@@ -40,7 +40,7 @@ jobs:
           registry-url: https://registry.npmjs.org/
 
       - name: Upgrade npm for trusted publishing
-        run: npm install --global npm@latest
+        run: npm install --global npm@12
 
       - name: Require the release tag and public repository metadata to match
         working-directory: packages/docs-artifact
@@ -112,5 +112,7 @@ jobs:
         if: steps.registry.outputs.should_publish == 'true'
         working-directory: packages/docs-artifact
         env:
+          # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
+          # trusted publishing replace the setup-node registry configuration.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

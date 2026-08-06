@@ -37,7 +37,7 @@ dispatched tags begin waiting in semantic-version order.
    staged directory as a new repository, and push its single bootstrap commit to
    Trunk `main` only after the staged files have been reviewed.
 3. Add a `main` branch ruleset that requires reviewed pull requests and the
-   public `Trunk / Docs artifact` check. Add a separate tag ruleset targeting
+   public `Docs artifact` check. Add a separate tag ruleset targeting
    `docs-artifact-v*` with **Restrict creations**, **Restrict updates**, and
    **Restrict deletions** enabled. Grant bypass on both rulesets only to the
    release App described below, so an ordinary Trunk writer cannot create a tag
@@ -45,12 +45,22 @@ dispatched tags begin waiting in semantic-version order.
    secrets, workflows, or other repository permissions.
 4. Create a private GitHub App for the `taprootio` organization with only
    **Repository contents: Read and write**. Install it only on `taprootio/trunk`.
-5. In private `taprootio/taproot`, set repository variable
-   `TRUNK_RELEASE_APP_ID` to the App ID and repository secret
-   `TRUNK_RELEASE_APP_PRIVATE_KEY` to the complete private-key PEM. The workflow
-   stores no installation token; `actions/create-github-app-token` mints one per
-   run.
-6. In public Trunk, create the `npm-docs-artifact-publish` Environment. Restrict
+5. In private `taprootio/taproot`, create the
+   `trunk-docs-artifact-sync` Environment. Restrict it to protected
+   `docs-artifact-v*` tags, set Environment secret
+   `TRUNK_RELEASE_APP_PRIVATE_KEY` to the complete private-key PEM, and set
+   repository variable `TRUNK_RELEASE_APP_ID` to the App ID. Do not store the
+   private key as a repository or organization secret: only the protected-tag
+   sync job may mint the App token. The workflow stores no installation token;
+   `actions/create-github-app-token` mints one per run.
+6. In private `taprootio/taproot`, add a tag ruleset targeting
+   `docs-artifact-v*` with **Restrict creations**, **Restrict updates**, and
+   **Restrict deletions** enabled. Grant bypass only to the trusted maintainers
+   authorized to create releases. This prevents an arbitrary writer from
+   creating a tag that unlocks the sync Environment, and prevents
+   delete-and-retag from entering the release retry paths with a different
+   source commit.
+7. In public Trunk, create the `npm-docs-artifact-publish` Environment. Restrict
    it to protected `docs-artifact-v*` tags and add required reviewers if release
    policy calls for a human deployment approval.
 

@@ -5,6 +5,7 @@ import {
   assertMonotonicRelease,
   assertNpmProvenance,
   compareSemVer,
+  parseSemVer,
 } from "./npm-release-guard.mjs";
 
 const expected = {
@@ -64,6 +65,10 @@ function auditWith(statement) {
 }
 
 test("semantic version comparison and the release-order guard fail closed", () => {
+  assert.deepEqual(parseSemVer("2.0.0-rc.10"), {
+    core: [2n, 0n, 0n],
+    prerelease: ["rc", "10"],
+  });
   assert.equal(compareSemVer("1.0.0", "1.0.0-rc.1"), 1);
   assert.equal(compareSemVer("2.0.0-rc.2", "2.0.0-rc.10"), -1);
   assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", ["1.0.0", "1.2.0"]));
@@ -71,6 +76,28 @@ test("semantic version comparison and the release-order guard fail closed", () =
     () => assertMonotonicRelease("1.1.9", ["1.0.0", "1.2.0"]),
     /precedes already-published 1\.2\.0/u,
   );
+});
+
+test("the release-order guard accepts npm's supported versions response shapes", () => {
+  assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", "1.0.0"));
+  assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", ["1.0.0", "1.2.0"]));
+  assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", [["1.0.0", "1.2.0"]]));
+});
+
+test("the release-order guard rejects malformed versions response shapes", () => {
+  for (const malformed of [
+    null,
+    {},
+    1,
+    ["1.0.0", ["1.1.0"]],
+    [["1.0.0"], ["1.1.0"]],
+    [[[["1.0.0"]]]],
+  ]) {
+    assert.throws(
+      () => assertMonotonicRelease("1.2.0", malformed),
+      /published versions must be a version string or JSON array of version strings/u,
+    );
+  }
 });
 
 test("an existing package succeeds only with verified provenance for this Trunk release", () => {
