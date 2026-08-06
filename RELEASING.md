@@ -28,6 +28,11 @@ until the preceding version has completed both the Trunk sync and npm publish;
 GitHub's concurrency queue prevents overlap but does not guarantee that rapidly
 dispatched tags begin waiting in semantic-version order.
 
+Release workflows pin third-party Actions to immutable commit SHAs and the npm
+CLI to one exact reviewed version. Upgrade either only through a coordinated
+Taproot and Trunk change that verifies the upstream tag-to-commit mapping,
+updates both reviewed workflow copies, and reruns the public release tests.
+
 ## One-time GitHub setup
 
 1. Create `taprootio/trunk` as a public repository with `main` as the default

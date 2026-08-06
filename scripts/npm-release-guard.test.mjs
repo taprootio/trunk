@@ -78,7 +78,9 @@ test("semantic version comparison and the release-order guard fail closed", () =
   );
 });
 
-test("the release-order guard accepts npm's supported versions response shapes", () => {
+// npm 12 currently returns a flat array for this invocation. The scalar and
+// nested forms are retained defensively for historical and invocation drift.
+test("the release-order guard defensively accepts known versions response shapes", () => {
   assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", "1.0.0"));
   assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", ["1.0.0", "1.2.0"]));
   assert.doesNotThrow(() => assertMonotonicRelease("1.2.0", [["1.0.0", "1.2.0"]]));
