@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "defaultLocale": "en-US",
+  "source": {
+    "provider": "github",
+    "repositoryId": "R_fixture_minimal",
+    "repository": "taprootio/docs-fixture",
+    "repositoryUrl": "https://github.com/taprootio/docs-fixture",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "ref": "refs/heads/main"
+  },
+  "build": {
+    "producer": "@taprootio/wtfm",
+    "producerVersion": "1.0.0",
+    "configurationSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sourceDateEpoch": 1767225600
+  },
+  "capabilities": {
+    "required": [
+      "taproot.docs.fragments.html.v1"
+    ],
+    "optional": []
+  },
+  "locales": [
+    {
+      "tag": "en-US",
+      "label": "English"
+    }
+  ],
+  "resources": [
+    {
+      "key": "guide:welcome",
+      "semantic": {
+        "kind": "guide",
+        "audiences": [
+          "user"
+        ],
+        "tags": []
+      },
+      "variants": [
+        {
+          "locale": "en-US",
+          "route": "/welcome/",
+          "title": "Welcome",
+          "description": "A minimal conforming documentation resource.",
+          "headings": [],
+          "source": {
+            "path": "guides/welcome.md",
+            "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/guides/welcome.md",
+            "startLine": 1,
+            "endLine": 3
+          },
+          "fragments": [
+            {
+              "key": "body",
+              "role": "body",
+              "path": "taproot-docs/fragments/welcome.html",
+              "mediaType": "text/html; charset=utf-8",
+              "bytes": 37,
+              "sha256": "sha256:13977afe13c21fc2fd5962f7155c0df0ca57bb4550f5fd08ec982a46e28709a1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "navigation": [
+    {
+      "locale": "en-US",
+      "items": [
+        {
+          "label": "Welcome",
+          "resourceKey": "guide:welcome"
+        }
+      ]
+    }
+  ],
+  "redirects": [],
+  "assets": []
+}

@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "defaultLocale": "en-US",
+  "source": {
+    "provider": "github",
+    "repositoryId": "R_fixture_complete",
+    "repository": "taprootio/docs-fixture",
+    "repositoryUrl": "https://github.com/taprootio/docs-fixture",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "ref": "refs/heads/main"
+  },
+  "build": {
+    "producer": "@taprootio/wtfm",
+    "producerVersion": "1.0.0",
+    "configurationSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "sourceDateEpoch": 1767225600
+  },
+  "capabilities": {
+    "required": [
+      "taproot.docs.fragments.html.v1"
+    ],
+    "optional": [
+      "taproot.docs.future-annotation.v1"
+    ]
+  },
+  "locales": [
+    {
+      "tag": "en-US",
+      "label": "English"
+    },
+    {
+      "tag": "fr-FR",
+      "label": "Français"
+    }
+  ],
+  "resources": [
+    {
+      "key": "guide:getting-started",
+      "semantic": {
+        "kind": "guide",
+        "audiences": [
+          "developer",
+          "user"
+        ],
+        "tags": [
+          "installation",
+          "quickstart"
+        ]
+      },
+      "variants": [
+        {
+          "locale": "en-US",
+          "route": "/guides/getting-started/",
+          "title": "Getting started",
+          "description": "Install the library and render your first button.",
+          "headings": [
+            {
+              "id": "install",
+              "text": "Install",
+              "level": 2
+            }
+          ],
+          "source": {
+            "path": "guides/getting-started.md",
+            "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/guides/getting-started.md"
+          },
+          "fragments": [
+            {
+              "key": "body",
+              "role": "body",
+              "path": "taproot-docs/fragments/getting-started.en-us.html",
+              "mediaType": "text/html; charset=utf-8",
+              "bytes": 194,
+              "sha256": "sha256:bc6882d8168672285d292fc40a289a4daa0f4fb3204409dd0d8665f6fef96d1c"
+            }
+          ]
+        },
+        {
+          "locale": "fr-FR",
+          "route": "/fr/guides/demarrage/",
+          "title": "Bien démarrer",
+          "description": "Installez la bibliothèque et affichez votre premier bouton.",
+          "headings": [
+            {
+              "id": "installer",
+              "text": "Installer",
+              "level": 2
+            }
+          ],
+          "source": {
+            "path": "guides/fr/getting-started.md",
+            "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/guides/fr/getting-started.md"
+          },
+          "fragments": [
+            {
+              "key": "body",
+              "role": "body",
+              "path": "taproot-docs/fragments/getting-started.fr-fr.html",
+              "mediaType": "text/html; charset=utf-8",
+              "bytes": 200,
+              "sha256": "sha256:0485393e88fb00ab1310430a15e968f96459696fd0d6363ed34e25e1df3430ea"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "reference:button",
+      "semantic": {
+        "kind": "reference",
+        "audiences": [
+          "developer"
+        ],
+        "tags": [
+          "components"
+        ]
+      },
+      "variants": [
+        {
+          "locale": "en-US",
+          "route": "/components/button/",
+          "title": "Button",
+          "description": "Button component reference.",
+          "headings": [],
+          "source": {
+            "path": "src/button.ts",
+            "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/src/button.ts"
+          },
+          "fragments": [
+            {
+              "key": "body",
+              "role": "body",
+              "path": "taproot-docs/fragments/button.en-us.html",
+              "mediaType": "text/html; charset=utf-8",
+              "bytes": 65,
+              "sha256": "sha256:dfab2576f38131e44b1c583aa1ffca0624d60210e8d2d4fbf481f0cbf24e6625"
+            }
+          ]
+        },
+        {
+          "locale": "fr-FR",
+          "route": "/fr/composants/bouton/",
+          "title": "Bouton",
+          "description": "Référence du composant bouton.",
+          "headings": [],
+          "source": {
+            "path": "src/button.ts",
+            "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/src/button.ts"
+          },
+          "fragments": [
+            {
+              "key": "body",
+              "role": "body",
+              "path": "taproot-docs/fragments/button.fr-fr.html",
+              "mediaType": "text/html; charset=utf-8",
+              "bytes": 70,
+              "sha256": "sha256:1d275771bcb0e927d04d5fe97d546b4f3e99b077166ec6328ccec1d91881d459"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "navigation": [
+    {
+      "locale": "en-US",
+      "items": [
+        {
+          "label": "Guides",
+          "children": [
+            {
+              "label": "Getting started",
+              "resourceKey": "guide:getting-started"
+            }
+          ]
+        },
+        {
+          "label": "Reference",
+          "children": [
+            {
+              "label": "Button",
+              "resourceKey": "reference:button"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "locale": "fr-FR",
+      "items": [
+        {
+          "label": "Guides",
+          "children": [
+            {
+              "label": "Bien démarrer",
+              "resourceKey": "guide:getting-started"
+            }
+          ]
+        },
+        {
+          "label": "Référence",
+          "children": [
+            {
+              "label": "Bouton",
+              "resourceKey": "reference:button"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "from": "/start/",
+      "toResourceKey": "guide:getting-started",
+      "locale": "en-US",
+      "status": 308
+    }
+  ],
+  "assets": [
+    {
+      "key": "image:pixel",
+      "path": "taproot-docs/assets/pixel.png",
+      "mediaType": "image/png",
+      "bytes": 68,
+      "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

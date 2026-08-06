@@ -1,0 +1,1630 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "valid-minimal",
+      "valid": true,
+      "expectedCodes": [],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "valid-complete-localized-artifact",
+      "valid": true,
+      "expectedCodes": [],
+      "manifest": "valid/complete/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/getting-started.en-us.html",
+          "source": "valid/complete/taproot-docs/fragments/getting-started.en-us.html"
+        },
+        {
+          "path": "taproot-docs/fragments/getting-started.fr-fr.html",
+          "source": "valid/complete/taproot-docs/fragments/getting-started.fr-fr.html"
+        },
+        {
+          "path": "taproot-docs/fragments/button.en-us.html",
+          "source": "valid/complete/taproot-docs/fragments/button.en-us.html"
+        },
+        {
+          "path": "taproot-docs/fragments/button.fr-fr.html",
+          "source": "valid/complete/taproot-docs/fragments/button.fr-fr.html"
+        },
+        {
+          "path": "taproot-docs/assets/pixel.png",
+          "base64Source": "valid/complete/taproot-docs/assets/pixel.png.base64"
+        }
+      ]
+    },
+    {
+      "name": "reject-duplicate-json-keys",
+      "valid": false,
+      "expectedCodes": ["json.duplicate_key"],
+      "manifest": "invalid/duplicate-json-key.json",
+      "files": []
+    },
+    {
+      "name": "reject-oversized-manifest-bytes",
+      "valid": false,
+      "expectedCodes": ["manifest.too_large"],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "manifestPaddingBytes": 2097152,
+      "files": []
+    },
+    {
+      "name": "reject-semver-numeric-prerelease-leading-zero",
+      "valid": false,
+      "expectedCodes": ["string.pattern"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["build", "producerVersion"],
+          "value": "1.0.0-01"
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "accept-pinned-locale-subset-length-boundary",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["defaultLocale"], "value": "abc-Latn-419" },
+        { "operation": "replace", "path": ["locales", 0, "tag"], "value": "abc-Latn-419" },
+        { "operation": "replace", "path": ["resources", 0, "variants", 0, "locale"], "value": "abc-Latn-419" },
+        { "operation": "replace", "path": ["navigation", 0, "locale"], "value": "abc-Latn-419" }
+      ],
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-noncanonical-locale-subset-casing",
+      "valid": false,
+      "expectedCodes": ["locale.not_canonical"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["defaultLocale"], "value": "en-us" },
+        { "operation": "replace", "path": ["locales", 0, "tag"], "value": "en-us" },
+        { "operation": "replace", "path": ["resources", 0, "variants", 0, "locale"], "value": "en-us" },
+        { "operation": "replace", "path": ["navigation", 0, "locale"], "value": "en-us" }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-locale-outside-pinned-subset",
+      "valid": false,
+      "expectedCodes": ["locale.invalid"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["defaultLocale"], "value": "de-1901" },
+        { "operation": "replace", "path": ["locales", 0, "tag"], "value": "de-1901" },
+        { "operation": "replace", "path": ["resources", 0, "variants", 0, "locale"], "value": "de-1901" },
+        { "operation": "replace", "path": ["navigation", 0, "locale"], "value": "de-1901" }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-manifest-c1-control",
+      "valid": false,
+      "expectedCodes": ["string.control"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["resources", 0, "variants", 0, "title"], "value": "Unsafe\u0085title" }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-manifest-bidirectional-override",
+      "valid": false,
+      "expectedCodes": ["string.control"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["resources", 0, "variants", 0, "title"], "value": "Unsafe\u202etitle" }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-unsafe-fragment-path",
+      "valid": false,
+      "expectedCodes": ["path.unsafe"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "fragments", 0, "path"],
+          "value": "taproot-docs/fragments/../welcome.html"
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-reserved-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "route"],
+          "value": "/api/"
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-nested-404-html-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/404.html/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-favicon-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/favicon.ico/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-root-index-file-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/index.html/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-root-index-file-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/index.html/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-web-manifest-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/manifest.webmanifest/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-robots-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/robots.txt/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-sitemap-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/sitemap.xml/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-nested-artifact-manifest-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/taproot-docs-manifest.json/child/" }],
+      "files": []
+    },
+    {
+      "name": "reject-route-root-windows-device-alias",
+      "valid": false,
+      "expectedCodes": ["route.device_name"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/con/" }],
+      "files": []
+    },
+    {
+      "name": "reject-route-windows-device-alias-with-extension",
+      "valid": false,
+      "expectedCodes": ["route.device_name"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/nul.txt/" }],
+      "files": []
+    },
+    {
+      "name": "reject-route-nested-windows-device-alias",
+      "valid": false,
+      "expectedCodes": ["route.device_name"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{ "operation": "replace", "path": ["resources", 0, "variants", 0, "route"], "value": "/guides/com1/" }],
+      "files": []
+    },
+    {
+      "name": "reject-unsupported-required-capability",
+      "valid": false,
+      "expectedCodes": ["capability.unsupported"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["capabilities", "required"],
+          "value": [
+            "taproot.docs.fragments.html.v1",
+            "taproot.docs.unknown.v1"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-unknown-redirect-target",
+      "valid": false,
+      "expectedCodes": ["redirect.unknown_resource"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["redirects"],
+          "value": [
+            {
+              "from": "/old-welcome/",
+              "toResourceKey": "guide:missing",
+              "locale": "en-US",
+              "status": 308
+            }
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-undeclared-resource-variant-locale",
+      "valid": false,
+      "expectedCodes": ["resource.unknown_locale"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["resources", 0, "variants"],
+          "value": {
+            "locale": "fr-FR",
+            "route": "/fr/bienvenue/",
+            "title": "Bienvenue",
+            "description": "Une variante dont la langue n'est pas declaree.",
+            "headings": [],
+            "source": {
+              "path": "guides/bienvenue.md",
+              "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/guides/bienvenue.md"
+            },
+            "fragments": [
+              {
+                "key": "body",
+                "role": "body",
+                "path": "taproot-docs/fragments/bienvenue.html",
+                "mediaType": "text/html; charset=utf-8",
+                "bytes": 37,
+                "sha256": "sha256:13977afe13c21fc2fd5962f7155c0df0ca57bb4550f5fd08ec982a46e28709a1"
+              }
+            ]
+          }
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-duplicate-route",
+      "valid": false,
+      "expectedCodes": ["duplicate.route"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["resources"],
+          "value": {
+            "key": "guide:welcome-copy",
+            "semantic": {
+              "kind": "guide",
+              "audiences": ["user"],
+              "tags": []
+            },
+            "variants": [
+              {
+                "locale": "en-US",
+                "route": "/welcome/",
+                "title": "Welcome copy",
+                "description": "A route collision fixture.",
+                "headings": [],
+                "source": {
+                  "path": "guides/welcome-copy.md",
+                  "url": "https://github.com/taprootio/docs-fixture/blob/0123456789abcdef0123456789abcdef01234567/guides/welcome-copy.md"
+                },
+                "fragments": [
+                  {
+                    "key": "body",
+                    "role": "body",
+                    "path": "taproot-docs/fragments/welcome-copy.html",
+                    "mediaType": "text/html; charset=utf-8",
+                    "bytes": 37,
+                    "sha256": "sha256:13977afe13c21fc2fd5962f7155c0df0ca57bb4550f5fd08ec982a46e28709a1"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-missing-file",
+      "valid": false,
+      "expectedCodes": ["file.missing"],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": []
+    },
+    {
+      "name": "reject-hash-drift",
+      "valid": false,
+      "expectedCodes": ["file.hash_drift"],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "invalid/hash-drift/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-size-drift",
+      "valid": false,
+      "expectedCodes": ["file.size_drift"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "fragments", 0, "bytes"],
+          "value": 36
+        }
+      ],
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "invalid/size-drift/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-unsafe-markup",
+      "valid": false,
+      "expectedCodes": ["markup.unsupported_tag"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "fragments", 0, "bytes"],
+          "value": 26
+        },
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "fragments", 0, "sha256"],
+          "value": "sha256:cfc151a63b53ac09647ea69d07410784a48c62c857ab6079e2ee8b3a3c9efbbe"
+        }
+      ],
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "invalid/unsafe-markup/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-markup-element-limit",
+      "valid": false,
+      "expectedCodes": ["limit.markup_elements"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "generated": {
+            "kind": "repeat",
+            "text": "<br>",
+            "count": 100001
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-markup-depth-limit",
+      "valid": false,
+      "expectedCodes": ["limit.markup_depth"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "generated": {
+            "kind": "nested",
+            "tag": "div",
+            "depth": 129
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "accept-navigation-depth-ceiling",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedNavigationDepth": 12,
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-navigation-depth-above-ceiling",
+      "valid": false,
+      "expectedCodes": ["navigation.too_deep"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedNavigationDepth": 13,
+      "files": []
+    },
+    {
+      "name": "reject-semicolonless-html-entity",
+      "valid": false,
+      "expectedCodes": ["markup.unsupported_entity"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "generated": {
+            "kind": "repeat",
+            "text": "<p>Terms &amp conditions</p>",
+            "count": 1
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-duplicate-file-entry",
+      "valid": false,
+      "expectedCodes": ["duplicate.file_entry"],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        },
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-unexpected-semantic-file",
+      "valid": false,
+      "expectedCodes": ["file.unexpected"],
+      "manifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        },
+        {
+          "path": "taproot-docs/fragments/extra.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        }
+      ]
+    },
+    {
+      "name": "reject-unsupported-asset-media",
+      "valid": false,
+      "expectedCodes": ["value.unsupported"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["assets"],
+          "value": {
+            "key": "image:unsafe",
+            "path": "taproot-docs/assets/unsafe.svg",
+            "mediaType": "image/svg+xml",
+            "bytes": 1,
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-asset-decoded-pixel-limit",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["assets"],
+          "value": {
+            "key": "image:oversized-canvas",
+            "path": "taproot-docs/assets/oversized-canvas.gif",
+            "mediaType": "image/gif",
+            "bytes": 1,
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "width": 32768,
+            "height": 32768
+          }
+        }
+      ],
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        },
+        {
+          "path": "taproot-docs/assets/oversized-canvas.gif",
+          "generated": {
+            "kind": "gif",
+            "width": 32768,
+            "height": 32768,
+            "frames": 1
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-asset-animation-frame-limit",
+      "valid": false,
+      "expectedCodes": ["asset.animation_frames"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["assets"],
+          "value": {
+            "key": "image:too-many-frames",
+            "path": "taproot-docs/assets/too-many-frames.gif",
+            "mediaType": "image/gif",
+            "bytes": 1,
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ],
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "source": "valid/minimal/taproot-docs/fragments/welcome.html"
+        },
+        {
+          "path": "taproot-docs/assets/too-many-frames.gif",
+          "generated": {
+            "kind": "gif",
+            "width": 1,
+            "height": 1,
+            "frames": 1001
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-gif-cumulative-decoded-animation-pixels",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_animation_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 8192, "height": 4097, "frames": 2 }
+    },
+    {
+      "name": "reject-apng-cumulative-decoded-animation-pixels",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_animation_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "width": 8192, "height": 4097, "frames": 2 }
+    },
+    {
+      "name": "reject-webp-cumulative-decoded-animation-pixels",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_animation_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": {
+        "canvasWidth": 8192,
+        "canvasHeight": 4097,
+        "frameWidth": 8192,
+        "frameHeight": 4097,
+        "topOrder": ["VP8X", "ANIM", "ANMF", "ANMF"]
+      }
+    },
+    {
+      "name": "reject-fragment-windows-device-path",
+      "valid": false,
+      "expectedCodes": ["path.device_name"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["resources", 0, "variants", 0, "fragments", 0, "path"],
+          "value": "taproot-docs/fragments/nested/nul.html"
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-asset-windows-device-path",
+      "valid": false,
+      "expectedCodes": ["path.device_name"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["assets"],
+          "value": {
+            "key": "image:device",
+            "path": "taproot-docs/assets/nested/com1.png",
+            "mediaType": "image/png",
+            "bytes": 1,
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "reject-asset-declared-pixel-product",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:declared-too-large",
+          "path": "taproot-docs/assets/declared-too-large.png",
+          "mediaType": "image/png",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 8193,
+          "height": 8192
+        }
+      }],
+      "files": []
+    },
+    {
+      "name": "accept-valid-animated-webp-frame",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:animated",
+          "path": "taproot-docs/assets/animated.webp",
+          "mediaType": "image/webp",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 1,
+          "height": 1
+        }
+      }],
+      "files": [
+        { "path": "taproot-docs/fragments/welcome.html", "source": "valid/minimal/taproot-docs/fragments/welcome.html" },
+        {
+          "path": "taproot-docs/assets/animated.webp",
+          "generated": { "kind": "animated-webp" },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-animated-webp-oversized-frame",
+      "valid": false,
+      "expectedCodes": ["asset.decoded_pixels"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:animated",
+          "path": "taproot-docs/assets/animated.webp",
+          "mediaType": "image/webp",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 1,
+          "height": 1
+        }
+      }],
+      "files": [
+        { "path": "taproot-docs/fragments/welcome.html", "source": "valid/minimal/taproot-docs/fragments/welcome.html" },
+        {
+          "path": "taproot-docs/assets/animated.webp",
+          "generated": { "kind": "animated-webp", "frameWidth": 32768, "frameHeight": 32768, "embeddedWidth": 1, "embeddedHeight": 1 },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-animated-webp-frame-outside-canvas",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:animated",
+          "path": "taproot-docs/assets/animated.webp",
+          "mediaType": "image/webp",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 1,
+          "height": 1
+        }
+      }],
+      "files": [
+        { "path": "taproot-docs/fragments/welcome.html", "source": "valid/minimal/taproot-docs/fragments/welcome.html" },
+        {
+          "path": "taproot-docs/assets/animated.webp",
+          "generated": { "kind": "animated-webp", "frameX": 2 },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-animated-webp-reserved-frame-flags",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:animated",
+          "path": "taproot-docs/assets/animated.webp",
+          "mediaType": "image/webp",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 1,
+          "height": 1
+        }
+      }],
+      "files": [
+        { "path": "taproot-docs/fragments/welcome.html", "source": "valid/minimal/taproot-docs/fragments/welcome.html" },
+        {
+          "path": "taproot-docs/assets/animated.webp",
+          "generated": { "kind": "animated-webp", "frameFlags": 4 },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-animated-webp-embedded-dimension-mismatch",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "mutations": [{
+        "operation": "append",
+        "path": ["assets"],
+        "value": {
+          "key": "image:animated",
+          "path": "taproot-docs/assets/animated.webp",
+          "mediaType": "image/webp",
+          "bytes": 1,
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width": 2,
+          "height": 1
+        }
+      }],
+      "files": [
+        { "path": "taproot-docs/fragments/welcome.html", "source": "valid/minimal/taproot-docs/fragments/welcome.html" },
+        {
+          "path": "taproot-docs/assets/animated.webp",
+          "generated": { "kind": "animated-webp", "canvasWidth": 2, "frameWidth": 2, "embeddedWidth": 1 },
+          "synchronizeDescriptor": true
+        }
+      ]
+    },
+    {
+      "name": "reject-animated-webp-nonzero-top-level-padding",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8X", "ODD", "ANIM", "ANMF"], "topPadByte": 1 }
+    },
+    {
+      "name": "reject-webp-unknown-chunk-in-simple-container",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8L", "ODD!"] }
+    },
+    {
+      "name": "reject-webp-unknown-chunk-in-extended-still-container",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "ODD!", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-unknown-chunk-in-animation",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8X", "ODD!", "ANIM", "ANMF"] }
+    },
+    {
+      "name": "reject-animated-webp-nonzero-nested-padding",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "nestedOrder": ["VP8L"], "nestedPadByte": 1 }
+    },
+    {
+      "name": "reject-animated-webp-vp8l-before-vp8x",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8L", "VP8X", "ANIM", "ANMF"] }
+    },
+    {
+      "name": "reject-animated-webp-frame-before-animation-header",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8X", "ANMF", "ANIM"] }
+    },
+    {
+      "name": "reject-animated-webp-duplicate-animation-header",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8X", "ANIM", "ANIM", "ANMF"] }
+    },
+    {
+      "name": "reject-animated-webp-top-level-payload",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "topOrder": ["VP8X", "VP8 ", "ANIM", "ANMF"] }
+    },
+    {
+      "name": "reject-animated-webp-unsupported-nested-chunk",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "nestedOrder": ["EXIF"] }
+    },
+    {
+      "name": "reject-animated-webp-duplicate-nested-image",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "nestedOrder": ["VP8L", "VP8L"] }
+    },
+    {
+      "name": "reject-animated-webp-misordered-nested-alpha",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "nestedOrder": ["VP8 ", "ALPH"] }
+    },
+    {
+      "name": "accept-webp-still-feature-contract",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 60, "topOrder": ["VP8X", "ICCP", "ALPH", "VP8 ", "EXIF", "XMP "] }
+    },
+    {
+      "name": "accept-webp-animated-feature-contract",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 62, "nestedOrder": ["ALPH", "VP8 "], "topOrder": ["VP8X", "ICCP", "ANIM", "ANMF", "EXIF", "XMP "] }
+    },
+    {
+      "name": "accept-webp-animated-lossless-alpha",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 18, "embeddedAlphaUsed": true, "nestedOrder": ["VP8L"] }
+    },
+    {
+      "name": "reject-webp-icc-flag-without-chunk",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 32, "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-alpha-flag-without-alpha",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-exif-flag-without-chunk",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 8, "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-xmp-flag-without-chunk",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 4, "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-animation-flag-without-animation",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 2, "topOrder": ["VP8X"] }
+    },
+    {
+      "name": "reject-webp-iccp-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "ICCP", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-alph-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-exif-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "VP8 ", "EXIF"] }
+    },
+    {
+      "name": "reject-webp-xmp-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "VP8 ", "XMP "] }
+    },
+    {
+      "name": "reject-webp-animation-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "topOrder": ["VP8X", "ANIM", "ANMF"] }
+    },
+    {
+      "name": "reject-webp-duplicate-iccp",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 32, "topOrder": ["VP8X", "ICCP", "ICCP", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-duplicate-alph",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "topOrder": ["VP8X", "ALPH", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-duplicate-exif",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 8, "topOrder": ["VP8X", "VP8 ", "EXIF", "EXIF"] }
+    },
+    {
+      "name": "reject-webp-duplicate-xmp",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 4, "topOrder": ["VP8X", "VP8 ", "XMP ", "XMP "] }
+    },
+    {
+      "name": "reject-webp-iccp-after-image",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 32, "topOrder": ["VP8X", "VP8 ", "ICCP"] }
+    },
+    {
+      "name": "reject-webp-alph-not-immediately-before-vp8",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 48, "topOrder": ["VP8X", "ALPH", "ICCP", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-exif-before-image",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 8, "topOrder": ["VP8X", "EXIF", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-xmp-before-image",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 4, "topOrder": ["VP8X", "XMP ", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-exif-after-xmp",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 12, "topOrder": ["VP8X", "VP8 ", "XMP ", "EXIF"] }
+    },
+    {
+      "name": "reject-webp-alph-with-vp8l",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "topOrder": ["VP8X", "ALPH", "VP8L"] }
+    },
+    {
+      "name": "reject-webp-animated-alph-without-alpha-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 2, "nestedOrder": ["ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-animated-vp8l-alpha-without-flag",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 2, "embeddedAlphaUsed": true, "nestedOrder": ["VP8L"] }
+    },
+    {
+      "name": "reject-webp-frame-after-metadata-ended-run",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 10, "topOrder": ["VP8X", "ANIM", "ANMF", "EXIF", "ANMF"] }
+    },
+    {
+      "name": "accept-browser-decodable-apng",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2 }
+    },
+    {
+      "name": "reject-apng-sequence-gap",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "sequenceGap": true }
+    },
+    {
+      "name": "reject-apng-invalid-dispose",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "dispose": 3 }
+    },
+    {
+      "name": "reject-apng-invalid-blend",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "blend": 2 }
+    },
+    {
+      "name": "reject-apng-missing-frame-data",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "omitSecondData": true }
+    },
+    {
+      "name": "reject-apng-frame-data-before-control",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "fdatBeforeControl": true }
+    },
+    {
+      "name": "reject-apng-declared-frame-mismatch",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "animated": true, "frames": 2, "declaredFrames": 3 }
+    },
+    {
+      "name": "accept-indexed-png-palette",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "bitDepth": 8, "colorType": 3, "paletteEntries": 2 }
+    },
+    {
+      "name": "reject-png-palette-for-grayscale",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "bitDepth": 8, "colorType": 0, "paletteEntries": 2 }
+    },
+    {
+      "name": "reject-indexed-png-without-palette",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "bitDepth": 8, "colorType": 3 }
+    },
+    {
+      "name": "reject-indexed-png-palette-over-bit-depth",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "bitDepth": 1, "colorType": 3, "paletteEntries": 3 }
+    },
+    {
+      "name": "reject-png-palette-after-idat",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "bitDepth": 8, "colorType": 2, "paletteEntries": 2, "paletteAfterData": true }
+    },
+    {
+      "name": "accept-gif-local-color-table",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "palette": "local" }
+    },
+    {
+      "name": "reject-gif-without-color-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "palette": "none" }
+    },
+    {
+      "name": "reject-webp-vp8-interframe",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8Fault": "interframe", "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-vp8-hidden-frame",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8Fault": "hidden", "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-vp8-experimental-version",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8Fault": "experimental", "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-vp8-empty-partition",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8Fault": "empty-partition", "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-vp8-partition-at-end",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8Fault": "partition-at-end", "topOrder": ["VP8X", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-vp8l-without-stream",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 0, "vp8lHeaderOnly": true, "topOrder": ["VP8X", "VP8L"] }
+    },
+    {
+      "name": "reject-webp-alph-reserved-bits",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "alphaHeader": 64, "topOrder": ["VP8X", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-alph-preprocessing",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "alphaHeader": 32, "topOrder": ["VP8X", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-alph-compression",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "alphaHeader": 2, "topOrder": ["VP8X", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "reject-webp-alph-raw-length",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedAnimatedWebp": { "extendedFlags": 16, "alphaDataLength": 0, "topOrder": ["VP8X", "ALPH", "VP8 "] }
+    },
+    {
+      "name": "accept-png-consecutive-zero-length-idat",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "leadingZeroIdat": true }
+    },
+    {
+      "name": "reject-png-lowercase-reserved-type-byte",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "reservedChunk": true }
+    },
+    {
+      "name": "reject-png-interrupted-zero-length-idat",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "png", "leadingZeroIdat": true, "interruptZeroIdat": true }
+    },
+    {
+      "name": "accept-gif-graphic-control-extension",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extension": "gce" }
+    },
+    {
+      "name": "accept-gif-application-extension",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extension": "application" }
+    },
+    {
+      "name": "accept-gif-plain-text-extension",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extension": "plain-text" }
+    },
+    {
+      "name": "accept-gif-comment-extension",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extension": "comment" }
+    },
+    {
+      "name": "reject-gif-gce-block-size",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extensionFault": "gce-size" }
+    },
+    {
+      "name": "reject-gif-gce-terminator",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extensionFault": "gce-terminator" }
+    },
+    {
+      "name": "reject-gif-gce-reserved-bits",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extensionFault": "gce-reserved" }
+    },
+    {
+      "name": "reject-gif-unknown-extension",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "extensionFault": "unknown" }
+    },
+    {
+      "name": "reject-gif-image-reserved-bits",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "gif", "width": 1, "height": 1, "frames": 1, "imageReserved": true }
+    },
+    {
+      "name": "accept-standalone-baseline-jpeg",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg" }
+    },
+    {
+      "name": "accept-jpeg-quantization-table-after-frame-header",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dqt-after-sof" }
+    },
+    {
+      "name": "accept-jpeg-complete-non-interleaved-scans",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan" }
+    },
+    {
+      "name": "accept-jpeg-non-interleaved-restart-component-geometry",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-restarts", "width": 17 }
+    },
+    {
+      "name": "reject-jpeg-duplicate-component-across-scans",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-duplicate" }
+    },
+    {
+      "name": "reject-jpeg-missing-component-across-scans",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-missing" }
+    },
+    {
+      "name": "reject-jpeg-missing-per-scan-quantization-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-missing-quantization" }
+    },
+    {
+      "name": "reject-jpeg-missing-per-scan-huffman-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-missing-huffman" }
+    },
+    {
+      "name": "reject-jpeg-invalid-per-scan-spectral-fields",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-spectral" }
+    },
+    {
+      "name": "reject-jpeg-non-interleaved-restart-cardinality",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "multi-scan-restart-cardinality", "width": 17 }
+    },
+    {
+      "name": "reject-jpeg-header-only-stream",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "header-only" }
+    },
+    {
+      "name": "reject-jpeg-arithmetic-frame",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "arithmetic" }
+    },
+    {
+      "name": "reject-jpeg-missing-quantization-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "missing-quantization" }
+    },
+    {
+      "name": "reject-jpeg-duplicate-component",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "duplicate-component" }
+    },
+    {
+      "name": "reject-jpeg-missing-huffman-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "missing-huffman" }
+    },
+    {
+      "name": "reject-jpeg-16-bit-baseline-quantization-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dqt-16-bit" }
+    },
+    {
+      "name": "reject-jpeg-zero-quantization-coefficient",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dqt-zero" }
+    },
+    {
+      "name": "reject-jpeg-oversubscribed-huffman-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-oversubscribed" }
+    },
+    {
+      "name": "reject-jpeg-exhausted-huffman-table",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-exhausted" }
+    },
+    {
+      "name": "reject-jpeg-all-ones-terminal-huffman-code",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-all-ones" }
+    },
+    {
+      "name": "reject-jpeg-too-many-huffman-symbols",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-too-many" }
+    },
+    {
+      "name": "reject-jpeg-invalid-baseline-dc-category",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-invalid-dc" }
+    },
+    {
+      "name": "reject-jpeg-invalid-baseline-ac-size",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-invalid-ac" }
+    },
+    {
+      "name": "reject-jpeg-invalid-zero-size-ac-symbol",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "dht-zero-size-ac" }
+    },
+    {
+      "name": "reject-jpeg-restart-without-preceding-entropy",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-only", "width": 9 }
+    },
+    {
+      "name": "reject-jpeg-consecutive-restarts",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-consecutive", "width": 17 }
+    },
+    {
+      "name": "reject-jpeg-restart-without-following-entropy",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-no-final-entropy", "width": 9 }
+    },
+    {
+      "name": "reject-jpeg-sampling-product-over-baseline-ceiling",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "sampling-units" }
+    },
+    {
+      "name": "reject-jpeg-multiple-fill-bytes-before-stuffed-zero",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "stuffing-multiple-ff" }
+    },
+    {
+      "name": "accept-jpeg-fill-bytes-before-eoi",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "fill-before-eoi" }
+    },
+    {
+      "name": "accept-jpeg-fill-bytes-before-restart",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "fill-before-rst", "width": 9 }
+    },
+    {
+      "name": "reject-jpeg-missing-restart-marker",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-missing", "width": 17 }
+    },
+    {
+      "name": "reject-jpeg-excess-restart-marker",
+      "valid": false,
+      "expectedCodes": ["asset.media_mismatch"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-excess", "width": 9 }
+    },
+    {
+      "name": "accept-jpeg-exact-restart-marker-count",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-exact", "width": 17 }
+    },
+    {
+      "name": "accept-jpeg-restart-interval-above-mcu-count",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "generatedImage": { "kind": "jpeg", "fault": "rst-interval-over-mcus" }
+    },
+    {
+      "name": "reject-literal-null-fragment-text",
+      "valid": false,
+      "expectedCodes": ["markup.invalid_null"],
+      "baseManifest": "valid/minimal/taproot-docs-manifest.json",
+      "files": [
+        {
+          "path": "taproot-docs/fragments/welcome.html",
+          "generated": {
+            "kind": "repeat",
+            "text": "<p>a\u0000b</p>",
+            "count": 1
+          },
+          "synchronizeDescriptor": true
+        }
+      ]
+    }
+  ]
+}

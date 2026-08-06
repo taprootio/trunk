@@ -1,0 +1,487 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:taproot:docs:artifact:manifest:v1",
+  "title": "Taproot Docs artifact manifest",
+  "description": "Portable semantic documentation contract. Cross-reference, path-reservation, capability, file-byte, hash, media, string-control, and markup rules are enforced by @taprootio/docs-artifact in addition to this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "defaultLocale",
+    "source",
+    "build",
+    "capabilities",
+    "locales",
+    "resources",
+    "navigation",
+    "redirects",
+    "assets"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "defaultLocale": {
+      "$ref": "#/$defs/locale"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repositoryId", "repository", "repositoryUrl", "revision", "ref"],
+      "properties": {
+        "provider": {
+          "const": "github"
+        },
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300,
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "repositoryUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000,
+          "pattern": "^https://"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^refs/(?:heads|tags)/[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "producerVersion", "configurationSha256", "sourceDateEpoch"],
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^(?:@[a-z0-9._-]+/)?[a-z0-9._-]+$"
+        },
+        "producerVersion": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "configurationSha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "sourceDateEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional"],
+      "properties": {
+        "required": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceKey"
+          },
+          "contains": {
+            "const": "taproot.docs.fragments.html.v1"
+          }
+        },
+        "optional": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceKey"
+          }
+        }
+      }
+    },
+    "locales": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tag", "label"],
+        "properties": {
+          "tag": {
+            "$ref": "#/$defs/locale"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "navigation": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/navigation"
+      }
+    },
+    "redirects": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/redirect"
+      }
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/asset"
+      }
+    }
+  },
+  "$defs": {
+    "resourceKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[a-z0-9]+(?:[._:/-][a-z0-9]+)*$"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "locale": {
+      "type": "string",
+      "$comment": "Docs v1 pins a deterministic BCP 47 subset independent of the host ICU database: a two- or three-letter lowercase language, an optional title-case four-letter Script subtag, and an optional uppercase two-letter or three-digit region subtag.",
+      "minLength": 2,
+      "maxLength": 12,
+      "pattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "route": {
+      "type": "string",
+      "$comment": "The runtime validator additionally rejects Windows device-name aliases in every segment, Taproot shell prefixes, and the complete first-segment subtrees rooted at reserved published files such as /index.html/, /robots.txt/, and /sitemap.xml/.",
+      "maxLength": 512,
+      "pattern": "^(?:/|/(?:[a-z0-9]+(?:[._~-][a-z0-9]+)*/)+)$"
+    },
+    "sourceLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "url"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000,
+          "pattern": "^https://"
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        }
+      },
+      "dependentRequired": {
+        "startLine": ["endLine"],
+        "endLine": ["startLine"]
+      }
+    },
+    "heading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "level"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 6
+        }
+      }
+    },
+    "fragment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "role", "path", "mediaType", "bytes", "sha256"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/token"
+        },
+        "role": {
+          "enum": ["aside", "body", "example"]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^taproot-docs/fragments/(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|/|$))[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|/|$))[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+        },
+        "mediaType": {
+          "const": "text/html; charset=utf-8"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2097152
+        },
+        "sha256": {
+          "$ref": "#/$defs/hash"
+        }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locale", "route", "title", "description", "headings", "source", "fragments"],
+      "properties": {
+        "locale": {
+          "$ref": "#/$defs/locale"
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "headings": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/heading"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocation"
+        },
+        "fragments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/fragment"
+          },
+          "contains": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "const": "body"
+              }
+            },
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      }
+    },
+    "semantic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "audiences", "tags"],
+      "properties": {
+        "kind": {
+          "enum": ["api", "changelog", "concept", "guide", "other", "reference"]
+        },
+        "audiences": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["administrator", "developer", "operator", "user"]
+          }
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/token"
+          }
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "semantic", "variants"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/resourceKey"
+        },
+        "semantic": {
+          "$ref": "#/$defs/semantic"
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/variant"
+          }
+        }
+      }
+    },
+    "navigationNode": {
+      "type": "object",
+      "$comment": "The runtime validator counts top-level navigation items as level 1, accepts leaves through level 12, and rejects child nodes at level 13.",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "resourceKey": {
+          "$ref": "#/$defs/resourceKey"
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/navigationNode"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["resourceKey"]
+        },
+        {
+          "required": ["children"]
+        }
+      ]
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locale", "items"],
+      "properties": {
+        "locale": {
+          "$ref": "#/$defs/locale"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/navigationNode"
+          }
+        }
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "toResourceKey", "locale", "status"],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/route"
+        },
+        "toResourceKey": {
+          "$ref": "#/$defs/resourceKey"
+        },
+        "locale": {
+          "$ref": "#/$defs/locale"
+        },
+        "status": {
+          "enum": [301, 308]
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "$comment": "The runtime validator additionally requires width * height <= 67108864 decoded pixels and the sum of animated frame rectangle areas <= 67108864 decoded pixels; JSON Schema cannot express these media-derived products.",
+      "additionalProperties": false,
+      "required": ["key", "path", "mediaType", "bytes", "sha256", "width", "height"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/resourceKey"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^taproot-docs/assets/(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|/|$))[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|/|$))[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+        },
+        "mediaType": {
+          "enum": ["image/gif", "image/jpeg", "image/png", "image/webp"]
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 26214400
+        },
+        "sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        }
+      }
+    }
+  }
+}

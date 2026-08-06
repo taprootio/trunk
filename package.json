@@ -1,0 +1,14 @@
+{
+  "name": "taproot-trunk-workspace",
+  "private": true,
+  "type": "module",
+  "description": "Public release workspace for independently versioned Taproot integration packages",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test:docs-artifact && npm run test:release-guards",
+    "test:docs-artifact": "npm --prefix packages/docs-artifact test && npm --prefix packages/docs-artifact run conformance",
+    "test:release-guards": "node --test scripts/npm-release-guard.test.mjs"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "@taprootio/docs-artifact",
+  "version": "1.0.0",
+  "description": "Canonical Taproot Docs artifact schema, validator, and conformance fixtures",
+  "type": "module",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taprootio/trunk.git",
+    "directory": "packages/docs-artifact"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./node": {
+      "types": "./node.d.ts",
+      "import": "./src/node.js"
+    },
+    "./conformance": {
+      "types": "./conformance.d.ts",
+      "import": "./src/conformance.js"
+    },
+    "./schema": "./schema/taproot-docs-manifest.schema.json",
+    "./fixtures/conformance.json": "./fixtures/conformance.json"
+  },
+  "bin": {
+    "taproot-docs-validate": "./bin/taproot-docs-validate.js"
+  },
+  "files": [
+    "bin/",
+    "fixtures/",
+    "schema/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "index.d.ts",
+    "node.d.ts",
+    "conformance.d.ts"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "conformance": "node ./bin/taproot-docs-conformance.js",
+    "prepack": "npm test && npm run conformance"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
