@@ -24,7 +24,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -34,13 +34,13 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Setup Node for npm trusted publishing
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
 
       - name: Upgrade npm for trusted publishing
-        run: npm install --global npm@latest
+        run: npm install --global npm@12.0.2
 
       - name: Require the release tag and public repository metadata to match
         working-directory: packages/docs-artifact
@@ -112,5 +112,7 @@ jobs:
         if: steps.registry.outputs.should_publish == 'true'
         working-directory: packages/docs-artifact
         env:
+          # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
+          # trusted publishing replace the setup-node registry configuration.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

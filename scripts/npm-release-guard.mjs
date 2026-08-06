@@ -10,7 +10,7 @@ function fail(message) {
   throw new Error(`npm release guard failed: ${message}`);
 }
 
-function parseSemVer(version) {
+export function parseSemVer(version) {
   if (typeof version !== "string") fail(`invalid semantic version ${JSON.stringify(version)}`);
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u.exec(version);
   if (!match) fail(`invalid semantic version ${JSON.stringify(version)}`);
@@ -53,8 +53,22 @@ export function compareSemVer(leftVersion, rightVersion) {
 }
 
 export function assertMonotonicRelease(candidateVersion, publishedVersions) {
-  if (!Array.isArray(publishedVersions)) fail("published versions must be a JSON array");
-  for (const publishedVersion of publishedVersions) {
+  let normalizedVersions = publishedVersions;
+  if (typeof normalizedVersions === "string") normalizedVersions = [normalizedVersions];
+  if (
+    Array.isArray(normalizedVersions)
+    && normalizedVersions.length === 1
+    && Array.isArray(normalizedVersions[0])
+  ) {
+    normalizedVersions = normalizedVersions[0];
+  }
+  if (
+    !Array.isArray(normalizedVersions)
+    || normalizedVersions.some((version) => typeof version !== "string")
+  ) {
+    fail("published versions must be a version string or JSON array of version strings");
+  }
+  for (const publishedVersion of normalizedVersions) {
     if (compareSemVer(candidateVersion, publishedVersion) < 0) {
       fail(
         `candidate ${candidateVersion} precedes already-published ${publishedVersion}; release tags must complete in version order`,
