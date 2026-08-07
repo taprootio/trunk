@@ -25,5 +25,8 @@ jobs:
         with:
           node-version: 24
 
+      - name: Upgrade npm to the reviewed release version
+        run: npm install --global npm@12.0.2
+
       - name: Test package and conformance fixtures
         run: npm test

@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   assertMonotonicRelease,
   assertNpmProvenance,
   compareSemVer,
+  npmPackIntegrity,
   parseSemVer,
 } from "./npm-release-guard.mjs";
 
@@ -16,6 +22,7 @@ const expected = {
   ref: "refs/tags/docs-artifact-v1.0.0",
   commit: "0123456789abcdef0123456789abcdef01234567",
 };
+const guardPath = fileURLToPath(new URL("./npm-release-guard.mjs", import.meta.url));
 
 function provenanceStatement(overrides = {}) {
   return {
@@ -99,6 +106,52 @@ test("the release-order guard rejects malformed versions response shapes", () =>
       () => assertMonotonicRelease("1.2.0", malformed),
       /published versions must be a version string or JSON array of version strings/u,
     );
+  }
+});
+
+test("npm pack integrity accepts npm 11 and npm 12 response shapes", () => {
+  const pack = { name: expected.packageName, integrity: "sha512-candidate" };
+  assert.equal(npmPackIntegrity([pack]), pack.integrity);
+  assert.equal(npmPackIntegrity({ [expected.packageName]: pack }), pack.integrity);
+});
+
+test("npm pack integrity rejects ambiguous or malformed response shapes", () => {
+  for (const malformed of [
+    null,
+    [],
+    {},
+    [{ integrity: "sha512-one" }, { integrity: "sha512-two" }],
+    { [expected.packageName]: { name: expected.packageName } },
+    { [expected.packageName]: { integrity: "" } },
+  ]) {
+    assert.throws(
+      () => npmPackIntegrity(malformed),
+      /npm pack output must contain exactly one package with an integrity value/u,
+    );
+  }
+});
+
+test("the CLI dispatches pack integrity and rejects invalid command arity", (testContext) => {
+  const directory = mkdtempSync(join(tmpdir(), "npm-release-guard-"));
+  testContext.after(() => rmSync(directory, { recursive: true, force: true }));
+  const packFile = join(directory, "pack.json");
+  writeFileSync(
+    packFile,
+    JSON.stringify({ [expected.packageName]: { integrity: "sha512-cli" } }),
+  );
+
+  const success = spawnSync(
+    process.execPath,
+    [guardPath, "pack-integrity", packFile],
+    { encoding: "utf8" },
+  );
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(success.stdout.trim(), "sha512-cli");
+
+  for (const args of [["order"], ["pack-integrity"], ["provenance"]]) {
+    const failure = spawnSync(process.execPath, [guardPath, ...args], { encoding: "utf8" });
+    assert.equal(failure.status, 1);
+    assert.match(failure.stderr, /usage: npm-release-guard\.mjs/u);
   }
 });
 
