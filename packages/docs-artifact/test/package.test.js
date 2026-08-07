@@ -60,7 +60,15 @@ test("npm package contains exactly the reviewed public contract files", async (t
       maxBuffer: 4 * 1024 * 1024,
     },
   );
-  const packs = JSON.parse(stdout);
+  const packResult = JSON.parse(stdout);
+  // Keep this npm 11/12 shape handling aligned with npmPackIntegrity in the
+  // release repository's scripts/npm-release-guard.mjs.
+  let packs = [];
+  if (Array.isArray(packResult)) {
+    packs = packResult;
+  } else if (packResult !== null && typeof packResult === "object") {
+    packs = Object.values(packResult);
+  }
 
   assert.equal(packs.length, 1);
   assert.deepEqual(

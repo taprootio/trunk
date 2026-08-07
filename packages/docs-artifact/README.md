@@ -98,8 +98,11 @@ GitHub-hosted runner. npm provenance therefore resolves to the exact public
 Trunk release rather than to private Taproot.
 
 The public publish job binds the `npm-docs-artifact-publish` GitHub Environment.
-The first `1.0.0` publish uses a one-time granular `NPM_TOKEN` because npm cannot
-configure a trusted publisher before a package exists. Administrators then
+The first registry publish is `1.0.1` and uses a one-time granular `NPM_TOKEN`
+because npm cannot configure a trusted publisher before a package exists. The
+immutable `1.0.0` Trunk tag records a bootstrap attempt that failed in package
+tests before npm publish, so that version is intentionally absent from the
+registry. Administrators then
 configure the trusted publisher for `taprootio/trunk`, workflow
 `publish-docs-artifact.yml`, and that Environment, and delete the bootstrap
 token. Steady-state releases use short-lived OIDC only. The complete setup and
@@ -350,7 +353,7 @@ The assertion variants throw `DocsArtifactValidationError` with the same stable
 `errors` array. The CLI prints `code path: message` diagnostics and exits nonzero:
 
 ```bash
-npx --package=@taprootio/docs-artifact@1.0.0 taproot-docs-validate ./_site
+npx --package=@taprootio/docs-artifact@1.0.1 taproot-docs-validate ./_site
 ```
 
 Consumers should assert error `code` and `path`, not human-readable wording.

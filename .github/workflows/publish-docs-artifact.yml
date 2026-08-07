@@ -67,7 +67,7 @@ jobs:
           versions_file="$RUNNER_TEMP/docs-artifact-versions.json"
           versions_error="$RUNNER_TEMP/docs-artifact-versions.error"
           if ! npm view "$package_name" versions --json --registry=https://registry.npmjs.org/ > "$versions_file" 2> "$versions_error"; then
-            if grep -q "E404" "$versions_error"; then
+            if grep -Fxq "npm error code E404" "$versions_error"; then
               echo "[]" > "$versions_file"
             else
               cat "$versions_error" >&2
@@ -82,7 +82,7 @@ jobs:
             published_integrity="$(tr -d '\r\n' < "$integrity_file")"
             test -n "$published_integrity"
             npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/docs-artifact-pack.json"
-            local_integrity="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'))[0].integrity" "$RUNNER_TEMP/docs-artifact-pack.json")"
+            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/docs-artifact-pack.json")"
             test "$local_integrity" = "$published_integrity"
 
             audit_directory="$RUNNER_TEMP/docs-artifact-provenance"
@@ -100,7 +100,7 @@ jobs:
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
             echo "$package_spec already exists with identical package integrity and verified Trunk provenance."
           else
-            if grep -q "E404" "$integrity_error"; then
+            if grep -Fxq "npm error code E404" "$integrity_error"; then
               echo "should_publish=true" >> "$GITHUB_OUTPUT"
             else
               cat "$integrity_error" >&2
@@ -115,4 +115,4 @@ jobs:
           # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
           # trusted publishing replace the setup-node registry configuration.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --ignore-scripts

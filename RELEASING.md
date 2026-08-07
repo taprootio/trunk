@@ -23,15 +23,22 @@ tag prefix, tests, and publish workflow.
    provenance.
 
 Never publish npm first. The public commit and tag are the inspectable release
-record to which provenance points. Do not create the next private release tag
-until the preceding version has completed both the Trunk sync and npm publish;
-GitHub's concurrency queue prevents overlap but does not guarantee that rapidly
-dispatched tags begin waiting in semantic-version order.
+record to which provenance points. Except for the preserved failed
+`docs-artifact-v1.0.0` bootstrap attempt documented below, do not create the
+next private release tag until the preceding version has completed both the
+Trunk sync and npm publish; GitHub's concurrency queue prevents overlap but
+does not guarantee that rapidly dispatched tags begin waiting in
+semantic-version order.
 
 Release workflows pin third-party Actions to immutable commit SHAs and the npm
 CLI to one exact reviewed version. Upgrade either only through a coordinated
 Taproot and Trunk change that verifies the upstream tag-to-commit mapping,
 updates both reviewed workflow copies, and reruns the public release tests.
+The exact npm version pin still trusts the registry response and the bundled
+npm client's TLS and integrity verification during the global install; it does
+not independently pin the npm tarball's sha512. That residual registry trust is
+explicitly accepted until the bootstrap install gains a separately reviewed
+tarball-integrity check.
 
 ## One-time GitHub setup
 
@@ -84,7 +91,11 @@ files and will fail closed while they differ.
 ## First npm publish
 
 npm cannot configure a trusted publisher until the package exists. Bootstrap
-`@taprootio/docs-artifact@1.0.0` once, then remove the credential:
+`@taprootio/docs-artifact@1.0.1` once, then remove the credential. The immutable
+`docs-artifact-v1.0.0` tag records the first bootstrap attempt, which failed in
+package tests before npm publish because npm 12 changed the shape of
+`npm pack --json` output. Version `1.0.0` is therefore intentionally absent from
+the registry:
 
 1. Confirm the `@taprootio` npm organization owns the scope. Public scoped
    packages do not require a paid npm plan.
@@ -92,7 +103,7 @@ npm cannot configure a trusted publisher until the package exists. Bootstrap
    `@taprootio` scope. Add it as `NPM_TOKEN` in Trunk's
    `npm-docs-artifact-publish` Environment—not in private Taproot.
 3. Merge the Taproot release work, then create private tag
-   `docs-artifact-v1.0.0`. The public workflow publishes from Trunk with
+   `docs-artifact-v1.0.1`. The public workflow publishes from Trunk with
    `--provenance` and the one-time token.
 4. In npm package settings, configure the GitHub Actions trusted publisher:
    organization `taprootio`, repository `trunk`, workflow
@@ -113,11 +124,14 @@ Never copy token or private-key values into an issue, task, log, or repository.
 - **Trunk `main` already has the candidate version but different package
   bytes:** stop. Restore the reviewed version bytes or bump the version; the
   sync will not overwrite a same-version tree even when its tag is missing.
-- **Public tag exists; npm failed:** rerun the public workflow for that tag. If
-  npm already contains the version, the workflow compares registry and local
-  package integrity, cryptographically verifies its npm attestation, and
-  succeeds only when the signed provenance names the same Trunk workflow, tag,
-  and commit.
+- **Public tag exists; npm failed:** while that version remains the newest
+  release, rerun the public workflow for its tag. If npm already contains the
+  version, the workflow compares registry and local package integrity,
+  cryptographically verifies its npm attestation, and succeeds only when the
+  signed provenance names the same Trunk workflow, tag, and commit. Reruns of a
+  superseded version intentionally fail the release-order guard. If the failure
+  requires different bytes, preserve the immutable tag and bump the package
+  version before releasing the correction.
 - **Existing public tag has different package bytes:** stop and bump the package
   version. Tags and npm versions are immutable.
 - **Public package path changed without a version bump:** reject the release;

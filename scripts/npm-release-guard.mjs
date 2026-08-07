@@ -77,6 +77,26 @@ export function assertMonotonicRelease(candidateVersion, publishedVersions) {
   }
 }
 
+export function npmPackIntegrity(packResult) {
+  let packs = [];
+  if (Array.isArray(packResult)) {
+    packs = packResult;
+  } else if (packResult !== null && typeof packResult === "object") {
+    packs = Object.values(packResult);
+  }
+  if (
+    packs.length !== 1
+    || packs[0] === null
+    || typeof packs[0] !== "object"
+    || Array.isArray(packs[0])
+    || typeof packs[0].integrity !== "string"
+    || packs[0].integrity.length === 0
+  ) {
+    fail("npm pack output must contain exactly one package with an integrity value");
+  }
+  return packs[0].integrity;
+}
+
 function decodeStatement(attestationBundle) {
   const envelope = attestationBundle?.bundle?.dsseEnvelope ?? attestationBundle?.dsseEnvelope;
   const payload = envelope?.payload;
@@ -155,6 +175,10 @@ function main(args) {
     assertMonotonicRelease(values[0], readJson(values[1], "published versions"));
     return;
   }
+  if (command === "pack-integrity" && values.length === 1) {
+    console.log(npmPackIntegrity(readJson(values[0], "npm pack output")));
+    return;
+  }
   if (command === "provenance" && values.length === 7) {
     assertNpmProvenance({
       audit: readJson(values[0], "npm audit output"),
@@ -167,7 +191,7 @@ function main(args) {
     });
     return;
   }
-  fail("usage: npm-release-guard.mjs order <version> <versions-json> | provenance <audit-json> <name> <version> <repository> <workflow> <ref> <commit>");
+  fail("usage: npm-release-guard.mjs order <version> <versions-json> | pack-integrity <npm-pack-json> | provenance <audit-json> <name> <version> <repository> <workflow> <ref> <commit>");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
