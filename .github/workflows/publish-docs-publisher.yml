@@ -1,14 +1,12 @@
-name: Publish Docs artifact
+name: Publish Docs publisher
 
 on:
   push:
     tags:
-      - "docs-artifact-v*"
+      - "docs-publisher-v*"
 
 concurrency:
-  # Prevent overlapping publishes and retain queued runs. The monotonic guard
-  # below fails closed because GitHub does not guarantee semantic tag order.
-  group: docs-artifact-npm
+  group: docs-publisher-npm
   queue: max
   cancel-in-progress: false
 
@@ -17,9 +15,9 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @taprootio/docs-artifact
+    name: Publish @taprootio/docs-publisher
     runs-on: ubuntu-latest
-    environment: npm-docs-artifact-publish
+    environment: npm-docs-publisher-publish
     permissions:
       contents: read
       id-token: write
@@ -42,33 +40,35 @@ jobs:
       - name: Upgrade npm for trusted publishing
         run: npm install --global npm@12.0.2
 
-      - name: Require the release tag and public repository metadata to match
-        working-directory: packages/docs-artifact
+      - name: Require release identity and the exact artifact-contract pin
+        working-directory: packages/docs-publisher
         run: |
           package_version="$(node -p "require('./package.json').version")"
           repository_url="$(node -p "require('./package.json').repository.url")"
           repository_directory="$(node -p "require('./package.json').repository.directory")"
-          test "$GITHUB_REF_NAME" = "docs-artifact-v${package_version}"
+          artifact_version="$(node -p "require('./package.json').dependencies['@taprootio/docs-artifact']")"
+          test "$GITHUB_REF_NAME" = "docs-publisher-v${package_version}"
           test "$repository_url" = "https://github.com/taprootio/trunk.git"
-          test "$repository_directory" = "packages/docs-artifact"
+          test "$repository_directory" = "packages/docs-publisher"
+          test "$artifact_version" = "1.0.1"
 
-      - name: Test artifact, conformance fixtures, and shared release guards
+      - name: Install the exact public artifact contract and test the publisher
+        working-directory: packages/docs-publisher
         run: |
-          npm --prefix packages/docs-artifact test
-          npm --prefix packages/docs-artifact run conformance
-          npm run test:release-guards
+          npm install --ignore-scripts --no-audit --no-fund --workspaces=false
+          npm test
 
       - name: Enforce release order and detect an identical completed npm publish
         id: registry
-        working-directory: packages/docs-artifact
+        working-directory: packages/docs-publisher
         shell: bash
         run: |
           set -euo pipefail
           package_name="$(node -p "require('./package.json').name")"
           package_version="$(node -p "require('./package.json').version")"
           package_spec="${package_name}@${package_version}"
-          versions_file="$RUNNER_TEMP/docs-artifact-versions.json"
-          versions_error="$RUNNER_TEMP/docs-artifact-versions.error"
+          versions_file="$RUNNER_TEMP/docs-publisher-versions.json"
+          versions_error="$RUNNER_TEMP/docs-publisher-versions.error"
           if ! npm view "$package_name" versions --json --registry=https://registry.npmjs.org/ > "$versions_file" 2> "$versions_error"; then
             if grep -Fxq "npm error code E404" "$versions_error"; then
               echo "[]" > "$versions_file"
@@ -79,25 +79,25 @@ jobs:
           fi
           node ../../scripts/npm-release-guard.mjs order "$package_version" "$versions_file"
 
-          integrity_file="$RUNNER_TEMP/docs-artifact-integrity.txt"
-          integrity_error="$RUNNER_TEMP/docs-artifact-integrity.error"
+          integrity_file="$RUNNER_TEMP/docs-publisher-integrity.txt"
+          integrity_error="$RUNNER_TEMP/docs-publisher-integrity.error"
           if npm view "$package_spec" dist.integrity --registry=https://registry.npmjs.org/ > "$integrity_file" 2> "$integrity_error"; then
             published_integrity="$(tr -d '\r\n' < "$integrity_file")"
             test -n "$published_integrity"
-            npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/docs-artifact-pack.json"
-            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/docs-artifact-pack.json")"
+            npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/docs-publisher-pack.json"
+            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/docs-publisher-pack.json")"
             test "$local_integrity" = "$published_integrity"
 
-            audit_directory="$RUNNER_TEMP/docs-artifact-provenance"
+            audit_directory="$RUNNER_TEMP/docs-publisher-provenance"
             mkdir -p "$audit_directory"
             npm install --prefix "$audit_directory" --ignore-scripts --no-audit --no-fund --save-exact "$package_spec"
-            npm --prefix "$audit_directory" audit signatures --json --include-attestations > "$RUNNER_TEMP/docs-artifact-attestations.json"
+            npm --prefix "$audit_directory" audit signatures --json --include-attestations > "$RUNNER_TEMP/docs-publisher-attestations.json"
             node ../../scripts/npm-release-guard.mjs provenance \
-              "$RUNNER_TEMP/docs-artifact-attestations.json" \
+              "$RUNNER_TEMP/docs-publisher-attestations.json" \
               "$package_name" \
               "$package_version" \
               "https://github.com/taprootio/trunk" \
-              ".github/workflows/publish-docs-artifact.yml" \
+              ".github/workflows/publish-docs-publisher.yml" \
               "refs/tags/$GITHUB_REF_NAME" \
               "$GITHUB_SHA"
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
@@ -113,7 +113,7 @@ jobs:
 
       - name: Publish immutable public package with provenance
         if: steps.registry.outputs.should_publish == 'true'
-        working-directory: packages/docs-artifact
+        working-directory: packages/docs-publisher
         env:
           # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
           # trusted publishing replace the setup-node registry configuration.
