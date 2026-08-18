@@ -7,8 +7,9 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm run test:docs-artifact && npm run test:release-guards",
+    "test": "npm run test:docs-artifact && npm run test:docs-publisher && npm run test:release-guards",
     "test:docs-artifact": "npm --prefix packages/docs-artifact test && npm --prefix packages/docs-artifact run conformance",
+    "test:docs-publisher": "npm --prefix packages/docs-publisher test",
     "test:release-guards": "node --test scripts/npm-release-guard.test.mjs"
   }
 }
