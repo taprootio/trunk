@@ -1,0 +1,444 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "accept-representative-espalier-prebuilt-output",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "archive": {
+        "path": "prebuilt/golden/espalier.tar.gz",
+        "byteLength": 19991,
+        "sha256": "sha256:57d9a7d7c79effafeb5c5951855ff75de04573a7ec4d46f26f8b1a40d044a1e8"
+      }
+    },
+    {
+      "name": "accept-permanent-301-redirect",
+      "valid": true,
+      "expectedCodes": [],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "mutations": [
+        { "operation": "replace", "path": ["redirects", 0, "status"], "value": 301 }
+      ]
+    },
+    {
+      "name": "reject-duplicate-json-key",
+      "valid": false,
+      "expectedCodes": ["json.duplicate_key"],
+      "manifest": "prebuilt/invalid/duplicate-json-key.json"
+    },
+    {
+      "name": "reject-path-traversal",
+      "valid": false,
+      "expectedCodes": ["path.unsafe"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 2, "path"], "value": "assets/../icons.svg" }
+      ]
+    },
+    {
+      "name": "reject-non-ascii-non-normalized-path",
+      "valid": false,
+      "expectedCodes": ["path.not_ascii", "string.not_normalized"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 2, "path"], "value": "assets/é.svg" }
+      ]
+    },
+    {
+      "name": "reject-ascii-case-fold-file-collision",
+      "valid": false,
+      "expectedCodes": ["array.not_sorted", "duplicate.file_path_casefold"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["files"],
+          "value": {
+            "bytes": 152,
+            "mediaType": "text/javascript; charset=utf-8",
+            "path": "assets/SITE.js",
+            "sha256": "sha256:59b4582bd63e4bc20d0650ee73452b34e8f8e2fc1cabe32c59c5507e7890f70d"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reject-ascii-case-fold-parent-directory-alias",
+      "valid": false,
+      "expectedCodes": ["duplicate.directory_path_casefold"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["files"],
+          "value": {
+            "bytes": 0,
+            "mediaType": "text/css; charset=utf-8",
+            "path": "zAlias/a.css",
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        },
+        {
+          "operation": "append",
+          "path": ["files"],
+          "value": {
+            "bytes": 0,
+            "mediaType": "text/css; charset=utf-8",
+            "path": "zalias/b.css",
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reject-undeclared-file",
+      "valid": false,
+      "expectedCodes": ["file.unexpected"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "files": [
+        { "path": "extra.txt", "utf8": "undeclared\n" }
+      ]
+    },
+    {
+      "name": "reject-missing-declared-file",
+      "valid": false,
+      "expectedCodes": ["file.missing"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "omitBaseFiles": ["assets/site.js"]
+    },
+    {
+      "name": "reject-hash-drift",
+      "valid": false,
+      "expectedCodes": ["file.hash_drift"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["files", 11, "sha256"],
+          "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "reject-size-drift",
+      "valid": false,
+      "expectedCodes": ["file.size_drift"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "mutations": [
+        { "operation": "replace", "path": ["files", 11, "bytes"], "value": 380 }
+      ]
+    },
+    {
+      "name": "reject-per-file-byte-bound",
+      "valid": false,
+      "expectedCodes": ["number.range"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 11, "bytes"], "value": 67108865 }
+      ]
+    },
+    {
+      "name": "reject-total-declared-byte-bound",
+      "valid": false,
+      "expectedCodes": ["limit.artifact_bytes"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 0, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 1, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 2, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 3, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 4, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 5, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 6, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 7, "bytes"], "value": 67108864 },
+        { "operation": "replace", "path": ["files", 8, "bytes"], "value": 67108864 }
+      ]
+    },
+    {
+      "name": "reject-path-byte-bound",
+      "valid": false,
+      "expectedCodes": ["path.too_long", "string.length"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 13, "path"], "repeat": "z", "count": 253, "suffix": ".js" }
+      ]
+    },
+    {
+      "name": "reject-manifest-byte-bound",
+      "valid": false,
+      "expectedCodes": ["manifest.too_large"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "manifestPaddingBytes": 8388609
+    },
+    {
+      "name": "reject-ambiguous-case-folded-redirect",
+      "valid": false,
+      "expectedCodes": ["array.not_sorted", "duplicate.redirect"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["redirects"],
+          "value": { "from": "/GETTING-started/", "status": 301, "toResourceKey": "home" }
+        }
+      ]
+    },
+    {
+      "name": "reject-redirect-file-route-collision",
+      "valid": false,
+      "expectedCodes": ["redirect.route_collision"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "append",
+          "path": ["redirects"],
+          "value": { "from": "/guides/", "status": 308, "toResourceKey": "home" }
+        }
+      ]
+    },
+    {
+      "name": "reject-worker-internal-control-file-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 1, "path"], "value": "__taproot/internal/published-site-routing" },
+        { "operation": "replace", "path": ["files", 1, "mediaType"], "value": "application/octet-stream" },
+        { "operation": "remove", "path": ["resources", 0] }
+      ]
+    },
+    {
+      "name": "reject-worker-internal-control-redirect-source",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["redirects", 0, "from"],
+          "value": "/__taproot/internal/published-site-routing"
+        }
+      ]
+    },
+    {
+      "name": "reject-missing-resource-target",
+      "valid": false,
+      "expectedCodes": ["redirect.unknown_resource"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["redirects", 0, "toResourceKey"], "value": "guide:missing" }
+      ]
+    },
+    {
+      "name": "reject-unsupported-redirect-status",
+      "valid": false,
+      "expectedCodes": ["redirect.status"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["redirects", 0, "status"], "value": 302 }
+      ]
+    },
+    {
+      "name": "reject-canonical-404-as-stable-resource",
+      "valid": false,
+      "expectedCodes": ["resource.not_found"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["resources", 0, "file"], "value": "404.html" }
+      ]
+    },
+    {
+      "name": "reject-resource-unknown-file",
+      "valid": false,
+      "expectedCodes": ["resource.unknown_file"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["resources", 0, "file"], "value": "missing.html" }
+      ]
+    },
+    {
+      "name": "reject-resource-non-html-file",
+      "valid": false,
+      "expectedCodes": ["resource.not_html"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["resources", 0, "file"], "value": "assets/site.js" }
+      ]
+    },
+    {
+      "name": "reject-canonical-404-media-type",
+      "valid": false,
+      "expectedCodes": ["file.media_type", "not_found.media_type"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 0, "mediaType"], "value": "text/plain; charset=utf-8" }
+      ]
+    },
+    {
+      "name": "reject-missing-required-prebuilt-capability",
+      "valid": false,
+      "expectedCodes": ["capability.missing"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["capabilities", "required"], "value": [] }
+      ]
+    },
+    {
+      "name": "reject-unsupported-required-prebuilt-capability",
+      "valid": false,
+      "expectedCodes": ["capability.unsupported"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["capabilities", "required"],
+          "value": ["taproot.docs.prebuilt.files.v1", "taproot.docs.unsupported.v1"]
+        }
+      ]
+    },
+    {
+      "name": "reject-noncanonical-source-repository-url",
+      "valid": false,
+      "expectedCodes": ["source.repository_url"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["source", "repositoryUrl"],
+          "value": "https://example.com/taprootio/taproot-controls"
+        }
+      ]
+    },
+    {
+      "name": "reject-noncanonical-404-file",
+      "valid": false,
+      "expectedCodes": ["not_found.not_canonical"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["notFoundFile"], "value": "missing.html" }
+      ]
+    },
+    {
+      "name": "reject-publisher-controlled-response-headers",
+      "valid": false,
+      "expectedCodes": ["property.unsupported"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["headers"], "value": { "content-security-policy": "default-src *" } }
+      ]
+    },
+    {
+      "name": "reject-media-type-drift",
+      "valid": false,
+      "expectedCodes": ["file.media_type"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 6, "mediaType"], "value": "text/javascript; charset=utf-8" }
+      ]
+    },
+    {
+      "name": "reject-file-count-bound",
+      "valid": false,
+      "expectedCodes": ["array.length", "duplicate.file_path", "validation.too_many_errors"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "repeat-array", "path": ["files"], "sourceIndex": 0, "count": 25001 },
+        { "operation": "replace", "path": ["resources"], "value": [] },
+        { "operation": "replace", "path": ["redirects"], "value": [] }
+      ]
+    },
+    {
+      "name": "reject-resource-count-bound",
+      "valid": false,
+      "expectedCodes": [
+        "array.length",
+        "duplicate.resource_file",
+        "duplicate.resource_key",
+        "validation.too_many_errors"
+      ],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "repeat-array", "path": ["resources"], "sourceIndex": 0, "count": 25001 },
+        { "operation": "replace", "path": ["redirects"], "value": [] }
+      ]
+    },
+    {
+      "name": "reject-redirect-count-bound",
+      "valid": false,
+      "expectedCodes": ["array.length", "duplicate.redirect", "validation.too_many_errors"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "repeat-array", "path": ["redirects"], "sourceIndex": 0, "count": 10001 }
+      ]
+    },
+    {
+      "name": "reject-directory-depth-bound",
+      "valid": false,
+      "expectedCodes": ["limit.directory_depth"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 13, "path"], "repeat": "z/", "count": 65, "suffix": "pagefind.js" }
+      ]
+    },
+    {
+      "name": "reject-ustar-name-bound",
+      "valid": false,
+      "expectedCodes": ["path.ustar"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 13, "path"], "repeat": "z", "count": 101, "suffix": ".js" }
+      ]
+    },
+    {
+      "name": "reject-manifest-path-descendant",
+      "valid": false,
+      "expectedCodes": ["path.manifest"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        {
+          "operation": "replace",
+          "path": ["files", 13, "path"],
+          "value": "taproot-docs-prebuilt-manifest.json/payload.js"
+        }
+      ]
+    },
+    {
+      "name": "reject-missing-canonical-404-inventory",
+      "valid": false,
+      "expectedCodes": ["not_found.missing"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "remove", "path": ["files", 0] }
+      ]
+    },
+    {
+      "name": "reject-publisher-origins-routes-and-hooks",
+      "valid": false,
+      "expectedCodes": ["property.unsupported"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["allowedOrigins"], "value": ["https://example.com"] },
+        { "operation": "replace", "path": ["validationHooks"], "value": ["npm run validate"] },
+        { "operation": "replace", "path": ["files", 1, "route"], "value": "/api/toast/" }
+      ]
+    },
+    {
+      "name": "reject-file-becoming-nonregular-before-open",
+      "valid": false,
+      "expectedCodes": ["file.not_regular"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "includeBaseFiles": true,
+      "nodeScenario": {
+        "type": "replace-file-with-directory-before-open",
+        "path": "assets/site.js"
+      }
+    }
+  ]
+}

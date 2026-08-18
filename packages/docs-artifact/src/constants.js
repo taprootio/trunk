@@ -1,5 +1,9 @@
 export const MANIFEST_FILE_NAME = "taproot-docs-manifest.json";
 export const SCHEMA_VERSION = 1;
+export const MANAGED_MANIFEST_FILE_NAME = MANIFEST_FILE_NAME;
+export const MANAGED_SCHEMA_VERSION = SCHEMA_VERSION;
+export const MANAGED_MODE = "managed";
+export const MANAGED_ARCHIVE_FORMAT = "taproot-docs-tar-gzip-v1";
 export const HTML_FRAGMENT_CAPABILITY = "taproot.docs.fragments.html.v1";
 
 export const SUPPORTED_CAPABILITIES = Object.freeze([

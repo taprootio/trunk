@@ -4,3 +4,4 @@ export function validateArtifactDirectory(
   rootDirectory: string,
   options?: ValidationOptions,
 ): Promise<ValidationResult<ValidatedArtifact>>;
+export const validateManagedArtifactDirectory: typeof validateArtifactDirectory;

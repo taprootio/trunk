@@ -1,0 +1,135 @@
+{
+  "build": {
+    "configurationSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "producer": "@taprootio/espalier-docs",
+    "producerVersion": "1.0.0",
+    "sourceDateEpoch": 1786838400
+  },
+  "capabilities": {
+    "optional": [],
+    "required": [
+      "taproot.docs.prebuilt.files.v1"
+    ]
+  },
+  "files": [
+    {
+      "bytes": 204,
+      "mediaType": "text/html; charset=utf-8",
+      "path": "404.html",
+      "sha256": "sha256:3227e1701e382cb02959c0d79eab3b77cb6b92231934c5fab84deb85ad20dcbf"
+    },
+    {
+      "bytes": 236,
+      "mediaType": "text/html; charset=utf-8",
+      "path": "api/show-toast/index.html",
+      "sha256": "sha256:e656772e20f7b7db2cfc572bbbce19caa7a7259acd78ef708f963ef8bd1acfcb"
+    },
+    {
+      "bytes": 130,
+      "mediaType": "image/svg+xml",
+      "path": "assets/icons.svg",
+      "sha256": "sha256:c40a36beae62f96b67b7e5f0d6ed47be135ea11e92ca51fe8187f21d57e9d561"
+    },
+    {
+      "bytes": 183,
+      "mediaType": "image/svg+xml",
+      "path": "assets/pulse.svg",
+      "sha256": "sha256:054cd0e52eaa6f072816a8d765484f9de1259bd84469bed1839621999493b43b"
+    },
+    {
+      "bytes": 85,
+      "mediaType": "text/javascript; charset=utf-8",
+      "path": "assets/search-worker.js",
+      "sha256": "sha256:837367dd7473cc2e132ee8edc36137a47f93f18ea0d4d3faca4fbeaa021872b4"
+    },
+    {
+      "bytes": 12,
+      "mediaType": "application/wasm",
+      "path": "assets/search.wasm",
+      "sha256": "sha256:17007025a9873b80bb8591aae680a7b2fe55199b83b74fe5bf2ec91f96d59bad"
+    },
+    {
+      "bytes": 190,
+      "mediaType": "text/css; charset=utf-8",
+      "path": "assets/site.css",
+      "sha256": "sha256:de7b5f1d63dcbed7ea3e8b42e3a489007b6e1e872f87085a81dbcd6cab003895"
+    },
+    {
+      "bytes": 152,
+      "mediaType": "text/javascript; charset=utf-8",
+      "path": "assets/site.js",
+      "sha256": "sha256:59b4582bd63e4bc20d0650ee73452b34e8f8e2fc1cabe32c59c5507e7890f70d"
+    },
+    {
+      "bytes": 36,
+      "mediaType": "text/css; charset=utf-8",
+      "path": "dist/-6iE9DOe.css",
+      "sha256": "sha256:2c7174e36288ef16e440291a09440f61dbd8356844180dc360054dae1ad8868e"
+    },
+    {
+      "bytes": 32,
+      "mediaType": "text/css; charset=utf-8",
+      "path": "dist/_AN3XUT_.css",
+      "sha256": "sha256:e48ad66f2485b66a446222c7270ba05f04e7cd16a2d55fab3bd3101c3ba9e5d8"
+    },
+    {
+      "bytes": 414,
+      "mediaType": "text/html; charset=utf-8",
+      "path": "guides/index.html",
+      "sha256": "sha256:e5dc7a53cf319152b9e7a92ca455c8086f18fd48ea834a910d2cba676faa7ea6"
+    },
+    {
+      "bytes": 381,
+      "mediaType": "text/html; charset=utf-8",
+      "path": "index.html",
+      "sha256": "sha256:e01e7ce55d4da1f87ee88fa90c58e0d5036734a42a3572e2cbad21f044f27456"
+    },
+    {
+      "bytes": 20,
+      "mediaType": "application/octet-stream",
+      "path": "pagefind/index/abc.pf_index",
+      "sha256": "sha256:f38c1c4a64d12d38b612823ec0d110f3b0133ebf308979fa1062b731eae5ba68"
+    },
+    {
+      "bytes": 172,
+      "mediaType": "text/javascript; charset=utf-8",
+      "path": "pagefind/pagefind.js",
+      "sha256": "sha256:5ddc73a0c8bb1d511025bac5e8c62359f80f30be56518e23beba6c2e0921b4f0"
+    }
+  ],
+  "mode": "prebuilt",
+  "notFoundFile": "404.html",
+  "redirects": [
+    {
+      "from": "/getting-started/",
+      "status": 308,
+      "toResourceKey": "guide:getting-started"
+    }
+  ],
+  "resources": [
+    {
+      "file": "api/show-toast/index.html",
+      "key": "api:show-toast",
+      "title": "Show toast API"
+    },
+    {
+      "file": "guides/index.html",
+      "key": "guide:getting-started",
+      "title": "Getting started"
+    },
+    {
+      "file": "index.html",
+      "key": "home",
+      "title": "Espalier controls"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "provider": "github",
+    "ref": "refs/heads/main",
+    "repository": "taprootio/taproot-controls",
+    "repositoryId": "934883082",
+    "repositoryUrl": "https://github.com/taprootio/taproot-controls",
+    "revision": "0123456789abcdef0123456789abcdef01234567"
+  }
+}

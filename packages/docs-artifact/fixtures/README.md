@@ -22,3 +22,22 @@ contract regardless of host ICU data.
 localized fixture keeps its one PNG as reviewable base64 in source control; the
 loader materializes it at the manifest path without requiring a generated binary
 file in the contract repository.
+
+Prebuilt cases are consumed through `loadPrebuiltConformanceCases()` from
+`@taprootio/docs-artifact/prebuilt/conformance`. The representative
+`prebuilt/valid/espalier/` fixture is a self-contained static tree with HTML,
+repository JavaScript and bundler-shaped CSS, a worker, a minimal WebAssembly
+module, an `/api/` content route, an SVG symbol sprite, an animated SVG,
+Pagefind JavaScript and binary index data, a redirect, stable resources, and the
+canonical 404. The sibling committed golden vector at
+`prebuilt/golden/espalier.tar.gz` freezes the exact
+deterministic USTAR/stored-gzip bytes; the loader exposes those bytes together
+with their expected length and SHA-256. The fixture does not depend on a
+checkout of the Espalier repository. Its adversarial cases pin traversal,
+normalization and case-fold collisions, extra/missing files, hash/size and
+media-type drift, every published collection/byte/path/depth/USTAR bound,
+ambiguous redirects, missing resource and canonical-404 targets, a file that
+becomes non-regular before its validated open, and rejection of
+publisher-controlled headers, origins, routes, and validation hooks. Run the
+loaded cases through `validatePrebuiltConformanceCase()` so both in-memory and
+Node-boundary scenarios use their owning validator.

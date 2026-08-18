@@ -11,9 +11,10 @@ class StrictJsonError extends Error {
 }
 
 class StrictJsonParser {
-  constructor(text) {
+  constructor(text, maximumDepth = LIMITS.manifestObjectDepth) {
     this.text = text;
     this.offset = 0;
+    this.maximumDepth = maximumDepth;
   }
 
   parse() {
@@ -27,8 +28,8 @@ class StrictJsonParser {
   }
 
   #parseValue(path, depth) {
-    if (depth > 64) {
-      throw new StrictJsonError("json.too_deep", "JSON nesting may not exceed 64 levels.", path);
+    if (depth > this.maximumDepth) {
+      throw new StrictJsonError("json.too_deep", `JSON nesting may not exceed ${this.maximumDepth} levels.`, path);
     }
     const char = this.text[this.offset];
     if (char === "{") return this.#parseObject(path, depth + 1);
@@ -210,10 +211,10 @@ export function classifyManifestInput(input) {
   return { kind: "object" };
 }
 
-function asBytes(input, classification = classifyManifestInput(input)) {
+function asBytes(input, classification = classifyManifestInput(input), maximumBytes = LIMITS.manifestBytes) {
   if (typeof input === "string") {
-    if (input.length > LIMITS.manifestBytes) {
-      throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${LIMITS.manifestBytes}.`);
+    if (input.length > maximumBytes) {
+      throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${maximumBytes}.`);
     }
     let byteLength = 0;
     for (let offset = 0; offset < input.length; offset += 1) {
@@ -230,39 +231,44 @@ function asBytes(input, classification = classifyManifestInput(input)) {
       } else {
         byteLength += first <= 0x7f ? 1 : first <= 0x7ff ? 2 : 3;
       }
-      if (byteLength > LIMITS.manifestBytes) {
-        throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${LIMITS.manifestBytes}.`);
+      if (byteLength > maximumBytes) {
+        throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${maximumBytes}.`);
       }
     }
     return new TextEncoder().encode(input);
   }
   if (classification.kind === "uint8array" || classification.kind === "arraybuffer") {
-    const snapshot = snapshotBinaryInput(input, LIMITS.manifestBytes, classification);
+    const snapshot = snapshotBinaryInput(input, maximumBytes, classification);
     if (snapshot.kind === "too_large") {
-      throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${LIMITS.manifestBytes}.`);
+      throw new StrictJsonError("manifest.too_large", `Manifest bytes may not exceed ${maximumBytes}.`);
     }
     if (snapshot.kind === "bytes") return snapshot.bytes;
   }
   throw new TypeError("Manifest input must be a string, Uint8Array, or ArrayBuffer.");
 }
 
-export function parseManifestJson(input, classification = classifyManifestInput(input)) {
+export function parseManifestJson(
+  input,
+  classification = classifyManifestInput(input),
+  maximumBytes = LIMITS.manifestBytes,
+  maximumDepth = LIMITS.manifestObjectDepth,
+) {
   let bytes;
   try {
-    bytes = asBytes(input, classification);
+    bytes = asBytes(input, classification, maximumBytes);
   } catch (error) {
     if (error instanceof StrictJsonError) {
       return { ok: false, errors: [sanitizeValidationError(error)] };
     }
     return { ok: false, errors: [sanitizeValidationError({ code: "json.invalid_input", path: "$", message: error.message })] };
   }
-  if (bytes.byteLength > LIMITS.manifestBytes) {
+  if (bytes.byteLength > maximumBytes) {
     return {
       ok: false,
       errors: [sanitizeValidationError({
         code: "manifest.too_large",
         path: "$",
-        message: `Manifest bytes may not exceed ${LIMITS.manifestBytes}.`,
+        message: `Manifest bytes may not exceed ${maximumBytes}.`,
       })],
     };
   }
@@ -278,7 +284,7 @@ export function parseManifestJson(input, classification = classifyManifestInput(
   }
 
   try {
-    return { ok: true, value: new StrictJsonParser(text).parse() };
+    return { ok: true, value: new StrictJsonParser(text, maximumDepth).parse() };
   } catch (error) {
     if (error instanceof StrictJsonError) {
       return { ok: false, errors: [sanitizeValidationError(error)] };
@@ -380,17 +386,29 @@ function jsonStringByteLength(value, maximumBytes) {
   return bytes;
 }
 
-export function preflightManifestObject(value) {
+export function preflightManifestObject(value, limits = {}) {
+  const maximumBytes = limits.manifestBytes ?? LIMITS.manifestBytes;
+  const maximumWork = limits.manifestObjectWork ?? LIMITS.manifestObjectWork;
+  const maximumDepth = limits.manifestObjectDepth ?? LIMITS.manifestObjectDepth;
+  const stopAtByteLimit = limits.stopAtByteLimit === true;
   const visiting = new WeakSet();
   const cachedSubtrees = new WeakMap();
   const state = { work: 0 };
-  const add = (left, right) => Math.min(LIMITS.manifestBytes + 1, left + right);
+  const byteLimitError = () => new ManifestObjectPreflightError(
+    "manifest.too_large",
+    `Canonical manifest bytes may not exceed ${maximumBytes}.`,
+  );
+  const checkByteLimit = (bytes) => {
+    if (stopAtByteLimit && bytes > maximumBytes) throw byteLimitError();
+    return Math.min(maximumBytes + 1, bytes);
+  };
+  const add = (left, right) => checkByteLimit(left + right);
   const consumeWork = (logicalWork = 1) => {
     state.work += logicalWork;
-    if (state.work > LIMITS.manifestObjectWork) {
+    if (state.work > maximumWork) {
       throw new ManifestObjectPreflightError(
         "manifest.too_large",
-        `Manifest object validation work may not exceed ${LIMITS.manifestObjectWork} values.`,
+        `Manifest object validation work may not exceed ${maximumWork} values.`,
       );
     }
   };
@@ -398,7 +416,7 @@ export function preflightManifestObject(value) {
     if (typeof candidate === "string") {
       consumeWork();
       return {
-        bytes: jsonStringByteLength(candidate, LIMITS.manifestBytes),
+        bytes: jsonStringByteLength(candidate, maximumBytes),
         logicalWork: 1,
         relativeDepth: -1,
         snapshot: candidate,
@@ -425,19 +443,19 @@ export function preflightManifestObject(value) {
     }
     const cached = cachedSubtrees.get(candidate);
     if (cached !== undefined) {
-      if (depth + cached.relativeDepth > LIMITS.manifestObjectDepth) {
+      if (depth + cached.relativeDepth > maximumDepth) {
         throw new ManifestObjectPreflightError(
           "manifest.object_too_deep",
-          `Manifest object nesting may not exceed ${LIMITS.manifestObjectDepth} levels.`,
+          `Manifest object nesting may not exceed ${maximumDepth} levels.`,
         );
       }
       consumeWork(cached.logicalWork);
       return cached;
     }
-    if (depth > LIMITS.manifestObjectDepth) {
+    if (depth > maximumDepth) {
       throw new ManifestObjectPreflightError(
         "manifest.object_too_deep",
-        `Manifest object nesting may not exceed ${LIMITS.manifestObjectDepth} levels.`,
+        `Manifest object nesting may not exceed ${maximumDepth} levels.`,
       );
     }
     const workAtStart = state.work;
@@ -471,11 +489,17 @@ export function preflightManifestObject(value) {
       snapshot = Object.create(null);
       let first = true;
       for (const key of Object.keys(candidate)) {
+        if (stopAtByteLimit) {
+          let minimumBytes = bytes;
+          if (!first) minimumBytes = add(minimumBytes, 1);
+          minimumBytes = add(minimumBytes, jsonStringByteLength(key, maximumBytes));
+          add(minimumBytes, 1);
+        }
         const child = visit(Reflect.get(candidate, key), depth + 1);
         if (child.snapshot === OMITTED_JSON_VALUE) continue;
         if (!first) bytes = add(bytes, 1);
         first = false;
-        bytes = add(bytes, jsonStringByteLength(key, LIMITS.manifestBytes));
+        bytes = add(bytes, jsonStringByteLength(key, maximumBytes));
         bytes = add(bytes, 1);
         bytes = add(bytes, child.bytes);
         relativeDepth = Math.max(relativeDepth, child.relativeDepth + 1);
@@ -497,7 +521,7 @@ export function preflightManifestObject(value) {
     const result = visit(value, 0);
     return {
       ok: true,
-      exceedsByteLimit: result.bytes > LIMITS.manifestBytes,
+      exceedsByteLimit: result.bytes > maximumBytes,
       value: result.snapshot === OMITTED_JSON_VALUE ? undefined : result.snapshot,
     };
   } catch (error) {

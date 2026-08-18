@@ -511,3 +511,5 @@ export async function validateArtifactDirectory(rootDirectory, options = {}) {
   if (context.errors.length > 0) return context.finish(undefined);
   return validateArtifact(manifestResult.value, entries, stableValidationOptions);
 }
+
+export const validateManagedArtifactDirectory = validateArtifactDirectory;

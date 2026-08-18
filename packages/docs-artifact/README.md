@@ -1,19 +1,133 @@
 # `@taprootio/docs-artifact`
 
 The canonical, independently versioned contract between documentation producers
-and Taproot Docs consumers. The public npm package contains all four authorities
-that must move together:
+and Taproot Docs consumers. Version 1.1 adds a separate prebuilt contract without
+changing or reinterpreting the released managed schema v1 contract. The public
+npm package contains the authorities that must move together:
 
 - `schema/taproot-docs-manifest.schema.json` for the structural v1 shape;
 - the validator and deterministic serializer exported from the package root;
 - the Node directory validator and `taproot-docs-validate` command;
 - valid and adversarial fixtures exposed by `@taprootio/docs-artifact/conformance`.
 
-WTFM and Taproot must pin the same exact released package version. Neither
-repository copies the schema, path rules, markup allow-list, limits, or fixture
-data.
+Prebuilt mode has its own `schema/taproot-docs-prebuilt-manifest.schema.json`,
+`@taprootio/docs-artifact/prebuilt` validator and serializer,
+`@taprootio/docs-artifact/prebuilt/node` directory validator, and
+`@taprootio/docs-artifact/prebuilt/archive` deterministic encoder, and
+`@taprootio/docs-artifact/prebuilt/conformance` cases and golden vector.
+Consumers select one entry point and one manifest filename explicitly; they
+never infer a mode from fields or archive contents.
+
+Each producer and consumer pins the exact package release for its selected
+contract. Managed artifacts produced under `1.0.1` remain valid and unchanged;
+prebuilt producers and consumers pin `1.1.0`. No repository copies the schema,
+path rules, markup allow-list, limits, or fixture data.
+
+## Prebuilt Docs contract
+
+Prebuilt mode is a Docs publication mode for repository-built static output,
+not a general static-hosting product. Its root is
+`taproot-docs-prebuilt-manifest.json`, `schemaVersion` is `1`, `mode` is
+`prebuilt`, and its required capability is
+`taproot.docs.prebuilt.files.v1`. The closed manifest contains only immutable
+GitHub source/build provenance, capabilities, `notFoundFile`, exact `files`,
+stable `resources`, and direct `redirects`. It has no response headers, cache
+directives, CSP fragments, routes table, origin allowlist, or executable hook.
+
+Every payload file has one ASCII relative POSIX path, exact media type, byte
+length, and `sha256:<64 lowercase hex>` digest. Paths use portable filename
+segments whose first character is a letter, digit, `-`, or `_` and whose last
+character is a letter or digit. They reject absolute paths, backslashes,
+percent escapes, controls, empty or dot segments, Windows device aliases, and
+the manifest name, and must fit both the 255-byte/64-directory envelope and
+POSIX USTAR's 100-byte name plus 155-byte prefix fields. Exact and
+ASCII-case-folded duplicates fail closed.
+The complete directory is closed: every declared file must be a regular file,
+and every other file, empty/unneeded directory, link, socket, FIFO, or device is
+rejected.
+
+The authenticated platform control route
+`/__taproot/internal/published-site-routing` is matched first and is the only
+reserved request route in the prebuilt file namespace. The edge then resolves
+the exact host, site, environment, immutable output pointer, and publication
+mode before applying public `/api/*` behavior. Managed mode retains the Taproot
+API proxy. Prebuilt files and redirects own the complete remaining namespace,
+including `/api/*`, and never fall through to that proxy.
+
+Within the prebuilt namespace, the file tree is the request router.
+`index.html` maps to `/`, `x/index.html` maps to `/x/`, and every other file
+maps to its exact `/<path>`. Redirects resolve before file lookup, map one
+canonical source directly to a stable resource key, and permit only status 301
+or 308. A redirect source may not collide, including after ASCII case-folding,
+with another redirect or a file route. `notFoundFile` is exactly `404.html` and
+must be declared as `text/html; charset=utf-8`.
+
+Resources contain exactly a durable `key`, one declared UTF-8 HTML `file`, and
+its current display `title`. Two keys cannot claim one file, and the 404 cannot
+be a successful-response resource. At publication, Taproot attaches the
+resulting `SiteResource` id as origin object metadata for mapped HTML. Eligible
+unmapped HTML is an explicit path-only analytics bucket. HTML 200 analytics stay
+cookie-free and no browser analytics script is injected.
+
+Taproot preserves every declared payload byte and publisher path. It owns and
+may attach `Content-Type`, cache policy, CSP, framing, MIME-sniffing, referrer,
+permissions, staging authorization/noindex, range, and content-encoding
+behavior; publisher fields cannot override them. Every prebuilt response gets
+this exact v1 policy, including HTML, the canonical 404, redirects, JavaScript
+and worker scripts, WebAssembly, directly navigated SVG documents, and all
+other assets:
+
+```text
+default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; form-action 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+```
+
+`'wasm-unsafe-eval'` permits the accepted same-origin Pagefind Wasm runtime
+without permitting string evaluation through `'unsafe-eval'`. V1 has no
+publisher-supplied origin allowlist or per-response relaxation.
+
+The archive identifier is the distinct
+`taproot-docs-prebuilt-tar-gzip-v1`. Its deterministic bytes contain the
+canonical manifest first and the exact payload snapshots in lexicographic path
+order. Each entry is a regular POSIX USTAR record with paths of at most 100
+bytes stored entirely in the name field; longer paths split at the rightmost
+slash that fits the 155-byte prefix and 100-byte name fields. Records use mode
+`0000644`; zero uid/gid/mtime/devmajor/devminor numeric fields; typeflag `0`;
+magic `ustar\0`; version `00`; empty owner/group names; six-octal-digit,
+NUL-space checksum; zero content padding; and exactly two zero terminator
+blocks. One gzip member
+uses header bytes `1f 8b 08 00 00 00 00 00 00 ff`; every non-final stored
+DEFLATE block is exactly 65,535 bytes and the final block holds the remaining
+1–65,535 bytes. The trailer contains the tar CRC-32 and low 32 bits of its byte
+length. The committed representative archive and its byte length/SHA-256 are
+the compatibility vector; platform `tar` or `gzip` output is not a substitute.
+The separate platform upload ceiling remains 256 MiB compressed; conformance
+under the artifact contract does not imply that an upload fits that independent
+limit.
+
+Public prebuilt ceilings are 8 MiB canonical manifest bytes, 25,000 files,
+512 MiB declared/actual uncompressed bytes, 64 MiB per file, 25,000 resources,
+10,000 redirects, 255 path bytes, and 64 directory levels. Object inputs retain
+the package's bounded 250,000-value/64-level work envelope, and diagnostics use
+the same stable bounded/sorted error contract as managed mode. Filesystem walks
+retain the existing 40,000-entry work ceiling. The Node validator opens files
+once with nonblocking/no-follow semantics, verifies the
+descriptor and every path component before and after reads, repeats the closed
+tree walk, and rejects identity, size, type, or ancestor races. Validation never
+executes or parses customer HTML, CSS, JavaScript, WebAssembly, Pagefind data,
+or SVG.
+
+Ordinary prebuilt output may execute only on separately verified customer
+production and staging hostnames. The only first-party platform-host exception
+is the closed Espalier tuple: hosts `espalier.taproot.io` and
+`espalier.taproot.test`, GitHub repository id `934883082` with locator
+`taprootio/taproot-controls`, and `refs/heads/main`. Product ingestion must
+enforce that complete tuple before serving executable prebuilt bytes beneath
+`taproot.io` or `taproot.test`. WTFM remains managed.
 
 ## Artifact layout and portability
+
+The remainder of this document describes the unchanged managed schema-v1
+contract.
 
 The producer writes this additive payload into its ordinary static output:
 
@@ -87,7 +201,8 @@ The npm package uses semantic versioning independently of `schemaVersion`:
   enforcement. A patch may reject an input that never conformed to the stated
   fail-closed rules.
 
-Producer and consumer release PRs update one exact dependency pin together. The
+Producer and consumer release PRs coordinate each selected contract's exact
+dependency pin. The
 private Taproot `docs-artifact-v<package-version>` tag does not publish npm
 directly. It verifies and copies the reviewed package allowlist into
 `packages/docs-artifact/` in public
@@ -189,28 +304,28 @@ ceiling as the runtime manifest and markup `lang` validators.
 
 The exported `LIMITS` object is the v1 ceiling. Important bounds are:
 
-| Input | Maximum |
-|---|---:|
-| Manifest | 2 MiB |
-| Object-manifest traversal / nesting depth | 250,000 values / 64 |
-| Managed semantic bytes | 256 MiB |
-| Listed semantic files | 20,000 |
-| Managed filesystem entries | 40,000 |
-| Managed directory depth | 32 |
-| Managed relative path | 512 characters |
-| Resources | 10,000 |
-| Locale variants | 20,000 |
-| Fragments | 20,000 |
-| Assets | 10,000 |
-| Redirects | 10,000 |
-| Navigation nodes / depth | 20,000 / 12 |
-| Markup elements / nesting depth per fragment | 100,000 / 128 |
-| One fragment | 2 MiB |
-| One asset | 25 MiB |
-| Decoded image canvas | 67,108,864 pixels |
-| Cumulative decoded animated frames | 67,108,864 pixels |
-| Animated image frames | 1,000 |
-| Consumer-supported capabilities | 100 entries, 200 characters each |
+| Input                                        |                          Maximum |
+| -------------------------------------------- | -------------------------------: |
+| Manifest                                     |                            2 MiB |
+| Object-manifest traversal / nesting depth    |              250,000 values / 64 |
+| Managed semantic bytes                       |                          256 MiB |
+| Listed semantic files                        |                           20,000 |
+| Managed filesystem entries                   |                           40,000 |
+| Managed directory depth                      |                               32 |
+| Managed relative path                        |                   512 characters |
+| Resources                                    |                           10,000 |
+| Locale variants                              |                           20,000 |
+| Fragments                                    |                           20,000 |
+| Assets                                       |                           10,000 |
+| Redirects                                    |                           10,000 |
+| Navigation nodes / depth                     |                      20,000 / 12 |
+| Markup elements / nesting depth per fragment |                    100,000 / 128 |
+| One fragment                                 |                            2 MiB |
+| One asset                                    |                           25 MiB |
+| Decoded image canvas                         |                67,108,864 pixels |
+| Cumulative decoded animated frames           |                67,108,864 pixels |
+| Animated image frames                        |                            1,000 |
+| Consumer-supported capabilities              | 100 entries, 200 characters each |
 
 Navigation depth counts each top-level item as level one. A leaf at level 12 is
 valid; a child node at level 13 is rejected, while the global node ceiling still
@@ -349,14 +464,65 @@ const canonicalBytes = serializeManifest(manifestObject);
 const sharedCases = await loadConformanceCases();
 ```
 
+The root also exports additive `validateManagedManifest`,
+`assertValidManagedManifest`, `serializeManagedManifest`,
+`validateManagedArtifact`, and `assertValidManagedArtifact` aliases plus
+`MANAGED_*` identity constants. `@taprootio/docs-artifact/node` likewise exports
+`validateManagedArtifactDirectory`. The legacy managed names above remain
+unchanged.
+
+Prebuilt consumers use the separate, explicit surface:
+
+```js
+import {
+  PREBUILT_ARCHIVE_FORMAT,
+  serializePrebuiltManifest,
+  validatePrebuiltArtifact,
+  validatePrebuiltManifest,
+} from "@taprootio/docs-artifact/prebuilt";
+import { createDeterministicPrebuiltArchive } from "@taprootio/docs-artifact/prebuilt/archive";
+import {
+  loadPrebuiltConformanceCases,
+  validatePrebuiltConformanceCase,
+} from "@taprootio/docs-artifact/prebuilt/conformance";
+import { validatePrebuiltArtifactDirectory } from "@taprootio/docs-artifact/prebuilt/node";
+
+const manifestResult = validatePrebuiltManifest(manifestBytes);
+const artifactResult = await validatePrebuiltArtifact(
+  manifestBytes,
+  exactFiles,
+);
+const directoryResult = await validatePrebuiltArtifactDirectory("_site");
+const canonicalBytes = serializePrebuiltManifest(manifestObject);
+const sharedCases = await loadPrebuiltConformanceCases();
+const sharedResults = await Promise.all(
+  sharedCases.map(validatePrebuiltConformanceCase),
+);
+const archive = createDeterministicPrebuiltArchive(directoryResult.value);
+const representativeVector = sharedCases.find((fixture) =>
+  fixture.expectedArchive
+)?.expectedArchive;
+```
+
+`createDeterministicPrebuiltArchive()` accepts only the isolated snapshot
+returned by a successful prebuilt artifact or directory validation. It verifies
+the snapshot's declared sizes and hashes again against the bytes it archives,
+then returns `{ format, bytes, byteLength, contentHash }`. The representative
+conformance case exposes its committed `expectedArchive` bytes, `byteLength`,
+and `sha256` for independent producer and consumer byte-identity checks.
+`validatePrebuiltConformanceCase()` runs ordinary cases against the in-memory
+validator and safely materializes the published non-regular-file race case in a
+disposable directory for the Node boundary.
+
 The assertion variants throw `DocsArtifactValidationError` with the same stable
 `errors` array. The CLI prints `code path: message` diagnostics and exits nonzero:
 
 ```bash
-npx --package=@taprootio/docs-artifact@1.0.1 taproot-docs-validate ./_site
+npx --package=@taprootio/docs-artifact@1.1.0 taproot-docs-validate ./_site
+npx --package=@taprootio/docs-artifact@1.1.0 taproot-docs-validate --mode prebuilt ./_site
 ```
 
 Consumers should assert error `code` and `path`, not human-readable wording.
 The package test suite also runs `npm pack --dry-run --json --ignore-scripts`
-and requires the exact reviewed 36-file tarball inventory, including the ISC
+and requires the exact reviewed tarball inventory, including the ISC
 `LICENSE`, so a publishable file cannot appear or disappear silently.

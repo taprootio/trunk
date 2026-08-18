@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:taproot:docs:prebuilt-artifact:manifest:v1",
+  "title": "Taproot Docs prebuilt artifact manifest",
+  "description": "Closed byte-preserving static Docs contract. Cross-reference, ASCII case-fold, redirect-source grammar, route-collision, required-array ordering, extension-bound media types, USTAR, aggregate-byte, UTF-8, and exact-inventory rules are additionally enforced by @taprootio/docs-artifact/prebuilt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mode", "source", "build", "capabilities", "notFoundFile", "files", "resources", "redirects"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mode": { "const": "prebuilt" },
+    "source": { "$ref": "#/$defs/source" },
+    "build": { "$ref": "#/$defs/build" },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional"],
+      "properties": {
+        "required": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "contains": { "const": "taproot.docs.prebuilt.files.v1" },
+          "items": { "$ref": "#/$defs/resourceKey" }
+        },
+        "optional": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/resourceKey" }
+        }
+      }
+    },
+    "notFoundFile": { "const": "404.html" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 25000,
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 25000,
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "redirects": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/redirect" }
+    }
+  },
+  "$defs": {
+    "resourceKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[a-z0-9]+(?:[._:/-][a-z0-9]+)*$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repositoryId", "repository", "repositoryUrl", "revision", "ref"],
+      "properties": {
+        "provider": { "const": "github" },
+        "repositoryId": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_.:-]+$" },
+        "repository": { "type": "string", "minLength": 3, "maxLength": 300, "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "repositoryUrl": { "type": "string", "format": "uri", "maxLength": 2000, "pattern": "^https://" },
+        "revision": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+        "ref": { "type": "string", "maxLength": 500, "pattern": "^refs/(?:heads|tags)/[A-Za-z0-9][A-Za-z0-9._/-]*$" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "producerVersion", "configurationSha256", "sourceDateEpoch"],
+      "properties": {
+        "producer": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^(?:@[a-z0-9._-]+/)?[a-z0-9._-]+$" },
+        "producerVersion": { "type": "string", "maxLength": 100, "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$" },
+        "configurationSha256": { "$ref": "#/$defs/hash" },
+        "sourceDateEpoch": { "type": "integer", "minimum": 0, "maximum": 253402300799 }
+      }
+    },
+    "path": {
+      "type": "string",
+      "$comment": "Runtime validation additionally enforces the 255-byte total, 64-directory, Windows-device, manifest-name, case-fold, and USTAR name/prefix constraints.",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?:[A-Za-z0-9]|[A-Za-z0-9_-][A-Za-z0-9._-]*[A-Za-z0-9])(?:/(?:[A-Za-z0-9]|[A-Za-z0-9_-][A-Za-z0-9._-]*[A-Za-z0-9]))*$"
+    },
+    "mediaType": {
+      "enum": [
+        "application/json; charset=utf-8",
+        "application/manifest+json; charset=utf-8",
+        "application/octet-stream",
+        "application/wasm",
+        "application/xml; charset=utf-8",
+        "font/otf",
+        "font/ttf",
+        "font/woff",
+        "font/woff2",
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/vnd.microsoft.icon",
+        "image/webp",
+        "text/css; charset=utf-8",
+        "text/html; charset=utf-8",
+        "text/javascript; charset=utf-8",
+        "text/plain; charset=utf-8"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mediaType", "bytes", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "mediaType": { "$ref": "#/$defs/mediaType" },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "file", "title"],
+      "properties": {
+        "key": { "$ref": "#/$defs/resourceKey" },
+        "file": { "$ref": "#/$defs/path" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "toResourceKey", "status"],
+      "properties": {
+        "from": {
+          "type": "string",
+          "$comment": "Runtime validation additionally enforces portable ASCII segments; forbids percent signs, backslashes, queries, fragments, dot segments, empty segments, Windows device aliases, the reserved manifest route, and the routing-control route; and requires ASCII case-fold uniqueness.",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^/"
+        },
+        "toResourceKey": { "$ref": "#/$defs/resourceKey" },
+        "status": { "enum": [301, 308] }
+      }
+    }
+  }
+}

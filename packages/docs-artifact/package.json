@@ -1,7 +1,7 @@
 {
   "name": "@taprootio/docs-artifact",
-  "version": "1.0.1",
-  "description": "Canonical Taproot Docs artifact schema, validator, and conformance fixtures",
+  "version": "1.1.0",
+  "description": "Canonical managed and prebuilt Taproot Docs artifact contracts",
   "type": "module",
   "license": "ISC",
   "repository": {
@@ -25,8 +25,26 @@
       "types": "./conformance.d.ts",
       "import": "./src/conformance.js"
     },
+    "./prebuilt": {
+      "types": "./prebuilt.d.ts",
+      "import": "./src/prebuilt.js"
+    },
+    "./prebuilt/archive": {
+      "types": "./prebuilt-archive.d.ts",
+      "import": "./src/prebuilt-archive.js"
+    },
+    "./prebuilt/node": {
+      "types": "./prebuilt-node.d.ts",
+      "import": "./src/prebuilt-node.js"
+    },
+    "./prebuilt/conformance": {
+      "types": "./prebuilt-conformance.d.ts",
+      "import": "./src/prebuilt-conformance.js"
+    },
     "./schema": "./schema/taproot-docs-manifest.schema.json",
-    "./fixtures/conformance.json": "./fixtures/conformance.json"
+    "./prebuilt/schema": "./schema/taproot-docs-prebuilt-manifest.schema.json",
+    "./fixtures/conformance.json": "./fixtures/conformance.json",
+    "./fixtures/prebuilt/conformance.json": "./fixtures/prebuilt/conformance.json"
   },
   "bin": {
     "taproot-docs-validate": "./bin/taproot-docs-validate.js"
@@ -40,12 +58,17 @@
     "README.md",
     "index.d.ts",
     "node.d.ts",
-    "conformance.d.ts"
+    "conformance.d.ts",
+    "prebuilt.d.ts",
+    "prebuilt-archive.d.ts",
+    "prebuilt-node.d.ts",
+    "prebuilt-conformance.d.ts"
   ],
   "scripts": {
     "test": "node --test",
     "conformance": "node ./bin/taproot-docs-conformance.js",
-    "prepack": "npm test && npm run conformance"
+    "conformance:prebuilt": "node ./bin/taproot-docs-conformance.js --mode prebuilt",
+    "prepack": "npm test && npm run conformance && npm run conformance:prebuilt"
   },
   "publishConfig": {
     "access": "public",

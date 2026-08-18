@@ -175,6 +175,10 @@ export interface DocsArtifactLimits {
 
 export const MANIFEST_FILE_NAME: "taproot-docs-manifest.json";
 export const SCHEMA_VERSION: 1;
+export const MANAGED_MANIFEST_FILE_NAME: "taproot-docs-manifest.json";
+export const MANAGED_SCHEMA_VERSION: 1;
+export const MANAGED_MODE: "managed";
+export const MANAGED_ARCHIVE_FORMAT: "taproot-docs-tar-gzip-v1";
 export const HTML_FRAGMENT_CAPABILITY: "taproot.docs.fragments.html.v1";
 export const SUPPORTED_CAPABILITIES: readonly string[];
 export const ASSET_MEDIA_TYPES: readonly DocsAssetMediaType[];
@@ -192,6 +196,9 @@ export function normalizeRoute(value: unknown): NormalizedPath | InvalidPath;
 export function validateManifest(input: unknown, options?: ValidationOptions): ValidationResult<DocsArtifactManifest>;
 export function assertValidManifest(input: unknown, options?: ValidationOptions): DocsArtifactManifest;
 export function serializeManifest(input: unknown, options?: ValidationOptions): string;
+export const validateManagedManifest: typeof validateManifest;
+export const assertValidManagedManifest: typeof assertValidManifest;
+export const serializeManagedManifest: typeof serializeManifest;
 export function validateArtifact(
   manifest: unknown,
   files: Iterable<ArtifactFileEntry>,
@@ -202,3 +209,5 @@ export function assertValidArtifact(
   files: Iterable<ArtifactFileEntry>,
   options?: ValidationOptions,
 ): Promise<ValidatedArtifact>;
+export const validateManagedArtifact: typeof validateArtifact;
+export const assertValidManagedArtifact: typeof assertValidArtifact;
