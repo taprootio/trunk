@@ -44,6 +44,22 @@ jobs:
           fi
           echo "present=false" >> "$GITHUB_OUTPUT"
 
+      - name: Detect the site-authoring bootstrap boundary
+        id: site-authoring
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f packages/site-authoring/package.json; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git cat-file -e origin/main:packages/site-authoring/package.json 2>/dev/null; then
+            echo "The independently owned Site authoring subtree may not be removed after bootstrap." >&2
+            exit 1
+          fi
+          echo "present=false" >> "$GITHUB_OUTPUT"
+
       - name: Install exact package dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
 
@@ -55,3 +71,7 @@ jobs:
       - name: Test the publisher after its allowlisted bootstrap sync
         if: steps.publisher.outputs.present == 'true'
         run: npm run test:docs-publisher
+
+      - name: Test the site-authoring CLI after its allowlisted bootstrap sync
+        if: steps.site-authoring.outputs.present == 'true'
+        run: npm run test:site-authoring
