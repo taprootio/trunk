@@ -1,0 +1,524 @@
+{
+  "version": 4,
+  "section": {
+    "nodeType": "section",
+    "label": "Section",
+    "help": "Group ordinary blocks into a full-bleed theme band with a centered content well and an optional raised surface.",
+    "minimumChildren": 1,
+    "attrs": {
+      "context": {
+        "label": "Theme context",
+        "help": "Optional context name declared by both the light and dark site themes. Omit it to use the root theme.",
+        "type": "identifier",
+        "required": false,
+        "default": null,
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        "maximumLength": 64
+      },
+      "contentPadding": {
+        "label": "Content padding",
+        "help": "Standard keeps the shared well and section breathing room; none removes the well cap and padding for edge-to-edge content.",
+        "type": "enum",
+        "required": false,
+        "default": "standard",
+        "values": [
+          "standard",
+          "none"
+        ]
+      },
+      "surface": {
+        "label": "Surface",
+        "help": "None leaves content on the band; raised uses the default layer-1/shadow-1 esp-box; elevated uses layer-2/shadow-2.",
+        "type": "enum",
+        "required": false,
+        "default": "none",
+        "values": [
+          "none",
+          "raised",
+          "elevated"
+        ]
+      },
+      "background": {
+        "label": "Photo background",
+        "help": "Optional site-owned responsive photograph behind the section band, with normalized focal points and a context-derived readability scrim.",
+        "type": "object",
+        "required": false,
+        "default": null,
+        "closed": true,
+        "fields": {
+          "image": {
+            "type": "processed-image",
+            "required": true,
+            "requiredKeys": [
+              "imageId",
+              "src",
+              "urls"
+            ],
+            "optionalKeys": [
+              "width",
+              "height",
+              "alt"
+            ],
+            "urls": {
+              "minItems": 1,
+              "maxItems": 5,
+              "closedItems": true,
+              "fields": {
+                "minWidth": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 1
+                },
+                "url": {
+                  "type": "safe-delivery-url",
+                  "required": true
+                },
+                "type": {
+                  "type": "enum",
+                  "required": false,
+                  "values": [
+                    "image/webp"
+                  ]
+                }
+              }
+            },
+            "srcMustMatchUrls": true
+          },
+          "portraitImage": {
+            "type": "processed-image",
+            "required": false,
+            "default": null,
+            "nullable": true,
+            "requiredKeys": [
+              "imageId",
+              "src",
+              "urls"
+            ],
+            "optionalKeys": [
+              "width",
+              "height",
+              "alt"
+            ],
+            "urls": {
+              "minItems": 1,
+              "maxItems": 5,
+              "closedItems": true,
+              "fields": {
+                "minWidth": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 1
+                },
+                "url": {
+                  "type": "safe-delivery-url",
+                  "required": true
+                },
+                "type": {
+                  "type": "enum",
+                  "required": false,
+                  "values": [
+                    "image/webp"
+                  ]
+                }
+              }
+            },
+            "srcMustMatchUrls": true
+          },
+          "focus": {
+            "type": "point",
+            "required": false,
+            "default": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "closed": true,
+            "fields": {
+              "x": {
+                "type": "number",
+                "required": false,
+                "default": 0.5,
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "required": false,
+                "default": 0.5,
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "portraitFocus": {
+            "type": "point",
+            "required": false,
+            "default": null,
+            "nullable": true,
+            "closed": true,
+            "fields": {
+              "x": {
+                "type": "number",
+                "required": false,
+                "default": 0.5,
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "required": false,
+                "default": 0.5,
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "scrimStrength": {
+            "type": "enum",
+            "required": false,
+            "default": "medium",
+            "values": [
+              "none",
+              "soft",
+              "medium",
+              "strong"
+            ],
+            "opacityByValue": {
+              "none": 0,
+              "soft": 0.28,
+              "medium": 0.48,
+              "strong": 0.68
+            }
+          }
+        }
+      },
+      "decoration": {
+        "label": "Decoration",
+        "help": "Optional site-owned transparent raster used as one theme-tinted alpha mask behind the section well.",
+        "type": "object",
+        "required": false,
+        "default": null,
+        "closed": true,
+        "fields": {
+          "image": {
+            "type": "processed-image",
+            "required": true,
+            "requiredKeys": [
+              "imageId",
+              "src",
+              "urls"
+            ],
+            "optionalKeys": [
+              "width",
+              "height",
+              "alt"
+            ],
+            "urls": {
+              "minItems": 1,
+              "maxItems": 5,
+              "closedItems": true,
+              "fields": {
+                "minWidth": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 1
+                },
+                "url": {
+                  "type": "safe-delivery-url",
+                  "required": true
+                },
+                "type": {
+                  "type": "enum",
+                  "required": false,
+                  "values": [
+                    "image/webp"
+                  ]
+                }
+              }
+            },
+            "srcMustMatchUrls": true
+          },
+          "anchor": {
+            "type": "enum",
+            "required": false,
+            "default": "center",
+            "values": [
+              "top-start",
+              "top-end",
+              "bottom-start",
+              "bottom-end",
+              "center"
+            ]
+          },
+          "inlineOffsetPercent": {
+            "type": "number",
+            "required": false,
+            "default": 0,
+            "minimum": -50,
+            "maximum": 50
+          },
+          "blockOffsetPercent": {
+            "type": "number",
+            "required": false,
+            "default": 0,
+            "minimum": -50,
+            "maximum": 50
+          },
+          "inlineSizePercent": {
+            "type": "integer",
+            "required": false,
+            "default": 40,
+            "minimum": 10,
+            "maximum": 100
+          },
+          "opacity": {
+            "type": "number",
+            "required": false,
+            "default": 0.12,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "tint": {
+            "type": "enum",
+            "required": false,
+            "default": "heading",
+            "values": [
+              "accent",
+              "heading",
+              "text",
+              "action",
+              "border"
+            ],
+            "tokenByValue": {
+              "accent": "--esp-color-link",
+              "heading": "--esp-color-headings",
+              "text": "--esp-color-text",
+              "action": "--esp-color-action-background",
+              "border": "--esp-color-border"
+            }
+          }
+        }
+      }
+    }
+  },
+  "table": {
+    "nodeTypes": {
+      "table": "table",
+      "row": "tableRow",
+      "header": "tableHeader",
+      "cell": "tableCell"
+    },
+    "attrs": {
+      "caption": {
+        "label": "Caption",
+        "help": "Optional non-empty plain text that names the table; Markdown writes it on the immediately preceding Table: line.",
+        "type": "plain-text",
+        "required": false,
+        "default": null,
+        "minScalars": 1,
+        "maxScalars": 160
+      }
+    },
+    "rows": {
+      "header": 1,
+      "minData": 1,
+      "maxData": 100
+    },
+    "columns": {
+      "min": 2,
+      "max": 12,
+      "ragged": false
+    },
+    "cells": {
+      "paragraphs": 1,
+      "paragraphAttrs": false,
+      "inlineNodes": [
+        "text",
+        "hardBreak"
+      ],
+      "marks": [
+        "bold",
+        "italic",
+        "underline",
+        "strike",
+        "code",
+        "link"
+      ],
+      "maxTextScalars": 1000,
+      "headerNonWhitespace": true,
+      "spans": false,
+      "spanAttrs": [
+        "colspan",
+        "rowspan",
+        "colwidth"
+      ]
+    },
+    "markdown": {
+      "captionPrefix": "Table: ",
+      "captionImmediate": true,
+      "outerPipes": "optional",
+      "literalPipeEscape": "\\|",
+      "delimiterMinHyphens": 3,
+      "alignment": "rejected",
+      "blankLineTerminates": true
+    },
+    "placement": {
+      "root": true,
+      "section": true,
+      "measure": "wide"
+    }
+  },
+  "inlineFacts": {
+    "nodeType": "inlineFacts",
+    "label": "Inline facts",
+    "help": "A compact ordered row of labeled facts whose values may be native links.",
+    "attrs": {
+      "items": {
+        "type": "array",
+        "required": true,
+        "minItems": 1,
+        "maxItems": 6,
+        "closedItems": true,
+        "fields": {
+          "value": {
+            "type": "plain-text",
+            "required": true,
+            "minScalars": 1,
+            "maxScalars": 120,
+            "nonWhitespace": true
+          },
+          "label": {
+            "type": "plain-text",
+            "required": true,
+            "minScalars": 1,
+            "maxScalars": 120,
+            "nonWhitespace": true
+          },
+          "url": {
+            "type": "safe-url",
+            "required": false,
+            "default": null,
+            "schemes": [
+              "http",
+              "https",
+              "mailto",
+              "tel"
+            ]
+          }
+        }
+      }
+    },
+    "markdown": {
+      "fence": "inline-facts",
+      "body": "json-array"
+    },
+    "placement": {
+      "root": true,
+      "section": true,
+      "measure": "wide"
+    }
+  },
+  "rootNodes": {
+    "paragraph": {
+      "label": "Paragraph",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "heading": {
+      "label": "Heading",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "bulletList": {
+      "label": "Bullet list",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "orderedList": {
+      "label": "Ordered list",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "blockquote": {
+      "label": "Blockquote",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "codeBlock": {
+      "label": "Code block",
+      "measure": "prose",
+      "placement": "flow"
+    },
+    "horizontalRule": {
+      "label": "Horizontal rule",
+      "measure": "wide",
+      "placement": "flow"
+    },
+    "taprootImage": {
+      "label": "Image",
+      "measure": "wide",
+      "placement": "flow"
+    },
+    "rawHtml": {
+      "label": "Raw HTML",
+      "measure": "wide",
+      "placement": "flow"
+    },
+    "table": {
+      "label": "Table",
+      "measure": "wide",
+      "placement": "flow"
+    },
+    "inlineFacts": {
+      "label": "Inline facts",
+      "measure": "wide",
+      "placement": "flow"
+    },
+    "section": {
+      "label": "Section",
+      "measure": "wide",
+      "placement": "explicit-band"
+    }
+  },
+  "components": {
+    "hero-section": {
+      "label": "Hero Section",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "cta": {
+      "label": "Call to Action",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "testimonial": {
+      "label": "Testimonials",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "feature-grid": {
+      "label": "Feature Grid",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "spacer": {
+      "label": "Spacer",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "latest-posts": {
+      "label": "Latest Posts",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "card-grid": {
+      "label": "Card Grid",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "image-banner": {
+      "label": "Image Banner",
+      "measure": "wide",
+      "rootPlacement": "root-band"
+    }
+  }
+}

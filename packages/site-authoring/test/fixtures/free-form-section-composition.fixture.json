@@ -1,0 +1,109 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Root prose."
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "attrs": {
+        "contentPadding": "standard",
+        "surface": "raised"
+      },
+      "content": [
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "hero-section",
+            "componentData": "{\"overline\":\"Riverbend Hot Yoga · Elm Harbor\",\"title\":\"Come as you are. Leave feeling stronger.\",\"titleSize\":\"display\",\"lead\":\"Hot yoga, barre, and wellness practices for every body.\",\"primaryAction\":{\"label\":\"View class schedule\",\"url\":\"/classes\"},\"secondaryAction\":{\"label\":\"Call the studio\",\"url\":\"tel:+12535550123\"},\"alignment\":\"start\",\"media\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"mediaArrangement\":\"split\",\"mediaPosition\":\"after\",\"mediaWidth\":\"wide\"}"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "A neutral section."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "attrs": {
+        "context": "inverted",
+        "contentPadding": "standard",
+        "surface": "elevated"
+      },
+      "content": [
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Inverted band"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "A paragraph inside the band."
+            }
+          ]
+        },
+        {
+          "type": "inlineFacts",
+          "attrs": {
+            "items": [
+              {
+                "value": "4.8 ★ from 109 Google reviews",
+                "label": "Rating"
+              },
+              {
+                "value": "112 Main St",
+                "label": "Address",
+                "url": "/visit"
+              },
+              {
+                "value": "(555) 123-4567",
+                "label": "Phone",
+                "url": "tel:+15551234567"
+              },
+              {
+                "value": "6am–8pm",
+                "label": "Today"
+              }
+            ]
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "feature-grid",
+            "componentData": "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":0}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "card-grid",
+            "componentData": "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}"
+          }
+        }
+      ]
+    }
+  ]
+}

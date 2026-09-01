@@ -1,0 +1,40 @@
+{
+  "name": "@taprootio/site-authoring",
+  "version": "0.1.0",
+  "description": "Taproot site authoring CLI: sign in once in the browser, then pull, validate, push, preview, approve, and deploy a site from the terminal",
+  "type": "module",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taprootio/trunk.git",
+    "directory": "packages/site-authoring"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/index.js"
+    }
+  },
+  "bin": {
+    "taproot-site": "./bin/taproot-site.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
+  "dependencies": {
+    "@taprootio/espalier": "4.4.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "prepack": "npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
