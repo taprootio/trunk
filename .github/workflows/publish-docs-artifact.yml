@@ -56,6 +56,7 @@ jobs:
         run: |
           npm --prefix packages/docs-artifact test
           npm --prefix packages/docs-artifact run conformance
+          npm --prefix packages/docs-artifact run conformance:prebuilt
           npm run test:release-guards
 
       - name: Enforce release order and detect an identical completed npm publish

@@ -7,9 +7,10 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm run test:docs-artifact && npm run test:docs-publisher && npm run test:release-guards",
-    "test:docs-artifact": "npm --prefix packages/docs-artifact test && npm --prefix packages/docs-artifact run conformance",
+    "test": "npm run test:docs-artifact && npm run test:docs-publisher && npm run test:site-authoring && npm run test:release-guards",
+    "test:docs-artifact": "npm --prefix packages/docs-artifact test && npm --prefix packages/docs-artifact run conformance && npm --prefix packages/docs-artifact run conformance:prebuilt",
     "test:docs-publisher": "npm --prefix packages/docs-publisher test",
+    "test:site-authoring": "npm --prefix packages/site-authoring test",
     "test:release-guards": "node --test scripts/npm-release-guard.test.mjs"
   }
 }

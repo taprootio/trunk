@@ -1,12 +1,12 @@
-name: Publish Docs publisher
+name: Publish Site authoring
 
 on:
   push:
     tags:
-      - "docs-publisher-v*"
+      - "site-authoring-v*"
 
 concurrency:
-  group: docs-publisher-npm
+  group: site-authoring-npm
   queue: max
   cancel-in-progress: false
 
@@ -15,9 +15,9 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @taprootio/docs-publisher
+    name: Publish @taprootio/site-authoring
     runs-on: ubuntu-latest
-    environment: npm-docs-publisher-publish
+    environment: npm-site-authoring-publish
     permissions:
       contents: read
       id-token: write
@@ -40,35 +40,45 @@ jobs:
       - name: Upgrade npm for trusted publishing
         run: npm install --global npm@12.0.2
 
-      - name: Require release identity and the exact artifact-contract pin
-        working-directory: packages/docs-publisher
+      # The private sync already proved the Espalier pin equals the exact
+      # version its release manifest declares, and only that sync can create
+      # this tag. What this side guards is the property that survives a
+      # version bump: the dependency is an exact version, never a range — so
+      # an install of the published CLI resolves the theme contract it was
+      # tested against. Asserting the version literal here as well is how the
+      # docs-publisher pin came to be stated as two different versions in two
+      # repositories; the grammar check has nothing to drift.
+      - name: Require release identity and an exact Espalier theme-contract pin
+        working-directory: packages/site-authoring
+        shell: bash
         run: |
+          set -euo pipefail
           package_version="$(node -p "require('./package.json').version")"
           repository_url="$(node -p "require('./package.json').repository.url")"
           repository_directory="$(node -p "require('./package.json').repository.directory")"
-          artifact_version="$(node -p "require('./package.json').dependencies['@taprootio/docs-artifact']")"
-          test "$GITHUB_REF_NAME" = "docs-publisher-v${package_version}"
+          espalier_version="$(node -p "require('./package.json').dependencies['@taprootio/espalier']")"
+          test "$GITHUB_REF_NAME" = "site-authoring-v${package_version}"
           test "$repository_url" = "https://github.com/taprootio/trunk.git"
-          test "$repository_directory" = "packages/docs-publisher"
-          test "$artifact_version" = "1.1.0"
+          test "$repository_directory" = "packages/site-authoring"
+          [[ "$espalier_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
 
-      - name: Install the exact public artifact contract and test the publisher
-        working-directory: packages/docs-publisher
+      - name: Install the exact public Espalier contract and test the CLI
+        working-directory: packages/site-authoring
         run: |
           npm install --ignore-scripts --no-audit --no-fund --workspaces=false
           npm test
 
       - name: Enforce release order and detect an identical completed npm publish
         id: registry
-        working-directory: packages/docs-publisher
+        working-directory: packages/site-authoring
         shell: bash
         run: |
           set -euo pipefail
           package_name="$(node -p "require('./package.json').name")"
           package_version="$(node -p "require('./package.json').version")"
           package_spec="${package_name}@${package_version}"
-          versions_file="$RUNNER_TEMP/docs-publisher-versions.json"
-          versions_error="$RUNNER_TEMP/docs-publisher-versions.error"
+          versions_file="$RUNNER_TEMP/site-authoring-versions.json"
+          versions_error="$RUNNER_TEMP/site-authoring-versions.error"
           if ! npm view "$package_name" versions --json --registry=https://registry.npmjs.org/ > "$versions_file" 2> "$versions_error"; then
             if grep -Fxq "npm error code E404" "$versions_error"; then
               echo "[]" > "$versions_file"
@@ -79,25 +89,25 @@ jobs:
           fi
           node ../../scripts/npm-release-guard.mjs order "$package_version" "$versions_file"
 
-          integrity_file="$RUNNER_TEMP/docs-publisher-integrity.txt"
-          integrity_error="$RUNNER_TEMP/docs-publisher-integrity.error"
+          integrity_file="$RUNNER_TEMP/site-authoring-integrity.txt"
+          integrity_error="$RUNNER_TEMP/site-authoring-integrity.error"
           if npm view "$package_spec" dist.integrity --registry=https://registry.npmjs.org/ > "$integrity_file" 2> "$integrity_error"; then
             published_integrity="$(tr -d '\r\n' < "$integrity_file")"
             test -n "$published_integrity"
-            npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/docs-publisher-pack.json"
-            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/docs-publisher-pack.json")"
+            npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/site-authoring-pack.json"
+            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/site-authoring-pack.json")"
             test "$local_integrity" = "$published_integrity"
 
-            audit_directory="$RUNNER_TEMP/docs-publisher-provenance"
+            audit_directory="$RUNNER_TEMP/site-authoring-provenance"
             mkdir -p "$audit_directory"
             npm install --prefix "$audit_directory" --ignore-scripts --no-audit --no-fund --save-exact "$package_spec"
-            npm --prefix "$audit_directory" audit signatures --json --include-attestations > "$RUNNER_TEMP/docs-publisher-attestations.json"
+            npm --prefix "$audit_directory" audit signatures --json --include-attestations > "$RUNNER_TEMP/site-authoring-attestations.json"
             node ../../scripts/npm-release-guard.mjs provenance \
-              "$RUNNER_TEMP/docs-publisher-attestations.json" \
+              "$RUNNER_TEMP/site-authoring-attestations.json" \
               "$package_name" \
               "$package_version" \
               "https://github.com/taprootio/trunk" \
-              ".github/workflows/publish-docs-publisher.yml" \
+              ".github/workflows/publish-site-authoring.yml" \
               "refs/tags/$GITHUB_REF_NAME" \
               "$GITHUB_SHA"
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
@@ -113,7 +123,7 @@ jobs:
 
       - name: Publish immutable public package with provenance
         if: steps.registry.outputs.should_publish == 'true'
-        working-directory: packages/docs-publisher
+        working-directory: packages/site-authoring
         env:
           # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
           # trusted publishing replace the setup-node registry configuration.

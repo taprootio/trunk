@@ -1,17 +1,19 @@
 # Trunk release operations
 
 This runbook covers the private Taproot → public Trunk → public npm boundary.
-The current packages are `@taprootio/docs-artifact` and
-`@taprootio/docs-publisher`. They have independent identities, manifests, tag
-prefixes, tests, sync Environments, npm Environments, and publish workflows.
-Every later integration must preserve the same isolation.
+The current packages are `@taprootio/docs-artifact`,
+`@taprootio/docs-publisher`, and `@taprootio/site-authoring`. They have
+independent identities, manifests, tag prefixes, tests, sync Environments,
+npm Environments, and publish workflows. Every later integration must preserve
+the same isolation.
 
 ## Release ordering
 
 1. Merge the reviewed package version and its public allowlist to private
    Taproot `main`.
 2. Create that package's tag on the exact private `main` commit:
-   `docs-artifact-v<version>` or `docs-publisher-v<version>`.
+   `docs-artifact-v<version>`, `docs-publisher-v<version>`, or
+   `site-authoring-v<version>`.
 3. The matching private workflow verifies the tag, tests the package, stages
    its allowlisted public tree, and mints a short-lived GitHub App installation
    token.
@@ -23,7 +25,10 @@ Every later integration must preserve the same isolation.
    reruns package tests, rejects a version older than anything already on npm,
    and publishes from a GitHub-hosted runner with npm provenance. The publisher
    workflow additionally proves its dependency remains exactly
-   `@taprootio/docs-artifact@1.0.1`.
+   `@taprootio/docs-artifact@1.1.0`. The site-authoring workflow additionally
+   proves its `@taprootio/espalier` dependency is an exact version rather than
+   a range; the exact version itself is asserted by the private sync against
+   the package's release manifest, so the literal lives in one place.
 
 Never publish npm first. The public commit and tag are the inspectable release
 record to which provenance points. Except for the preserved failed
@@ -54,30 +59,34 @@ tarball-integrity check.
    Trunk `main` only after the staged files have been reviewed.
 3. Add a `main` branch ruleset that requires reviewed pull requests and the
    public `Public integration packages` check. Add separate tag rulesets
-   targeting `docs-artifact-v*` and `docs-publisher-v*`, each with **Restrict
-   creations**, **Restrict updates**, and **Restrict deletions** enabled. Grant
-   bypass only to the release App described below, so an ordinary Trunk writer
-   cannot create a tag that invokes either npm trusted publisher. Do not grant
-   the App administration, secrets, workflows, or other repository permissions.
+   targeting `docs-artifact-v*`, `docs-publisher-v*`, and `site-authoring-v*`,
+   each with **Restrict creations**, **Restrict updates**, and **Restrict
+   deletions** enabled. Grant bypass only to the release App described below,
+   so an ordinary Trunk writer cannot create a tag that invokes any npm trusted
+   publisher. Do not grant the App administration, secrets, workflows, or other
+   repository permissions.
 4. Create a private GitHub App for the `taprootio` organization with only
    **Repository contents: Read and write**. Install it only on `taprootio/trunk`.
 5. In private `taprootio/taproot`, keep `trunk-docs-artifact-sync` restricted to
-   protected `docs-artifact-v*` tags and create `trunk-docs-publisher-sync`
-   restricted to protected `docs-publisher-v*` tags. Each Environment uses the
+   protected `docs-artifact-v*` tags, `trunk-docs-publisher-sync` restricted to
+   protected `docs-publisher-v*` tags, and create `trunk-site-authoring-sync`
+   restricted to protected `site-authoring-v*` tags. Each Environment uses the
    Environment secret `TRUNK_RELEASE_APP_PRIVATE_KEY` containing the complete
    App private-key PEM; repository variable `TRUNK_RELEASE_APP_ID` holds the App
    id. Do not store the private key as a repository or organization secret: only
    a protected-tag sync job may mint the App token. The workflow stores no
    installation token; `actions/create-github-app-token` mints one per run.
-6. In private `taprootio/taproot`, add matching `docs-artifact-v*` and
-   `docs-publisher-v*` tag rulesets with **Restrict creations**, **Restrict
-   updates**, and **Restrict deletions** enabled. Grant bypass only to trusted
-   release maintainers. This prevents arbitrary tags from unlocking a sync
-   Environment and prevents delete-and-retag recovery against different source.
+6. In private `taprootio/taproot`, add matching `docs-artifact-v*`,
+   `docs-publisher-v*`, and `site-authoring-v*` tag rulesets with **Restrict
+   creations**, **Restrict updates**, and **Restrict deletions** enabled. Grant
+   bypass only to trusted release maintainers. This prevents arbitrary tags from
+   unlocking a sync Environment and prevents delete-and-retag recovery against
+   different source.
 7. In public Trunk, keep `npm-docs-artifact-publish` restricted to protected
-   `docs-artifact-v*` tags and create `npm-docs-publisher-publish` restricted to
-   protected `docs-publisher-v*` tags. Add required reviewers if release policy
-   calls for a human deployment approval.
+   `docs-artifact-v*` tags, `npm-docs-publisher-publish` restricted to protected
+   `docs-publisher-v*` tags, and create `npm-site-authoring-publish` restricted
+   to protected `site-authoring-v*` tags. Add required reviewers if release
+   policy calls for a human deployment approval.
 
 GitHub App contents permission is repository-scoped rather than path-scoped.
 The audited sync implementation stages and commits only the package path
@@ -141,6 +150,37 @@ Bootstrap `@taprootio/docs-publisher@1.0.0` independently after the public
 4. Configure npm's trusted publisher for organization `taprootio`, repository
    `trunk`, workflow `publish-docs-publisher.yml`, Environment
    `npm-docs-publisher-publish`, allowed action `npm publish`.
+5. Delete `NPM_TOKEN` from that Environment and revoke the one-time token.
+   Record the non-secret public commit/tag, package version, and provenance URL.
+
+Bootstrap `@taprootio/site-authoring@0.1.0` the same way. Its one dependency,
+`@taprootio/espalier`, is already public, so nothing else has to be released
+first:
+
+1. Create a new one-time granular npm token limited to creation/publish of
+   `@taprootio/site-authoring`, and add it only as `NPM_TOKEN` in
+   `npm-site-authoring-publish`.
+2. Before tagging, merge the reviewed public scaffold additions into Trunk
+   `main` — `publish-site-authoring.yml`, the CI bootstrap boundary, the
+   workspace test script, and this document — generated from private Taproot
+   with:
+
+   ```bash
+   node scripts/stage-trunk-release.mjs <empty-directory> \
+     release/trunk/site-authoring-release-manifest.json
+   ```
+
+   As above, copy only the root scaffold diff. Public CI skips the
+   not-yet-present site-authoring test during the bootstrap interval and
+   rejects any later subtree removal.
+3. Create private tag `site-authoring-v0.1.0`. The private sync verifies the
+   exact Espalier pin against the release manifest and exports only
+   `packages/site-authoring/`; the public workflow installs that pin, runs the
+   package tests (the ones that compare against private monorepo sources skip
+   by name there), and publishes with provenance.
+4. Configure npm's trusted publisher for organization `taprootio`, repository
+   `trunk`, workflow `publish-site-authoring.yml`, Environment
+   `npm-site-authoring-publish`, allowed action `npm publish`.
 5. Delete `NPM_TOKEN` from that Environment and revoke the one-time token.
    Record the non-secret public commit/tag, package version, and provenance URL.
 
