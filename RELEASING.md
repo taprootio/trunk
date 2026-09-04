@@ -10,13 +10,23 @@ the same isolation.
 ## Release ordering
 
 1. Merge the reviewed package version and its public allowlist to private
-   Taproot `main`.
-2. Create that package's tag on the exact private `main` commit:
-   `docs-artifact-v<version>`, `docs-publisher-v<version>`, or
-   `site-authoring-v<version>`.
-3. The matching private workflow verifies the tag, tests the package, stages
-   its allowlisted public tree, and mints a short-lived GitHub App installation
-   token.
+   Taproot `main`. A pull request that changes a package's allowlisted files
+   without raising its version fails the private CI.
+2. That merge starts the private release workflow for every already-released
+   package whose `docs-artifact-v<version>`, `docs-publisher-v<version>`, or
+   `site-authoring-v<version>` tag does not exist in this repository yet. A
+   package's first release is still created by hand with a private tag on
+   the exact `main` commit once its bootstrap below is complete; that manual
+   tag remains available for every package and runs the same verification.
+   The automated path creates no private tag, since the private tag rulesets
+   reserve creation for maintainers; the public commit here names the private
+   source commit instead.
+3. The private workflow verifies that the commit belongs to `main` and that
+   the release names the declared version and pins, tests the package (first
+   waiting for every declared pin to be on npm, so a dependent released in
+   the same run as its sibling does not race that sibling's publish), stages
+   its allowlisted public tree, and mints a short-lived GitHub App
+   installation token.
 4. The sync replaces only the selected owned package subtree, commits it to
    Trunk `main`, then pushes the branch and identical package tag in one atomic
    ref transaction. An existing tag is accepted only when that package subtree
@@ -32,12 +42,14 @@ the same isolation.
 
 Never publish npm first. The public commit and tag are the inspectable release
 record to which provenance points. Except for the preserved failed
-`docs-artifact-v1.0.0` bootstrap attempt documented below, do not create a
-package's next private release tag until its preceding version has completed
-both the Trunk sync and npm publish. The private sync workflows share one
-`trunk-main-sync` concurrency queue so Trunk `main` updates serialize, while
-each package keeps its own npm publish queue; GitHub still does not guarantee
-semantic ordering among rapidly dispatched tags.
+`docs-artifact-v1.0.0` bootstrap attempt documented below, do not merge a
+package's next version bump, or create its tag by hand, until its preceding
+version has completed both the Trunk sync and npm publish. The private
+release and sync workflows share one `trunk-main-sync` concurrency queue so
+Trunk `main` updates serialize, and the release workflow runs its packages one
+after another for the same reason, while each package keeps its own npm
+publish queue; GitHub still does not guarantee semantic ordering among
+rapidly dispatched tags.
 
 Release workflows pin third-party Actions to immutable commit SHAs and the npm
 CLI to one exact reviewed version. Upgrade either only through a coordinated
@@ -70,12 +82,17 @@ tarball-integrity check.
 5. In private `taprootio/taproot`, keep `trunk-docs-artifact-sync` restricted to
    protected `docs-artifact-v*` tags, `trunk-docs-publisher-sync` restricted to
    protected `docs-publisher-v*` tags, and create `trunk-site-authoring-sync`
-   restricted to protected `site-authoring-v*` tags. Each Environment uses the
-   Environment secret `TRUNK_RELEASE_APP_PRIVATE_KEY` containing the complete
-   App private-key PEM; repository variable `TRUNK_RELEASE_APP_ID` holds the App
-   id. Do not store the private key as a repository or organization secret: only
-   a protected-tag sync job may mint the App token. The workflow stores no
-   installation token; `actions/create-github-app-token` mints one per run.
+   restricted to protected `site-authoring-v*` tags; allow the protected
+   `main` branch on all three as well. The release-on-merge workflow calls the
+   sync from `main`, and GitHub checks an Environment's deployment rules
+   against the calling run's ref, so a tag-only Environment turns that run
+   away before it can read the key. Each Environment uses the Environment
+   secret `TRUNK_RELEASE_APP_PRIVATE_KEY` containing the complete App
+   private-key PEM; repository variable `TRUNK_RELEASE_APP_ID` holds the App
+   id. Do not store the private key as a repository or organization secret:
+   only a sync job running from a protected tag or from `main` may mint the
+   App token. The workflow stores no installation token;
+   `actions/create-github-app-token` mints one per run.
 6. In private `taprootio/taproot`, add matching `docs-artifact-v*`,
    `docs-publisher-v*`, and `site-authoring-v*` tag rulesets with **Restrict
    creations**, **Restrict updates**, and **Restrict deletions** enabled. Grant
