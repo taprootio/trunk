@@ -227,6 +227,9 @@ const IMAGE_BANNER = Object.freeze({
   }),
   ratio: enumOf("4/1", "3/1", "2/1"),
   compactRatio: enumOf("", "2/1", "3/2", "1/1"),
+  // `ratio` keeps the wide/compact shape, capped at the viewport space below
+  // the site header; `viewport` fills exactly that space (TR00413).
+  heightMode: enumOf("ratio", "viewport"),
   contentPosition: enumOf("bottom-start", "bottom", "bottom-end", "center", "top-start", "top", "top-end"),
   scrim: enumOf("auto", "none", "flat", "top", "bottom", "left", "right", "radial"),
   scrimStrength: enumOf("soft", "medium", "strong"),
@@ -457,6 +460,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       focus: { x: 0.5, y: 0.5 },
       ratio: "3/1",
       compactRatio: "3/2",
+      heightMode: "ratio",
       contentPosition: "center",
       scrim: "auto",
       scrimStrength: "medium",
@@ -473,6 +477,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       altText: "",
       overlayText: "Train together",
       focus: { x: 0.5, y: 0.35 },
+      heightMode: "ratio",
       contentPosition: "bottom-start",
       scrim: "bottom",
       scrimStrength: "medium",

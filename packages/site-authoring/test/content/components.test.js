@@ -101,6 +101,7 @@ const COMPLETE = {
     focus: { x: 0.5, y: 0.25 },
     ratio: "4/1",
     compactRatio: "1/1",
+    heightMode: "viewport",
     contentPosition: "bottom-end",
     scrim: "radial",
     scrimStrength: "strong",
@@ -164,6 +165,24 @@ test("holds the CTA variant to the narrowed primary|danger vocabulary", async (t
       const errors = validate("cta", { ...COMPLETE["cta"], variant });
       assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
       assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/variant"]);
+    });
+  }
+});
+
+test("holds the image-banner height mode to the ratio|viewport vocabulary", async (testContext) => {
+  // The generator, node preview, and runtime adapter each fall back to ratio
+  // for anything else, so a typo here would publish a banner silently sized
+  // by its shape instead of the screen.
+  for (const heightMode of ["ratio", "viewport"]) {
+    await testContext.test(`accepts ${heightMode}`, () => {
+      assert.deepEqual(validate("image-banner", { ...COMPLETE["image-banner"], heightMode }), []);
+    });
+  }
+  for (const heightMode of ["fill", "100vh", "", true]) {
+    await testContext.test(`refuses ${JSON.stringify(heightMode)}`, () => {
+      const errors = validate("image-banner", { ...COMPLETE["image-banner"], heightMode });
+      assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
+      assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/heightMode"]);
     });
   }
 });

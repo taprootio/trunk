@@ -223,12 +223,18 @@ Actions output.
 
 ## Public release
 
-Private Taproot is the source authority. A private `site-authoring-v<version>`
-tag verifies this package — the release commit must belong to `main`, the tag
-must name the version `package.json` declares, and `@taprootio/espalier` must
-be pinned to the exact version the release manifest records — then
-allowlist-exports only `packages/site-authoring/` to public
-[`taprootio/trunk`](https://github.com/taprootio/trunk). Trunk's separate
+Private Taproot is the source authority. Merging a version bump to private
+`main` releases this package: the release workflow verifies that the commit
+belongs to `main`, that `site-authoring-v<version>` names the version
+`package.json` declares, and that `@taprootio/espalier` is pinned to the exact
+version the release manifest records, then allowlist-exports only
+`packages/site-authoring/` to public
+[`taprootio/trunk`](https://github.com/taprootio/trunk), whose commit and
+`site-authoring-v<version>` tag are the release record and name the private
+source commit. A pull request that changes this package's public files
+without raising the version fails CI, so the bump is never an afterthought;
+pushing a private `site-authoring-v<version>` tag by hand remains the manual
+path and runs the same verification. Trunk's separate
 `publish-site-authoring.yml` workflow tests and publishes those exact public
 tag bytes with npm trusted-publishing provenance, under its own concurrency
 group, GitHub Environment, tag prefix, and npm identity.

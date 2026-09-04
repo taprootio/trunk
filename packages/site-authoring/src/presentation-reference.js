@@ -271,6 +271,7 @@ export function getThemeReference() {
       "Define brand anchors first, then assign canvas, ink, accent, action, and structure roles in both schemes.",
       "Add named contexts for whole zones, including inverted zones, and rebind lightness when the zone changes brightness.",
       "Tune typography, type/space ratios, radii, and viewport interpolation as one layout system.",
+      "Typography is per scheme on purpose: light and dark set their own moods, so a heading, body, or brand face that differs between them is a design choice, and theme push never warns about it.",
       "Retune danger/success/warning/info through intents without changing their meanings; design data palettes separately.",
       "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model.",
       "Run theme push, inspect warnings, then verify text, actions, focus states, and both schemes in authoring previews.",

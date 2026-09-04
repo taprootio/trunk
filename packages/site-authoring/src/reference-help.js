@@ -27,7 +27,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 13;
+export const REFERENCE_VERSION = 15;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),

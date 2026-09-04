@@ -42,7 +42,7 @@ test("the machine-readable failure carries only the reviewed keys", () => {
   const result = failureResult(error);
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: "0.1.0" });
+  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: "0.1.1" });
   assert.deepEqual(Object.keys(result.error).sort(), RESERVED_ERROR_KEYS);
 });
 
