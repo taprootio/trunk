@@ -2,7 +2,7 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { NAVIGATION_MAXIMUM_DEPTH, TEMPLATE_TYPE_FREE_FORM } from "../api.js";
-import { sharedThemeContextNames } from "../content/free-form-sections.js";
+import { freeFormRootPresentation, sharedThemeContextNames } from "../content/free-form-sections.js";
 import { VERB_VALIDATE } from "../constants.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
 import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
@@ -340,6 +340,34 @@ function validatePageImageReferences(value, field, knownImageIds, deliveryOrigin
   }
 }
 
+/** Whether a validated page document places a root-band component at its root. */
+function pageUsesRootBand(document) {
+  return Array.isArray(document?.content)
+    && document.content.some((node) => freeFormRootPresentation(node)?.rootPlacement === "root-band");
+}
+
+/**
+ * Advisory only: a root-band component spans the viewport, so a header whose
+ * brand and buttons stop at the content edges usually reads as misaligned
+ * beside it. The wide header with the centered menu is the recommended pair,
+ * never a requirement, so this is a hint in the result and on stderr, not a
+ * failure (TR00697).
+ */
+function headerWidthHints(headerWidth, rootBandPages) {
+  if (rootBandPages.length === 0 || headerWidth === "wide") return [];
+  const pages = boundedList(rootBandPages, MAXIMUM_REPORTED);
+  return [{
+    code: "header.width_contained_with_root_band",
+    message: `${rootBandPages.length} page(s) use a full-bleed root-band component while site-header.headerWidth is `
+      + `'${headerWidth}'. Full-bleed designs usually read better with headerWidth 'wide' (brand and buttons at the `
+      + "viewport edges) paired with headerLayout 'centered-menu'.",
+    setting: "site-header.headerWidth",
+    suggested: { headerWidth: "wide", headerLayout: "centered-menu" },
+    pages: pages.items,
+    ...(pages.truncated ? { pagesTruncated: true } : {}),
+  }];
+}
+
 export async function validateFixture(invocation = {}) {
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
   const fixtureRoot = await resolveFixtureRoot(invocation.cwd ?? process.cwd(), invocation.fixturePath);
@@ -377,6 +405,7 @@ export async function validateFixture(invocation = {}) {
     fail("fixture.page_untracked", `Page source '${untracked}' is not bound by ${FIXTURE_MANIFEST_FILE_NAME}.`, untracked);
   }
   const validatedPages = [];
+  const rootBandPages = [];
   for (const file of pageFiles) {
     onProgress(`Validating '${file}'.`);
     const entry = manifestByFile.get(file);
@@ -404,7 +433,10 @@ export async function validateFixture(invocation = {}) {
     }
     validatePageImageReferences(page.document, file, imageIds, deliveryOrigins);
     validatedPages.push({ file, path: page.pagePath });
+    if (pageUsesRootBand(page.document)) rootBandPages.push(file);
   }
+  const hints = headerWidthHints(presentation.header.headerWidth, rootBandPages);
+  for (const hint of hints) onProgress(`Hint: ${hint.message}`);
 
   onProgress("Validating navigation shape and local PAGE targets.");
   const navigation = validateNavigationWorkspaceDocument(
@@ -459,6 +491,7 @@ export async function validateFixture(invocation = {}) {
       count: presentation.themes.warningCount,
       ...(presentation.themes.warningsTruncated ? { truncated: true } : {}),
     },
+    hints,
     proves: [
       "fixture structure and bounded files",
       "page content and named theme contexts",

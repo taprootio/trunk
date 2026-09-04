@@ -57,6 +57,12 @@ function getEspalierVersion() {
 
 const OPTIONAL_THEME_FIELDS = Object.freeze([
   "explicitMappingTokens",
+  // Espalier 4.7.0 menu typography: documented so the theme help covers the
+  // installed contract, optional so pulled baselines that predate it stay
+  // complete (the server seeds and requires the fields listed in
+  // DefaultSiteTheme.RequiredProperties only).
+  "fontMenu",
+  "fontWeightMenu",
   "boxBackgroundImage",
   "boxBackgroundImageOpacity",
   "vellumOpacity",
@@ -201,8 +207,12 @@ const THEME_GROUPS = Object.freeze([
       ...["fontBody", "fontHeadings", "fontBrand", "fontMonospace"].map((name) =>
         themeField(name, "CSS font-family; empty inherits the consuming surface's fallback.")
       ),
-      ...["fontWeightBody", "fontWeightHeadings", "fontWeightBrand", "fontWeightMonospace"].map((name) =>
-        themeField(name, "CSS font-weight: 1–1000, normal/bold/lighter/bolder, or a CSS-wide keyword.")
+      themeField(
+        "fontMenu",
+        "CSS font-family for navigation menu items and group labels; empty falls back to fontBody, never to headings.",
+      ),
+      ...["fontWeightBody", "fontWeightHeadings", "fontWeightBrand", "fontWeightMonospace", "fontWeightMenu"].map(
+        (name) => themeField(name, "CSS font-weight: 1–1000, normal/bold/lighter/bolder, or a CSS-wide keyword."),
       ),
       themeField("rootFontSize", "Root font size in px.", { minimum: 1, warningMaximum: 100 }),
       themeField("typeRatio", "Modular type-scale ratio.", { exclusiveMinimum: 1, warningMaximum: 1.3 }),
@@ -330,6 +340,18 @@ export function getAppearanceReference() {
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
       "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting.",
+    headerWidthContract:
+      "headerWidth 'contained' keeps the brand and the header buttons at the page content edges; "
+      + "'wide' moves them to the viewport edges. Pages with root-band components (image-banner) span the viewport, "
+      + "so full-bleed designs usually pair headerWidth 'wide' with headerLayout 'centered-menu', which keeps the "
+      + "brand left, the buttons right, and the navigation centered. validate prints a hint, never a failure, when a "
+      + "root-band page ships with a contained header.",
+    menuContract:
+      "navDrawerStyle 'full-screen' (the published default) opens the mobile menu over the whole viewport with the "
+      + "brand centered above large centered items and navDrawerTransition choosing how it appears (fade, slide-down, "
+      + "slide-up, slide-left, or slide-right); 'panel' keeps the side panel, which exists for application-style "
+      + "menus with many groups. fontMenu and fontWeightMenu set the navigation face the way fontBrand sets the "
+      + "brand; an empty fontMenu falls back to the body font, never to headings.",
     mutationOrder: [
       "fresh footer read plus concurrency-protected ten-color overlay",
       "default scheme, brand fonts and assets, favicon, and header scalars",
@@ -577,6 +599,8 @@ export function formatPresentationReference(reference) {
       + "\n\nRead-only server projections:\n"
       + reference.readOnlyProjections.map((field) => "  " + field.file + " :: " + field.path).join("\n")
       + "\n\nImages: " + reference.imageReferences + "\nLogos: " + reference.logoContract
+      + "\nHeader width: " + reference.headerWidthContract
+      + "\nMobile menu and menu font: " + reference.menuContract
       + "\nFooter: " + reference.footerBoundary
       + "\nFooter content guard: " + reference.footerContentGuard + "\n\nMutation order (non-atomic):\n"
       + reference.mutationOrder.map((step, index) => "  " + (index + 1) + ". " + step).join("\n")

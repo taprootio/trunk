@@ -90,7 +90,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", () => {
   assert.doesNotThrow(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "4.6.0");
+  assert.equal(getThemeReference().espalierVersion, "4.7.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -160,6 +160,8 @@ test("appearance help is derived from the same ordered registries theme push exe
   assert.deepEqual(reference.fields, expected);
   assert.deepEqual(reference.readOnlyProjections, APPEARANCE_READ_ONLY_FIELDS);
   assert.match(reference.logoContract, /no separate compact-logo setting/u);
+  assert.match(reference.headerWidthContract, /'wide' moves them to the viewport edges/u);
+  assert.match(reference.headerWidthContract, /headerLayout 'centered-menu'/u);
   assert.equal(reference.nonAtomic, true);
   assert.match(reference.recovery, /completedWrites/u);
   for (const field of reference.fields.filter((item) => item.type === "appearance-color")) {
@@ -181,6 +183,11 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
       lightCanvasImageOpacity: defaults["settings.lightCanvasImageOpacity"],
       darkCanvasImageOpacity: defaults["settings.darkCanvasImageOpacity"],
       headerLayout: defaults["settings.headerLayout"],
+      headerWidth: defaults["settings.headerWidth"],
+      navDrawerStyle: defaults["settings.navDrawerStyle"],
+      navDrawerTransition: defaults["settings.navDrawerTransition"],
+      fontMenu: defaults["settings.fontMenu"],
+      fontWeightMenu: defaults["settings.fontWeightMenu"],
       navMenuDisplay: defaults["settings.navMenuDisplay"],
       headerPosition: defaults["settings.headerPosition"],
       showThemeToggle: defaults["settings.showThemeToggle"],
@@ -193,6 +200,11 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
       lightCanvasImageOpacity: 1,
       darkCanvasImageOpacity: 1,
       headerLayout: "standard",
+      headerWidth: "contained",
+      navDrawerStyle: "full-screen",
+      navDrawerTransition: "fade",
+      fontMenu: "",
+      fontWeightMenu: "",
       navMenuDisplay: "auto",
       headerPosition: "normal",
       showThemeToggle: false,
@@ -205,6 +217,11 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
   const domain = readFileSync(SITE_SETTINGS_PATH, "utf8");
   for (const declaration of [
     "string HeaderLayout = Taproot.Domain.Entities.HeaderLayout.Standard",
+    "string HeaderWidth = Taproot.Domain.Entities.HeaderWidth.Contained",
+    "string NavDrawerStyle = HeaderNavDrawerStyle.FullScreen",
+    "string NavDrawerTransition = HeaderNavDrawerTransition.Fade",
+    "string FontMenu = \"\"",
+    "string FontWeightMenu = \"\"",
     "string NavMenuDisplay = HeaderNavigationDisplay.Auto",
     "bool ShowThemeToggle = false",
     "string HeaderPosition = Taproot.Domain.Entities.HeaderPosition.Normal",

@@ -446,6 +446,8 @@ function themeWorkspace(overrides = {}) {
       defaultScheme: "system",
       fontBrand: "\"Inika\", serif",
       fontWeightBrand: "600",
+      fontMenu: "",
+      fontWeightMenu: "",
       lightLogoId: "",
       darkLogoId: "",
       lightCanvasImageId: "",
@@ -461,6 +463,9 @@ function themeWorkspace(overrides = {}) {
     }),
     "settings/site-header.json": settingsDocument("SETTING_TYPE_SITE_HEADER", {
       headerLayout: "standard",
+      headerWidth: "contained",
+      navDrawerStyle: "full-screen",
+      navDrawerTransition: "fade",
       brandText: "Taproot",
       brandColor: "--esp-color-headings",
       logoAlt: "Taproot home",
@@ -867,6 +872,9 @@ test("the settings catalog materializes only real enum members", async (site) =>
     "settings/brand.json": { faviconId: "", faviconUrl: "" },
     "settings/site-header.json": {
       headerLayout: "",
+      headerWidth: "",
+      navDrawerStyle: "",
+      navDrawerTransition: "",
       showThemeToggle: false,
       showBrandText: false,
       brandLogoSize: "",
@@ -954,7 +962,7 @@ test("theme push validates roles, contexts, and anchors before saving themes las
 
   assert.equal(result.ok, true);
   assert.equal(result.verb, "theme push");
-  assert.equal(result.written.items.length, 25);
+  assert.equal(result.written.items.length, 30);
   const mutations = wire.calls.filter((call) => call.method === "POST");
   assert.equal(mutations[0].pathname, `/api/v1/sites/${SITE_ID}/footer-settings`);
   assert.deepEqual(mutations[0].body.footerSettings.bottomLinks, currentFooter.bottomLinks);
@@ -4956,7 +4964,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.1.1" },
+    cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -5386,7 +5394,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.1.1" },
+    cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

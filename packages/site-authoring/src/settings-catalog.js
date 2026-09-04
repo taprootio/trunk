@@ -58,6 +58,8 @@ export const SETTINGS_GROUPS = Object.freeze([
         "defaultScheme",
         "fontBrand",
         "fontWeightBrand",
+        "fontMenu",
+        "fontWeightMenu",
         "lightLogoId",
         "lightLogoUrl",
         "darkLogoId",
@@ -86,6 +88,9 @@ export const SETTINGS_GROUPS = Object.freeze([
     fields: Object.freeze([
       ...stringFields(
         "headerLayout",
+        "headerWidth",
+        "navDrawerStyle",
+        "navDrawerTransition",
         "brandText",
         "brandColor",
         "logoAlt",

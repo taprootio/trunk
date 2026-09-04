@@ -122,15 +122,38 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       pages: 8,
       navigationItems: 9,
       themes: 2,
-      appearanceSettings: 22,
+      appearanceSettings: 27,
       footer: true,
     },
   );
   assert.deepEqual(json.warnings, { items: [], count: 0 });
   assert.ok(json.doesNotProve.includes("credential authorization or live site ownership"));
   assert.ok(json.doesNotProve.includes("preview or published rendering"));
+  // The www fixture keeps the contained header beside a full-bleed image
+  // banner, so validate advises the wide header without failing (TR00697).
+  assert.deepEqual(json.hints.map((hint) => hint.code), ["header.width_contained_with_root_band"]);
+  assert.deepEqual(json.hints[0].suggested, { headerWidth: "wide", headerLayout: "centered-menu" });
+  assert.deepEqual(json.hints[0].pages, ["pages/publishing.md"]);
+  assert.match(result.stderr, /Hint: 1 page\(s\) use a full-bleed root-band component/u);
   assert.match(result.stderr, /^Reading manifest\.fixture\.json\./u);
   assert.match(result.stderr, /without credentials or mutation\.\n$/u);
+});
+
+test("validate drops the header-width hint once the workspace opts into the wide header", { skip: MONOREPO_ONLY }, async (context) => {
+  const { fixture } = await copiedFixture(context, "wide header fixture");
+  const headerPath = path.join(fixture, "settings", "site-header.json");
+  const header = JSON.parse(await readFile(headerPath, "utf8"));
+  header.settings.headerWidth = "wide";
+  header.settings.headerLayout = "centered-menu";
+  await writeFile(headerPath, `${JSON.stringify(header, null, 2)}\n`);
+
+  const result = await runValidation(fixture, { quiet: false });
+
+  assert.equal(result.exitCode, 0);
+  const json = JSON.parse(result.stdout);
+  assert.deepEqual(json.hints, []);
+  assert.doesNotMatch(result.stderr, /Hint:/u);
+  assert.equal(json.validated.appearanceSettings, 27);
 });
 
 test("validate ignores GITHUB_OUTPUT on both success and usage failure", { skip: MONOREPO_ONLY }, async (context) => {
