@@ -7,10 +7,17 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
+import { shippedFixtureDirectory } from "../src/fixture-contract.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
 
+// The complete example fixture the package ships (TR00647). It is the default
+// source for every case below, so the whole family runs in the public Trunk
+// tree instead of skipping there.
+const SHIPPED_FIXTURE = shippedFixtureDirectory();
 // The Taproot-www fixture is private, unapproved copy that does not ship with
-// the package (TR00635); every test that replays it skips outside the monorepo.
+// the package (TR00635); the two cases that replay it are monorepo-only, and
+// they are additions to the shipped-fixture coverage rather than the only
+// coverage.
 const TAPROOT_FIXTURE = monorepoPath("business", "playbooks", "www-launch", "fixtures", "taproot-www");
 // The package's copy of the representative section composition, pinned
 // byte-for-byte to the canonical shared fixture by renderer-parity.test.js.
@@ -18,6 +25,11 @@ const SHY_COMPOSITION = fileURLToPath(new URL(
   "./fixtures/free-form-section-composition.fixture.json",
   import.meta.url,
 ));
+// The package's copy of the seeded default theme, pinned byte-for-byte to the
+// canonical shared artifact by renderer-parity.test.js. The shipped fixture's
+// theme pair is that artifact plus four authored groups.
+const DEFAULT_SITE_THEME = fileURLToPath(new URL("./fixtures/default-site-theme.json", import.meta.url));
+const AUTHORED_THEME_GROUPS = new Set(["anchors", "roles", "contexts", "intents"]);
 const SHY_PAGE_ID = "00000000-0000-4000-8000-000000000791";
 const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
 const SHY_IMAGE_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
@@ -66,11 +78,11 @@ async function treeDigest(root) {
   return hash.digest("hex");
 }
 
-async function copiedFixture(context, label = "fixture with spaces") {
+async function copiedFixture(context, label = "fixture with spaces", source = SHIPPED_FIXTURE) {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "taproot-site-fixture-validate-"));
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const fixture = path.join(temporary, label);
-  await cp(TAPROOT_FIXTURE, fixture, { recursive: true });
+  await cp(source, fixture, { recursive: true });
   return { temporary, fixture };
 }
 
@@ -91,6 +103,127 @@ async function runValidation(fixture, { quiet = true, environment = {}, argument
   });
   return { exitCode, stdout: stdout.read(), stderr: stderr.read(), requests };
 }
+
+test("the shipped example fixture validates without credentials, network, or writes", async () => {
+  const before = await treeDigest(SHIPPED_FIXTURE);
+  const result = await runValidation(SHIPPED_FIXTURE, { quiet: false });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.requests, 0);
+  // The README tells a reader to validate the installed copy in place, so the
+  // verb must leave the package's own files exactly as it found them.
+  assert.equal(await treeDigest(SHIPPED_FIXTURE), before);
+  const json = JSON.parse(result.stdout);
+  assert.deepEqual(
+    {
+      schemaVersion: json.schemaVersion,
+      ok: json.ok,
+      verb: json.verb,
+      offline: json.offline,
+      contractVersion: json.fixture.contractVersion,
+      manifest: json.fixture.manifest,
+      imageIds: json.fixture.imageIds,
+      deliveryOrigins: json.fixture.deliveryOrigins,
+      pages: json.validated.pages.total,
+      navigationItems: json.validated.navigation.items,
+      themes: json.validated.themes,
+      appearanceSettings: json.validated.appearanceSettings,
+      footer: json.validated.footer,
+    },
+    {
+      schemaVersion: 1,
+      ok: true,
+      verb: "validate",
+      offline: true,
+      contractVersion: 1,
+      manifest: "manifest.fixture.json",
+      imageIds: 3,
+      deliveryOrigins: 1,
+      pages: 2,
+      navigationItems: 3,
+      themes: 2,
+      appearanceSettings: 27,
+      footer: true,
+    },
+  );
+  assert.deepEqual(json.validated.pages.items, [
+    { file: "pages/index.md", path: "" },
+    { file: "pages/visit.md", path: "visit" },
+  ]);
+  // The README promises exit 0 with nothing to read afterwards, so the shipped
+  // fixture must be clean rather than merely valid.
+  assert.deepEqual(json.warnings, { items: [], count: 0 });
+  assert.deepEqual(json.hints, []);
+  assert.match(result.stderr, /^Reading manifest\.fixture\.json\./u);
+  assert.match(result.stderr, /Validated 2 page\(s\), 3 navigation item\(s\)/u);
+});
+
+test("the shipped fixture's theme pair is the seeded default plus its authored semantics", async () => {
+  const defaultTheme = JSON.parse(await readFile(DEFAULT_SITE_THEME, "utf8"));
+  const styles = JSON.parse(
+    await readFile(path.join(SHIPPED_FIXTURE, "settings", "taproot-styles.json"), "utf8"),
+  );
+
+  for (const [scheme, key] of [["light", "lightTheme"], ["dark", "darkTheme"]]) {
+    const seeded = defaultTheme[scheme].theme;
+    const fixture = styles.settings[key];
+    assert.deepEqual(Object.keys(fixture).sort(), Object.keys(seeded).sort(), `${scheme}: property set`);
+    for (const property of Object.keys(seeded)) {
+      if (AUTHORED_THEME_GROUPS.has(property)) {
+        // Authored on purpose: the seeded theme leaves these empty, and a
+        // fixture with no anchors, roles, or contexts could not demonstrate a
+        // named section context.
+        assert.notDeepEqual(fixture[property], seeded[property], `${scheme}.${property} is still the seeded value`);
+        continue;
+      }
+      // Everything else is the seeded value, so a theme-contract change is a
+      // re-copy of the generated artifact rather than a re-authoring.
+      assert.deepEqual(fixture[property], seeded[property], `${scheme}.${property} drifted from the seeded theme`);
+    }
+  }
+});
+
+test("the shipped fixture keeps every example value inside the reserved example ranges", async () => {
+  const files = [];
+  async function visit(relative) {
+    for (const entry of await readdir(path.join(SHIPPED_FIXTURE, relative), { withFileTypes: true })) {
+      const child = path.join(relative, entry.name);
+      if (entry.isDirectory()) await visit(child);
+      else files.push(child);
+    }
+  }
+  await visit("");
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    const text = await readFile(path.join(SHIPPED_FIXTURE, file), "utf8");
+    // Every hostname the fixture names is reserved for examples, and every
+    // telephone number is from the reserved 555-01xx range. A fixture ships
+    // and is copied, so a live host or a real number in one would travel.
+    for (const match of text.matchAll(/https?:\/\/([^/"\s)]+)/gu)) {
+      const hostname = new URL(match[0]).hostname;
+      assert.ok(
+        hostname === "example.test" || hostname.endsWith(".example.test"),
+        `${file} references non-reserved host '${hostname}'`,
+      );
+    }
+    // Area code 555 with the 555-01xx local range: the only block reserved for
+    // fiction. UUIDs carry long digit runs, so this matches the two written
+    // forms exactly rather than any ten digits.
+    for (const match of text.matchAll(/\(\d{3}\)\s*\d{3}-\d{4}/gu)) {
+      assert.equal(match[0], "(555) 555-0147", `${file} writes a non-reserved telephone number`);
+    }
+    for (const match of text.matchAll(/tel:[+\d\-().\s]+/gu)) {
+      assert.equal(match[0], "tel:+15555550147", `${file} links a non-reserved telephone number`);
+    }
+    // A mailbox domain travels the same way a host does.
+    for (const match of text.matchAll(/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/gu)) {
+      assert.ok(
+        match[1] === "example.test" || match[1].endsWith(".example.test"),
+        `${file} writes a non-reserved email domain '${match[1]}'`,
+      );
+    }
+  }
+});
 
 test("the public CLI validates the complete TR00621 Taproot-www fixture without credentials, network, or writes", { skip: MONOREPO_ONLY }, async () => {
   const before = await treeDigest(TAPROOT_FIXTURE);
@@ -120,7 +253,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       offline: true,
       contractVersion: 1,
       pages: 8,
-      navigationItems: 9,
+      navigationItems: 10,
       themes: 2,
       appearanceSettings: 27,
       footer: true,
@@ -140,7 +273,10 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
 });
 
 test("validate drops the header-width hint once the workspace opts into the wide header", { skip: MONOREPO_ONLY }, async (context) => {
-  const { fixture } = await copiedFixture(context, "wide header fixture");
+  // The www fixture owns this case: the hint needs a full-bleed root-band
+  // component on a page, and the shipped fixture deliberately has none so its
+  // README-promised run is clean.
+  const { fixture } = await copiedFixture(context, "wide header fixture", TAPROOT_FIXTURE);
   const headerPath = path.join(fixture, "settings", "site-header.json");
   const header = JSON.parse(await readFile(headerPath, "utf8"));
   header.settings.headerWidth = "wide";
@@ -156,7 +292,7 @@ test("validate drops the header-width hint once the workspace opts into the wide
   assert.equal(json.validated.appearanceSettings, 27);
 });
 
-test("validate ignores GITHUB_OUTPUT on both success and usage failure", { skip: MONOREPO_ONLY }, async (context) => {
+test("validate ignores GITHUB_OUTPUT on both success and usage failure", async (context) => {
   const { fixture } = await copiedFixture(context, "fixture with actions output");
   const outputPath = path.join(fixture, "github-output.txt");
   const initialOutput = "caller-owned-output\n";
@@ -191,14 +327,13 @@ test("fixture path inspection failures keep the stable fixturePath contract", as
   assert.match(result.stderr, /^taproot-site failed \[fixture\.path_invalid\]/u);
 });
 
-test("the canonical SHY composition document executes through the same quiet offline page validator", { skip: MONOREPO_ONLY }, async (context) => {
+test("the canonical SHY composition document executes through the same quiet offline page validator", async (context) => {
   const { temporary, fixture } = await copiedFixture(context, "canonical SHY composition fixture");
   const manifestPath = path.join(fixture, "manifest.fixture.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  // The Taproot-www fixture grows as its owner review adds pages; this case
-  // owns the SHY document, so it asserts against that baseline rather than a
-  // literal total that an unrelated fixture edit would break.
-  const taprootPageCount = manifest.pages.length;
+  // This case owns the SHY document, so it asserts against the fixture's own
+  // baseline rather than a literal total an unrelated fixture edit would break.
+  const basePageCount = manifest.pages.length;
   manifest.fixture.imageIds.push(SHY_IMAGE_ID);
   manifest.pages.push({
     pageId: SHY_PAGE_ID,
@@ -223,20 +358,20 @@ test("the canonical SHY composition document executes through the same quiet off
   assert.equal(result.requests, 0);
   assert.equal(result.stderr, "");
   const json = JSON.parse(result.stdout);
-  assert.equal(json.validated.pages.total, taprootPageCount + 1);
+  assert.equal(json.validated.pages.total, basePageCount + 1);
   assert.ok(json.validated.pages.items.some((entry) => entry.path === "shy-composition"));
 });
 
-test("offline failures retain the push validators' stable code and field", { skip: MONOREPO_ONLY }, async (context) => {
+test("offline failures retain the push validators' stable code and field", async (context) => {
   const cases = [
     {
       label: "page raw HTML",
       mutate: async (fixture) => {
         const manifestPath = path.join(fixture, "manifest.fixture.json");
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        const page = manifest.pages.find((entry) => entry.path === "about");
+        const page = manifest.pages.find((entry) => entry.path === "visit");
         await unlink(path.join(fixture, page.file));
-        page.file = "pages/about.pm.json";
+        page.file = "pages/visit.pm.json";
         page.sourceFormat = "prosemirror";
         await writeFile(
           path.join(fixture, page.file),
@@ -248,7 +383,7 @@ test("offline failures retain the push validators' stable code and field", { ski
         await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
       },
       code: "content.raw_html_forbidden",
-      field: "pages/about.pm.json:/content/0",
+      field: "pages/visit.pm.json:/content/0",
     },
     {
       label: "fixture settings entity binding",
@@ -260,8 +395,10 @@ test("offline failures retain the push validators' stable code and field", { ski
       },
       code: "theme.settings_site_mismatch",
       field: "settings/brand.json",
-      humanIncludes: ["fixture entity 00000000-0000-4000-8000-000000000672"],
-      humanExcludes: ["site 00000000-0000-4000-8000-000000000621", "Run pull"],
+      // The fixture binds settings to their own entity ids, so the refusal
+      // names that entity rather than the site and offers no 'Run pull'.
+      humanIncludes: ["fixture entity a0000000-0000-4000-8000-000000000021"],
+      humanExcludes: ["site a0000000-0000-4000-8000-000000000001", "Run pull"],
     },
     {
       label: "appearance scalar",
@@ -282,12 +419,12 @@ test("offline failures retain the push validators' stable code and field", { ski
         // Point the first PAGE item at a page the fixture does not contain.
         // Group headers carry no target, so mutating one would exercise
         // nav.target_unexpected instead of the unknown-reference path.
-        const target = document_.navItems.find((item) => item.kind === "NAV_ITEM_KIND_PAGE");
-        target.resourceId = "99999999-9999-4999-8999-999999999999";
+        const index = document_.navItems.findIndex((item) => item.kind === "NAV_ITEM_KIND_PAGE");
+        document_.navItems[index].resourceId = "99999999-9999-4999-8999-999999999999";
         await writeFile(file, `${JSON.stringify(document_, undefined, 2)}\n`);
+        return { field: `navItems[${index}]` };
       },
       code: "nav.resource_unknown",
-      field: "navItems[1]",
     },
     {
       label: "footer image reference",
@@ -311,7 +448,10 @@ test("offline failures retain the push validators' stable code and field", { ski
   for (const scenario of cases) {
     await context.test(scenario.label, async (caseContext) => {
       const { fixture } = await copiedFixture(caseContext, scenario.label);
-      await scenario.mutate(fixture);
+      // A mutation may report the field it produced, for a case whose field
+      // depends on where in the fixture the mutation landed.
+      const produced = await scenario.mutate(fixture);
+      const field = scenario.field ?? produced.field;
       const before = await treeDigest(fixture);
 
       const result = await runValidation(fixture);
@@ -319,7 +459,7 @@ test("offline failures retain the push validators' stable code and field", { ski
       assert.equal(result.exitCode, 1);
       assert.equal(result.requests, 0);
       assert.equal(await treeDigest(fixture), before);
-      assert.deepEqual(JSON.parse(result.stdout).error, { code: scenario.code, field: scenario.field });
+      assert.deepEqual(JSON.parse(result.stdout).error, { code: scenario.code, field });
       assert.match(result.stderr, new RegExp(`^taproot-site failed \\[${scenario.code.replaceAll(".", "\\.")}\\]`, "u"));
       for (const text of scenario.humanIncludes ?? []) assert.ok(result.stderr.includes(text), `missing '${text}'`);
       for (const text of scenario.humanExcludes ?? []) assert.ok(!result.stderr.includes(text), `unexpected '${text}'`);

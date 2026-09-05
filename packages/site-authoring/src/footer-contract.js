@@ -1,3 +1,8 @@
+import {
+  CONTACT_OR_WEB_URL_MAX_LENGTH,
+  CONTACT_OR_WEB_URL_REQUIREMENT,
+  isContactOrWebUrl,
+} from "./contact-url.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import { FOOTER_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
 
@@ -15,7 +20,7 @@ export const FOOTER_LIMITS = Object.freeze({
   linkLabelLength: 120,
   bottomTextLength: 500,
   featureImageAltLength: 300,
-  externalUrlLength: 2_048,
+  externalUrlLength: CONTACT_OR_WEB_URL_MAX_LENGTH,
   backgroundRepeatHeightMinimum: 64,
   backgroundRepeatHeightMaximum: 512,
   backgroundRepeatHeightStep: 16,
@@ -198,33 +203,17 @@ function stableId(value, path, seen, label) {
   return value;
 }
 
+// A `tel:` or `mailto:` target is returned exactly as authored: the number's
+// punctuation and the address's plus-tag are content, and `URL.toString()`
+// re-encodes both. Only the whitespace the server would strip is removed.
 function safeExternalUrl(value, path, tolerateStoredValues) {
   if (typeof value !== "string") {
-    fail("footer.url_invalid", `${path} must be a bounded absolute http or https URL.`, path);
+    fail("footer.url_invalid", `${path} ${CONTACT_OR_WEB_URL_REQUIREMENT}.`, path);
   }
   const normalized = trimLikeServer(value);
   if (tolerateStoredValues) return normalized;
-  if (
-    normalized.length === 0
-    || normalized.length > FOOTER_LIMITS.externalUrlLength
-    || hasControlCharacter(normalized)
-    || normalized.includes("\\")
-  ) {
-    fail("footer.url_invalid", `${path} must be a bounded absolute http or https URL.`, path);
-  }
-  let parsed;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    fail("footer.url_invalid", `${path} must be an absolute http or https URL.`, path);
-  }
-  if (
-    (parsed.protocol !== "http:" && parsed.protocol !== "https:")
-    || parsed.username !== ""
-    || parsed.password !== ""
-    || parsed.hostname === ""
-  ) {
-    fail("footer.url_invalid", `${path} must use http or https without embedded credentials.`, path);
+  if (!isContactOrWebUrl(normalized, FOOTER_LIMITS.externalUrlLength)) {
+    fail("footer.url_invalid", `${path} ${CONTACT_OR_WEB_URL_REQUIREMENT}.`, path);
   }
   return normalized;
 }
@@ -618,16 +607,25 @@ export function footerImageIds(value) {
 export const FOOTER_EXAMPLE = Object.freeze({
   enabled: true,
   showBrand: true,
+  // The aside CTA is where a local business puts the thing a visitor came for.
+  // A phone number is a `tel:` target, emitted verbatim so it stays dialable.
   asideCta: Object.freeze({
     id: "103e726d-3152-49c8-bf14-c947b1bd8a14",
-    label: "Talk with us",
-    externalUrl: "https://example.com/contact",
+    label: "Call the studio",
+    externalUrl: "tel:+15555550123",
   }),
-  bottomLinks: Object.freeze([Object.freeze({
-    id: "28363e08-b341-42fc-bc83-8dd73fa87904",
-    label: "Privacy",
-    externalUrl: "https://example.com/privacy",
-  })]),
+  bottomLinks: Object.freeze([
+    Object.freeze({
+      id: "28363e08-b341-42fc-bc83-8dd73fa87904",
+      label: "Privacy",
+      externalUrl: "https://example.com/privacy",
+    }),
+    Object.freeze({
+      id: "9e2d1f04-4bb0-4a2d-9d1a-6d3b0d0a4c77",
+      label: "Email us",
+      externalUrl: "mailto:hello@example.com",
+    }),
+  ]),
   light: Object.freeze({
     backgroundColor: "--esp-color-layer-1",
     textColor: "--esp-color-text",

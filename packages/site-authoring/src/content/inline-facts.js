@@ -64,9 +64,13 @@ export function normalizeInlineFactsItems(
       }
     }
 
+    // The value is the fact; the label names it when the value does not name
+    // itself. An omitted or null label is the standalone fact, while an empty
+    // string stays refused so a half-authored item is still caught.
     for (const name of ["value", "label"]) {
       const field = definition.fields[name];
       const entry = item[name];
+      if (!field.required && (entry === undefined || entry === null)) continue;
       if (typeof entry !== "string" || (field.nonWhitespace && entry.trim() === "")) {
         report(`${itemPath}/${name}`, CODES.attrInvalid, `Inline fact ${name} must contain non-whitespace text.`);
       } else if (scalarLength(entry, field.maxScalars) > field.maxScalars) {
@@ -88,7 +92,7 @@ export function normalizeInlineFactsItems(
 
     items.push(Object.freeze({
       value: item.value,
-      label: item.label,
+      ...(typeof item.label === "string" ? { label: item.label } : {}),
       ...(typeof item.url === "string" ? { url: item.url.trim() } : {}),
     }));
   });

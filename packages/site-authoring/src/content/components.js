@@ -149,7 +149,11 @@ const CTA = Object.freeze({
   buttonText: str(),
   buttonUrl: actionUrl(),
   variant: enumOf("primary", "danger"),
-  borderWidth: num({ integer: true, minimum: 0 }),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around the call-to-action panel; 0 leaves it unbordered.",
+  }),
   imagePosition: enumOf("top", "left", "right"),
   mediaImage: image(),
 });
@@ -167,7 +171,11 @@ const FEATURE_GRID = Object.freeze({
   ),
   columns: num({ values: Object.freeze([2, 3, 4]) }),
   iconSize: enumOf("small", "medium", "large", "xlarge"),
-  borderWidth: num({ integer: true, minimum: 0 }),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around each item, as on a card grid; the grid itself is never framed. 0 boxes nothing.",
+  }),
 });
 
 /** `TestimonialData` and its `TestimonialItem`. */
@@ -184,7 +192,11 @@ const TESTIMONIAL = Object.freeze({
   columns: num({ values: Object.freeze([1, 2, 3]) }),
   carousel: bool(),
   interval: num({ integer: true, minimum: 2000 }),
-  borderWidth: num({ integer: true, minimum: 0 }),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around the whole set of quotations — the grid or the carousel; 0 leaves it unbordered.",
+  }),
 });
 
 /** `LatestPostsData` — resolved at generation time. */
@@ -212,7 +224,11 @@ const CARD_GRID = Object.freeze({
     { kind: "value", value: Object.freeze([]) },
   ),
   columns: num({ values: Object.freeze([2, 3]) }),
-  borderWidth: num({ integer: true, minimum: 0 }),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around each card; the grid itself is never framed. 0 boxes nothing.",
+  }),
 });
 
 /** `ImageBannerData`. */
@@ -372,6 +388,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     [
       "Each linked item needs a title that remains meaningful as link text.",
       "Icon images need descriptive alt text when they convey information; otherwise use an empty alt value.",
+      "Item title and description are plain text: an item's url makes the whole item the link, and no link can be placed inside the text. Put linked prose in a paragraph beside the grid.",
     ],
     {
       items: [
@@ -428,6 +445,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     [
       "Every linked card needs a title that describes its destination.",
       "Card images need descriptive alt text unless they are decorative.",
+      "Card title and description are plain text: a card's linkUrl makes the whole card the link, and no link can be placed inside the text. Put linked prose in a paragraph beside the grid.",
     ],
     {
       cards: [
@@ -544,6 +562,10 @@ function referenceSchema(spec) {
       if (spec.values) schema.enum = [...spec.values];
       if (spec.minimum !== undefined) schema.minimum = spec.minimum;
       if (spec.maximum !== undefined) schema.maximum = spec.maximum;
+      // A numeric field whose units say nothing about what the number does —
+      // `borderWidth` is the case — carries its meaning here so `help
+      // component` prints it beside the constraints.
+      if (spec.description) schema.description = spec.description;
       return schema;
     }
     case "array":

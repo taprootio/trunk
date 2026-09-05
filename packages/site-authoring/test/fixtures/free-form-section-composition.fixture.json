@@ -85,6 +85,23 @@
               {
                 "value": "6am–8pm",
                 "label": "Today"
+              },
+              {
+                "value": "Free parking"
+              }
+            ]
+          }
+        },
+        {
+          "type": "inlineFacts",
+          "attrs": {
+            "items": [
+              {
+                "value": "(555) 555-0148",
+                "url": "tel:+15555550148"
+              },
+              {
+                "value": "Walk-ins welcome"
               }
             ]
           }
@@ -93,7 +110,7 @@
           "type": "componentBlock",
           "attrs": {
             "componentType": "feature-grid",
-            "componentData": "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":0}"
+            "componentData": "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":1}"
           }
         },
         {

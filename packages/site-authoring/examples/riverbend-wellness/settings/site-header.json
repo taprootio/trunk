@@ -1,0 +1,21 @@
+{
+  "entityId": "a0000000-0000-4000-8000-000000000022",
+  "settingsType": "SETTING_TYPE_SITE_HEADER",
+  "settings": {
+    "headerLayout": "standard",
+    "headerWidth": "contained",
+    "navDrawerStyle": "full-screen",
+    "navDrawerTransition": "fade",
+    "brandText": "Riverbend Wellness",
+    "logoAlt": "Riverbend Wellness",
+    "navMenuDisplay": "auto",
+    "headerPosition": "sticky",
+    "showThemeToggle": true,
+    "showBrandText": true,
+    "brandLogoSize": "standard",
+    "brandHoverGrow": false,
+    "brandColor": "--esp-color-headings",
+    "lightBrandColor": "--esp-color-headings",
+    "darkBrandColor": "--esp-color-headings"
+  }
+}

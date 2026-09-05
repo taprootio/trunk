@@ -412,7 +412,7 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
   "FooterLink.label": { type: "plain-text", required: true, maximumLength: FOOTER_LIMITS.linkLabelLength },
   "FooterLink.pageResourceId": { type: "tracked-page-resource-uuid", exclusiveWith: "externalUrl" },
   "FooterLink.externalUrl": {
-    type: "absolute-http-or-https-url",
+    type: "contact-or-web-url",
     exclusiveWith: "pageResourceId",
     maximumLength: FOOTER_LIMITS.externalUrlLength,
   },
@@ -425,7 +425,7 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
   "FooterRichTextRun.link": { type: "FooterInlineLink|null", default: null },
   "FooterInlineLink.pageResourceId": { type: "tracked-page-resource-uuid", exclusiveWith: "externalUrl" },
   "FooterInlineLink.externalUrl": {
-    type: "absolute-http-or-https-url",
+    type: "contact-or-web-url",
     exclusiveWith: "pageResourceId",
     maximumLength: FOOTER_LIMITS.externalUrlLength,
   },
@@ -507,7 +507,9 @@ export function getFooterReference() {
     totalGroupMaximum: FOOTER_LIMITS.linkGroups,
     totalRichTextRunsMaximum: FOOTER_LIMITS.richTextRuns,
     targetRule:
-      "Each link has exactly one target: a tracked pageResourceId, or an absolute credential-free http/https externalUrl.",
+      "Each link has exactly one target: a tracked pageResourceId, or an externalUrl that is an absolute "
+      + "credential-free http/https URL, or a mailto:/tel: contact URL such as tel:+15555550123. A contact URL is "
+      + "published exactly as authored, so write the number the way it should be dialled.",
     imageRule:
       "Image ids come from pull or media upload. Feature images require alt text; background art is decorative.",
     readOnlyProjections: FOOTER_READ_ONLY_FIELDS,

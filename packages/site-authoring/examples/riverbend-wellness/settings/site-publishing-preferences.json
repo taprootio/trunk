@@ -1,0 +1,107 @@
+{
+  "entityId": "a0000000-0000-4000-8000-000000000023",
+  "settingsType": "SETTING_TYPE_SITE_PUBLISHING_PREFERENCES",
+  "settings": {
+    "footerSettings": {
+      "enabled": true,
+      "showBrand": true,
+      "showBrandText": true,
+      "asideCta": {
+        "id": "a0000000-0000-4000-8000-000000000040",
+        "label": "Book a class",
+        "externalUrl": "https://schedule.example.test/riverbend"
+      },
+      "bottomLinks": [
+        {
+          "id": "a0000000-0000-4000-8000-000000000041",
+          "label": "Visit",
+          "pageResourceId": "a0000000-0000-4000-8000-000000000013"
+        }
+      ],
+      "light": {
+        "backgroundColor": "--esp-color-layer-1",
+        "textColor": "--esp-color-text",
+        "headingColor": "--esp-color-headings",
+        "linkColor": "--esp-color-link",
+        "linkHoverColor": "--esp-color-link-hover",
+        "backgroundImageId": "",
+        "backgroundImageOpacity": 0,
+        "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",
+        "backgroundFade": "FOOTER_FADE_MODE_NONE",
+        "backgroundRepeatHeightPx": 160,
+        "additionalTopPaddingRem": 1
+      },
+      "dark": {
+        "backgroundColor": "--esp-color-layer-1",
+        "textColor": "--esp-color-text",
+        "headingColor": "--esp-color-headings",
+        "linkColor": "--esp-color-link",
+        "linkHoverColor": "--esp-color-link-hover",
+        "backgroundImageId": "",
+        "backgroundImageOpacity": 0,
+        "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",
+        "backgroundFade": "FOOTER_FADE_MODE_NONE",
+        "backgroundRepeatHeightPx": 160,
+        "additionalTopPaddingRem": 1
+      },
+      "linkColumns": [
+        {
+          "id": "a0000000-0000-4000-8000-000000000042",
+          "groups": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000043",
+              "heading": "Studio",
+              "links": [
+                {
+                  "id": "a0000000-0000-4000-8000-000000000044",
+                  "label": "Home",
+                  "pageResourceId": "a0000000-0000-4000-8000-000000000011"
+                },
+                {
+                  "id": "a0000000-0000-4000-8000-000000000045",
+                  "label": "Visit",
+                  "pageResourceId": "a0000000-0000-4000-8000-000000000013"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "asideHeadingContent": {
+        "paragraphs": [
+          {
+            "runs": [
+              {
+                "text": "Everything here is invented.",
+                "bold": true
+              }
+            ]
+          }
+        ]
+      },
+      "asideBodyContent": {
+        "paragraphs": [
+          {
+            "runs": [
+              {
+                "text": "Riverbend Wellness is a fictional studio used to demonstrate the authoring contract offline."
+              }
+            ]
+          }
+        ]
+      },
+      "bottomContent": {
+        "paragraphs": [
+          {
+            "runs": [
+              {
+                "text": "An example fixture. Not a real business."
+              }
+            ]
+          }
+        ]
+      },
+      "featureImage": null
+    }
+  }
+}

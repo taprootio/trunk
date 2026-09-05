@@ -1,0 +1,74 @@
+{
+  "manifestVersion": 5,
+  "siteId": "a0000000-0000-4000-8000-000000000001",
+  "pulledAt": "2026-09-04T00:00:00.000Z",
+  "pages": [
+    {
+      "pageId": "a0000000-0000-4000-8000-000000000010",
+      "resourceId": "a0000000-0000-4000-8000-000000000011",
+      "path": "",
+      "title": "Riverbend Wellness",
+      "status": "PAGE_STATUS_DRAFT",
+      "templateType": "TEMPLATE_TYPE_FREE_FORM",
+      "hasDraft": true,
+      "isGenerated": false,
+      "description": "An example home page for the offline authoring fixture.",
+      "file": "pages/index.md",
+      "sourceFormat": "markdown",
+      "workspaceMode": "editable"
+    },
+    {
+      "pageId": "a0000000-0000-4000-8000-000000000012",
+      "resourceId": "a0000000-0000-4000-8000-000000000013",
+      "path": "visit",
+      "title": "Visit the studio",
+      "status": "PAGE_STATUS_DRAFT",
+      "templateType": "TEMPLATE_TYPE_FREE_FORM",
+      "hasDraft": true,
+      "isGenerated": false,
+      "description": "An example second page for the offline authoring fixture.",
+      "file": "pages/visit.md",
+      "sourceFormat": "markdown",
+      "workspaceMode": "editable"
+    }
+  ],
+  "pagesTruncated": false,
+  "navigation": {
+    "file": "nav.json",
+    "items": 3
+  },
+  "settings": [
+    {
+      "settingsType": "SETTING_TYPE_TAPROOT_STYLES",
+      "file": "settings/taproot-styles.json",
+      "entityId": "a0000000-0000-4000-8000-000000000020"
+    },
+    {
+      "settingsType": "SETTING_TYPE_BRAND",
+      "file": "settings/brand.json",
+      "entityId": "a0000000-0000-4000-8000-000000000021"
+    },
+    {
+      "settingsType": "SETTING_TYPE_SITE_HEADER",
+      "file": "settings/site-header.json",
+      "entityId": "a0000000-0000-4000-8000-000000000022"
+    },
+    {
+      "settingsType": "SETTING_TYPE_SITE_PUBLISHING_PREFERENCES",
+      "file": "settings/site-publishing-preferences.json",
+      "entityId": "a0000000-0000-4000-8000-000000000023"
+    }
+  ],
+  "settingsSkipped": [],
+  "fixture": {
+    "contractVersion": 1,
+    "imageIds": [
+      "a0000000-0000-4000-8000-0000000000a0",
+      "a0000000-0000-4000-8000-0000000000a1",
+      "a0000000-0000-4000-8000-0000000000a2"
+    ],
+    "deliveryOrigins": [
+      "https://static.example.test"
+    ]
+  }
+}

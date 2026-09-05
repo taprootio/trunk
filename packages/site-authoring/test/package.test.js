@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -33,7 +33,10 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   // back on the agent's path.
   assert.deepEqual(packageJson.engines, { node: ">=22" });
   assert.deepEqual(packageJson.bin, { "taproot-site": "./bin/taproot-site.js" });
-  assert.deepEqual(packageJson.files, ["bin/", "src/", "LICENSE", "README.md"]);
+  // examples/ ships because the README's credential-free first command points
+  // at it: a global install with nothing pulled has no other fixture to
+  // validate (TR00647).
+  assert.deepEqual(packageJson.files, ["bin/", "examples/", "src/", "LICENSE", "README.md"]);
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
@@ -70,6 +73,17 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "LICENSE",
     "README.md",
     "bin/taproot-site.js",
+    // The complete offline fixture the README's first command validates and
+    // 'help fixture' locates (TR00647). About 28 KB unpacked, 17 KB of it the
+    // light and dark theme pair in taproot-styles.json.
+    "examples/riverbend-wellness/manifest.fixture.json",
+    "examples/riverbend-wellness/nav.json",
+    "examples/riverbend-wellness/pages/index.md",
+    "examples/riverbend-wellness/pages/visit.md",
+    "examples/riverbend-wellness/settings/brand.json",
+    "examples/riverbend-wellness/settings/site-header.json",
+    "examples/riverbend-wellness/settings/site-publishing-preferences.json",
+    "examples/riverbend-wellness/settings/taproot-styles.json",
     "package.json",
     // The verb-support modules TR00604 S2 added alongside the S1 foundation:
     // wire vocabulary, the image header sniffer, session/result shaping, the
@@ -84,6 +98,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/cli.js",
     "src/config.js",
     "src/constants.js",
+    // The one outbound-target rule the footer and the navigation share
+    // (TR00704): absolute credential-free http/https, or a mailto/tel contact.
+    "src/contact-url.js",
     // The content pipeline: the validation the server does not perform, the
     // Markdown converter, and the byte-parity copy of the canonical renderer.
     "src/content/components.js",
@@ -100,6 +117,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // that manage it and the site selection it enables.
     "src/credentials.js",
     "src/errors.js",
+    // The one home for the offline fixture contract: validate enforces it and
+    // 'help fixture' states it from the same constants (TR00647).
+    "src/fixture-contract.js",
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-workspace.js",
@@ -135,4 +155,60 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/whoami.js",
     "src/workspace.js",
   ]);
+});
+
+/**
+ * An installed copy whose `examples/` directory is gone (TR00647).
+ *
+ * `examples/` ships, but `node_modules` pruners and image-slimming steps drop
+ * example directories by default, so nothing on a verb's module-load path may
+ * depend on it.
+ *
+ * The copy sits inside the package rather than in `os.tmpdir()` so it resolves
+ * its dependencies through this checkout's own `node_modules` chain, whether
+ * npm installed them beside the package (the monorepo) or hoisted them to a
+ * workspace root (the public Trunk tree). `src/` is copied rather than
+ * symlinked because Node resolves symlinks before it computes
+ * `import.meta.url`, so a linked `src/` would still find the real `examples/`.
+ */
+function prunedInstall(testContext) {
+  const root = mkdtempSync(path.join(PACKAGE_ROOT, ".pruned-install-"));
+  testContext.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const entry of ["bin", "src", "package.json"]) {
+    cpSync(path.join(PACKAGE_ROOT, entry), path.join(root, entry), { recursive: true });
+  }
+  return root;
+}
+
+function runPruned(root, arguments_) {
+  return execFileSync(process.execPath, [path.join(root, "bin", "taproot-site.js"), ...arguments_], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+test("an installed copy pruned of examples/ still runs every verb and degrades only 'help fixture'", (testContext) => {
+  const root = prunedInstall(testContext);
+
+  // The whole CLI loads. A static import of the shipped manifest fails here
+  // with ERR_MODULE_NOT_FOUND before any verb can run, which is the failure
+  // this case exists to catch; execFileSync throws on a non-zero exit.
+  assert.equal(runPruned(root, ["--version"]).trim(), CLI_VERSION);
+  // A second workflow topic, whose example is a literal in the source, renders
+  // unchanged: the degradation is scoped to the shipped file.
+  assert.ok(runPruned(root, ["help", "nav"]).includes("\n\nExample:\n"));
+
+  const fixtureHelp = runPruned(root, ["help", "fixture"]);
+  assert.match(fixtureHelp, /^Offline fixture manifest contract/u);
+  // The contract still arrives in full; only the example and the path to a
+  // fixture that is no longer there are dropped.
+  assert.ok(fixtureHelp.includes("Required root fields: "));
+  assert.ok(fixtureHelp.includes("validate reads the fixture and writes nothing to it."));
+  assert.ok(!fixtureHelp.includes("Example:"));
+  assert.ok(!fixtureHelp.includes("Shipped example:"));
+
+  const machineReadable = JSON.parse(runPruned(root, ["help", "fixture", "--json"]));
+  assert.equal(machineReadable.reference.example, undefined);
+  assert.equal(machineReadable.reference.fixtureDirectory, undefined);
+  assert.ok(Array.isArray(machineReadable.reference.details));
 });

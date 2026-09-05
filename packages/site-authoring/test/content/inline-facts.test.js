@@ -25,6 +25,34 @@ test("canonicalizes inline fact fields in value, label, url order", () => {
   assert.ok(result.items.every(Object.isFrozen));
 });
 
+test("a fact that names itself stands alone: an omitted or null label canonicalizes to no label", () => {
+  const result = normalizeInlineFactsItems([
+    { value: "4.8 ★ from 111 Google reviews" },
+    { value: "(555) 555-0123", url: "tel:+15555550123" },
+    { value: "Free parking", label: null },
+    { value: "6am–8pm", label: "Today" },
+  ]);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.items, [
+    { value: "4.8 ★ from 111 Google reviews" },
+    { value: "(555) 555-0123", url: "tel:+15555550123" },
+    { value: "Free parking" },
+    { value: "6am–8pm", label: "Today" },
+  ]);
+  assert.deepEqual(Object.keys(result.items[0]), ["value"]);
+  assert.deepEqual(Object.keys(result.items[1]), ["value", "url"]);
+});
+
+test("an empty label is still refused so omitting one stays explicit", () => {
+  const result = normalizeInlineFactsItems([{ value: "Free parking", label: "" }]);
+
+  assert.equal(result.items, undefined);
+  assert.deepEqual(result.errors.map((error) => ({ path: error.path, message: error.message })), [
+    { path: "/attrs/items/0/label", message: "Inline fact label must contain non-whitespace text." },
+  ]);
+});
+
 test("enforces the closed item shape, 1-6 bounds, and 120-Unicode-scalar text limit", async (context) => {
   const cases = [
     ["not an array", {}, "/attrs/items"],

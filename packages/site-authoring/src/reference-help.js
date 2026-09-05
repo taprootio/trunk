@@ -1,4 +1,19 @@
+import { readFileSync } from "node:fs";
+
+import { TEMPLATE_TYPE_FREE_FORM } from "./api.js";
 import { CLI_BINARY_NAME } from "./constants.js";
+import {
+  FIXTURE_CONTRACT_VERSION,
+  FIXTURE_DELIVERY_ORIGIN_DOMAIN,
+  FIXTURE_MANIFEST_FILE_NAME,
+  FIXTURE_MAXIMUM_DELIVERY_ORIGINS,
+  FIXTURE_METADATA_FIELDS,
+  FIXTURE_OPTIONAL_ROOT_FIELDS,
+  FIXTURE_REQUIRED_ROOT_FIELDS,
+  SHIPPED_FIXTURE_NAME,
+  shippedFixtureDirectory,
+} from "./fixture-contract.js";
+import { SETTINGS_GROUPS } from "./settings-catalog.js";
 import {
   canonicalizeComponentData,
   COMPONENT_TYPES,
@@ -20,14 +35,21 @@ import {
 } from "./presentation-reference.js";
 import {
   INTERNAL_PAGE_BASELINE_DIRECTORY,
+  MANIFEST_VERSION,
+  NAVIGATION_FILE_NAME,
   PAGE_READ_ONLY_REASON_SYSTEM_404,
+  PAGE_SOURCE_EXTENSIONS,
+  PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_READ_ONLY,
+  pageSourceFormat,
+  PAGES_DIRECTORY,
+  SETTINGS_DIRECTORY,
   SYSTEM_PAGE_NOT_FOUND_PATH,
 } from "./workspace.js";
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 15;
+export const REFERENCE_VERSION = 16;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
@@ -72,6 +94,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     usage: `${CLI_BINARY_NAME} help footer`,
     summary: "Author and concurrency-safely push the complete footer document.",
   }),
+  Object.freeze({
+    name: "fixture",
+    usage: `${CLI_BINARY_NAME} help fixture`,
+    summary: "State the offline fixture manifest contract and locate the shipped example.",
+  }),
 ]);
 
 const WORKFLOW_REFERENCES = Object.freeze({
@@ -84,6 +111,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "kind is NAV_ITEM_KIND_PAGE, NAV_ITEM_KIND_EXTERNAL_URL, or NAV_ITEM_KIND_GROUP_HEADER.",
       "PAGE uses resourceId from .taproot-site-manifest.json, never pageId or path.",
       "EXTERNAL_URL uses externalUrl; GROUP_HEADER has no target; every kind may carry children.",
+      "externalUrl is an absolute credential-free http/https URL, or a mailto:/tel: contact URL such as "
+      + "tel:+15555550123, published exactly as authored.",
     ]),
     example: Object.freeze({
       siteId: "<site-uuid>",
@@ -125,6 +154,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
     details: Object.freeze([
       "A page path resolves through .taproot-site-manifest.json; a canonical page UUID works directly.",
       "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.",
+      "Preview before approving: approve consumes the draft, so an approved page has no draft left to render and answers preview.no_draft. Review it on staging after a deploy instead.",
       "Creation prints pageId, snapshotId, and expiresAt before the bounded render wait starts.",
       "The default stored-preview cap is 10 per authoring key and site; operators can tune it.",
       "Success returns READY with url, snapshotId, expiresAt, storedPreviewCap, storedPreviewCount, and evictedPreviews.",
@@ -134,10 +164,96 @@ const WORKFLOW_REFERENCES = Object.freeze({
     ]),
     example: Object.freeze({ command: `${CLI_BINARY_NAME} preview page classes` }),
   }),
+  fixture: Object.freeze({
+    title: "Offline fixture manifest contract",
+    summary:
+      `${FIXTURE_MANIFEST_FILE_NAME} binds a directory laid out like a pulled workspace to deterministic identities, `
+      + "so validate can prove it with no credential, no network, and no write.",
+    usage: `${CLI_BINARY_NAME} validate <fixture-directory>`,
+    details: Object.freeze([
+      `Required root fields: ${FIXTURE_REQUIRED_ROOT_FIELDS.join(", ")}.`,
+      `Accepted and not read: ${FIXTURE_OPTIONAL_ROOT_FIELDS.join(", ")} — pull writes them, and neither the snapshot `
+      + "time nor a recorded deployment can be checked offline. Any other root field is refused.",
+      `manifestVersion must be ${MANIFEST_VERSION}; fixture.contractVersion must be ${FIXTURE_CONTRACT_VERSION}.`,
+      "siteId, every pageId and resourceId, every settings entityId, and every fixture.imageIds entry is a canonical "
+      + "lowercase UUID. They are deterministic fixture identities, not identities from a live site.",
+      `Each pages[] entry binds one editable free-form source: pageId, resourceId, path, title, templateType `
+      + `${TEMPLATE_TYPE_FREE_FORM}, file, sourceFormat, and workspaceMode ${PAGE_WORKSPACE_MODE_EDITABLE}. `
+      + "status, hasDraft, isGenerated, and description are recorded by pull and not read: the page key set "
+      + "stays open so a fixture from a newer pull is not refused. The homepage's path is the empty string.",
+      `file lives under '${PAGES_DIRECTORY}/' and ends in ${PAGE_SOURCE_EXTENSIONS.join(" or ")}; sourceFormat must be `
+      + `the format that extension implies (${
+        PAGE_SOURCE_EXTENSIONS.map((extension) => `${extension} is '${pageSourceFormat(`page${extension}`)}'`).join(
+          ", ",
+        )
+      }).`,
+      "No two page entries share a pageId, resourceId, file, or path; every declared source must exist; every "
+      + `source under '${PAGES_DIRECTORY}/' must be declared; and each entry's path must equal the path its source `
+      + "declares — a Markdown source's front-matter 'path:' wins, and the entry's value applies only when the "
+      + "front matter omits it.",
+      "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty: a "
+      + "partial snapshot is not a fixture.",
+      `navigation binds { file: "${NAVIGATION_FILE_NAME}", items }, and items must equal the tree's own item count.`,
+      `settings binds all ${SETTINGS_GROUPS.length} authorable groups, each with settingsType, file, and entityId: ${
+        SETTINGS_GROUPS.map((group) => `${group.settingsType} to '${SETTINGS_DIRECTORY}/${group.file}'`).join("; ")
+      }.`,
+      `The fixture block carries ${FIXTURE_METADATA_FIELDS.join(", ")}. Every image a page references by imageId must `
+      + "be listed in fixture.imageIds, and every absolute delivery URL a page uses must sit on a declared origin.",
+      `Each deliveryOrigins entry is an origin-only HTTPS URL (no path, query, fragment, or credentials) on `
+      + `${FIXTURE_DELIVERY_ORIGIN_DOMAIN} or a subdomain of it, at most ${FIXTURE_MAXIMUM_DELIVERY_ORIGINS} of them, `
+      + "with no duplicates. Fixtures are copied and shipped, so a real delivery host in one would be a live "
+      + "reference in every copy.",
+      "validate reads the fixture and writes nothing to it. Copy the directory somewhere writable before editing it.",
+    ]),
+  }),
 });
 
+// The box, rather than the value, is the cache: an absent fixture memoizes
+// `undefined` instead of being re-read on every call.
+let shippedFixtureManifestCache;
+
+/**
+ * The shipped fixture's own manifest, read on demand and memoized, or
+ * `undefined` when this copy of the package has no readable `examples/`.
+ *
+ * The read is lazy because `examples/` ships but is not load-bearing. This
+ * module sits on the path of every verb (`bin/taproot-site.js` imports
+ * `src/cli.js`, which imports this) and of every library consumer through
+ * `src/index.js`, while `examples/` is exactly what a `node_modules` pruner or
+ * an image-slimming step drops. A static import would turn such a pruned
+ * install into an `ERR_MODULE_NOT_FOUND` at module load for `login`, `pull`,
+ * `push`, and every other verb; reading here degrades `help fixture` alone.
+ */
+function shippedFixtureManifest() {
+  shippedFixtureManifestCache ??= { value: readShippedFixtureManifest() };
+  return shippedFixtureManifestCache.value;
+}
+
+function readShippedFixtureManifest() {
+  try {
+    return JSON.parse(readFileSync(
+      new URL(`../examples/${SHIPPED_FIXTURE_NAME}/${FIXTURE_MANIFEST_FILE_NAME}`, import.meta.url),
+      "utf8",
+    ));
+  } catch {
+    // Missing, unreadable, or not JSON. The contract the topic states is
+    // derived from constants and stays complete without an example, so
+    // `help fixture` answers rather than fails.
+    return undefined;
+  }
+}
+
 export function getWorkflowReference(topic) {
-  return WORKFLOW_REFERENCES[topic];
+  const reference = WORKFLOW_REFERENCES[topic];
+  if (topic !== "fixture") return reference;
+  const example = shippedFixtureManifest();
+  // The directory is resolved from this package rather than from the caller's
+  // directory, so the path is right for a global install as well as a
+  // checkout. Both it and the example are reported only when the fixture is
+  // actually present: a pruned install has nothing to locate or to validate.
+  return example === undefined
+    ? reference
+    : Object.freeze({ ...reference, fixtureDirectory: shippedFixtureDirectory(), example });
 }
 
 function componentSummary(type) {
@@ -324,6 +440,8 @@ function decorationReference() {
 }
 
 const INLINE_FACTS_DEFINITION = FREE_FORM_SECTION_REGISTRY.inlineFacts;
+// The third fact carries no label on purpose: a phone number names itself, and
+// the row is allowed to mix labelled and standalone facts.
 const INLINE_FACT_ITEMS_EXAMPLE = Object.freeze([
   Object.freeze({ value: "4.9 ★", label: "Community rating" }),
   Object.freeze({
@@ -331,7 +449,7 @@ const INLINE_FACT_ITEMS_EXAMPLE = Object.freeze([
     label: "Elm Harbor",
     url: "https://maps.example.test/?q=100%20Riverside%20Way%20Elm%20Harbor",
   }),
-  Object.freeze({ value: "(555) 013-7788", label: "Call the studio", url: "tel:+15550137788" }),
+  Object.freeze({ value: "(555) 013-7788", url: "tel:+15550137788" }),
   Object.freeze({ value: "Open today until 8:30 PM", label: "Today's hours", url: "/classes" }),
 ]);
 
@@ -353,6 +471,12 @@ function inlineFactsReference() {
       }),
     }),
     placement: Object.freeze({ ...INLINE_FACTS_DEFINITION.placement }),
+    valuePolicy:
+      `Required non-whitespace plain text; maximum ${items.fields.value.maxScalars} Unicode scalar values.`,
+    labelPolicy:
+      `Optional non-whitespace plain text; maximum ${items.fields.label.maxScalars} Unicode scalar values. `
+      + "Omit it when the value already names itself, such as a rating, an address, or a phone number; a row may "
+      + "mix labelled and standalone facts. An empty string is rejected, so omitting a label stays explicit.",
     urlPolicy:
       "Optional safe HTTP(S), mailto, tel, non-protocol-relative root, fragment, query, or relative URL. Empty/whitespace-only values, other schemes, backslashes, and ASCII controls are rejected; tel: remains a native link.",
     markdown: Object.freeze({
@@ -897,7 +1021,7 @@ export function formatReferenceResult(result) {
         page.sections.placementMatrix.map(formatPlacement).join("\n")
       }\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${page.tables.structure.inlineNodes.join(", ")}; marks ${page.tables.structure.marks.join(", ")}\n  pipes                 outer pipes ${page.tables.markdown.outerPipes}; write a literal pipe as ${page.tables.markdown.literalPipeEscape}\n  spans                 unsupported: ${page.tables.structure.unsupportedSpanAttrs.join(", ")}\n  alignment             ${page.tables.markdown.alignment}; delimiter cells contain hyphens only\n  termination           a blank line ends the table before another block\n\nRate table example:\n${page.tables.examples.rateTable}\n\nComparison table example:\n${page.tables.examples.comparisonTable}\n\nRejected alignment example (${CONTENT_ERROR_CODES.markdownTableAlignment}):\n${page.tables.examples.rejectedAlignment}\nRemove the ':' characters from the delimiter row.\n\nDirect ProseMirror table example:\n${JSON.stringify(page.tables.examples.proseMirror, null, 2)}\n\nTable error corrections:\n${
         page.tables.corrections.map((entry) => `  ${entry.code.padEnd(34)} ${entry.correction}`).join("\n")
-      }\n\nInline facts:\n  placement             document root or directly inside a top-level section; ${page.inlineFacts.placement.measure} measure\n  items                 ${page.inlineFacts.attrs.items.minItems} through ${page.inlineFacts.attrs.items.maxItems}; closed objects in value, label, url order\n  value and label       required non-whitespace plain text; maximum ${page.inlineFacts.attrs.items.fields[0].maxScalars} Unicode scalar values each\n  url                   ${page.inlineFacts.urlPolicy}\n  Markdown              fenced ${page.inlineFacts.markdown.fence} block whose body is a JSON array\n\nInline-facts Markdown example:\n${page.inlineFacts.markdown.example}\n\nDirect ProseMirror inlineFacts example:\n${JSON.stringify(page.inlineFacts.examples.proseMirror, null, 2)}\n\nRaw HTML: ${page.document.rawHtml.default} by default. For a tracked ${page.document.rawHtml.trackedProseMirror.format} document only: ${page.document.rawHtml.trackedProseMirror.behavior} Opt in with ${page.document.rawHtml.trackedProseMirror.optIn}. For ${page.document.rawHtml.markdown.format}, ${page.document.rawHtml.markdown.behavior} ${page.document.rawHtml.warning}\n\nComponents:\n${
+      }\n\nInline facts:\n  placement             document root or directly inside a top-level section; ${page.inlineFacts.placement.measure} measure\n  items                 ${page.inlineFacts.attrs.items.minItems} through ${page.inlineFacts.attrs.items.maxItems}; closed objects in ${page.inlineFacts.attrs.items.itemFieldOrder.join(", ")} order\n  value                 ${page.inlineFacts.valuePolicy}\n  label                 ${page.inlineFacts.labelPolicy}\n  url                   ${page.inlineFacts.urlPolicy}\n  Markdown              fenced ${page.inlineFacts.markdown.fence} block whose body is a JSON array\n\nInline-facts Markdown example:\n${page.inlineFacts.markdown.example}\n\nDirect ProseMirror inlineFacts example:\n${JSON.stringify(page.inlineFacts.examples.proseMirror, null, 2)}\n\nRaw HTML: ${page.document.rawHtml.default} by default. For a tracked ${page.document.rawHtml.trackedProseMirror.format} document only: ${page.document.rawHtml.trackedProseMirror.behavior} Opt in with ${page.document.rawHtml.trackedProseMirror.optIn}. For ${page.document.rawHtml.markdown.format}, ${page.document.rawHtml.markdown.behavior} ${page.document.rawHtml.warning}\n\nComponents:\n${
         page.components.map((component) => `  ${component.type.padEnd(16)} ${component.summary}`).join("\n")
       }\n\nWorkflow:\n${
         page.workflow.map((step) => `  ${step.command}: ${step.result}`).join("\n")
@@ -915,9 +1039,20 @@ export function formatReferenceResult(result) {
     }
     case "workflow": {
       const reference = result.reference;
-      return `${reference.title}\n${reference.summary}\n\nUsage: ${reference.usage}\n\n${
+      // Only the fixture reference carries a shipped directory; every other
+      // workflow topic renders exactly as it did.
+      const shipped = reference.fixtureDirectory === undefined
+        ? ""
+        : `\nShipped example: ${reference.fixtureDirectory}\nValidate it: ${CLI_BINARY_NAME} validate "${reference.fixtureDirectory}"\n`;
+      // Every other topic's example is a literal in this module and is always
+      // present; the fixture topic's is a shipped file, so it is omitted the
+      // same way the shipped-directory lines are when the file is not there.
+      const example = reference.example === undefined
+        ? ""
+        : `\n\nExample:\n${JSON.stringify(reference.example, null, 2)}`;
+      return `${reference.title}\n${reference.summary}\n\nUsage: ${reference.usage}\n${shipped}\n${
         reference.details.map((detail) => `  - ${detail}`).join("\n")
-      }\n\nExample:\n${JSON.stringify(reference.example, null, 2)}\n`;
+      }${example}\n`;
     }
     case "presentation":
       return formatPresentationReference(result.reference);

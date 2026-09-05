@@ -7,7 +7,14 @@ import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
 import { normalizeImage } from "../src/api.js";
-import { runCli } from "../src/cli.js";
+import {
+  CAPABILITY_CONTENT,
+  CAPABILITY_DEPLOYMENTS,
+  CAPABILITY_DESIGN,
+  SITE_AUTHORING_CAPABILITIES,
+} from "../src/capabilities.js";
+import { runCli, VERB_CAPABILITIES } from "../src/cli.js";
+import { CAPABILITY_REFUSAL_REASON } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
@@ -285,7 +292,10 @@ function invoke(site, wire, extra = {}) {
       environment: { TAPROOT_SITE_KEY: TOKEN, XDG_CONFIG_HOME: site.configHome },
       quiet: false,
       onProgress: (message) => progress.push(message),
-      fetch: wire.fetch,
+      // Every verb in this suite runs behind the same capability gate the
+      // server applies, under exactly the set the shipped verb table declares
+      // for it. See `capabilityGatedFetch`.
+      fetch: capabilityGatedFetch(extra.verb, wire.fetch),
       sleep: timing.sleep,
       now: timing.now,
       // A signal that never fires: the bounded polls below take thousands of
@@ -375,6 +385,185 @@ const PRESIGNED_PUT = /^\/upload$/u;
 const PREVIEW_CREATE = /\/authoring-previews\/pages\/[^/]+$/u;
 const PREVIEW_STATUS = /\/authoring-previews\/pages\/[^/]+\/[^/:]+$/u;
 const PREVIEW_MINT = /\/authoring-previews\/pages\/[^/]+\/[^/]+:mint-handoff$/u;
+
+// ── The server's key-mode capability gate, mirrored on the fake wire ─────────
+//
+// The verb table claims each declared set is the smallest its verb's *requests*
+// need. Nothing checked that claim, and two verbs were a capability short of
+// reads they make on every run: `nav push` and `deploy` both list the site's
+// pages, and that list is gated on a Content permission (TR00691). The whole
+// suite therefore runs behind this gate now, so a narrowed declaration fails
+// the verb's own tests rather than a production run.
+//
+// The mirror can drift the other way, which is what the API-side pins in
+// `GetSitePagesTests` and `SiteAuthoringKeyPipelineHandlerTests` are for.
+
+/**
+ * Which delegation capabilities carry each site permission the CLI's routes are
+ * gated on — the client's reading of `SiteDelegationCapabilities`. Any one of
+ * them satisfies the gate: `site.media.manage` is in both Content and Design on
+ * purpose (a designer who cannot upload a logo cannot set a theme), and
+ * `site.staging.view` is the baseline every authoring capability carries.
+ */
+const PERMISSION_CAPABILITIES = Object.freeze({
+  "site.pages.create": [CAPABILITY_CONTENT],
+  "site.pages.edit_any": [CAPABILITY_CONTENT],
+  "site.pages.publish_any": [CAPABILITY_CONTENT],
+  "site.theme.manage": [CAPABILITY_DESIGN],
+  "site.media.manage": [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
+  "site.staging.view": [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
+  "site.deploy": [CAPABILITY_DEPLOYMENTS],
+  "site.deployments.view_any": [CAPABILITY_DEPLOYMENTS],
+});
+
+/**
+ * The permission each route's key-mode gate resolves, in the order the server
+ * resolves it. First match wins, so the narrower pattern is listed first.
+ *
+ * A route resolves the permission its own gate names. `POST /deploy` resolves
+ * further ones on a promotion, which `promotionPermissions` below covers.
+ */
+const ROUTE_PERMISSIONS = Object.freeze([
+  { method: "GET", pattern: PAGES_LIST, permission: "site.pages.edit_any" },
+  { method: "POST", pattern: PUBLISH_DRAFTS, permission: "site.pages.publish_any" },
+  { method: "POST", pattern: PAGES_COLLECTION, permission: "site.pages.create" },
+  { method: "GET", pattern: PAGE_BY_ID, permission: "site.pages.edit_any" },
+  { method: "PATCH", pattern: PAGE_BY_ID, permission: "site.pages.edit_any" },
+  { method: "GET", pattern: NAVIGATION, permission: "site.theme.manage" },
+  { method: "PUT", pattern: NAVIGATION, permission: "site.theme.manage" },
+  { method: "GET", pattern: SETTINGS, permission: "site.theme.manage" },
+  { method: "POST", pattern: SETTING, permission: "site.theme.manage" },
+  { method: "POST", pattern: FOOTER_SETTINGS, permission: "site.theme.manage" },
+  { method: "GET", pattern: READINESS, permission: "site.deploy" },
+  { method: "POST", pattern: DEPLOY, permission: "site.deploy" },
+  { method: "GET", pattern: DEPLOYMENTS, permission: "site.deployments.view_any" },
+  { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
+  { method: "GET", pattern: SITE_IMAGES, permission: "site.media.manage" },
+  { method: "POST", pattern: REQUEST_UPLOAD, permission: "site.media.manage" },
+  { method: "POST", pattern: CONFIRM_UPLOAD, permission: "site.media.manage" },
+  { method: "POST", pattern: PREVIEW_MINT, permission: "site.pages.edit_any" },
+  { method: "POST", pattern: PREVIEW_CREATE, permission: "site.pages.edit_any" },
+  { method: "GET", pattern: PREVIEW_STATUS, permission: "site.pages.edit_any" },
+  { method: "DELETE", pattern: PREVIEW_STATUS, permission: "site.pages.edit_any" },
+]);
+
+// Reached with the account sign-in rather than a site credential, so no site
+// capability applies: the exchange itself, and the two things a sign-in can do.
+const UNGATED_API_PATH = /^\/api\/v1\/site-authoring\//u;
+
+/**
+ * The transcoded shape `SiteAuthoringKeyDenial` produces: gRPC PermissionDenied
+ * carrying one `google.rpc.ErrorInfo` detail. Written out rather than imported
+ * so a server-side change to the shape shows up here as a real failure. The
+ * shape is applied uniformly on purpose: the routes gated in pipeline
+ * handlers still answer Unauthenticated in production, and the mirror models
+ * them with the named shape because what it proves is that a declared set is
+ * wide enough, not which status the refusal carries.
+ */
+function capabilityDenialBody(permission, granted, required) {
+  return {
+    code: 7,
+    message: "Permission is not granted in this scope.",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason: CAPABILITY_REFUSAL_REASON,
+      domain: "taproot-site-authoring",
+      metadata: {
+        permission,
+        granted: granted.join(","),
+        required: required.join(","),
+      },
+    }],
+  };
+}
+
+function capabilityDenied(permission, granted, required) {
+  return jsonResponse(capabilityDenialBody(permission, granted, required), 403);
+}
+
+/**
+ * The further permissions a production `POST /deploy` resolves, in the server's
+ * order, or an empty list.
+ *
+ * A promotion carries no selection of its own — the CLI refuses to send one —
+ * so the pipeline resolves the promoted staging deployment's *stored* candidate
+ * and re-authorizes it: each selected settings group's own permission, and
+ * `site.theme.manage` when the stored manifest carries navigation
+ * (`DeploySitePipelineHandler.AuthorizeProductionSelectionForKeyAsync`). All
+ * four candidate-selectable settings groups name `site.theme.manage` as well,
+ * so the settings and navigation halves collapse to that one permission; the
+ * stored candidate's pages then add `site.pages.publish_any`, one decision per
+ * site.
+ *
+ * A wire double holds no deployments, so the stored candidate is modelled
+ * rather than looked up: `deploy --staging` sends the pulled settings groups and
+ * the pulled navigation on every run against a pulled workspace, so a promotion
+ * is modelled as promoting a candidate that carried them. The model is
+ * deliberately the strict direction. A workspace that pulled neither would
+ * stage a pages-only candidate the server would promote without Design, so this
+ * can refuse where production would allow — and refusing a case the server
+ * permits keeps a declared set honest, while permitting one it refuses is
+ * exactly the blind spot that let this ship.
+ */
+function promotionPermissions(method, pathname, init) {
+  if (method !== "POST" || !DEPLOY.test(pathname)) return [];
+  let body;
+  try {
+    body = JSON.parse(typeof init.body === "string" ? init.body : "null");
+  } catch {
+    return [];
+  }
+  const promotes = body !== null
+    && typeof body === "object"
+    && typeof body.stagingDeploymentId === "string"
+    && body.stagingDeploymentId !== "";
+  return promotes ? ["site.theme.manage", "site.pages.publish_any"] : [];
+}
+
+/**
+ * Wraps a wire double in the server's key-mode gate, under exactly the
+ * capabilities the shipped verb table declares for `verbName`.
+ *
+ * A verb with no declared set never presents a site credential (help, whoami,
+ * login), so it is ungated — but a request from one to a gated route is a
+ * mistake worth failing loudly on rather than waving through.
+ */
+function capabilityGatedFetch(verbName, fetchImpl) {
+  const granted = Object.hasOwn(VERB_CAPABILITIES, verbName) ? VERB_CAPABILITIES[verbName] : undefined;
+  return async (url, init = {}) => {
+    const target = new URL(url);
+    const method = init.method ?? "GET";
+    const route = ROUTE_PERMISSIONS.find(
+      (candidate) => candidate.method === method && candidate.pattern.test(target.pathname),
+    );
+    if (route === undefined) {
+      if (target.pathname.startsWith("/api/v1/") && !UNGATED_API_PATH.test(target.pathname)) {
+        throw new Error(
+          `No key-mode capability is mapped for ${method} ${target.pathname}. `
+            + "Add it to ROUTE_PERMISSIONS with the permission its server gate resolves.",
+        );
+      }
+      return await fetchImpl(url, init);
+    }
+    if (granted === undefined) {
+      throw new Error(
+        `The verb '${verbName}' declares no capabilities but called the gated route ${method} `
+          + `${target.pathname}.`,
+      );
+    }
+    // The route's own gate first, then anything the server resolves from state
+    // the request only names — in the server's order, so the refusal a narrowed
+    // credential meets is the one it would meet in production.
+    for (const permission of [route.permission, ...promotionPermissions(method, target.pathname, init)]) {
+      const required = PERMISSION_CAPABILITIES[permission];
+      assert.ok(required !== undefined, `PERMISSION_CAPABILITIES is missing '${permission}'`);
+      if (!required.some((capability) => granted.includes(capability))) {
+        return capabilityDenied(permission, granted, required);
+      }
+    }
+    return await fetchImpl(url, init);
+  };
+}
 
 function manifestFixture(pages, extra = {}) {
   return {
@@ -907,8 +1096,10 @@ test("pull records a settings group the credential cannot read instead of failin
     {
       method: "GET",
       pattern: SETTINGS,
+      // The production shape: the named capability denial the settings read
+      // gate attaches (TR00691), not a bare 403.
       reply: (call) => (call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")
-        ? jsonResponse({ code: 7, message: "denied" }, 403)
+        ? capabilityDenied("site.theme.manage", [CAPABILITY_CONTENT], [CAPABILITY_DESIGN])
         : {}),
     },
   ]);
@@ -3841,6 +4032,39 @@ test("nav push re-reads the live tree immediately before replacing it whole", as
   assert.ok(progress.some((line) => line.includes("removes 1 navigation item")));
 });
 
+test("nav push carries a contact target to the wire exactly as authored", async (site) => {
+  // A local business's phone number and email are the two header targets that
+  // are not web pages. The number's punctuation is content, so nothing between
+  // the workspace file and the wire may re-encode it.
+  const dialable = "tel:+1 (555) 555-0123";
+  const workspace = await fixture(site, {
+    "nav.json": {
+      siteId: SITE_ID,
+      navItems: [
+        { id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Call us", externalUrl: dialable },
+        {
+          id: navId(2),
+          kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+          title: "Email us",
+          externalUrl: "mailto:desk+bookings@example.test?subject=Class%20booking",
+        },
+      ],
+    },
+  });
+  const wire = api([
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "PUT", pattern: NAVIGATION, reply: (call) => ({ navItems: call.body.navItems }) },
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "nav push" });
+  await navPush(invocation);
+
+  const saved = wire.matching("PUT", NAVIGATION)[0];
+  assert.deepEqual(saved.body.navItems.map((item) => item.externalUrl), [
+    dialable,
+    "mailto:desk+bookings@example.test?subject=Class%20booking",
+  ]);
+});
+
 test("nav push refuses a malformed tree locally and names the item", async (testContext) => {
   const cases = [
     {
@@ -3924,6 +4148,46 @@ test("nav push refuses a malformed tree locally and names the item", async (test
         kind: "NAV_ITEM_KIND_EXTERNAL_URL",
         title: "A",
         externalUrl: "javascript:alert(1)",
+      }],
+      code: "nav.external_url_invalid",
+      field: "navItems[0]",
+    },
+    {
+      name: "an external item pointing at a scheme that is neither web nor contact",
+      navItems: [{
+        id: navId(1),
+        kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+        title: "A",
+        externalUrl: "ftp://example.test/brochure.pdf",
+      }],
+      code: "nav.external_url_invalid",
+      field: "navItems[0]",
+    },
+    {
+      // A raw line break in a mailto body is the header-injection vector.
+      name: "an external mailto item carrying a line break",
+      navItems: [{
+        id: navId(1),
+        kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+        title: "A",
+        externalUrl: "mailto:hello@example.test\nBcc:victim@example.test",
+      }],
+      code: "nav.external_url_invalid",
+      field: "navItems[0]",
+    },
+    {
+      name: "an external contact item with nothing to reach",
+      navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "A", externalUrl: "tel:" }],
+      code: "nav.external_url_invalid",
+      field: "navItems[0]",
+    },
+    {
+      name: "an external item carrying embedded credentials",
+      navItems: [{
+        id: navId(1),
+        kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+        title: "A",
+        externalUrl: "https://user:secret@example.test/",
       }],
       code: "nav.external_url_invalid",
       field: "navItems[0]",
@@ -4964,7 +5228,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -5394,7 +5658,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -6216,6 +6480,12 @@ test("every verb maps a classified refusal to the behavior it calls for", async 
     { name: "rollout", body: violation("SiteAuthoringRollout"), httpStatus: 503, refusal: "platform_paused" },
     { name: "credential", body: violation("ExternalApiKey"), httpStatus: 401, refusal: "credential_rejected" },
     { name: "throttle", body: { code: 8, message: "slow down" }, httpStatus: 429, refusal: "throttled" },
+    {
+      name: "capability",
+      body: capabilityDenialBody("site.pages.edit_any", [CAPABILITY_DESIGN], [CAPABILITY_CONTENT]),
+      httpStatus: 403,
+      refusal: "capability_missing",
+    },
   ];
   for (const refusal of refusals) {
     for (const verb of VERB_CASES) {
@@ -6397,4 +6667,126 @@ test("no verb ever emits the credential, upload capability, or page contents", a
       }
     });
   }
+});
+
+test("the verb table declares every capability the verb's own routes need", async (testContext) => {
+  // The claim under test is the verb table's own comment: each declared set is
+  // the smallest the verb's *requests* need. `nav push` and `deploy` were both
+  // one short of it, because both list the site's pages before writing anything
+  // and nothing checked reads against the table (TR00691).
+  await testContext.test("nav push and deploy declare Content for the page list they read", () => {
+    assert.deepEqual(VERB_CAPABILITIES["nav push"], [CAPABILITY_CONTENT, CAPABILITY_DESIGN]);
+    assert.deepEqual(
+      VERB_CAPABILITIES["deploy"],
+      [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
+    );
+  });
+
+  // Design is on `deploy` for the promotion, not for a write: --production
+  // re-authorizes the promoted candidate's stored settings and navigation.
+  await testContext.test("deploy declares Design for the promotion it re-authorizes", () => {
+    assert.ok(VERB_CAPABILITIES["deploy"].includes(CAPABILITY_DESIGN));
+    // And `deploy` is still the only verb that needs all three: a verb table
+    // where everything asks for everything would pass the gate and mint the
+    // widest credential every time.
+    assert.deepEqual(
+      Object.entries(VERB_CAPABILITIES)
+        .filter(([, capabilities]) => capabilities.length === SITE_AUTHORING_CAPABILITIES.length)
+        .map(([verb]) => verb),
+      ["deploy"],
+    );
+  });
+
+  await testContext.test("every declared capability is one an exchange can ask for", () => {
+    for (const [verb, capabilities] of Object.entries(VERB_CAPABILITIES)) {
+      assert.ok(capabilities.length > 0, `${verb} declares an empty set`);
+      assert.deepEqual(
+        capabilities.filter((capability) => !SITE_AUTHORING_CAPABILITIES.includes(capability)),
+        [],
+        `${verb} declares a capability outside the site-authoring envelope`,
+      );
+      assert.deepEqual([...new Set(capabilities)], [...capabilities], `${verb} names a capability twice`);
+    }
+  });
+
+  // The gate the whole suite now runs behind only proves a declaration is wide
+  // enough while it is genuinely enforced. Narrowing one by a capability has to
+  // fail, or a set could quietly go stale again.
+  await testContext.test("narrowing a declared set by one capability is refused on the wire", async (site) => {
+    const workspace = await fixture(site, {
+      "nav.json": {
+        siteId: SITE_ID,
+        navItems: [{
+          id: navId(1),
+          kind: "NAV_ITEM_KIND_PAGE",
+          title: "About",
+          resourceId: resourceIdFor(ABOUT_PAGE_ID),
+        }],
+      },
+    });
+    const wire = api([
+      { method: "GET", pattern: PAGES_LIST, reply: { pages: [pageSummary()] } },
+      { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+      { method: "PUT", pattern: NAVIGATION, reply: { navItems: [] } },
+    ]);
+    // Design alone: exactly what `nav push` declared before this task, and one
+    // capability short of the page list it reads.
+    const narrowed = capabilityGatedFetch("theme push", wire.fetch);
+    const { invocation, progress } = invoke(workspace, wire, { verb: "nav push", fetch: narrowed });
+    await assert.rejects(navPush(invocation), (error) => {
+      assert.equal(error.code, "api.request_rejected");
+      assert.equal(error.status, "grpc:7");
+      assert.equal(error.field, "GrantedCapabilities");
+      assert.equal(error.refusalKind(), "capability_missing");
+      assert.deepEqual(error.capability, {
+        permission: "site.pages.edit_any",
+        granted: [CAPABILITY_DESIGN],
+        required: [CAPABILITY_CONTENT],
+      });
+      return true;
+    });
+    // The refusal lands on the read, before anything is replaced.
+    assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+    // And the operator is told which capability, and that the verb table — not
+    // the credential — is what needs changing.
+    const announced = progress.join("\n");
+    assert.match(announced, /CAPABILITY MISSING \(refusal=capability_missing, field=GrantedCapabilities\)/u);
+    assert.match(announced, /site\.pages\.edit_any/u);
+    assert.match(announced, /Carried by: delegation\.content\./u);
+    assert.match(announced, /verb table/u);
+  });
+
+  // The same proof for the second shortfall, which no route-level gate could
+  // have caught: `deploy --production` sends nothing but a staging deployment
+  // id, and the server re-authorizes what that deployment stored.
+  await testContext.test("narrowing deploy by Design is refused on the promotion", async (site) => {
+    const workspace = await fixture(site, {
+      ".taproot-site-manifest.json": manifestFixture([], {
+        deployments: { staging: { id: STAGING_DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED" } },
+      }),
+    });
+    const wire = api(deployRoutes());
+    // Content plus Deployments: exactly what `deploy` declared before this
+    // task, and one capability short of the stored candidate it promotes.
+    const narrowed = capabilityGatedFetch("status", wire.fetch);
+    const { invocation, progress } = invoke(workspace, wire, {
+      verb: "deploy",
+      deployTarget: "production",
+      fetch: narrowed,
+    });
+    await assert.rejects(deploy(invocation), (error) => {
+      assert.equal(error.code, "api.request_rejected");
+      assert.equal(error.refusalKind(), "capability_missing");
+      assert.deepEqual(error.capability, {
+        permission: "site.theme.manage",
+        granted: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
+        required: [CAPABILITY_DESIGN],
+      });
+      return true;
+    });
+    // Readiness is read before the promotion, so the refusal is the deploy
+    // itself and nothing was promoted.
+    assert.equal(wire.matching("POST", DEPLOY).length, 0);
+    assert.match(progress.join("\n"), /Carried by: delegation\.design\./u);
+  });
 });

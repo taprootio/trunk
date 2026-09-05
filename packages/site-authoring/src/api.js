@@ -1,6 +1,8 @@
 import {
   CANONICAL_TIMESTAMP,
+  CAPABILITY_REFUSAL_FIELD,
   LIMITS,
+  REFUSAL_CAPABILITY_MISSING,
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_PLAN_LIMIT,
   REFUSAL_PLATFORM_PAUSED,
@@ -329,6 +331,32 @@ const REFUSAL_GUIDANCE = Object.freeze({
 export function announceRefusal(error, onProgress, action = "request") {
   if (!(error instanceof ApiError)) return;
   const kind = error.refusalKind();
+  if (kind === REFUSAL_CAPABILITY_MISSING) {
+    const { permission, granted, required } = error.capability;
+    onProgress("");
+    onProgress(`CAPABILITY MISSING (refusal=${REFUSAL_CAPABILITY_MISSING}, field=${CAPABILITY_REFUSAL_FIELD})`);
+    onProgress(
+      `  Taproot refused this ${action} because the credential it runs on was not exchanged for a capability `
+        + `that grants '${permission}'.`,
+    );
+    onProgress(`  Granted: ${granted.length > 0 ? granted.join(", ") : "(none)"}.`);
+    onProgress(
+      required.length > 0
+        ? `  Carried by: ${required.join(", ")}.`
+        : "  Carried by: no site-authoring capability — this permission is not reachable by any credential.",
+    );
+    // The credential is exactly what was asked for, so re-issuing it changes
+    // nothing. What is wrong is the verb's declared capability set, and saying
+    // so is the whole point of the named refusal: the first agent to meet this
+    // had to read the package source to find out.
+    onProgress(
+      `  The credential is not the problem: the exchange minted precisely what the ${action} asked for. `
+        + "The verb's declared capability set in the CLI's verb table is short of the requests it makes; "
+        + "report it rather than minting a wider key.",
+    );
+    onProgress("");
+    return;
+  }
   if (kind === REFUSAL_PLAN_LIMIT) {
     onProgress("");
     onProgress("PLAN LIMIT (refusal=plan_limit, field=UpgradePrompt)");

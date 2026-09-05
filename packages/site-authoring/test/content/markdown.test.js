@@ -485,10 +485,13 @@ const GOLDENS = [
       + "## Inverted band\n\n"
       + "A paragraph inside the band.\n\n"
       + "```inline-facts\n"
-      + "[{\"value\":\"4.8 ★ from 109 Google reviews\",\"label\":\"Rating\"},{\"value\":\"112 Main St\",\"label\":\"Address\",\"url\":\"/visit\"},{\"value\":\"(555) 123-4567\",\"label\":\"Phone\",\"url\":\"tel:+15551234567\"},{\"value\":\"6am–8pm\",\"label\":\"Today\"}]\n"
+      + "[{\"value\":\"4.8 ★ from 109 Google reviews\",\"label\":\"Rating\"},{\"value\":\"112 Main St\",\"label\":\"Address\",\"url\":\"/visit\"},{\"value\":\"(555) 123-4567\",\"label\":\"Phone\",\"url\":\"tel:+15551234567\"},{\"value\":\"6am–8pm\",\"label\":\"Today\"},{\"value\":\"Free parking\"}]\n"
+      + "```\n\n"
+      + "```inline-facts\n"
+      + "[{\"value\":\"(555) 555-0148\",\"url\":\"tel:+15555550148\"},{\"value\":\"Walk-ins welcome\"}]\n"
       + "```\n\n"
       + "```component:feature-grid\n"
-      + "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":0}\n"
+      + "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":1}\n"
       + "```\n\n"
       + "```component:card-grid\n"
       + "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}\n"
@@ -569,6 +572,28 @@ const GOLDENS = [
     doc: {
       type: "doc",
       content: [{ type: "inlineFacts", attrs: { items: INLINE_FACT_ITEMS } }],
+    },
+  },
+  {
+    // The SHY row from the standalone-fact decision: the label is dropped and
+    // a null label canonicalizes the same way, so a self-describing fact keeps
+    // its own copy instead of inventing a second line.
+    name: "an inline-facts fence whose facts name themselves",
+    markdown: `\`\`\`inline-facts\n${JSON.stringify([
+      { value: "4.8 ★ from 111 Google reviews" },
+      { value: "(555) 555-0123", url: "tel:+15555550123", label: null },
+    ])}\n\`\`\``,
+    doc: {
+      type: "doc",
+      content: [{
+        type: "inlineFacts",
+        attrs: {
+          items: [
+            { value: "4.8 ★ from 111 Google reviews" },
+            { value: "(555) 555-0123", url: "tel:+15555550123" },
+          ],
+        },
+      }],
     },
   },
   {

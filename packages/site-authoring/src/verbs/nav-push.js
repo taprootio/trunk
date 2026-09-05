@@ -9,6 +9,11 @@ import {
   withRefusalGuidance,
 } from "../api.js";
 import { VERB_NAV_PUSH } from "../constants.js";
+import {
+  CONTACT_OR_WEB_URL_MAX_LENGTH,
+  CONTACT_OR_WEB_URL_REQUIREMENT,
+  isContactOrWebUrl,
+} from "../contact-url.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult } from "../session.js";
 import {
@@ -44,7 +49,7 @@ import {
 const MAXIMUM_REPORTED = 100;
 const MAXIMUM_ITEMS = 1_000;
 const MAXIMUM_TITLE_LENGTH = 200;
-const MAXIMUM_URL_LENGTH = 2_048;
+const MAXIMUM_URL_LENGTH = CONTACT_OR_WEB_URL_MAX_LENGTH;
 const ITEM_KEYS = new Set(["id", "kind", "title", "resourceId", "externalUrl", "children"]);
 
 // `SaveSiteNavigation` maps both `id` and `resourceId` through
@@ -141,14 +146,10 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     if (!isBoundedText(item.externalUrl, MAXIMUM_URL_LENGTH)) {
       throw navError("nav.external_url_missing", "an EXTERNAL_URL item needs a non-empty 'externalUrl'.", itemPath);
     }
-    let url;
-    try {
-      url = new URL(item.externalUrl);
-    } catch {
-      url = undefined;
-    }
-    if (url === undefined || (url.protocol !== "https:" && url.protocol !== "http:")) {
-      throw navError("nav.external_url_invalid", "'externalUrl' must be an absolute http or https URL.", itemPath);
+    // A header item may be a phone number or an email address, not just a web
+    // page; the value is stored verbatim so the number stays dialable.
+    if (!isContactOrWebUrl(item.externalUrl, MAXIMUM_URL_LENGTH)) {
+      throw navError("nav.external_url_invalid", `'externalUrl' ${CONTACT_OR_WEB_URL_REQUIREMENT}.`, itemPath);
     }
     if (!isEmpty(item.resourceId)) {
       throw navError("nav.resource_unexpected", "an EXTERNAL_URL item must not carry 'resourceId'.", itemPath);

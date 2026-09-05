@@ -5,6 +5,14 @@ import { NAVIGATION_MAXIMUM_DEPTH, TEMPLATE_TYPE_FREE_FORM } from "../api.js";
 import { freeFormRootPresentation, sharedThemeContextNames } from "../content/free-form-sections.js";
 import { VERB_VALIDATE } from "../constants.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
+import {
+  FIXTURE_CONTRACT_VERSION,
+  FIXTURE_DELIVERY_ORIGIN_DOMAIN,
+  FIXTURE_MANIFEST_FILE_NAME,
+  FIXTURE_MAXIMUM_DELIVERY_ORIGINS,
+  FIXTURE_METADATA_FIELDS,
+  FIXTURE_ROOT_FIELDS,
+} from "../fixture-contract.js";
 import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
 import { boundedList, successResult } from "../session.js";
 import { SETTINGS_GROUPS, SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "../settings-catalog.js";
@@ -26,22 +34,9 @@ import {
   WORKSPACE_LIMITS,
 } from "../workspace.js";
 
-export const FIXTURE_MANIFEST_FILE_NAME = "manifest.fixture.json";
-export const FIXTURE_CONTRACT_VERSION = 1;
 const MAXIMUM_REPORTED = 200;
-const FIXTURE_ROOT_KEYS = new Set([
-  "manifestVersion",
-  "siteId",
-  "pulledAt",
-  "pages",
-  "pagesTruncated",
-  "navigation",
-  "settings",
-  "settingsSkipped",
-  "deployments",
-  "fixture",
-]);
-const FIXTURE_METADATA_KEYS = new Set(["contractVersion", "imageIds", "deliveryOrigins"]);
+const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
+const FIXTURE_METADATA_KEYS = new Set(FIXTURE_METADATA_FIELDS);
 
 function fail(code, message, field, exitCode) {
   throw new SiteAuthoringError(code, message, { field, exitCode });
@@ -163,7 +158,10 @@ function validateFixtureManifest(manifest) {
   if (imageIds.size !== manifest.fixture.imageIds.length) {
     fail("fixture.image_ids_invalid", "fixture.imageIds must not contain duplicates.", "fixture.imageIds");
   }
-  if (!Array.isArray(manifest.fixture.deliveryOrigins) || manifest.fixture.deliveryOrigins.length > 100) {
+  if (
+    !Array.isArray(manifest.fixture.deliveryOrigins)
+    || manifest.fixture.deliveryOrigins.length > FIXTURE_MAXIMUM_DELIVERY_ORIGINS
+  ) {
     fail(
       "fixture.delivery_origins_invalid",
       "fixture.deliveryOrigins must be a bounded list of reserved HTTPS example origins.",
@@ -186,11 +184,14 @@ function validateFixtureManifest(manifest) {
       || url.pathname !== "/"
       || url.search !== ""
       || url.hash !== ""
-      || !(url.hostname === "example.test" || url.hostname.endsWith(".example.test"))
+      || !(
+        url.hostname === FIXTURE_DELIVERY_ORIGIN_DOMAIN
+        || url.hostname.endsWith(`.${FIXTURE_DELIVERY_ORIGIN_DOMAIN}`)
+      )
     ) {
       fail(
         "fixture.delivery_origins_invalid",
-        "Every fixture delivery origin must be an origin-only HTTPS URL under the reserved example.test domain.",
+        `Every fixture delivery origin must be an origin-only HTTPS URL under the reserved ${FIXTURE_DELIVERY_ORIGIN_DOMAIN} domain.`,
         `fixture.deliveryOrigins[${index}]`,
       );
     }

@@ -420,6 +420,60 @@ test("footer validation rejects closed-shape, target, identity, media, text, and
   }
 });
 
+test("footer external targets accept contact schemes and refuse everything else", async (context) => {
+  // The value a studio types is the value that publishes: a number keeps its
+  // punctuation and an address keeps its plus-tag, so no round trip through
+  // URL.toString() may re-encode either.
+  const accepted = [
+    "tel:+15555550123",
+    "tel:+1 (555) 555-0123",
+    "mailto:hello@example.com",
+    "mailto:desk+bookings@example.com?subject=Class%20booking",
+    "mailto:desk@example.test,bookings@example.test",
+    "https://example.com/contact",
+  ];
+  for (const externalUrl of accepted) {
+    await context.test(`accepts ${externalUrl}`, () => {
+      const footer = structuredClone(FOOTER_EXAMPLE);
+      footer.asideCta.externalUrl = externalUrl;
+      footer.bottomLinks[0].externalUrl = externalUrl;
+      footer.asideBodyContent.paragraphs[0].runs[0].link = { externalUrl };
+      const normalized = validateFooterDocument(footer);
+      assert.equal(normalized.asideCta.externalUrl, externalUrl);
+      assert.equal(normalized.bottomLinks[0].externalUrl, externalUrl);
+      assert.equal(normalized.asideBodyContent.paragraphs[0].runs[0].link.externalUrl, externalUrl);
+    });
+  }
+
+  const refused = [
+    "javascript:alert(1)",
+    "ftp://example.com/brochure.pdf",
+    // A raw line break in a mailto is the header-injection vector.
+    "mailto:hello@example.com\nBcc:victim@example.com",
+    "tel:+155555501	23",
+    // A scheme with nothing to reach is a dead anchor, not a link.
+    "tel:",
+    "mailto:",
+    // A contact URL has no authority; "//" forms are refused everywhere.
+    "tel://example.test/+15555550123",
+    "tel://example.test:invalid/+15555550123",
+    "https://user:secret@example.com/contact",
+    "/relative/contact",
+    "tel:" + "9".repeat(FOOTER_LIMITS.externalUrlLength),
+  ];
+  for (const externalUrl of refused) {
+    await context.test(`refuses ${JSON.stringify(externalUrl).slice(0, 48)}`, () => {
+      const footer = structuredClone(FOOTER_EXAMPLE);
+      footer.asideCta.externalUrl = externalUrl;
+      assert.throws(
+        () => validateFooterDocument(footer),
+        (error) =>
+          error?.code === "footer.url_invalid" && error?.field === "footerSettings.asideCta.externalUrl",
+      );
+    });
+  }
+});
+
 test("workspace projection strips server delivery URLs and preserves stable image identities", () => {
   const response = structuredClone(FOOTER_EXAMPLE);
   response.light.backgroundImageUrl = "https://cdn.example/light.webp";

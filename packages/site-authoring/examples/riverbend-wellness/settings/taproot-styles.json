@@ -1,0 +1,730 @@
+{
+  "entityId": "a0000000-0000-4000-8000-000000000020",
+  "settingsType": "SETTING_TYPE_TAPROOT_STYLES",
+  "settings": {
+    "lightTheme": {
+      "anchors": {
+        "root": {
+          "color": "#1f4e5f",
+          "text": "#12313c",
+          "hover": "#2e6d82"
+        },
+        "paper": "#faf6f0",
+        "white": "#ffffff",
+        "ember": {
+          "color": "#d98324",
+          "text": "#7a4304",
+          "hover": "#e79a4c"
+        },
+        "reed": {
+          "color": "#3d7a6b",
+          "text": "#1f4a3f",
+          "hover": "#54998a"
+        },
+        "mist": "#e4eeee",
+        "night": "#0b232b"
+      },
+      "angles": {
+        "analogous": 30,
+        "complementary": 180,
+        "splitComplementary": 30,
+        "triadic": 120
+      },
+      "borderRadius": 0.1,
+      "chroma": {
+        "actionBackground": {
+          "max": 0.4,
+          "min": 0
+        },
+        "actionText": {
+          "max": 0.4,
+          "min": 0
+        },
+        "background": {
+          "max": 0.4,
+          "min": 0
+        },
+        "border": {
+          "max": 0.4,
+          "min": 0
+        },
+        "dangerText": {
+          "max": 0.4,
+          "min": 0
+        },
+        "headings": {
+          "max": 0.4,
+          "min": 0
+        },
+        "headingsHover": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputCaret": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputSelection": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputSelectionBg": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer1": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer2": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer3": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer4": {
+          "max": 0.4,
+          "min": 0
+        },
+        "link": {
+          "max": 0.4,
+          "min": 0
+        },
+        "linkHover": {
+          "max": 0.4,
+          "min": 0
+        },
+        "linkHoverBg": {
+          "max": 0.4,
+          "min": 0
+        },
+        "shadow": {
+          "max": 0.4,
+          "min": 0
+        },
+        "text": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeCaption": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeLabel": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeLead": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeOverline": {
+          "max": 0.4,
+          "min": 0
+        }
+      },
+      "contexts": {
+        "subtle": {
+          "canvas": "anchor:mist",
+          "ink": {
+            "color": "anchor:root",
+            "heading": "anchor:root.text"
+          },
+          "accent": {
+            "color": "anchor:reed",
+            "text": "anchor:reed.text",
+            "hover": "anchor:reed.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:reed"
+        },
+        "raised": {
+          "canvas": "anchor:white",
+          "ink": {
+            "color": "anchor:root",
+            "heading": "anchor:root.text"
+          },
+          "accent": {
+            "color": "anchor:reed",
+            "text": "anchor:reed.text",
+            "hover": "anchor:reed.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:root"
+        },
+        "inverted": {
+          "canvas": "anchor:night",
+          "ink": {
+            "color": "anchor:paper",
+            "heading": "anchor:ember"
+          },
+          "accent": {
+            "color": "anchor:ember",
+            "text": "anchor:ember",
+            "hover": "anchor:ember.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:mist",
+          "lightness": {
+            "surface": 0.14,
+            "raised1": 0.18,
+            "raised2": 0.24,
+            "raised3": 0.31,
+            "raised4": 0.38,
+            "text": 0.94,
+            "ink": 0.99,
+            "border": 0.72
+          }
+        }
+      },
+      "dataPalette": {
+        "series1": "#000000",
+        "series2": "#E69F00",
+        "series3": "#56B4E9",
+        "series4": "#009E73",
+        "series5": "#F0E442",
+        "series6": "#0072B2",
+        "series7": "#D55E00",
+        "series8": "#CC79A7"
+      },
+      "dataRamps": {},
+      "explicitMappingTokens": [],
+      "fontBody": "\"Noto Sans\", sans-serif",
+      "fontBrand": "\"Inika\", serif",
+      "fontHeadings": "\"Inika\", serif",
+      "fontMenu": "",
+      "fontMonospace": "\"JetBrains Mono\", monospace",
+      "fontWeightBody": "normal",
+      "fontWeightBrand": "normal",
+      "fontWeightHeadings": "normal",
+      "fontWeightMenu": "bold",
+      "fontWeightMonospace": "normal",
+      "intents": {
+        "danger": "#b0005a",
+        "success": "#007a58",
+        "warning": "#a33a00",
+        "info": "#005ea8"
+      },
+      "lightness": {
+        "accent": 0.5,
+        "border": 0.3,
+        "ink": 0.25,
+        "muted": 0.45,
+        "raised1": 0.97,
+        "raised2": 0.9,
+        "raised3": 0.8,
+        "raised4": 0.72,
+        "shadow": 0.2,
+        "surface": 0.99,
+        "text": 0.35
+      },
+      "pageBackgroundImage": "",
+      "pageBackgroundImageOpacity": 0.5,
+      "roles": {
+        "canvas": "anchor:paper",
+        "ink": {
+          "color": "anchor:root",
+          "heading": "anchor:root.text"
+        },
+        "accent": {
+          "color": "anchor:reed",
+          "text": "anchor:reed.text",
+          "hover": "anchor:reed.hover"
+        },
+        "action": {
+          "color": "anchor:ember",
+          "ink": "anchor:night"
+        },
+        "structure": "anchor:root"
+      },
+      "rootFontSize": 16,
+      "seedColor": "oklch(.07 0.15 216)",
+      "semanticHues": {
+        "danger": 27,
+        "info": 244,
+        "success": 150,
+        "warning": 90
+      },
+      "semanticMappings": {
+        "actionBackground": {
+          "lightness": "raised3",
+          "source": "primary"
+        },
+        "actionText": {
+          "lightness": "ink",
+          "source": "primary"
+        },
+        "background": {
+          "lightness": "surface",
+          "source": "primary"
+        },
+        "border": {
+          "lightness": "border",
+          "source": "primary"
+        },
+        "dangerText": {
+          "lightness": "text",
+          "source": "danger"
+        },
+        "headings": {
+          "lightness": "muted",
+          "source": "primary"
+        },
+        "headingsHover": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "inputCaret": {
+          "lightness": "ink",
+          "source": "triadic-right"
+        },
+        "inputSelection": {
+          "lightness": "text",
+          "source": "complementary"
+        },
+        "inputSelectionBg": {
+          "lightness": "raised2",
+          "source": "triadic-left"
+        },
+        "layer1": {
+          "lightness": "raised1",
+          "source": "primary"
+        },
+        "layer2": {
+          "lightness": "raised2",
+          "source": "primary"
+        },
+        "layer3": {
+          "lightness": "raised3",
+          "source": "primary"
+        },
+        "layer4": {
+          "lightness": "raised4",
+          "source": "primary"
+        },
+        "link": {
+          "lightness": "accent",
+          "source": "complementary"
+        },
+        "linkHover": {
+          "lightness": "text",
+          "source": "complementary"
+        },
+        "linkHoverBg": {
+          "lightness": "raised2",
+          "source": "triadic-left"
+        },
+        "shadow": {
+          "lightness": "shadow",
+          "source": "primary"
+        },
+        "text": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeCaption": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeLabel": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeLead": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeOverline": {
+          "lightness": "text",
+          "source": "primary"
+        }
+      },
+      "spaceRatio": 1.618,
+      "stylesheets": [],
+      "tones": {},
+      "typeRatio": 1.25,
+      "variantChroma": {},
+      "viewportMax": 1200,
+      "viewportMin": 320
+    },
+    "darkTheme": {
+      "anchors": {
+        "root": {
+          "color": "#4fa3b4",
+          "text": "#d9eff3",
+          "hover": "#79c0cd"
+        },
+        "paper": "#f5efe6",
+        "white": "#ffffff",
+        "ember": {
+          "color": "#e8ab5c",
+          "text": "#f4c98c",
+          "hover": "#f6d9a8"
+        },
+        "reed": {
+          "color": "#57a394",
+          "text": "#1f4a3f",
+          "hover": "#79bdb0"
+        },
+        "mist": "#12333d",
+        "night": "#0b232b",
+        "raised": "#164450"
+      },
+      "angles": {
+        "analogous": 30,
+        "complementary": 180,
+        "splitComplementary": 30,
+        "triadic": 120
+      },
+      "borderRadius": 0.1,
+      "chroma": {
+        "actionBackground": {
+          "max": 0.4,
+          "min": 0
+        },
+        "actionText": {
+          "max": 0.4,
+          "min": 0
+        },
+        "background": {
+          "max": 0.4,
+          "min": 0
+        },
+        "border": {
+          "max": 0.4,
+          "min": 0
+        },
+        "dangerText": {
+          "max": 0.4,
+          "min": 0
+        },
+        "headings": {
+          "max": 0.4,
+          "min": 0
+        },
+        "headingsHover": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputCaret": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputSelection": {
+          "max": 0.4,
+          "min": 0
+        },
+        "inputSelectionBg": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer1": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer2": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer3": {
+          "max": 0.4,
+          "min": 0
+        },
+        "layer4": {
+          "max": 0.4,
+          "min": 0
+        },
+        "link": {
+          "max": 0.4,
+          "min": 0
+        },
+        "linkHover": {
+          "max": 0.4,
+          "min": 0
+        },
+        "linkHoverBg": {
+          "max": 0.4,
+          "min": 0
+        },
+        "shadow": {
+          "max": 0.4,
+          "min": 0
+        },
+        "text": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeCaption": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeLabel": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeLead": {
+          "max": 0.4,
+          "min": 0
+        },
+        "typeOverline": {
+          "max": 0.4,
+          "min": 0
+        }
+      },
+      "contexts": {
+        "subtle": {
+          "canvas": "anchor:mist",
+          "ink": {
+            "color": "anchor:paper",
+            "heading": "anchor:ember"
+          },
+          "accent": {
+            "color": "anchor:ember",
+            "text": "anchor:ember.text",
+            "hover": "anchor:ember.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:reed"
+        },
+        "raised": {
+          "canvas": "anchor:raised",
+          "ink": {
+            "color": "anchor:paper",
+            "heading": "anchor:ember"
+          },
+          "accent": {
+            "color": "anchor:ember",
+            "text": "anchor:ember.text",
+            "hover": "anchor:ember.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:reed"
+        },
+        "inverted": {
+          "canvas": "anchor:paper",
+          "ink": {
+            "color": "anchor:night",
+            "heading": "anchor:night"
+          },
+          "accent": {
+            "color": "anchor:reed",
+            "text": "anchor:reed.text",
+            "hover": "anchor:reed.hover"
+          },
+          "action": {
+            "color": "anchor:ember",
+            "ink": "anchor:night"
+          },
+          "structure": "anchor:root",
+          "lightness": {
+            "surface": 0.97,
+            "raised1": 0.94,
+            "raised2": 0.88,
+            "raised3": 0.8,
+            "raised4": 0.72,
+            "text": 0.28,
+            "ink": 0.14,
+            "border": 0.35
+          }
+        }
+      },
+      "dataPalette": {
+        "series1": "#000000",
+        "series2": "#E69F00",
+        "series3": "#56B4E9",
+        "series4": "#009E73",
+        "series5": "#F0E442",
+        "series6": "#0072B2",
+        "series7": "#D55E00",
+        "series8": "#CC79A7"
+      },
+      "dataRamps": {},
+      "explicitMappingTokens": [],
+      "fontBody": "\"Noto Sans\", sans-serif",
+      "fontBrand": "\"Inika\", serif",
+      "fontHeadings": "\"Inika\", serif",
+      "fontMenu": "",
+      "fontMonospace": "\"JetBrains Mono\", monospace",
+      "fontWeightBody": "normal",
+      "fontWeightBrand": "normal",
+      "fontWeightHeadings": "normal",
+      "fontWeightMenu": "bold",
+      "fontWeightMonospace": "normal",
+      "intents": {
+        "danger": "#b0005a",
+        "success": "#007a58",
+        "warning": "#a33a00",
+        "info": "#005ea8"
+      },
+      "lightness": {
+        "accent": 0.6,
+        "border": 0.7,
+        "ink": 0.95,
+        "muted": 0.75,
+        "raised1": 0.2,
+        "raised2": 0.3,
+        "raised3": 0.4,
+        "raised4": 0.36,
+        "shadow": 0.6,
+        "surface": 0.15,
+        "text": 0.85
+      },
+      "pageBackgroundImage": "",
+      "pageBackgroundImageOpacity": 0.55,
+      "roles": {
+        "canvas": "anchor:night",
+        "ink": {
+          "color": "anchor:paper",
+          "heading": "anchor:ember"
+        },
+        "accent": {
+          "color": "anchor:ember",
+          "text": "anchor:ember.text",
+          "hover": "anchor:ember.hover"
+        },
+        "action": {
+          "color": "anchor:ember",
+          "ink": "anchor:night"
+        },
+        "structure": "anchor:reed"
+      },
+      "rootFontSize": 16,
+      "seedColor": "oklch(.07 0.15 216)",
+      "semanticHues": {
+        "danger": 27,
+        "info": 244,
+        "success": 150,
+        "warning": 90
+      },
+      "semanticMappings": {
+        "actionBackground": {
+          "lightness": "raised3",
+          "source": "primary"
+        },
+        "actionText": {
+          "lightness": "ink",
+          "source": "primary"
+        },
+        "background": {
+          "lightness": "surface",
+          "source": "primary"
+        },
+        "border": {
+          "lightness": "border",
+          "source": "primary"
+        },
+        "dangerText": {
+          "lightness": "text",
+          "source": "danger"
+        },
+        "headings": {
+          "lightness": "muted",
+          "source": "primary"
+        },
+        "headingsHover": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "inputCaret": {
+          "lightness": "ink",
+          "source": "triadic-right"
+        },
+        "inputSelection": {
+          "lightness": "text",
+          "source": "complementary"
+        },
+        "inputSelectionBg": {
+          "lightness": "raised2",
+          "source": "triadic-left"
+        },
+        "layer1": {
+          "lightness": "raised1",
+          "source": "primary"
+        },
+        "layer2": {
+          "lightness": "raised2",
+          "source": "primary"
+        },
+        "layer3": {
+          "lightness": "raised3",
+          "source": "primary"
+        },
+        "layer4": {
+          "lightness": "raised4",
+          "source": "primary"
+        },
+        "link": {
+          "lightness": "accent",
+          "source": "complementary"
+        },
+        "linkHover": {
+          "lightness": "text",
+          "source": "complementary"
+        },
+        "linkHoverBg": {
+          "lightness": "raised2",
+          "source": "triadic-left"
+        },
+        "shadow": {
+          "lightness": "shadow",
+          "source": "primary"
+        },
+        "text": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeCaption": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeLabel": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeLead": {
+          "lightness": "text",
+          "source": "primary"
+        },
+        "typeOverline": {
+          "lightness": "text",
+          "source": "primary"
+        }
+      },
+      "spaceRatio": 1.618,
+      "stylesheets": [],
+      "tones": {},
+      "typeRatio": 1.25,
+      "variantChroma": {},
+      "viewportMax": 1200,
+      "viewportMin": 320
+    },
+    "defaultScheme": "system",
+    "fontBrand": "",
+    "fontWeightBrand": "",
+    "fontMenu": "",
+    "fontWeightMenu": "",
+    "lightLogoId": "a0000000-0000-4000-8000-0000000000a0",
+    "darkLogoId": "a0000000-0000-4000-8000-0000000000a1",
+    "lightCanvasImageId": "",
+    "darkCanvasImageId": "",
+    "lightCanvasImageOpacity": 0,
+    "darkCanvasImageOpacity": 0
+  }
+}

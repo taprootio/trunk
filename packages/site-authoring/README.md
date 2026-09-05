@@ -39,8 +39,8 @@ resolve a different contract than the CLI was tested against.
 `taproot-site --help` lists every verb and the configuration contract.
 `taproot-site help` is the offline reference family agents read before
 authoring: page types, components, navigation, media, previews, themes,
-appearance, and the footer, each with `--json` for stable machine-readable
-output.
+appearance, the footer, and the offline fixture contract, each with `--json`
+for stable machine-readable output.
 
 ```bash
 taproot-site help
@@ -57,6 +57,23 @@ page content and theme contexts, navigation references, the complete theme,
 appearance, header, brand, and footer, and fixture-local image identities. It
 does not prove authorization, site ownership, concurrency, server round trips,
 or rendering; a real pull and an authorized preview do that.
+
+The package ships one, so `validate` is runnable the moment the install
+finishes. `taproot-site help fixture` states the manifest contract and prints
+the shipped fixture's absolute path along with the exact command to validate
+it:
+
+```bash
+taproot-site help fixture
+taproot-site validate "$(npm root --global)/@taprootio/site-authoring/examples/riverbend-wellness"
+```
+
+The fixture is a fictional wellness studio — `example.test` hostnames, a
+reserved `555-01xx` telephone number, an invented street and town — with two
+free-form pages, a three-item navigation tree, and all four settings
+documents. Nothing in it describes a real business. Copy the directory
+somewhere writable before you edit it; `validate` never writes to the fixture
+it reads.
 
 ## Authorize
 
@@ -208,11 +225,15 @@ whose approval code and URL exist only as progress). Stdout carries exactly
 one JSON object per run, schema version `1`: `ok`, the CLI name and version,
 the verb, and the verb's own result on success; a stable `error.code` with an
 optional `field`, `status`, and classified `refusal` on failure. Exit codes are
-`0` success, `1` failure, and `2` usage fault. The four refusal classes an
+`0` success, `1` failure, and `2` usage fault. The five refusal classes an
 automation should branch on are `platform_paused` (external authoring is
 paused; retry later), `credential_rejected` (stop and re-issue),
-`plan_limit` (the plan's published-page allowance, surfaced at deploy), and
-`throttled` (back off).
+`capability_missing` (the credential is valid and correctly scoped but was
+not exchanged for a capability the request needs; the refusal carries
+`field: "GrantedCapabilities"`, and the CLI's human progress names the
+granted and required capabilities, so report the verb's declared set rather
+than re-issuing the key), `plan_limit` (the plan's published-page allowance,
+surfaced at deploy), and `throttled` (back off).
 
 When `GITHUB_OUTPUT` names the runner's existing output file, every
 operational verb appends the same JSON under `taproot_site_result` through a

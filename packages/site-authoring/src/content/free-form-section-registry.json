@@ -370,7 +370,7 @@
   "inlineFacts": {
     "nodeType": "inlineFacts",
     "label": "Inline facts",
-    "help": "A compact ordered row of labeled facts whose values may be native links.",
+    "help": "A compact ordered row of facts whose values may be native links. A fact that names itself needs no label.",
     "attrs": {
       "items": {
         "type": "array",
@@ -388,7 +388,8 @@
           },
           "label": {
             "type": "plain-text",
-            "required": true,
+            "required": false,
+            "default": null,
             "minScalars": 1,
             "maxScalars": 120,
             "nonWhitespace": true

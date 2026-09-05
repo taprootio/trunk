@@ -75,7 +75,9 @@ const VERBS = Object.freeze([
     offline: true,
     note: "Reads manifest.fixture.json plus the fixture's page, navigation, theme, appearance, header, brand, and footer files. "
       + "This proves local structure and semantics only. It does not prove authorization, live site ownership, concurrency, "
-      + "persisted round trips, or rendering; run a real pull and authorized preview before deployment.",
+      + "persisted round trips, or rendering; run a real pull and authorized preview before deployment. "
+      + `See '${CLI_BINARY_NAME} help fixture' for the manifest contract and for the path of the complete example `
+      + "fixture this package ships, which needs no credential and no pulled site.",
   },
   {
     name: VERB_LOGIN,
@@ -210,7 +212,10 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_NAV_PUSH,
-    capabilities: [CAPABILITY_DESIGN],
+    // Content is for the read, not the write: every PAGE nav item is checked
+    // against the live page list before the tree is replaced, and that list is
+    // gated on site.pages.edit_any (TR00691).
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
     tokens: ["nav", "push"],
     summary: "Replace the whole navigation tree from the local workspace.",
   },
@@ -251,7 +256,18 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_DEPLOY,
-    capabilities: [CAPABILITY_DEPLOYMENTS],
+    // Deployments is the only capability this verb *writes* with; the other two
+    // are for reads and re-reads the server makes on its behalf (TR00691).
+    // Content: --staging builds the candidate from the live page list
+    // (DeploySiteRequest.staged_page_ids names the ids explicitly), and that
+    // list is gated on site.pages.edit_any.
+    // Design: --production promotes a completed staging deployment, and the
+    // pipeline re-authorizes that deployment's *stored* candidate — every
+    // selected settings group and its navigation — against site.theme.manage,
+    // which only Design carries. Every candidate this CLI stages from a pulled
+    // workspace carries settings, navigation, or both, so a promotion without
+    // Design is refused.
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
     tokens: ["deploy"],
     summary: "Deploy to staging, or promote staging to production.",
     target: true,
@@ -265,6 +281,8 @@ const VERBS = Object.freeze([
     json: true,
     note: "Select the persisted draft by page path (as recorded by pull) or canonical lowercase UUID. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
+      + "Preview before approving: approve consumes the draft, so a page that has been approved has no draft "
+      + "left to render and answers preview.no_draft. Review it on staging after a deploy instead. "
       + "The handoff URL in the result is single-use and expires two minutes after it is minted: opening it "
       + "consumes it, and a reused, shared, or bookmarked preview URL answers Not found. Run preview page again "
       + "for another. "
@@ -292,6 +310,23 @@ const VERBS = Object.freeze([
       + " rather than pretending an empty list means a clean site.",
   },
 ]);
+
+/**
+ * The shipped verb table's capability declarations, keyed by verb name.
+ *
+ * Exported so the tests enforce the table rather than restate it. The claim
+ * each entry makes — "this is the smallest set this verb's requests need" —
+ * went four releases without anything checking it, and it was wrong twice:
+ * `nav push` and `deploy` were each short of a read they make on every run, and
+ * `deploy` was short again of the promotion re-authorization the server runs on
+ * state the request only names (TR00691). A verb with no entry needs no site
+ * credential at all.
+ */
+export const VERB_CAPABILITIES = Object.freeze(Object.fromEntries(
+  VERBS
+    .filter((verb) => verb.capabilities !== undefined)
+    .map((verb) => [verb.name, Object.freeze([...verb.capabilities])]),
+));
 
 const COMMON_OPTIONS = `Options:
   --config <path>  Place before a config-reading verb; bypass parent discovery.
@@ -464,6 +499,7 @@ function parseReferenceArguments(arguments_) {
       || topic === "theme"
       || topic === "appearance"
       || topic === "footer"
+      || topic === "fixture"
     )
     && (subject !== undefined || extra.length > 0)) {
     throw usageError("help.usage", `The '${topic}' topic does not accept a name.`);
@@ -515,6 +551,7 @@ function referenceResult(parsed) {
     case "nav":
     case "media":
     case "preview":
+    case "fixture":
       return { ...result, topic: "workflow", referenceKind: parsed.topic, reference: getWorkflowReference(parsed.topic) };
     case "theme":
       return { ...result, topic: "presentation", referenceKind: "theme", reference: getThemeReference() };
@@ -750,9 +787,16 @@ function parseArguments(arguments_) {
   return {
     mode: "run",
     verb: verb.name,
-    // The smallest capability set this verb's requests need. It reaches the
-    // exchange so a content push never holds deploy, and a pull never holds
-    // delete (TR00645).
+    // The smallest capability set this verb's requests need — every permission
+    // the server resolves for them, not only the ones the verb's writes name.
+    // It reaches the exchange so a content push never holds deploy, and a pull
+    // never holds delete (TR00645). Two things count beyond the writes
+    // (TR00691): a read (nav push and deploy each list the site's pages first,
+    // and that list is gated on a Content permission), and a re-authorization
+    // of server-held state (deploy --production re-checks the promoted
+    // candidate's stored settings and navigation against a Design permission).
+    // `VERB_CAPABILITIES` below is what the tests pin against the routes each
+    // verb actually calls.
     capabilities: verb.capabilities,
     configPath,
     quiet,

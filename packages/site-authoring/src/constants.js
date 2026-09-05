@@ -1,5 +1,5 @@
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.2.0";
+export const CLI_VERSION = "0.3.0";
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";
@@ -99,7 +99,7 @@ export const DEPLOY_TARGET_STAGING = "staging";
 export const DEPLOY_TARGET_PRODUCTION = "production";
 
 /**
- * The refusal vocabulary TR00602/TR00603 speak, collapsed into the four
+ * The refusal vocabulary TR00602/TR00603/TR00691 speak, collapsed into the five
  * distinct client behaviors plus an explicit "we do not know" value. The CLI
  * keeps these apart because an agent's correct next move differs for each:
  * see `ApiError.refusalKind()` in transport.js.
@@ -108,6 +108,7 @@ export const REFUSAL_PLATFORM_PAUSED = "platform_paused";
 export const REFUSAL_CREDENTIAL_REJECTED = "credential_rejected";
 export const REFUSAL_PLAN_LIMIT = "plan_limit";
 export const REFUSAL_THROTTLED = "throttled";
+export const REFUSAL_CAPABILITY_MISSING = "capability_missing";
 export const REFUSAL_UNCLASSIFIED = "unclassified";
 
 export const REFUSAL_KINDS = Object.freeze([
@@ -115,6 +116,7 @@ export const REFUSAL_KINDS = Object.freeze([
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_PLAN_LIMIT,
   REFUSAL_THROTTLED,
+  REFUSAL_CAPABILITY_MISSING,
   REFUSAL_UNCLASSIFIED,
 ]);
 
@@ -124,6 +126,25 @@ export const REFUSAL_KINDS = Object.freeze([
 export const ROLLOUT_REFUSAL_FIELD = "SiteAuthoringRollout";
 export const CREDENTIAL_REFUSAL_FIELD = "ExternalApiKey";
 export const PLAN_LIMIT_REFUSAL_FIELD = "UpgradePrompt";
+
+/**
+ * The `google.rpc.ErrorInfo` reason a key-mode permission denial carries
+ * (TR00691, `SiteAuthoringKeyDenial` on the server). A wire identity, matched
+ * exactly.
+ */
+export const CAPABILITY_REFUSAL_REASON = "SITE_AUTHORING_CAPABILITY_MISSING";
+
+/**
+ * The `field` a capability refusal reports on the JSON error.
+ *
+ * The server sends this refusal as `ErrorInfo`, not as a field violation — the
+ * request is well formed and the credential is too narrow, so a `BadRequest`
+ * would misstate the status. Automation still wants one shape to branch on, so
+ * the CLI names the field itself, exactly as `platform_paused` carries
+ * `SiteAuthoringRollout`. It is the CLI's own label rather than a value read
+ * off the wire, which is why nothing matches an incoming field against it.
+ */
+export const CAPABILITY_REFUSAL_FIELD = "GrantedCapabilities";
 
 // gRPC `ResourceExhausted`. Transcoded responses carry the numeric code in the
 // body; the HTTP mapping is 429.

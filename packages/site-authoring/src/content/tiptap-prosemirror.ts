@@ -496,10 +496,20 @@ function countUnicodeScalars(value: string): number {
 
 type NormalizedInlineFact = {
   value: string;
-  label: string;
+  label?: string;
   url?: string;
 };
 
+/**
+ * The row is a list, not a description list: a fact whose value names itself
+ * carries no label, and `dl` has no valid shape for a `dd` without a `dt`.
+ * The label keeps its leading source position so the CSS `order` rules that
+ * lift the value above it stay unchanged for a labelled fact. The list roles
+ * are explicit because `list-style: none` makes WebKit drop them, and the
+ * label is separated from the value by a space: search indexers take adjacent
+ * inline elements as one word, and a whitespace-only anonymous flex item is
+ * not rendered, so the row looks the same.
+ */
 function renderInlineFacts(
   node: ProseMirrorNode,
   options: RenderProseMirrorOptions,
@@ -512,17 +522,18 @@ function renderInlineFacts(
     const value = fact.url
       ? renderElement("a", { href: fact.url }, escapeHtml(fact.value))
       : escapeHtml(fact.value);
+    const label = fact.label === undefined
+      ? ""
+      : `${renderElement("span", { class: "taproot-inline-fact__label" }, escapeHtml(fact.label))} `;
     return renderElement(
-      "div",
-      { class: "taproot-inline-fact" },
-      `${renderElement("dt", { class: "taproot-inline-fact__label" }, escapeHtml(fact.label))}${
-        renderElement("dd", { class: "taproot-inline-fact__value" }, value)
-      }`,
+      "li",
+      { class: "taproot-inline-fact", role: "listitem" },
+      `${label}${renderElement("span", { class: "taproot-inline-fact__value" }, value)}`,
     );
   }).join("");
   return renderElement(
-    "dl",
-    withProseMeasure({ class: "taproot-inline-facts" }, node.type, options),
+    "ul",
+    withProseMeasure({ class: "taproot-inline-facts", role: "list" }, node.type, options),
     items,
   );
 }
@@ -544,14 +555,17 @@ function normalizeInlineFacts(node: ProseMirrorNode): NormalizedInlineFact[] | u
   for (const value of node.attrs.items) {
     if (!isRecord(value) || !hasOnlyKeys(value, fieldKeys)) return undefined;
     const factValue = stringAttr(value.value);
-    const label = stringAttr(value.label);
     if (
       !factValue
-      || !label
       || factValue.trim() === ""
-      || label.trim() === ""
       || countUnicodeScalars(factValue) > definition.fields.value.maxScalars
-      || countUnicodeScalars(label) > definition.fields.label.maxScalars
+    ) return undefined;
+    // An omitted or null label is the standalone fact; an empty string is a
+    // half-authored one and still fails the row closed.
+    const label = value.label === undefined || value.label === null ? undefined : stringAttr(value.label);
+    if (
+      value.label !== undefined && value.label !== null
+      && (!label || label.trim() === "" || countUnicodeScalars(label) > definition.fields.label.maxScalars)
     ) return undefined;
     const url = value.url === undefined || value.url === null ? undefined : stringAttr(value.url);
     if (value.url !== undefined && value.url !== null && (!url || !isSafeUrl(url))) return undefined;

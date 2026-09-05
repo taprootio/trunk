@@ -1,0 +1,26 @@
+{
+  "siteId": "a0000000-0000-4000-8000-000000000001",
+  "navItems": [
+    {
+      "id": "a0000000-0000-4000-8000-000000000030",
+      "kind": "NAV_ITEM_KIND_PAGE",
+      "title": "Home",
+      "resourceId": "a0000000-0000-4000-8000-000000000011",
+      "children": []
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000031",
+      "kind": "NAV_ITEM_KIND_PAGE",
+      "title": "Visit",
+      "resourceId": "a0000000-0000-4000-8000-000000000013",
+      "children": []
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000032",
+      "kind": "NAV_ITEM_KIND_EXTERNAL_URL",
+      "title": "Book a class",
+      "externalUrl": "https://schedule.example.test/riverbend",
+      "children": []
+    }
+  ]
+}

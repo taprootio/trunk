@@ -1,4 +1,6 @@
 import {
+  CAPABILITY_REFUSAL_FIELD,
+  CAPABILITY_REFUSAL_REASON,
   CLI_NAME,
   CLI_VERSION,
   CREDENTIAL_REFUSAL_FIELD,
@@ -9,6 +11,7 @@ import {
   LIMITS,
   PLAN_LIMIT_REFUSAL_FIELD,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
+  REFUSAL_CAPABILITY_MISSING,
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_PLAN_LIMIT,
   REFUSAL_PLATFORM_PAUSED,
@@ -330,21 +333,95 @@ function fieldDescriptions(value) {
   return descriptions;
 }
 
+/**
+ * A delegation capability or permission key as the server spells it. Anything
+ * outside this shape is dropped rather than repaired: these values reach a
+ * terminal and a machine-readable result, and a name the CLI cannot vouch for
+ * is worse than a name it does not print.
+ */
+const CAPABILITY_NAME = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
+const MAXIMUM_CAPABILITY_NAMES = 16;
+
+function capabilityNames(value) {
+  if (typeof value !== "string" || value === "") return [];
+  return value
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length <= 200 && CAPABILITY_NAME.test(name))
+    .slice(0, MAXIMUM_CAPABILITY_NAMES);
+}
+
+/**
+ * The key-mode capability denial the authoring API attaches as a
+ * `google.rpc.ErrorInfo` detail (TR00691), or undefined.
+ *
+ * The same bounded breadth-first walk the field extractors use, for the same
+ * reason: transcoded `details[]` entries are `Any`-packed, and pinning one path
+ * through them is how a contract change silently empties an extractor. The
+ * `reason` is the contract — a stable, namespaced classifier — so the walk
+ * keys on it rather than on `@type`, which a future packing could reshape.
+ */
+export function capabilityRefusal(value) {
+  const queue = [{ value, depth: 0 }];
+  let work = 0;
+  while (queue.length > 0 && work < 1_000) {
+    const current = queue.shift();
+    work += 1;
+    if (!current || current.depth > 8 || current.value === null || typeof current.value !== "object") continue;
+    const metadata = current.value.metadata;
+    if (
+      current.value.reason === CAPABILITY_REFUSAL_REASON
+      && metadata !== null
+      && typeof metadata === "object"
+      && !Array.isArray(metadata)
+    ) {
+      const permission = capabilityNames(metadata.permission)[0];
+      // A detail naming no permission is not this refusal, whatever it says:
+      // the guidance is built entirely out of these three values, and half of
+      // one would be a message nobody could act on.
+      if (permission !== undefined) {
+        return Object.freeze({
+          permission,
+          granted: Object.freeze(capabilityNames(metadata.granted)),
+          required: Object.freeze(capabilityNames(metadata.required)),
+        });
+      }
+    }
+    for (const child of Object.values(current.value)) {
+      if (child !== null && typeof child === "object") queue.push({ value: child, depth: current.depth + 1 });
+    }
+  }
+  return undefined;
+}
+
 export class ApiError extends SiteAuthoringError {
   constructor(httpStatus, body) {
     const grpcCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
     const fields = fieldViolations(body);
+    const capability = capabilityRefusal(body);
     super(
       "api.request_rejected",
       fields.length > 0
         ? `Taproot rejected the request field '${fields[0]}'.`
+        : capability !== undefined
+        ? `Taproot refused the request: this credential does not carry a capability granting '${
+          capability.permission
+        }'.`
         : `Taproot rejected the request with HTTP ${httpStatus}.`,
-      { field: fields[0], status: grpcCode === undefined ? `http:${httpStatus}` : `grpc:${grpcCode}` },
+      {
+        // `fields` stays exactly what the wire named. The capability field is
+        // the CLI's own label for a refusal that carries no field violation at
+        // all, so it lands on the error without joining the wire-derived set
+        // that `hasField()` classifies on.
+        field: fields[0] ?? (capability === undefined ? undefined : CAPABILITY_REFUSAL_FIELD),
+        status: grpcCode === undefined ? `http:${httpStatus}` : `grpc:${grpcCode}`,
+      },
     );
     this.httpStatus = httpStatus;
     this.grpcCode = grpcCode;
     this.fields = fields;
     this.violationDescriptions = fieldDescriptions(body);
+    this.capability = capability;
   }
 
   hasField(field) {
@@ -366,7 +443,7 @@ export class ApiError extends SiteAuthoringError {
 
   /**
    * Classifies a refusal into the one thing the caller should do next. The
-   * four kinds are genuinely different behaviors, and collapsing them into
+   * five kinds are genuinely different behaviors, and collapsing them into
    * "the request failed" is what makes an agent retry a revoked credential
    * forever or treat a plan ceiling as a transient outage:
    *
@@ -393,6 +470,13 @@ export class ApiError extends SiteAuthoringError {
    *   never invents the numeric limit.
    * - `throttled` (gRPC `ResourceExhausted` / HTTP 429) — the per-key
    *   throttle. **Back off** and retry with delay.
+   * - `capability_missing` (`ErrorInfo` reason `SITE_AUTHORING_CAPABILITY_MISSING`)
+   *   — the credential is valid and correctly scoped, and simply was not
+   *   exchanged for a capability this request needs. **Fix the verb table**,
+   *   not the credential: the exchange minted exactly what the verb asked for,
+   *   so a verb whose declared set is short of the requests it makes is the
+   *   defect. Distinguished from `credential_rejected` precisely because
+   *   re-issuing the same credential cannot help (TR00691).
    *
    * Anything else is `unclassified`, which is a signal to surface the raw
    * status rather than to guess.
@@ -403,6 +487,9 @@ export class ApiError extends SiteAuthoringError {
     if (this.hasField(ROLLOUT_REFUSAL_FIELD)) return REFUSAL_PLATFORM_PAUSED;
     if (this.hasField(CREDENTIAL_REFUSAL_FIELD)) return REFUSAL_CREDENTIAL_REJECTED;
     if (this.hasField(PLAN_LIMIT_REFUSAL_FIELD)) return REFUSAL_PLAN_LIMIT;
+    // The named detail ranks with the fields and above the status mappings, for
+    // the same reason: it is the specific statement about this refusal.
+    if (this.capability !== undefined) return REFUSAL_CAPABILITY_MISSING;
     if (this.grpcCode === GRPC_RESOURCE_EXHAUSTED || this.httpStatus === HTTP_TOO_MANY_REQUESTS) {
       return REFUSAL_THROTTLED;
     }

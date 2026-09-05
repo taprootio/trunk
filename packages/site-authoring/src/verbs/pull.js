@@ -9,7 +9,7 @@ import {
   TEMPLATE_TYPE_FREE_FORM,
   withRefusalGuidance,
 } from "../api.js";
-import { REFUSAL_UNCLASSIFIED, VERB_PULL } from "../constants.js";
+import { REFUSAL_CAPABILITY_MISSING, REFUSAL_UNCLASSIFIED, VERB_PULL } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
 import { boundedList, openSession, successResult } from "../session.js";
@@ -94,8 +94,10 @@ import {
 
 const MAXIMUM_REPORTED = 200;
 // A settings group the credential's envelope does not reach is a narrower
-// snapshot, not a failed pull. Anything the transport classified as a refusal
-// is a different matter and always propagates.
+// snapshot, not a failed pull. The server names that shortfall as a
+// capability denial (TR00691), and an older server answers a bare 403; both
+// mean the same thing here. Any other classified refusal — a rejected
+// credential, the rollout switch, a plan ceiling — always propagates.
 const UNAVAILABLE_SETTINGS_STATUSES = new Set([403, 404]);
 const APPEARANCE_SETTINGS_TYPES = Object.freeze([
   SETTINGS_TYPE_TAPROOT_STYLES,
@@ -435,7 +437,8 @@ export async function pull(invocation) {
       } catch (error) {
         if (
           error instanceof ApiError
-          && error.refusalKind() === REFUSAL_UNCLASSIFIED
+          && (error.refusalKind() === REFUSAL_UNCLASSIFIED
+            || error.refusalKind() === REFUSAL_CAPABILITY_MISSING)
           && UNAVAILABLE_SETTINGS_STATUSES.has(error.httpStatus)
         ) {
           onProgress(`Settings group ${group.settingsType} is not readable by this credential; skipping it.`);

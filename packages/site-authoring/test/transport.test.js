@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { REFUSAL_KINDS } from "../src/constants.js";
-import { ApiError, fieldViolations, SiteApiClient } from "../src/transport.js";
+import { CAPABILITY_REFUSAL_REASON, REFUSAL_KINDS } from "../src/constants.js";
+import { ApiError, capabilityRefusal, fieldViolations, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
 
 const API_BASE_URL = "https://app.taproot.test/api";
@@ -39,6 +39,30 @@ function makeClient(fetch, overrides = {}) {
 function violation(field) {
   return { details: [{ fieldViolations: [{ field }] }] };
 }
+
+/**
+ * The transcoded shape `SiteAuthoringKeyDenial` produces for a key-mode
+ * permission denial (TR00691): one `google.rpc.ErrorInfo` detail, no field
+ * violation, because the request is well formed and the credential is narrow.
+ */
+function capabilityDetail(metadata) {
+  return {
+    code: 7,
+    message: "Permission is not granted in this scope.",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason: CAPABILITY_REFUSAL_REASON,
+      domain: "taproot-site-authoring",
+      metadata,
+    }],
+  };
+}
+
+const DESIGN_ONLY_PAGE_LIST = capabilityDetail({
+  permission: "site.pages.edit_any",
+  granted: "delegation.design",
+  required: "delegation.content",
+});
 
 test("refuses a non-reviewed origin before it ever holds a bearer token", () => {
   for (const apiBaseUrl of ["https://attacker.example/api", "http://app.taproot.io/api", "https://app.taproot.io/v1"]) {
@@ -120,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.2.0");
+  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.3.0");
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });
@@ -639,6 +663,70 @@ test("collects nested field violations without unbounded or unsafe values", () =
   );
 });
 
+test("reads the key-mode capability denial out of its packed error detail", async (testContext) => {
+  await testContext.test("the shipped shape", () => {
+    assert.deepEqual(capabilityRefusal(DESIGN_ONLY_PAGE_LIST), {
+      permission: "site.pages.edit_any",
+      granted: ["delegation.design"],
+      required: ["delegation.content"],
+    });
+  });
+
+  await testContext.test("multiple capabilities on either side", () => {
+    assert.deepEqual(
+      capabilityRefusal(capabilityDetail({
+        permission: "site.media.manage",
+        granted: "delegation.deployments",
+        required: "delegation.content,delegation.design",
+      })),
+      {
+        permission: "site.media.manage",
+        granted: ["delegation.deployments"],
+        required: ["delegation.content", "delegation.design"],
+      },
+    );
+  });
+
+  // A permission no capability carries is a real answer, and the one an agent
+  // most needs: no amount of widening the exchange will reach it.
+  await testContext.test("a permission no capability carries", () => {
+    assert.deepEqual(
+      capabilityRefusal(capabilityDetail({
+        permission: "site.settings.manage",
+        granted: "delegation.content,delegation.design,delegation.deployments",
+        required: "",
+      })).required,
+      [],
+    );
+  });
+
+  await testContext.test("names the CLI cannot vouch for are dropped, never printed", () => {
+    assert.deepEqual(
+      capabilityRefusal(capabilityDetail({
+        permission: "site.pages.edit_any",
+        granted: `delegation.design,delegation.${String.fromCodePoint(13)}spoof,DELEGATION.SHOUTY,x`.concat(
+          `,${"y".repeat(400)}`,
+        ),
+        required: "delegation.content",
+      })).granted,
+      ["delegation.design"],
+    );
+  });
+
+  await testContext.test("a detail naming no permission is not this refusal", () => {
+    for (
+      const body of [
+        capabilityDetail({ granted: "delegation.design", required: "delegation.content" }),
+        capabilityDetail({ permission: "not a permission", required: "delegation.content" }),
+        { code: 7, details: [{ reason: "SOMETHING_ELSE", metadata: { permission: "site.pages.edit_any" } }] },
+        { code: 7 },
+      ]
+    ) {
+      assert.equal(capabilityRefusal(body), undefined);
+    }
+  });
+});
+
 test("classifies every refusal the authoring surface speaks", async (testContext) => {
   const cases = [
     { name: "rollout", status: 503, body: { code: 14, ...violation("SiteAuthoringRollout") }, kind: "platform_paused" },
@@ -664,6 +752,10 @@ test("classifies every refusal the authoring surface speaks", async (testContext
       kind: "credential_rejected",
     },
     { name: "plan limit", status: 400, body: { code: 3, ...violation("UpgradePrompt") }, kind: "plan_limit" },
+    // The credential is valid, correctly scoped, and simply narrower than the
+    // request. Classified apart from `credential_rejected` because re-issuing
+    // the same credential cannot help: the verb table is what is wrong.
+    { name: "capability missing", status: 403, body: DESIGN_ONLY_PAGE_LIST, kind: "capability_missing" },
     { name: "grpc throttle", status: 400, body: { code: 8 }, kind: "throttled" },
     { name: "http throttle", status: 429, body: {}, kind: "throttled" },
     { name: "ordinary validation", status: 400, body: { code: 3, ...violation("Path") }, kind: "unclassified" },

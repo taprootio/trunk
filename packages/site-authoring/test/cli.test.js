@@ -6,7 +6,9 @@ import test from "node:test";
 
 import { runCli } from "../src/cli.js";
 import { SiteAuthoringError } from "../src/errors.js";
+import { shippedFixtureDirectory } from "../src/fixture-contract.js";
 
+const SHIPPED_FIXTURE_DIRECTORY = shippedFixtureDirectory();
 const PAGE_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const SNAPSHOT_ID = "11111111-2222-4333-8444-555555555555";
 const SITE_ID = "aaaa1111-bbbb-4111-8111-cccc11111111";
@@ -25,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
     verb,
   };
 }
@@ -558,7 +560,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.2.0\n");
+    assert.equal(versionStdout.read(), "0.3.0\n");
   }
 });
 
@@ -671,6 +673,27 @@ test("serves page and component reference help without configuration, credential
         "featureImage",
       ],
     },
+    {
+      arguments_: ["help", "fixture"],
+      match: /^Offline fixture manifest contract/u,
+      contains: [
+        "Shipped example: ",
+        `Validate it: taproot-site validate "${SHIPPED_FIXTURE_DIRECTORY}"`,
+        "Required root fields: manifestVersion, siteId, pages, pagesTruncated, navigation, settings, "
+        + "settingsSkipped, fixture.",
+        "Accepted and not read: pulledAt, deployments",
+        "manifestVersion must be 5; fixture.contractVersion must be 1.",
+        "workspaceMode editable",
+        ".md is 'markdown', .pm.json is 'prosemirror'",
+        "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty",
+        'navigation binds { file: "nav.json", items }',
+        "settings binds all 4 authorable groups",
+        "SETTING_TYPE_SITE_PUBLISHING_PREFERENCES to 'settings/site-publishing-preferences.json'",
+        "contractVersion, imageIds, deliveryOrigins",
+        "on example.test or a subdomain of it, at most 100 of them",
+        "validate reads the fixture and writes nothing to it.",
+      ],
+    },
   ];
   for (const scenario of cases) {
     await context.test(scenario.arguments_.join(" "), async () => {
@@ -710,6 +733,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "theme", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "appearance", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "footer", "--json"], topic: "presentation", field: "reference" },
+    { arguments_: ["help", "fixture", "--json"], topic: "workflow", field: "reference" },
   ];
   for (const scenario of cases) {
     await context.test(scenario.topic, async () => {
@@ -728,9 +752,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.2.0" },
+          cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
           verb: "help",
-          referenceVersion: 15,
+          referenceVersion: 16,
           topic: scenario.topic,
         },
       );
@@ -782,6 +806,7 @@ test("reference help reports stable usage errors with valid alternatives", async
         "theme",
         "appearance",
         "footer",
+        "fixture",
       ],
     },
     {

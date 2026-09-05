@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -19,11 +21,20 @@ import {
   formatReferenceResult,
   getComponentReference,
   getPageTypeReference,
+  getWorkflowReference,
   listComponentTypeReferences,
   listPageTypeReferences,
   PAGE_TYPES,
   REFERENCE_VERSION,
 } from "../../src/reference-help.js";
+import {
+  FIXTURE_CONTRACT_VERSION,
+  FIXTURE_MANIFEST_FILE_NAME,
+  FIXTURE_REQUIRED_ROOT_FIELDS,
+  shippedFixtureDirectory,
+} from "../../src/fixture-contract.js";
+import { SETTINGS_GROUPS } from "../../src/settings-catalog.js";
+import { MANIFEST_VERSION } from "../../src/workspace.js";
 import { FREE_FORM_SECTION_REGISTRY } from "../../src/content/free-form-sections.js";
 
 function componentDocument(componentType, data) {
@@ -37,7 +48,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 15);
+  assert.equal(REFERENCE_VERSION, 16);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -359,17 +370,24 @@ test("inline-facts reference is executable and documents the canonical SHY row",
   assert.deepEqual(
     facts.attrs.items.fields.slice(0, 2).map((field) => ({
       name: field.name,
+      required: field.required,
+      default: field.default,
       minScalars: field.minScalars,
       maxScalars: field.maxScalars,
       nonWhitespace: field.nonWhitespace,
     })),
     [
-      { name: "value", minScalars: 1, maxScalars: 120, nonWhitespace: true },
-      { name: "label", minScalars: 1, maxScalars: 120, nonWhitespace: true },
+      { name: "value", required: true, default: undefined, minScalars: 1, maxScalars: 120, nonWhitespace: true },
+      { name: "label", required: false, default: null, minScalars: 1, maxScalars: 120, nonWhitespace: true },
     ],
   );
+  assert.match(facts.labelPolicy, /^Optional non-whitespace plain text/u);
+  assert.match(facts.labelPolicy, /Omit it when the value already names itself/u);
+  assert.match(facts.labelPolicy, /An empty string is rejected/u);
   assert.deepEqual(validateDocument({ type: "doc", content: [facts.examples.proseMirror] }).errors, []);
   assert.ok(facts.examples.items.some((item) => item.url?.startsWith("tel:")));
+  // The published example must itself demonstrate the standalone fact.
+  assert.ok(facts.examples.items.some((item) => item.label === undefined));
 
   const converted = await markdownToProseMirror(facts.markdown.example, {
     resolveImage: async () => {
@@ -382,6 +400,8 @@ test("inline-facts reference is executable and documents the canonical SHY row",
   assert.match(output, /Inline facts:/u);
   assert.match(output, /1 through 6/u);
   assert.match(output, /maximum 120 Unicode scalar values/u);
+  assert.match(output, /value +Required non-whitespace plain text/u);
+  assert.match(output, /label +Optional non-whitespace plain text/u);
   assert.match(output, /tel: remains a native link/u);
   assert.match(output, /other schemes, backslashes, and ASCII controls are rejected/u);
   assert.match(output, /```inline-facts/u);
@@ -540,6 +560,33 @@ test("URL references name protocol-relative, native-action, backslash, and ASCII
   assert.match(heroCta.schema.description, /mailto, or tel/u);
 });
 
+test("every borderWidth says what it boxes, and the grids say their item text is plain", () => {
+  // TR00706: a shared field name is a promise the field behaves the same way,
+  // so each borderWidth names its own subject and the two grids agree.
+  const boxed = {
+    "feature-grid": /border around each item, as on a card grid; the grid itself is never framed/u,
+    "card-grid": /border around each card; the grid itself is never framed/u,
+    "cta": /border around the call-to-action panel/u,
+    "testimonial": /border around the whole set of quotations — the grid or the carousel/u,
+  };
+  for (const [componentType, expected] of Object.entries(boxed)) {
+    const component = getComponentReference(componentType);
+    const borderWidth = component.properties.find((property) => property.name === "borderWidth");
+    assert.match(borderWidth.schema.description, expected);
+    // The description reaches the printed help, not only the JSON schema.
+    assert.match(formatReferenceResult({ topic: "component", component }), expected);
+  }
+
+  for (const [componentType, linkField] of [["feature-grid", "url"], ["card-grid", "linkUrl"]]) {
+    const component = getComponentReference(componentType);
+    const plainText = component.accessibility.find((note) => note.includes("plain text"));
+    assert.ok(plainText, `${componentType} guidance must state that item text is plain text.`);
+    assert.match(plainText, new RegExp(`${linkField} makes the whole (item|card) the link`, "u"));
+    assert.match(plainText, /Put linked prose in a paragraph beside the grid/u);
+    assert.match(formatReferenceResult({ topic: "component", component }), /Put linked prose in a paragraph/u);
+  }
+});
+
 test("collection references distinguish editor seed rows from renderer omission behavior", () => {
   for (const [componentType, propertyName] of [
     ["feature-grid", "items"],
@@ -609,4 +656,57 @@ test("every nested object schema explicitly rejects unlisted properties", () => 
     assert.equal(reference.additionalProperties, false);
     for (const property of reference.properties) assertClosed(property.schema);
   }
+});
+
+test("the fixture reference is the shipped fixture's own manifest, not a restatement of it", async () => {
+  const reference = getWorkflowReference("fixture");
+  const directory = shippedFixtureDirectory();
+
+  assert.equal(reference.fixtureDirectory, directory);
+  // The example is the file `validate` reads, so a fixture edit cannot leave
+  // `help fixture` describing the previous one.
+  assert.deepEqual(
+    reference.example,
+    JSON.parse(await readFile(path.join(directory, FIXTURE_MANIFEST_FILE_NAME), "utf8")),
+  );
+
+  // Every derived claim is read from the constants the verb enforces.
+  const details = reference.details.join("\n");
+  assert.ok(details.includes(`manifestVersion must be ${MANIFEST_VERSION}`));
+  assert.ok(details.includes(`fixture.contractVersion must be ${FIXTURE_CONTRACT_VERSION}`));
+  assert.ok(details.includes(`settings binds all ${SETTINGS_GROUPS.length} authorable groups`));
+  for (const group of SETTINGS_GROUPS) {
+    assert.ok(details.includes(`${group.settingsType} to 'settings/${group.file}'`), group.settingsType);
+  }
+  for (const field of FIXTURE_REQUIRED_ROOT_FIELDS) {
+    assert.ok(reference.example[field] !== undefined, `the example omits required field '${field}'`);
+  }
+
+  const human = formatReferenceResult({ topic: "workflow", reference });
+  assert.ok(human.includes(`Shipped example: ${directory}`));
+  assert.ok(human.includes(`Validate it: taproot-site validate "${directory}"`));
+  assert.ok(human.includes(`\n\nExample:\n${JSON.stringify(reference.example, null, 2)}\n`));
+});
+
+test("a workflow reference without a shipped fixture renders exactly as it did", () => {
+  const human = formatReferenceResult({ topic: "workflow", reference: getWorkflowReference("nav") });
+  assert.ok(!human.includes("Shipped example:"));
+  assert.match(human, /^Navigation workspace contract\n/u);
+  assert.ok(human.includes("\n\nExample:\n"));
+});
+
+test("a fixture reference whose shipped file is unavailable still states the whole contract", () => {
+  // What a `node_modules` pruner or an image-slimming step leaves behind: the
+  // contract is complete without the example, so the topic drops the example
+  // and the path it could not offer rather than failing. The pruned-install
+  // test in package.test.js exercises the same degradation end to end.
+  const { example, fixtureDirectory, ...pruned } = getWorkflowReference("fixture");
+  assert.notEqual(example, undefined);
+  assert.notEqual(fixtureDirectory, undefined);
+
+  const human = formatReferenceResult({ topic: "workflow", reference: pruned });
+  assert.match(human, /^Offline fixture manifest contract\n/u);
+  assert.ok(!human.includes("Example:"));
+  assert.ok(!human.includes("Shipped example:"));
+  for (const detail of pruned.details) assert.ok(human.includes(`  - ${detail}`), detail);
 });
