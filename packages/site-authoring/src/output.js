@@ -42,6 +42,15 @@ export function failureResult(error) {
   if (Array.isArray(error.completedWrites) && error.completedWrites.length > 0) {
     result.error.completedWrites = error.completedWrites;
   }
+  // Three states, and an agent acts differently on each. Absent: the two
+  // documents were never compared, because this workspace kept no copy of the
+  // site's previous version. Empty: they were compared and the body is
+  // identical, so the change that raised the conflict is in the page's title,
+  // path, or description. Non-empty: the JSON paths at which they differ.
+  // Suppressing the empty array would collapse the first two into one.
+  if (Array.isArray(error.differences)) {
+    result.error.differences = error.differences;
+  }
   const previewRecovery = normalizePreviewRecovery(error.previewRecovery);
   if (previewRecovery) result.error.preview = previewRecovery;
   const refusal = typeof error.refusalKind === "function" ? error.refusalKind() : undefined;

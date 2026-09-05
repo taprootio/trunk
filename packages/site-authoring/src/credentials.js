@@ -6,6 +6,7 @@ import path from "node:path";
 import { atomicWriteFile } from "./atomic-file.js";
 import { readBoundedFile } from "./bounded-file.js";
 import { SITE_AUTHORING_CAPABILITIES } from "./capabilities.js";
+import { parseCliVersion } from "./cli-release.js";
 
 import {
   CANONICAL_TIMESTAMP,
@@ -63,6 +64,11 @@ export const KEY_PREFIX = /^[\w.-]{1,64}$/u;
 const PROJECTION_UUID = "00000000-0000-4000-8000-000000000000";
 const PROJECTION_TIMESTAMP = "2000-01-01T00:00:00.000Z";
 const PROJECTION_KEY_PREFIX_LENGTH = 64;
+// A version string as long as the reader admits (MAXIMUM_VERSION_LENGTH in
+// cli-release.js, 64 characters), for the same reason the prefix above is
+// padded: the projection is an upper bound on the record a first exchange will
+// write (TR00703).
+const PROJECTION_LATEST_CLI_VERSION = `999999.999999.999999-${"a".repeat(43)}`;
 
 function usableDirectory(value) {
   return typeof value === "string"
@@ -134,9 +140,17 @@ function normalizeEntry(entry) {
     "A stored credential record has an invalid createdAt.",
   );
   // What the last exchange produced. Entirely non-secret — a site id, the
-  // capabilities that exchange asked for, and when the credential it returned
-  // dies — and the only way `whoami` can answer "what can this actually do"
-  // without a network round trip. Absent before the first exchange.
+  // capabilities that exchange asked for, when the credential it returned dies,
+  // when the exchange happened, and what Taproot then said about the
+  // platform-wide authoring switch — and the only way `whoami` can answer "what
+  // can this actually do" without a network round trip. Absent before the first
+  // exchange.
+  //
+  // `at` and `externalWritesEnabled` are optional on top of that (TR00692), and
+  // `latestCliVersion` on top of those (TR00703): a record written by an
+  // earlier version carries none of them, and a server that predates either
+  // field carries no value for it. Refusing those would make a routine upgrade
+  // look like a corrupt store.
   requireStoreShape(
     entry.lastExchange === undefined
       || (entry.lastExchange !== null
@@ -146,7 +160,16 @@ function normalizeEntry(entry) {
         && Array.isArray(entry.lastExchange.capabilities)
         && entry.lastExchange.capabilities.every((value) => typeof value === "string")
         && typeof entry.lastExchange.expiresAt === "string"
-        && CANONICAL_TIMESTAMP.test(entry.lastExchange.expiresAt)),
+        && CANONICAL_TIMESTAMP.test(entry.lastExchange.expiresAt)
+        && (entry.lastExchange.at === undefined
+          || (typeof entry.lastExchange.at === "string" && CANONICAL_TIMESTAMP.test(entry.lastExchange.at)))
+        && (entry.lastExchange.externalWritesEnabled === undefined
+          || typeof entry.lastExchange.externalWritesEnabled === "boolean")
+        // Only a version this side can compare is admitted, because the value's
+        // whole job is to be compared: a record carrying something unparseable
+        // could never gate anything, so storing it would be storing noise.
+        && (entry.lastExchange.latestCliVersion === undefined
+          || parseCliVersion(entry.lastExchange.latestCliVersion) !== undefined)),
     "A stored credential record has an invalid lastExchange.",
   );
   return Object.freeze({
@@ -161,6 +184,13 @@ function normalizeEntry(entry) {
         siteId: entry.lastExchange.siteId,
         capabilities: Object.freeze([...entry.lastExchange.capabilities]),
         expiresAt: entry.lastExchange.expiresAt,
+        ...(entry.lastExchange.at === undefined ? {} : { at: entry.lastExchange.at }),
+        ...(entry.lastExchange.externalWritesEnabled === undefined
+          ? {}
+          : { externalWritesEnabled: entry.lastExchange.externalWritesEnabled }),
+        ...(entry.lastExchange.latestCliVersion === undefined
+          ? {}
+          : { latestCliVersion: entry.lastExchange.latestCliVersion }),
       }),
     }),
     createdAt: entry.createdAt,
@@ -469,6 +499,11 @@ export async function assertCredentialCapacity(environment, apiOrigin) {
       siteId: PROJECTION_UUID,
       capabilities: [...SITE_AUTHORING_CAPABILITIES],
       expiresAt: PROJECTION_TIMESTAMP,
+      at: PROJECTION_TIMESTAMP,
+      // `false` rather than `true`: it serializes one byte longer, and the
+      // projection's whole job is to be an upper bound on the real record.
+      externalWritesEnabled: false,
+      latestCliVersion: PROJECTION_LATEST_CLI_VERSION,
     },
     createdAt: PROJECTION_TIMESTAMP,
   });

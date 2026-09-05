@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,12 +15,14 @@ import {
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
 import { runCli, VERB_CAPABILITIES } from "../src/cli.js";
-import { CAPABILITY_REFUSAL_REASON } from "../src/constants.js";
+import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY } from "../src/constants.js";
+import { saveCredential } from "../src/credentials.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
 import { failureResult } from "../src/output.js";
+import { REDIRECT_LIMITS } from "../src/redirects-contract.js";
 import { approve } from "../src/verbs/approve.js";
 import { deploy } from "../src/verbs/deploy.js";
 import { footerPush } from "../src/verbs/footer-push.js";
@@ -30,6 +33,8 @@ import { pagesPush } from "../src/verbs/pages-push.js";
 import { previewPage } from "../src/verbs/preview-page.js";
 import { previewRevoke } from "../src/verbs/preview-revoke.js";
 import { pull } from "../src/verbs/pull.js";
+import { redirectsPull } from "../src/verbs/redirects-pull.js";
+import { redirectsPush } from "../src/verbs/redirects-push.js";
 import { status } from "../src/verbs/status.js";
 import { themePush } from "../src/verbs/theme-push.js";
 import { readWorkspaceFile, workspaceContentHash, writeWorkspaceFile } from "../src/workspace.js";
@@ -205,6 +210,14 @@ const REQUIRED_QUERY = [
 ];
 
 function api(routes) {
+  // `pull` reads the redirect map on every run (TR00702), so a test that is not
+  // about redirects would otherwise have to declare the route just to get past
+  // it. The default is what a site with no redirects answers; a test that cares
+  // declares its own GET route, which wins because route matching takes the
+  // first entry.
+  const effectiveRoutes = routes.some((route) => route.method === "GET" && route.pattern === REDIRECT_MAP)
+    ? routes
+    : [...routes, { method: "GET", pattern: REDIRECT_MAP, reply: emptyRedirectMap() }];
   const calls = [];
   const queryViolations = [];
   const fetchImpl = async (url, init = {}) => {
@@ -245,7 +258,7 @@ function api(routes) {
       }
     }
     // A route may also pin its own expectations for a one-off case.
-    for (const route of routes) {
+    for (const route of effectiveRoutes) {
       if (route.method !== method || !route.pattern.test(target.pathname)) continue;
       for (const [name, expected] of Object.entries(route.expectQuery ?? {})) {
         assert.equal(target.searchParams.get(name), expected, `${method} ${target.pathname} query ${name}`);
@@ -370,6 +383,16 @@ const PAGE_BY_ID = /^\/api\/v1\/pages\/[^/]+$/u;
 const PUBLISH_DRAFTS = /^\/api\/v1\/pages\/publish_drafts$/u;
 const PAGES_COLLECTION = /^\/api\/v1\/pages$/u;
 const NAVIGATION = /\/navigation$/u;
+const REDIRECT_MAP = /\/redirects$/u;
+// A deterministic stand-in for the server's map hash. It is 64 lowercase hex
+// characters because that is what the CLI accepts as a revision; its value
+// carries no meaning beyond being stable across a test's read and its push.
+const REDIRECT_REVISION = "a".repeat(64);
+const NEXT_REDIRECT_REVISION = "b".repeat(64);
+
+function emptyRedirectMap() {
+  return { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: [] };
+}
 const SETTINGS = /^\/api\/v1\/settings\//u;
 const SETTING = /^\/api\/v1\/setting$/u;
 const FOOTER_SETTINGS = /\/footer-settings$/u;
@@ -385,6 +408,10 @@ const PRESIGNED_PUT = /^\/upload$/u;
 const PREVIEW_CREATE = /\/authoring-previews\/pages\/[^/]+$/u;
 const PREVIEW_STATUS = /\/authoring-previews\/pages\/[^/]+\/[^/:]+$/u;
 const PREVIEW_MINT = /\/authoring-previews\/pages\/[^/]+\/[^/]+:mint-handoff$/u;
+// The sign-in exchange, reached with the account credential rather than a site
+// one — the only response that reports the platform authoring switch (TR00692).
+const TOKEN_EXCHANGE = /^\/api\/v1\/site-authoring\/tokens:exchange$/u;
+const EXCHANGED_KEY = "tr_live_exchanged_site_credential_never_logged";
 
 // ── The server's key-mode capability gate, mirrored on the fake wire ─────────
 //
@@ -431,6 +458,10 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "PATCH", pattern: PAGE_BY_ID, permission: "site.pages.edit_any" },
   { method: "GET", pattern: NAVIGATION, permission: "site.theme.manage" },
   { method: "PUT", pattern: NAVIGATION, permission: "site.theme.manage" },
+  // A redirect is a content path, so both halves of the map resolve the
+  // permission that governs page paths (TR00702).
+  { method: "GET", pattern: REDIRECT_MAP, permission: "site.pages.edit_any" },
+  { method: "PUT", pattern: REDIRECT_MAP, permission: "site.pages.edit_any" },
   { method: "GET", pattern: SETTINGS, permission: "site.theme.manage" },
   { method: "POST", pattern: SETTING, permission: "site.theme.manage" },
   { method: "POST", pattern: FOOTER_SETTINGS, permission: "site.theme.manage" },
@@ -567,7 +598,7 @@ function capabilityGatedFetch(verbName, fetchImpl) {
 
 function manifestFixture(pages, extra = {}) {
   return {
-    manifestVersion: 5,
+    manifestVersion: 6,
     siteId: SITE_ID,
     pulledAt: "2026-08-20T00:00:00.000Z",
     navigation: { file: "nav.json", items: 1 },
@@ -804,7 +835,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.deepEqual((await readWorkspaceJson(workspace, "nav.json")).navItems.length, 1);
 
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 5);
+  assert.equal(manifest.manifestVersion, 6);
   assert.equal(manifest.siteId, SITE_ID);
   assert.equal(manifest.pulledAt, new Date(1_700_000_000_000).toISOString());
   assert.deepEqual(manifest.pages.map((entry) => [
@@ -1820,12 +1851,38 @@ function trackedAboutEntry(overrides = {}) {
  * One live free-form page whose stored body the test owns, so a pull can be
  * run twice against a body that did or did not move underneath the author.
  */
-function trackedRoutes(state) {
+/**
+ * A stand-in for the API's own body revision: opaque to the CLI, derived from
+ * the stored state the site holds, and — the point of it — untouched by the
+ * delivery fields a real read re-projects over the body it returns.
+ */
+function siteRevision(state) {
+  return `v1:${
+    createHash("sha256")
+      .update(JSON.stringify([state.title, state.path, state.description, state.body]))
+      .digest("hex")
+  }`;
+}
+
+/**
+ * @param state the stored page state the test owns.
+ * @param options `reportsRevision: false` answers the way a Taproot that
+ *   predates the revision contract does — no `bodyRevision` on any read, which
+ *   is what the published CLI meets whenever it runs ahead of the deployed API.
+ */
+function trackedRoutes(state, { reportsRevision = true } = {}) {
+  state.title ??= "About us";
+  state.description ??= "Who we are";
+  state.path ??= "about";
+  const reportedRevision = () => (reportsRevision ? siteRevision(state) : undefined);
   return [
     {
       method: "GET",
       pattern: PAGES_LIST,
-      reply: () => ({ pages: [pageSummary({ pageId: ABOUT_PAGE_ID })], nextPageToken: "" }),
+      reply: () => ({
+        pages: [pageSummary({ pageId: ABOUT_PAGE_ID, bodyRevision: reportedRevision() })],
+        nextPageToken: "",
+      }),
     },
     {
       method: "GET",
@@ -1833,12 +1890,15 @@ function trackedRoutes(state) {
       reply: () => ({
         pageId: ABOUT_PAGE_ID,
         status: "PAGE_STATUS_PUBLISHED",
-        title: "About us",
-        shortDescription: "Who we are",
+        title: state.title,
+        shortDescription: state.description,
+        bodyRevision: reportedRevision(),
         template: {
           templateType: "TEMPLATE_TYPE_FREE_FORM",
           templateVersion: "1.0",
-          freeFormData: { body: state.body },
+          // Every read re-projects image delivery, so what a caller receives is
+          // not what the site stored. `project` is how a test says so.
+          freeFormData: { body: state.project === undefined ? state.body : state.project(state.body) },
         },
       }),
     },
@@ -1849,13 +1909,61 @@ function trackedRoutes(state) {
       pattern: PAGE_BY_ID,
       reply: (call) => {
         state.body = call.body.template.freeFormData.body;
-        return draftSummary(call.body.pageId, call.body.path);
+        state.title = call.body.title;
+        state.description = call.body.shortDescription;
+        state.path = call.body.path;
+        return draftSummary(call.body.pageId, call.body.path, { bodyRevision: reportedRevision() });
       },
     },
   ];
 }
 
 const ABOUT_BASELINE_FILE = `.taproot-site-state/pages/${ABOUT_PAGE_ID}.pm.json`;
+
+/**
+ * The rollout publishes the CLI before the API is deployed, so a fresh 0.4.0
+ * workspace can be pulled against a Taproot that does not serve the redirect
+ * map yet (TR00702). That pull must still succeed, and it must record no
+ * redirect baseline rather than a fabricated empty one.
+ */
+test("a first pull against a Taproot without a redirect map records no redirect baseline", async (site) => {
+  const workspace = await fixture(site, {});
+  const wire = api([
+    { method: "GET", pattern: REDIRECT_MAP, reply: () => new Response("", { status: 404 }) },
+    ...trackedRoutes({ body: paragraphDocument(BODY_MARKER) }),
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "pull" });
+
+  const result = await pull(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.redirects, undefined);
+  assert.equal(await workspaceHas(workspace, "redirects.json"), false);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.redirects, undefined);
+  assert.ok(progress.some((line) => line.includes("does not serve a redirect map")));
+
+  // Without a recorded baseline a redirects push has nothing to fence on, and
+  // says so rather than guessing.
+  await assert.rejects(
+    redirectsPush(invoke(workspace, wire, { verb: "redirects push" }).invocation),
+    (error) => typeof error?.code === "string" && error.code.startsWith("redirects."),
+  );
+});
+
+test("a failed redirect-map read strands nothing: pull refuses before its first workspace write", async (site) => {
+  const workspace = await fixture(site, {});
+  const wire = api([
+    { method: "GET", pattern: REDIRECT_MAP, reply: () => new Response("", { status: 500 }) },
+    ...trackedRoutes({ body: paragraphDocument(BODY_MARKER) }),
+  ]);
+
+  await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation));
+
+  assert.equal(await workspaceHas(workspace, ".taproot-site-manifest.json"), false);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+  assert.equal(await workspaceHas(workspace, "nav.json"), false);
+});
 
 test("pull keeps a tracked Markdown source instead of writing a competing document beside it", async (site) => {
   const workspace = await fixture(site, {
@@ -1936,7 +2044,7 @@ test("pull repairs a version-4 workspace that already tracks a Markdown source",
   assert.equal(result.pages.tracked, 1);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 5);
+  assert.equal(manifest.manifestVersion, 6);
   assert.equal(manifest.pages[0].file, "pages/about.md");
   assert.equal(manifest.pages[0].sourceFormat, "markdown");
 });
@@ -2094,6 +2202,647 @@ test("an unpushed ProseMirror edit survives every later pull, not just the first
     (await readWorkspaceJson(workspace, "pages/about.pm.json")).content[0].content[0].text,
     "local draft",
   );
+});
+
+const ABOUT_OBSERVED_REVISION_FILE = `.taproot-site-state/pages/${ABOUT_PAGE_ID}.revision.json`;
+
+/** A body carrying the one thing that broke in production: a delivery-rewritten image. */
+function decoratedDocument(text, source) {
+  return {
+    type: "doc",
+    content: [{
+      type: "section",
+      attrs: { decoration: { image: { src: source, urls: [{ minWidth: 640, url: `${source}?w=640` }] } } },
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    }],
+  };
+}
+
+test("a projection change between two pulls is not a remote edit", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  // The SHY production home page, exactly: the stored body never changed, but
+  // every read re-signs the image's delivery URLs, so the previous
+  // projected-body hash reported a remote edit whose only recoveries were to
+  // re-push identical content or abandon the Markdown source.
+  let signature = 0;
+  const state = {
+    body: decoratedDocument(BODY_MARKER, "https://images.example.test/hero.webp"),
+    project: (body) => {
+      signature += 1;
+      return decoratedDocument(
+        body.content[0].content[0].content[0].text,
+        `https://images.example.test/hero.webp?sig=${signature}`,
+      );
+    },
+  };
+  const wire = api(trackedRoutes(state));
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const settled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(settled.pages.tracked, 1);
+  assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
+  assert.equal(await workspaceHas(workspace, ABOUT_OBSERVED_REVISION_FILE), false);
+});
+
+test("pull names the JSON paths at which the site's document moved", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: decoratedDocument(BODY_MARKER, "https://images.example.test/hero.webp") };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  state.body = decoratedDocument("edited on the site", "https://images.example.test/hero.webp");
+  const failure = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(failure?.code, "pages.pull_conflict");
+  // The list is what tells an operator whether the site gained real content or
+  // only a re-signed delivery URL. Without it the refusal is unactionable.
+  assert.deepEqual(failure.differences, ["$.content[0].content[0].content[0].text"]);
+  assert.deepEqual(failureResult(failure).error.differences, ["$.content[0].content[0].content[0].text"]);
+});
+
+test("a title-only remote edit conflicts and reports no differing body path", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  // Stored state a body hash cannot see at all. The revision covers it, so the
+  // refusal is raised — and the empty path list is what says the body is not
+  // where to look.
+  state.title = "About us, renamed";
+  const failure = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(failure?.code, "pages.pull_conflict");
+  // Compared, and identical: the empty list is the machine-readable half of
+  // "the body is not where to look". Omitting it would leave this
+  // indistinguishable from a conflict nothing could be compared against.
+  assert.deepEqual(failure.differences, []);
+  assert.deepEqual(failureResult(failure).error.differences, []);
+});
+
+test("pages push refuses a page the site changed since this workspace last reconciled with it", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const reconciled = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].baseline.revision;
+
+  // Somebody edited the page in the browser after this workspace pulled. The
+  // window between a push and the next pull is the one divergence TR00622
+  // could not see, and the push used to overwrite it silently.
+  state.body = paragraphDocument("edited on the site");
+  const live = siteRevision(state);
+  const failure = await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+  ).then(() => undefined, (error) => error);
+
+  assert.equal(failure?.code, "pages.push_conflict");
+  assert.equal(failure.field, "pages/about.md");
+  assert.deepEqual(failure.alternatives, [reconciled, live]);
+  // Fails closed: nothing was sent, so the site still holds its own edit.
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+  assert.equal(state.body.content[0].content[0].text, "edited on the site");
+});
+
+/**
+ * The revision a push records from its own response is what lets the *next*
+ * push tell "nobody else touched this page" from "someone did" without a pull
+ * in between (TR00643). Pinned here because every other push test either runs
+ * against a wire that reports no revision, so the guard is unarmed, or pushes
+ * once.
+ */
+test("a push records the revision it wrote, so a second push needs no pull in between", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const first = await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+  );
+  const second = await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+  );
+
+  assert.equal(first.pages.updated, 1);
+  assert.equal(second.pages.updated, 1);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 2);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
+});
+
+/**
+ * The page read is what supplies the revision, so its title and path are the
+ * ones that revision describes (TR00643). A rename that lands between the
+ * listing and the read must not be recorded beside the newer revision with the
+ * older metadata, or the next push would revert it without a conflict.
+ */
+test("pull records a page's title and path from the read that supplied its revision", async (site) => {
+  const workspace = await fixture(site, {});
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: () => ({
+        pageId: ABOUT_PAGE_ID,
+        status: "PAGE_STATUS_PUBLISHED",
+        title: "Renamed on the site",
+        path: "about-us",
+        shortDescription: "Who we are",
+        bodyRevision: siteRevision(state),
+        template: { templateType: "TEMPLATE_TYPE_FREE_FORM", templateVersion: "1.0", freeFormData: { body: state.body } },
+      }),
+    },
+    ...trackedRoutes(state),
+  ]);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const entry = manifest.pages.find((candidate) => candidate.pageId === ABOUT_PAGE_ID);
+  assert.equal(entry.title, "Renamed on the site");
+  assert.equal(entry.path, "about-us");
+
+  // A ProseMirror source takes its metadata from the manifest, so the next
+  // push carries the rename rather than reverting it.
+  await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about-us"], content: contentStub().module }).invocation,
+  );
+  const sent = wire.matching("PATCH", PAGE_BY_ID)[0].body;
+  assert.equal(sent.title, "Renamed on the site");
+  assert.equal(sent.path, "about-us");
+});
+
+test("pull records a tracked page's title and path from its read too, stripped like the listing's", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: () => ({
+        pageId: ABOUT_PAGE_ID,
+        status: "PAGE_STATUS_PUBLISHED",
+        // A bidi override in the title is stripped, as the listing path strips it.
+        title: "Renamed\u202E on the site",
+        path: "/about-us/",
+        shortDescription: "Who we are",
+        bodyRevision: siteRevision(state),
+        template: { templateType: "TEMPLATE_TYPE_FREE_FORM", templateVersion: "1.0", freeFormData: { body: state.body } },
+      }),
+    },
+    ...trackedRoutes(state),
+  ]);
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const entry = manifest.pages.find((candidate) => candidate.pageId === ABOUT_PAGE_ID);
+  assert.equal(entry.file, "pages/about.md");
+  assert.equal(entry.title, "Renamed on the site");
+  assert.equal(entry.path, "about-us");
+});
+
+/**
+ * The observed-revision record a push may spend has to be removable after the
+ * send, so a shape that cannot be removed is refused before any page is
+ * written — never discovered after the site has changed (TR00643).
+ */
+test("pages push refuses before sending when the observed-revision record is not a regular file", async (testContext) => {
+  const recordFile = `.taproot-site-state/pages/${ABOUT_PAGE_ID}.revision.json`;
+  const shapes = [
+    { name: "a directory", plant: (target) => mkdir(target, { recursive: true }) },
+    {
+      name: "a symlink",
+      plant: async (target) => {
+        await mkdir(path.dirname(target), { recursive: true });
+        await symlink(path.join(path.dirname(target), "elsewhere.json"), target);
+      },
+    },
+  ];
+  for (const shape of shapes) {
+    await testContext.test(shape.name, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+        "pages/about.md": ABOUT_MARKDOWN,
+      });
+      const state = { body: paragraphDocument(BODY_MARKER) };
+      const wire = api(trackedRoutes(state));
+      await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+      await shape.plant(workspacePath(workspace, recordFile));
+
+      await assert.rejects(
+        pagesPush(
+          invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module })
+            .invocation,
+        ),
+        (error) => error?.code === "workspace.not_regular",
+      );
+      assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+    });
+  }
+});
+
+test("a refused pull is what unblocks its own recovery push, and only for the version it showed", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  state.body = paragraphDocument("edited on the site");
+  await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation), { code: "pages.pull_conflict" });
+
+  // The site moved again between the refusal and the push, so the operator has
+  // not been shown *this* version and the push still fails closed.
+  state.body = paragraphDocument("edited on the site again");
+  await assert.rejects(
+    pagesPush(
+      invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+    ),
+    { code: "pages.push_conflict" },
+  );
+
+  // Shown that version too, the documented recovery from a pull conflict —
+  // push the local source to make the site match it — goes through.
+  await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation), { code: "pages.pull_conflict" });
+  const pushed = await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+  );
+
+  assert.equal(pushed.pages.updated, 1);
+  // The override is spent: nothing is left that would let the next push
+  // overwrite an edit nobody has seen.
+  assert.equal(await workspaceHas(workspace, ABOUT_OBSERVED_REVISION_FILE), false);
+});
+
+test("a second refusal for the same version reports the differences the first one showed", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  state.body = paragraphDocument("edited on the site");
+  const first = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(first?.code, "pages.pull_conflict");
+  assert.deepEqual(first.differences, ["$.content[0].content[0].text"]);
+
+  // The refusal preserved the version it refused, overwriting the only copy the
+  // comparison could be made from. A second refusal that recomputed would
+  // compare that version with itself, find nothing, and tell the operator the
+  // change was in the page's title, path, or description rather than its body —
+  // for a page whose body is the only thing that moved.
+  const second = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(second?.code, "pages.pull_conflict");
+  assert.deepEqual(second.differences, first.differences);
+  assert.deepEqual(failureResult(second).error.differences, first.differences);
+
+  // A further remote edit is a different version, so the record no longer
+  // applies and the comparison is redone — against the version the previous
+  // refusal preserved, which is the one the operator was last shown.
+  state.body = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "edited on the site" }] },
+      { type: "paragraph", content: [{ type: "text", text: "and again" }] },
+    ],
+  };
+  const third = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(third?.code, "pages.pull_conflict");
+  assert.deepEqual(third.differences, ["$.content[1]"]);
+});
+
+test("a site that reports no revision still repeats the differences on the second refusal", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  // A Taproot that predates the revision contract, which the published CLI
+  // meets whenever it runs ahead of the deployed API. Pull compares body hashes
+  // there, and the refusal preserves the version it refused over the only copy
+  // the comparison could be made from — so without a record naming that
+  // version by its hash, the second refusal recomputed against the new body,
+  // found nothing, and reported a body edit as a title, path, or description
+  // change.
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state, { reportsRevision: false }));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  state.body = paragraphDocument("edited on the site");
+  const first = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+  const second = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(first?.code, "pages.pull_conflict");
+  assert.equal(second?.code, "pages.pull_conflict");
+  assert.deepEqual(first.differences, ["$.content[0].content[0].text"]);
+  assert.deepEqual(second.differences, first.differences);
+  assert.deepEqual(failureResult(second).error.differences, first.differences);
+});
+
+test("a version-5 manifest's superseded body hash does not refuse the pull that migrates it", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture(
+      [trackedAboutEntry({
+        baseline: {
+          // Version 5 could only record the hash of a *projected* body, and the
+          // projection moves on its own — the SHY case. Honoring it here would
+          // make this Markdown page conflict on the first pull after the
+          // upgrade and refuse without writing a manifest, and the documented
+          // recovery, `pages push`, reads the manifest strictly and refuses a
+          // version-5 one telling the operator to pull again.
+          remoteHash: `sha256:${"a".repeat(64)}`,
+          sourceHash: workspaceContentHash(Buffer.from(ABOUT_MARKDOWN, "utf8")),
+        },
+      })],
+      { manifestVersion: 5 },
+    ),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+
+  const migrated = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(migrated.pages.tracked, 1);
+  assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.manifestVersion, 6);
+  // The migration pull establishes the revision baseline, which is what every
+  // later pull compares instead of falling back to a hash again.
+  assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
+});
+
+test("a version-5 manifest keeps an edited ProseMirror source through the migration pull", async (site) => {
+  const edited = paragraphDocument("local draft");
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture(
+      [trackedAboutEntry({
+        file: "pages/about.pm.json",
+        sourceFormat: "prosemirror",
+        baseline: {
+          remoteHash: `sha256:${"a".repeat(64)}`,
+          // Kept across the version bump, unlike the hash beside it: it answers
+          // a question that has not changed — whether the author has edited
+          // this file since the last pull — and losing it would let this same
+          // pull refresh the site's document over unpushed work.
+          sourceHash: workspaceContentHash(
+            Buffer.from(`${JSON.stringify(paragraphDocument(BODY_MARKER), undefined, 2)}\n`, "utf8"),
+          ),
+        },
+      })],
+      { manifestVersion: 5 },
+    ),
+    "pages/about.pm.json": edited,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+
+  const migrated = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(migrated.pages.tracked, 1);
+  assert.deepEqual(await readWorkspaceJson(workspace, "pages/about.pm.json"), edited);
+});
+
+test("a hash-only baseline of this version yields to the revision the site now reports", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry({
+      // This version's manifest, recorded against a Taproot that had no
+      // revision to give: `withoutSupersededRemoteHashes` never sees it, so
+      // nothing else drops the projected-body hash it holds.
+      baseline: {
+        remoteHash: `sha256:${"a".repeat(64)}`,
+        sourceHash: workspaceContentHash(Buffer.from(ABOUT_MARKDOWN, "utf8")),
+      },
+    })]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  // The API deploy has landed, so the site reports a revision — and the image's
+  // delivery projection moved in the meantime, so the hash beside it no longer
+  // matches anything. Comparing it would refuse this Markdown page's every
+  // later pull, which is the SHY failure this task removes.
+  let signature = 0;
+  const state = {
+    body: decoratedDocument(BODY_MARKER, "https://images.example.test/hero.webp"),
+    project: (body) => {
+      signature += 1;
+      return decoratedDocument(
+        body.content[0].content[0].content[0].text,
+        `https://images.example.test/hero.webp?sig=${signature}`,
+      );
+    },
+  };
+  const wire = api(trackedRoutes(state));
+
+  const result = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(result.pages.tracked, 1);
+  assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
+  // The revision baseline is established, so the next pull compares stored
+  // state rather than falling back to a hash again.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
+  const settled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.equal(settled.pages.tracked, 1);
+});
+
+/**
+ * A body that arrives inside the API response cap and does not fit back through
+ * the single-document limit once pull has preserved it.
+ *
+ * Pull writes the preserved copy pretty-printed and under no per-file cap of
+ * its own, and indentation roughly triples a document made of many small nodes.
+ * So this is not a synthetic size: it is one real page. The read that trips on
+ * it is a diagnostic that decides nothing, so its failure must not decide
+ * anything either — not the conflict below, and not an ordinary refresh.
+ */
+function bulkyDocument(text) {
+  return {
+    type: "doc",
+    content: Array.from({ length: 5000 }, (_, index) => ({
+      type: "section",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "text", marks: [{ type: "link", attrs: { href: `/p${index}` } }], text: `${text} ${index}` }],
+      }],
+    })),
+  };
+}
+
+test("an oversized preserved baseline still refuses, rather than failing the pull", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  const state = { body: bulkyDocument("before") };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  state.body = bulkyDocument("after");
+  const failure = await pull(invoke(workspace, wire, { verb: "pull" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  // The conflict is still the outcome, and the record that keeps the refusal's
+  // own recovery push reachable is still written. A `workspace.file_too_large`
+  // here would replace both.
+  assert.equal(failure?.code, "pages.pull_conflict");
+  // Nothing was compared, so the refusal claims nothing about where the change
+  // is — as distinct from the empty list, which claims the body is unchanged.
+  assert.equal(failure.differences, undefined);
+  assert.equal("differences" in failureResult(failure).error, false);
+  assert.equal(await workspaceHas(workspace, ABOUT_OBSERVED_REVISION_FILE), true);
+});
+
+test("an oversized preserved baseline does not fail an ordinary refresh", async (site) => {
+  const workspace = await fixture(site);
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const wire = api(trackedRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  // What an earlier refusal of a since-shrunk body leaves behind: internal
+  // state past the single-document limit, beside a source file that still holds
+  // exactly what pull wrote and so has nothing to protect.
+  await mkdir(path.dirname(workspacePath(workspace, ABOUT_BASELINE_FILE)), { recursive: true });
+  await writeFile(
+    workspacePath(workspace, ABOUT_BASELINE_FILE),
+    `${JSON.stringify(bulkyDocument("preserved"), undefined, 2)}\n`,
+  );
+  state.body = paragraphDocument("edited on the site");
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(
+    (await readWorkspaceJson(workspace, "pages/about.pm.json")).content[0].content[0].text,
+    "edited on the site",
+  );
+  assert.equal(await workspaceHas(workspace, ABOUT_BASELINE_FILE), false);
+});
+
+test("push, pull, approve, deploy, pull on a page carrying an image reports no conflict", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    "pages/about.md": ABOUT_MARKDOWN,
+  });
+  // The production run of 2026-09-03, as a test. Every read re-signs the
+  // image's delivery URLs, and the approve/deploy steps in between move the
+  // page's status without touching its stored authoring state.
+  let signature = 0;
+  const state = {
+    body: decoratedDocument(BODY_MARKER, "https://images.example.test/hero.webp"),
+    status: "PAGE_STATUS_PUBLISHED",
+    hasDraft: false,
+    project: (body) => {
+      signature += 1;
+      return decoratedDocument(
+        body.content[0]?.content?.[0]?.content?.[0]?.text ?? BODY_MARKER,
+        `https://images.example.test/hero.webp?sig=${signature}`,
+      );
+    },
+  };
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PAGES_LIST,
+      reply: () => ({
+        pages: [pageSummary({
+          pageId: ABOUT_PAGE_ID,
+          status: state.status,
+          hasDraft: state.hasDraft,
+          bodyRevision: siteRevision(state),
+        })],
+        nextPageToken: "",
+      }),
+    },
+    ...trackedRoutes(state).filter((route) => route.pattern !== PAGES_LIST),
+    {
+      method: "POST",
+      pattern: PUBLISH_DRAFTS,
+      reply: () => {
+        // Approval stages the draft: the status moves, the stored authoring
+        // state does not, so the revision must not move either.
+        state.status = "PAGE_STATUS_APPROVED";
+        state.hasDraft = false;
+        return {
+          pages: [pageSummary({
+            pageId: ABOUT_PAGE_ID,
+            status: state.status,
+            hasDraft: false,
+            bodyRevision: siteRevision(state),
+          })],
+        };
+      },
+    },
+    ...deployRoutes().filter((route) => route.pattern !== PAGES_LIST),
+  ]);
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  await writeFile(
+    workspacePath(workspace, "pages/about.md"),
+    `---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nLaunch copy.\n`,
+  );
+  await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+  );
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  await approve(invoke(workspace, wire, { verb: "approve" }).invocation);
+  await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation);
+  state.status = "PAGE_STATUS_PUBLISHED";
+  await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "production" }).invocation);
+
+  const settled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.equal(settled.pages.tracked, 1);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+  assert.equal(await workspaceHas(workspace, ABOUT_OBSERVED_REVISION_FILE), false);
 });
 
 test("pull refuses when a tracked ProseMirror source and the site both moved", async (site) => {
@@ -2546,7 +3295,13 @@ test("a long page title round-trips through pull and push unchanged", async (sit
         nextPageToken: "",
       },
     },
-    { method: "GET", pattern: PAGE_BY_ID, reply: freeFormPageDetail(ABOUT_PAGE_ID, BODY_MARKER) },
+    // The read is what the manifest records the title from, so it carries the
+    // same long title the listing does.
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: { ...freeFormPageDetail(ABOUT_PAGE_ID, BODY_MARKER), title: longTitle },
+    },
     { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
     { method: "GET", pattern: SETTINGS, reply: {} },
     { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
@@ -2746,8 +3501,8 @@ const PUSH_WORKSPACE = {
   "pages/about.md": "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nHello.\n",
 };
 
-function draftSummary(pageId, pagePath) {
-  return pageSummary({ pageId, path: pagePath, status: "PAGE_STATUS_DRAFT", hasDraft: true });
+function draftSummary(pageId, pagePath, overrides = {}) {
+  return pageSummary({ pageId, path: pagePath, status: "PAGE_STATUS_DRAFT", hasDraft: true, ...overrides });
 }
 
 function pushRoutes({ live = [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" })] } = {}) {
@@ -2816,6 +3571,138 @@ test("pages push creates and updates from the workspace and round-trips the mani
   assert.equal(record.pendingApproval, true);
   assert.equal(manifest.pages.find((entry) => entry.pageId === HOME_PAGE_ID).pendingApproval, true);
   assert.ok(progress.some((line) => line.includes("Validating 'pages/about.md'")));
+});
+
+/**
+ * The upgrade refusal reaches the operator as an instruction, not as a field
+ * name (TR00703).
+ *
+ * The exchange is the first request every site verb makes and it sits outside
+ * each verb's own refusal guidance, so this pins that a refusal raised there is
+ * still announced — and that the announcement carries the server's own
+ * description, which is where both versions and the install command live. A
+ * `humanFailure` line alone would say only "Taproot rejected the request field
+ * 'CliUpgradeRequired'", which is the message for CLIs too old to know better,
+ * not for one that can do better.
+ */
+test("an outdated CLI is refused at the exchange with the server's own upgrade instruction", async (site) => {
+  const workspace = await fixture(site, PUSH_WORKSPACE);
+  const upgradeDescription = "This @taprootio/site-authoring CLI reports version 0.1.0; Taproot accepts only the "
+    + "latest published release, 9.9.9. Upgrade with: npm install -g @taprootio/site-authoring@latest.";
+  const wire = api([
+    {
+      method: "POST",
+      pattern: TOKEN_EXCHANGE,
+      reply: () => jsonResponse(violation("CliUpgradeRequired", upgradeDescription), 400),
+    },
+    ...pushRoutes(),
+  ]);
+  await saveCredential(
+    { XDG_CONFIG_HOME: workspace.configHome },
+    {
+      apiOrigin: "https://app.taproot.test",
+      accountId: "eeee5555-ffff-4555-8555-aaaa55555555",
+      key: "tr_live_stored_sign_in_that_must_never_be_logged",
+      keyId: "dddd4444-eeee-4444-8444-ffff44444444",
+      keyPrefix: "tr_live_ab12cd34...",
+    },
+    { now: () => 1_700_000_000_000 },
+  );
+  const content = contentStub();
+  const { invocation, progress } = invoke(workspace, wire, {
+    verb: "pages push",
+    content: content.module,
+    environment: { XDG_CONFIG_HOME: workspace.configHome },
+  });
+
+  await assert.rejects(
+    pagesPush(invocation),
+    (error) => error?.field === "CliUpgradeRequired" && error.refusalKind() === "cli_outdated",
+  );
+
+  // Refused before the push validated or sent anything: the check needs no
+  // credential and no document, so nothing else should have run.
+  assert.deepEqual(content.calls.validate, []);
+  assert.ok(progress.some((line) => line.includes(upgradeDescription)));
+  assert.ok(progress.some((line) => line.includes("npm install -g @taprootio/site-authoring@latest")));
+});
+
+/**
+ * The rollout switch's whole point (TR00692): a paused platform is announced
+ * before the push does any work, and the write is still attempted and still
+ * refused as `platform_paused`.
+ *
+ * Run through the sign-in exchange rather than `TAPROOT_SITE_KEY`, because the
+ * exchange is the only thing that reports the switch — the environment path
+ * performs none and is deliberately left saying "not known".
+ */
+test("pages push warns about a paused platform before validating, then still refuses at the write", async (site) => {
+  const workspace = await fixture(site, PUSH_WORKSPACE);
+  const wire = api([
+    {
+      method: "POST",
+      pattern: TOKEN_EXCHANGE,
+      reply: {
+        rawKey: EXCHANGED_KEY,
+        keyId: "cccc3333-dddd-4333-8333-eeee33333333",
+        keyPrefix: "tr_live_ex99ab88...",
+        siteId: SITE_ID,
+        expiresAt: "2026-12-31T23:59:59.000Z",
+        capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
+        externalWritesEnabled: false,
+      },
+    },
+    // Listed before pushRoutes() because the first matching route wins: this is
+    // the write the transactional freeze refuses, in the shape the server sends.
+    {
+      method: "PATCH",
+      pattern: PAGE_BY_ID,
+      reply: () =>
+        jsonResponse({ code: 14, details: [{ fieldViolations: [{ field: "SiteAuthoringRollout" }] }] }, 503),
+    },
+    ...pushRoutes(),
+  ]);
+  await saveCredential(
+    { XDG_CONFIG_HOME: workspace.configHome },
+    {
+      apiOrigin: "https://app.taproot.test",
+      accountId: "eeee5555-ffff-4555-8555-aaaa55555555",
+      key: "tr_live_stored_sign_in_that_must_never_be_logged",
+      keyId: "dddd4444-eeee-4444-8444-ffff44444444",
+      keyPrefix: "tr_live_ab12cd34...",
+    },
+    { now: () => 1_700_000_000_000 },
+  );
+  const content = contentStub();
+  const { invocation, progress } = invoke(workspace, wire, {
+    verb: "pages push",
+    content: content.module,
+    // No TAPROOT_SITE_KEY: this run exchanges the stored sign-in, which is what
+    // reports the switch.
+    environment: { XDG_CONFIG_HOME: workspace.configHome },
+  });
+
+  await assert.rejects(
+    pagesPush(invocation),
+    (error) => error?.field === "SiteAuthoringRollout" && error.refusalKind() === "platform_paused",
+  );
+
+  // Warned before the first document was validated, which is the difference
+  // between learning this up front and learning it from a refusal.
+  const warned = progress.findIndex((line) => line.includes(EXTERNAL_WRITES_SETTING_KEY));
+  const validated = progress.findIndex((line) => line.includes("Validating 'pages/about.md'"));
+  assert.ok(warned >= 0, "the paused platform is announced");
+  assert.ok(validated > warned, "the warning precedes validation");
+  // The refusal's own guidance repeats the setting, so an agent that reads only
+  // the failure still learns where the switch is and who can flip it.
+  assert.ok(
+    progress.findLastIndex((line) => line.includes(EXTERNAL_WRITES_SETTING_KEY)) > validated,
+    "the refusal guidance names the setting too",
+  );
+  // Advisory, not a gate: the push validated everything and sent the write, and
+  // the server is what refused it.
+  assert.equal(content.calls.validate.length, 2);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 1);
 });
 
 test("pages push keeps the '/' field in the not-found contract", async (site) => {
@@ -4307,6 +5194,535 @@ test("nav push refuses a workspace with no navigation file", async (site) => {
 });
 
 // ---------------------------------------------------------------------------
+// redirects pull / redirects push (TR00702)
+// ---------------------------------------------------------------------------
+
+/** A pulled workspace's manifest once the redirect baseline exists. */
+function redirectsManifest(revision = REDIRECT_REVISION, entries = 0) {
+  return manifestFixture([], { redirects: { file: "redirects.json", revision, entries } });
+}
+
+function redirectsDocument(entries, revision = REDIRECT_REVISION) {
+  return { siteId: SITE_ID, revision, entries };
+}
+
+test("redirects pull names a Taproot that serves no redirect map yet", async (site) => {
+  // The missing-baseline refusal sends the operator here, so a bare 404 from a
+  // site that predates the map must become a refusal that says what to wait for.
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([{ method: "GET", pattern: REDIRECT_MAP, reply: () => new Response("", { status: 404 }) }]);
+
+  await assert.rejects(
+    redirectsPull(invoke(workspace, wire, { verb: "redirects pull" }).invocation),
+    (error) => error?.code === "redirects.not_served",
+  );
+  assert.equal(await workspaceHas(workspace, "redirects.json"), false);
+});
+
+test("redirects pull writes the map and records the revision a push is fenced by", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": redirectsManifest() });
+  const wire = api([{
+    method: "GET",
+    pattern: REDIRECT_MAP,
+    reply: {
+      siteId: SITE_ID,
+      revision: NEXT_REDIRECT_REVISION,
+      entries: [
+        {
+          path: "/faqs.html",
+          kind: "SITE_REDIRECT_KIND_REDIRECT",
+          target: "/faq",
+          status: 301,
+          origin: "SITE_REDIRECT_ORIGIN_AUTHORED",
+        },
+        // Transcoding omits proto default values, so a path-history redirect at
+        // the default status arrives with neither field. The CLI must read that
+        // as a 301 redirect a rename recorded, not as an unknown entry.
+        { path: "/old-home", target: "/" },
+        {
+          path: "/retired",
+          kind: "SITE_REDIRECT_KIND_GONE",
+          status: 410,
+          origin: "SITE_REDIRECT_ORIGIN_AUTHORED",
+        },
+      ],
+    },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects pull" });
+  const result = await redirectsPull(invocation);
+
+  assert.deepEqual(await readWorkspaceJson(workspace, "redirects.json"), {
+    siteId: SITE_ID,
+    revision: NEXT_REDIRECT_REVISION,
+    entries: [
+      { path: "/faqs.html", kind: "redirect", target: "/faq", status: 301, origin: "authored" },
+      { path: "/old-home", kind: "redirect", target: "/", status: 301, origin: "path_history" },
+      { path: "/retired", kind: "gone", status: 410, origin: "authored" },
+    ],
+  });
+  assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).redirects, {
+    file: "redirects.json",
+    revision: NEXT_REDIRECT_REVISION,
+    entries: 3,
+  });
+  assert.equal(result.revision, NEXT_REDIRECT_REVISION);
+  assert.deepEqual(
+    {
+      total: result.redirects.total,
+      authored: result.redirects.authored,
+      pathHistory: result.redirects.pathHistory,
+      gone: result.redirects.gone,
+    },
+    { total: 3, authored: 2, pathHistory: 1, gone: 1 },
+  );
+});
+
+test("redirects push sends the recorded revision and the normalized whole map", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    // Deliberately unnormalized on the way in: a missing leading slash, a
+    // trailing slash, an omitted kind, and an omitted status all have to reach
+    // the wire in exactly one canonical spelling.
+    "redirects.json": redirectsDocument([
+      { path: "faqs.html/", target: "faq" },
+      { path: "/book", kind: "redirect", target: "https://booking.example.test/riverbend", status: 302 },
+      { path: "/retired", kind: "gone" },
+    ]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: (call) => ({
+      siteId: SITE_ID,
+      revision: NEXT_REDIRECT_REVISION,
+      entries: call.body.entries.map((entry) => ({ ...entry, origin: "SITE_REDIRECT_ORIGIN_AUTHORED" })),
+    }),
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  const result = await redirectsPush(invocation);
+
+  const saved = wire.matching("PUT", REDIRECT_MAP)[0];
+  assert.equal(saved.body.expectedRevision, REDIRECT_REVISION);
+  assert.deepEqual(saved.body.entries, [
+    {
+      path: "/book",
+      kind: "SITE_REDIRECT_KIND_REDIRECT",
+      target: "https://booking.example.test/riverbend",
+      status: 302,
+    },
+    { path: "/faqs.html", kind: "SITE_REDIRECT_KIND_REDIRECT", target: "/faq", status: 301 },
+    { path: "/retired", kind: "SITE_REDIRECT_KIND_GONE", status: 410 },
+  ]);
+  // The new revision replaces the baseline, so a second push is fenced against
+  // the state this one produced rather than the one before it.
+  assert.equal(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).redirects.revision,
+    NEXT_REDIRECT_REVISION,
+  );
+  assert.equal(result.revision, NEXT_REDIRECT_REVISION);
+  assert.equal(result.redirects.gone, 1);
+});
+
+test("redirects push never sends origin, so a pulled path-history entry stays the site's own", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument([
+      { path: "/old-home", kind: "redirect", target: "/", status: 301, origin: "path_history" },
+    ]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  await redirectsPush(invocation);
+
+  const saved = wire.matching("PUT", REDIRECT_MAP)[0];
+  assert.equal(Object.hasOwn(saved.body.entries[0], "origin"), false);
+});
+
+test("redirects push translates a stale-revision refusal into re-pull guidance", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument([{ path: "/faqs.html", target: "/faq" }]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: () => jsonResponse(violation("ExpectedRevision"), 400),
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+
+  await assert.rejects(
+    redirectsPush(invocation),
+    (error) => error?.code === "redirects.concurrent_modification" && error.field === "revision",
+  );
+  // Nothing local moved: the workspace still names the revision it read, so the
+  // re-pull the guidance asks for is the only way forward.
+  assert.equal(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).redirects.revision,
+    REDIRECT_REVISION,
+  );
+});
+
+test("redirects push refuses a workspace with no recorded baseline", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "redirects.json": redirectsDocument([{ path: "/faqs.html", target: "/faq" }]),
+  });
+  const wire = api([]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+
+  await assert.rejects(
+    redirectsPush(invocation),
+    (error) => error?.code === "redirects.pull_required",
+  );
+  assert.equal(wire.matching("PUT", REDIRECT_MAP).length, 0);
+});
+
+test("redirects push refuses a malformed map locally and names the entry", async (testContext) => {
+  const cases = [
+    {
+      name: "a chain",
+      entries: [{ path: "/a", target: "/b" }, { path: "/b", target: "/c" }],
+      code: "redirects.chain",
+      field: "entries[0].target",
+    },
+    {
+      name: "a loop",
+      entries: [{ path: "/a", target: "/a/" }],
+      code: "redirects.loop",
+      field: "entries[0].target",
+    },
+    {
+      name: "a duplicate path",
+      entries: [{ path: "/a", target: "/x" }, { path: "a/", target: "/y" }],
+      code: "redirects.path_duplicate",
+      field: "entries[1].path",
+    },
+    {
+      name: "a path carrying a query string",
+      entries: [{ path: "/a?utm=1", target: "/x" }],
+      code: "redirects.path_invalid",
+      field: "entries[0].path",
+    },
+    {
+      // The edge keys a redirect on the pathname, so a query string on the
+      // target hides neither a chain nor a loop from it.
+      name: "a chain whose target carries a query string",
+      entries: [{ path: "/a", target: "/b?x=1" }, { path: "/b", target: "/c" }],
+      code: "redirects.chain",
+      field: "entries[0].target",
+    },
+    {
+      // The pair the edge would serve forever: each hop's query string used to
+      // make the target unresolvable, so neither entry saw the other.
+      name: "a two-hop cycle spelled with a query string on each hop",
+      entries: [{ path: "/a", target: "/b?x=1" }, { path: "/b", target: "/a?y=2" }],
+      code: "redirects.chain",
+      field: "entries[0].target",
+    },
+    {
+      name: "an entry targeting itself through a fragment",
+      entries: [{ path: "/a", target: "/a#top" }],
+      code: "redirects.loop",
+      field: "entries[0].target",
+    },
+    {
+      name: "an over-long path you authored",
+      entries: [{ path: `/${"a".repeat(REDIRECT_LIMITS.pathBytes)}`, target: "/x" }],
+      code: "redirects.path_too_long",
+      field: "entries[0].path",
+    },
+    {
+      // C1, which the site's own control-character rule refuses alongside C0
+      // and DEL. Missing it here sent the map to the site to be refused there.
+      name: "a path carrying a C1 control character",
+      entries: [{ path: "/a\u0080b", target: "/x" }],
+      code: "redirects.path_invalid",
+      field: "entries[0].path",
+    },
+    {
+      name: "a target carrying a C1 control character",
+      entries: [{ path: "/a", target: "/x\u009Fy" }],
+      code: "redirects.target_invalid",
+      field: "entries[0].target",
+    },
+    {
+      name: "a gone entry carrying a target",
+      entries: [{ path: "/a", kind: "gone", target: "/x" }],
+      code: "redirects.gone_target",
+      field: "entries[0].target",
+    },
+    {
+      name: "a status outside the allowed set",
+      entries: [{ path: "/a", target: "/x", status: 303 }],
+      code: "redirects.status_invalid",
+      field: "entries[0].status",
+    },
+    {
+      name: "a credential-bearing absolute target",
+      entries: [{ path: "/a", target: "https://user:secret@elsewhere.example.test/" }],
+      code: "redirects.target_invalid",
+      field: "entries[0].target",
+    },
+    {
+      name: "an unknown entry field",
+      entries: [{ path: "/a", target: "/x", permanent: true }],
+      code: "redirects.unknown_field",
+      field: "entries[0]",
+    },
+  ];
+  for (const scenario of cases) {
+    await testContext.test(scenario.name, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+        "redirects.json": redirectsDocument(scenario.entries),
+      });
+      const wire = api([]);
+      const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+      await assert.rejects(
+        redirectsPush(invocation),
+        (error) => error?.code === scenario.code && error.field === scenario.field,
+      );
+      assert.equal(wire.matching("PUT", REDIRECT_MAP).length, 0);
+    });
+  }
+});
+
+test("redirects push sends a path_history entry over the path bound, because a rename recorded it", async (site) => {
+  // A page may sit at a path longer than the map allows a source to be
+  // (MaxPagePathLength is larger than the bound), and renaming it records a
+  // path_history entry there that 'redirects pull' returns. Refusing it offline
+  // would leave the site's own map failing 'validate' and unpushable without
+  // dropping a live redirect, so the site decides: it alone knows whether the
+  // push introduces that path or carries it back unchanged.
+  const overLong = `/${"a".repeat(REDIRECT_LIMITS.pathBytes)}`;
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument([
+      { path: overLong, target: "/classes", origin: "path_history" },
+    ]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  await redirectsPush(invocation);
+
+  assert.equal(wire.matching("PUT", REDIRECT_MAP)[0].body.entries[0].path, overLong);
+});
+
+test("redirects push carries back a pulled map already over the entry bound", async (site) => {
+  // Renames record entries nobody submitted, so a long-lived site can hold more
+  // than the bound. Refusing offline on the submitted count alone would leave
+  // its own pulled map unpushable without deleting live path history, so the
+  // count the last pull recorded scopes the refusal exactly as the stored map
+  // scopes it at the site.
+  const entries = Array.from({ length: REDIRECT_LIMITS.entries + 1 }, (_ignored, index) => ({
+    path: `/legacy-${index}`,
+    target: "/faq",
+    origin: "path_history",
+  }));
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, entries.length),
+    "redirects.json": redirectsDocument(entries),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  await redirectsPush(invocation);
+
+  assert.equal(wire.matching("PUT", REDIRECT_MAP)[0].body.entries.length, entries.length);
+});
+
+test("redirects push reads back a pulled map larger than the navigation tree's bound", async (site) => {
+  // The map's own bound is sized from the redirect contract, not borrowed from
+  // nav.json: five hundred entries pointing at long absolute targets are well
+  // inside every site-side limit and well past a megabyte on disk.
+  const entries = Array.from({ length: 500 }, (_ignored, index) => ({
+    path: `/legacy-${index}.html`,
+    target: `https://legacy.example.test/${"a".repeat(2_000)}?id=${index}`,
+    origin: "path_history",
+  }));
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, entries.length),
+    "redirects.json": redirectsDocument(entries),
+  });
+  assert.ok((await readWorkspaceText(workspace, "redirects.json")).length > 1024 * 1024);
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  await redirectsPush(invocation);
+
+  assert.equal(wire.matching("PUT", REDIRECT_MAP)[0].body.entries.length, entries.length);
+});
+
+test("redirects pull and push read a map larger than the ordinary response bound", async (site) => {
+  // Six hundred entries with long absolute targets are inside every site-side
+  // limit and well past a megabyte on the wire; the map has its own budget.
+  const wireEntries = Array.from({ length: 600 }, (_ignored, index) => ({
+    path: `/legacy-${index}.html`,
+    kind: "SITE_REDIRECT_KIND_REDIRECT",
+    target: `https://legacy.example.test/${"a".repeat(1_900)}?id=${index}`,
+    status: 301,
+    origin: "SITE_REDIRECT_ORIGIN_AUTHORED",
+  }));
+  assert.ok(JSON.stringify(wireEntries).length > 1024 * 1024);
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": redirectsManifest() });
+  const wire = api([
+    { method: "GET", pattern: REDIRECT_MAP, reply: { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: wireEntries } },
+    {
+      method: "PUT",
+      pattern: REDIRECT_MAP,
+      reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: wireEntries },
+    },
+  ]);
+
+  const pulled = await redirectsPull(invoke(workspace, wire, { verb: "redirects pull" }).invocation);
+  assert.equal(pulled.redirects.total, 600);
+  assert.equal((await readWorkspaceJson(workspace, "redirects.json")).entries.length, 600);
+
+  // The reply to a replace is the whole map too, and its revision is what the
+  // next push is fenced by: it has to be recorded, not refused as too large.
+  await redirectsPush(invoke(workspace, wire, { verb: "redirects push" }).invocation);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.redirects.revision, NEXT_REDIRECT_REVISION);
+});
+
+test("redirects push refuses a map authored past the entry bound", async (site) => {
+  // The exemption is scoped to what the last pull recorded; it never lets an
+  // authored map grow past the cap.
+  const entries = Array.from({ length: REDIRECT_LIMITS.entries + 1 }, (_ignored, index) => ({
+    path: `/legacy-${index}`,
+    target: "/faq",
+  }));
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument(entries),
+  });
+  const wire = api([]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+
+  await assert.rejects(
+    redirectsPush(invocation),
+    (error) => error?.code === "redirects.too_many_entries" && error.field === "entries",
+  );
+  assert.equal(wire.matching("PUT", REDIRECT_MAP).length, 0);
+});
+
+test("redirects push sends a root entry, because a home page that moved records one", async (site) => {
+  // '/' is refused for exactly as long as a live home page occupies it, which
+  // only the site can know. Refusing it offline would leave a site whose home
+  // page moved with a map it can pull and never push back: the rename records
+  // the entry at the root itself.
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument([{ path: "/", target: "/welcome", origin: "path_history" }]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  const { invocation } = invoke(workspace, wire, { verb: "redirects push" });
+  await redirectsPush(invocation);
+
+  assert.deepEqual(wire.matching("PUT", REDIRECT_MAP)[0].body.entries, [
+    { path: "/", kind: "SITE_REDIRECT_KIND_REDIRECT", target: "/welcome", status: 301 },
+  ]);
+});
+
+test("narrowing redirects push to Design is refused, because the map is a content path", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
+    "redirects.json": redirectsDocument([{ path: "/faqs.html", target: "/faq" }]),
+  });
+  const wire = api([{
+    method: "PUT",
+    pattern: REDIRECT_MAP,
+    reply: { siteId: SITE_ID, revision: NEXT_REDIRECT_REVISION, entries: [] },
+  }]);
+  // Design alone, borrowed from `theme push`: one capability short of the
+  // permission the map's own gate resolves.
+  const { invocation } = invoke(workspace, wire, {
+    verb: "redirects push",
+    fetch: capabilityGatedFetch("theme push", wire.fetch),
+  });
+
+  await assert.rejects(redirectsPush(invocation), (error) => {
+    assert.equal(error.refusalKind(), "capability_missing");
+    assert.deepEqual(error.capability, {
+      permission: "site.pages.edit_any",
+      granted: [CAPABILITY_DESIGN],
+      required: [CAPABILITY_CONTENT],
+    });
+    return true;
+  });
+});
+
+test("pull records the redirect baseline beside the navigation one", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    {
+      method: "GET",
+      pattern: REDIRECT_MAP,
+      reply: {
+        siteId: SITE_ID,
+        revision: NEXT_REDIRECT_REVISION,
+        entries: [{ path: "/faqs.html", target: "/faq", status: 301 }],
+      },
+    },
+    { method: "GET", pattern: SETTINGS, reply: () => ({}) },
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "pull" });
+  const result = await pull(invocation);
+
+  assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).redirects, {
+    file: "redirects.json",
+    revision: NEXT_REDIRECT_REVISION,
+    entries: 1,
+  });
+  assert.deepEqual(await readWorkspaceJson(workspace, "redirects.json"), {
+    siteId: SITE_ID,
+    revision: NEXT_REDIRECT_REVISION,
+    entries: [{ path: "/faqs.html", kind: "redirect", target: "/faq", status: 301, origin: "path_history" }],
+  });
+  assert.deepEqual(result.redirects, {
+    file: "redirects.json",
+    revision: NEXT_REDIRECT_REVISION,
+    entries: 1,
+  });
+});
+
+test("deploy says redirect entries reach an eventually consistent store, and quotes no hold", async (site) => {
+  // A spot-check run the second a deploy reports success can still read the
+  // previous map, and taking that for "the redirect did not land" is the wrong
+  // conclusion in front of a customer waiting to cut DNS over. What the CLI
+  // must not do is report a coordinator-side hold: the propagation grace in the
+  // routing coordinator defers only the deletion of a superseded Docs pointer
+  // namespace, and a standard site's redirect rows are written immediately.
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api(deployRoutes());
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const result = await deploy(invocation);
+
+  assert.ok(progress.some((line) => line.includes("eventually consistent")));
+  assert.equal(result.redirects?.propagationGraceSeconds, undefined);
+});
+
+// ---------------------------------------------------------------------------
 // media upload
 // ---------------------------------------------------------------------------
 
@@ -5228,7 +6644,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.4.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -5658,7 +7074,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.4.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -6448,6 +7864,7 @@ function completeWorkspace() {
     ...themeWorkspace(),
     ...PUSH_WORKSPACE,
     "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+    "redirects.json": { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: [] },
     "media/hero.png": png(20, 10),
   };
   // PUSH_WORKSPACE's manifest replaces themeWorkspace's, so re-point its
@@ -6455,6 +7872,7 @@ function completeWorkspace() {
   // the same file/manifest agreement a real pull writes.
   files[".taproot-site-manifest.json"] = {
     ...files[".taproot-site-manifest.json"],
+    redirects: { file: "redirects.json", revision: REDIRECT_REVISION, entries: 0 },
     footer: footerManifestEntry(
       files["settings/site-publishing-preferences.json"].settings.footerSettings,
     ),
@@ -6466,6 +7884,8 @@ const VERB_CASES = [
   { name: "pull", run: pull, extra: {} },
   { name: "pages push", run: pagesPush, extra: () => ({ content: contentStub().module }) },
   { name: "nav push", run: navPush, extra: {} },
+  { name: "redirects pull", run: redirectsPull, extra: {} },
+  { name: "redirects push", run: redirectsPush, extra: {} },
   { name: "theme push", run: themePush, extra: {} },
   { name: "footer push", run: footerPush, extra: {} },
   { name: "media upload", run: mediaUpload, extra: {} },
@@ -6477,6 +7897,9 @@ const VERB_CASES = [
 
 test("every verb maps a classified refusal to the behavior it calls for", async (testContext) => {
   const refusals = [
+    // Refused at the token exchange, before any verb does its own work: this
+    // CLI is behind the only release Taproot accepts (TR00703).
+    { name: "cli upgrade", body: violation("CliUpgradeRequired"), httpStatus: 400, refusal: "cli_outdated" },
     { name: "rollout", body: violation("SiteAuthoringRollout"), httpStatus: 503, refusal: "platform_paused" },
     { name: "credential", body: violation("ExternalApiKey"), httpStatus: 401, refusal: "credential_rejected" },
     { name: "throttle", body: { code: 8, message: "slow down" }, httpStatus: 429, refusal: "throttled" },
@@ -6508,6 +7931,78 @@ test("every verb maps a classified refusal to the behavior it calls for", async 
         );
       });
     }
+  }
+});
+
+/**
+ * The pre-write warning is a per-verb contract (TR00692): every write verb
+ * announces a paused platform before it validates, reads, or sends anything.
+ * Pinned across the whole table rather than for one verb, because a call
+ * dropped from a single verb, or moved below that verb's first read, would
+ * leave every other test green while that verb quietly stopped warning.
+ */
+test("every write verb announces a paused platform before doing any other work", async (testContext) => {
+  const writeVerbs = [
+    ...VERB_CASES.filter((verb) => !["pull", "redirects pull", "status"].includes(verb.name)),
+    { name: "preview revoke", run: previewRevoke, extra: { previewIds: [ABOUT_PAGE_ID, SNAPSHOT_ID] } },
+  ];
+  for (const verb of writeVerbs) {
+    await testContext.test(verb.name, async (site) => {
+      const workspace = await fixture(site, completeWorkspace());
+      const paused = () =>
+        jsonResponse({ code: 14, details: [{ fieldViolations: [{ field: "SiteAuthoringRollout" }] }] }, 503);
+      const wire = api([
+        // Listed first, because the first matching route wins: the exchange is
+        // the one call that reports the switch, and it must succeed.
+        {
+          method: "POST",
+          pattern: TOKEN_EXCHANGE,
+          reply: {
+            rawKey: EXCHANGED_KEY,
+            keyId: "cccc3333-dddd-4333-8333-eeee33333333",
+            keyPrefix: "tr_live_ex99ab88...",
+            siteId: SITE_ID,
+            expiresAt: "2026-12-31T23:59:59.000Z",
+            capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
+            externalWritesEnabled: false,
+          },
+        },
+        { method: "GET", pattern: /.*/u, reply: paused },
+        { method: "POST", pattern: /.*/u, reply: paused },
+        { method: "PUT", pattern: /.*/u, reply: paused },
+        { method: "PATCH", pattern: /.*/u, reply: paused },
+        { method: "DELETE", pattern: /.*/u, reply: paused },
+      ]);
+      await saveCredential(
+        { XDG_CONFIG_HOME: workspace.configHome },
+        {
+          apiOrigin: "https://app.taproot.test",
+          accountId: "eeee5555-ffff-4555-8555-aaaa55555555",
+          key: "tr_live_stored_sign_in_that_must_never_be_logged",
+          keyId: "dddd4444-eeee-4444-8444-ffff44444444",
+          keyPrefix: "tr_live_ab12cd34...",
+        },
+        { now: () => 1_700_000_000_000 },
+      );
+      const { invocation, progress } = invoke(workspace, wire, {
+        verb: verb.name,
+        ...(typeof verb.extra === "function" ? verb.extra() : verb.extra),
+        // No TAPROOT_SITE_KEY: this run exchanges the stored sign-in, which is
+        // what reports the switch.
+        environment: { XDG_CONFIG_HOME: workspace.configHome },
+      });
+
+      await assert.rejects(
+        verb.run(invocation),
+        (error) => typeof error?.refusalKind === "function" && error.refusalKind() === "platform_paused",
+      );
+
+      // The exchange path prints nothing of its own, so the warning is the
+      // first line this verb says: nothing was validated, read, or sent first.
+      assert.ok(progress.length > 0, `${verb.name} announced nothing`);
+      assert.ok(progress[0].includes(EXTERNAL_WRITES_SETTING_KEY), `${verb.name} did not warn first: ${progress[0]}`);
+      assert.equal(wire.calls.findIndex((call) => !TOKEN_EXCHANGE.test(call.pathname)) >= 0, true);
+    });
   }
 });
 

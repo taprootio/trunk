@@ -1,6 +1,7 @@
 import {
   CLI_BINARY_NAME,
   CLI_NAME,
+  CLI_UPGRADE_COMMAND,
   CLI_VERSION,
   DEFAULT_LOGIN_KEY_NAME,
   DEPLOY_TARGET_PRODUCTION,
@@ -22,6 +23,8 @@ import {
   VERB_PREVIEW_PAGE,
   VERB_PREVIEW_REVOKE,
   VERB_PULL,
+  VERB_REDIRECTS_PULL,
+  VERB_REDIRECTS_PUSH,
   VERB_SITES,
   VERB_STATUS,
   VERB_THEME_PUSH,
@@ -56,7 +59,20 @@ import {
   CAPABILITY_DEPLOYMENTS,
   CAPABILITY_DESIGN,
 } from "./capabilities.js";
+import { assertCliCurrent } from "./session.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
+
+/**
+ * The verbs the local version gate applies to (TR00703).
+ *
+ * Exactly the three that make no request. Every other verb reaches Taproot,
+ * whose own refusal is authoritative and better informed than this recording,
+ * so gating them here would only duplicate an answer — and gating `login`,
+ * `logout`, or `env` would take away the commands an operator needs while they
+ * are outdated. `--help` and `--version` are outside it for the same reason:
+ * they are how someone finds out what they have.
+ */
+const VERSION_GATED_OFFLINE_VERBS = Object.freeze([VERB_HELP, VERB_VALIDATE, VERB_WHOAMI]);
 
 // One entry per verb, in help order. `tokens` is the exact leading positional
 // sequence; matching prefers the longest sequence, so a two-token family can
@@ -197,8 +213,9 @@ const VERBS = Object.freeze([
       + "The homepage is recorded with an empty path, so address it as '/'. "
       + "A selected path resolves to its one authoritative source from metadata alone, and that page is then validated "
       + "exactly as a whole push would validate it — site binding, manifest integrity, live create-or-update "
-      + "resolution, system-page rules, path uniqueness against the live site, media ownership, and two workspace "
-      + "files claiming one path all still fail closed. What a selection does not do is convert or validate the "
+      + "resolution, system-page rules, path uniqueness against the live site, media ownership, a live page whose "
+      + "stored-state revision moved since this workspace last reconciled with it (pages.push_conflict), and two "
+      + "workspace files claiming one path all still fail closed. What a selection does not do is convert or validate the "
       + "documents of pages it is not sending: an unrelated page left on an obsolete contract is reported by the "
       + "whole-workspace push, not used to block this one. The result states the selection and how many sources were "
       + "discovered and validated. "
@@ -218,6 +235,28 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
     tokens: ["nav", "push"],
     summary: "Replace the whole navigation tree from the local workspace.",
+  },
+  {
+    name: VERB_REDIRECTS_PULL,
+    // A redirect is a content path, and both halves of the map — read and
+    // replace — are gated on site.pages.edit_any, which only Content carries.
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["redirects", "pull"],
+    summary: "Snapshot the site's whole redirect map into redirects.json.",
+    note: "Also part of 'pull'. Run it on its own to re-read the map after a page rename, or after a push was "
+      + "refused as a conflict, without re-pulling every page. It records the map's revision in the pull "
+      + "manifest; 'redirects push' sends that revision so a stale replace is refused rather than deleting an "
+      + "entry a rename recorded. See 'taproot-site help redirects'.",
+  },
+  {
+    name: VERB_REDIRECTS_PUSH,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["redirects", "push"],
+    summary: "Validate redirects.json and replace the whole redirect map.",
+    note: "Run 'redirects pull' first. The whole file is validated locally by entry index — path normalization, "
+      + "targets, statuses, duplicates, chains, and loops — before anything is sent, and the site refuses a "
+      + "source a live page occupies. Entries take effect on the next deploy. "
+      + "See 'taproot-site help redirects'.",
   },
   {
     name: VERB_THEME_PUSH,
@@ -304,7 +343,7 @@ const VERBS = Object.freeze([
     // Content.
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["status"],
-    summary: "Report deployments, readiness, and image processing.",
+    summary: "Report the platform authoring switch, the CLI release, deployments, readiness, and image processing.",
     note: "Broken references are not included: that read remains"
       + " session-only on the server, so the result reports it as uncovered"
       + " rather than pretending an empty list means a clean site.",
@@ -352,6 +391,15 @@ help, whoami, and env are offline and read-only. login, logout, sites, use,
 whoami, and env need no configuration and no site. The offline help family is
 human-readable by default; add --json for stable reference data. Exit codes: 0
 success, 1 failure, 2 usage fault.
+
+Troubleshooting: a command that fails with field=CliUpgradeRequired (or
+refusal=cli_outdated) means this CLI is behind the latest published release,
+which is the only release Taproot accepts. Nothing is wrong with the
+credential, the request, or the site, and no retry of this version succeeds.
+Run '${CLI_UPGRADE_COMMAND}' and try again; if the
+release is minutes old, npm may not serve it yet, so wait and retry the
+upgrade. Once a run has recorded a newer release, help, validate, and whoami
+refuse the same way offline. --version and --help always answer.
 
 Verbs:
 ${VERBS.map((verb) => `  ${verb.tokens.join(" ").padEnd(14)} ${verb.summary}`).join("\n")}
@@ -408,11 +456,22 @@ function verbHelp(verb) {
   // would have had to gain.
   const selfContained = verb.offline && !verb.readsLocalState;
   const prefix = selfContained ? CLI_BINARY_NAME : `${CLI_BINARY_NAME} [--config <path>]`;
+  // The offline boundary states the version gate too (TR00703). It is the one
+  // thing these verbs read that is not their own input, and a boundary sentence
+  // that omitted it would be describing a verb that no longer exists.
+  // `env` is offline too and deliberately outside the gate — switching Taproots
+  // is one of the things an outdated CLI must still be able to do — so the
+  // sentence is attached per verb rather than to offline-ness.
+  const upgradeGate = VERSION_GATED_OFFLINE_VERBS.includes(verb.name)
+    ? " It refuses only when a previous sign-in exchange recorded a newer published release than this CLI, because "
+      + "Taproot accepts only the latest; with nothing recorded it runs."
+    : "";
   const boundary = selfContained
-    ? "This offline verb reads no configuration or credential and performs no network request or write."
+    ? "This offline verb uses no credential and reads no configuration, and performs no network request and no "
+      + `write.${upgradeGate}`
     : verb.offline
     ? "This verb answers entirely from local state — the stored sign-in and the configuration — and makes no "
-      + "network request and no write."
+      + `network request and no write.${upgradeGate}`
     : verb.credentialFree
     ? `This verb reads the configuration but requires no existing credential. `
       + `${PUBLISH_KEY_ENVIRONMENT_VARIABLE} always takes precedence over the stored credential, so setting it leaves `
@@ -500,6 +559,7 @@ function parseReferenceArguments(arguments_) {
       || topic === "appearance"
       || topic === "footer"
       || topic === "fixture"
+      || topic === "redirects"
     )
     && (subject !== undefined || extra.length > 0)) {
     throw usageError("help.usage", `The '${topic}' topic does not accept a name.`);
@@ -549,6 +609,7 @@ function referenceResult(parsed) {
       return { ...result, topic: "component", component };
     }
     case "nav":
+    case "redirects":
     case "media":
     case "preview":
     case "fixture":
@@ -855,9 +916,13 @@ export async function runCli({
       return 0;
     }
     if (parsed.mode === "reference") {
+      await assertCliCurrent(environment);
       const result = referenceResult(parsed);
       stdout.write(parsed.json ? `${serializeResult(result)}\n` : formatReferenceResult(result));
       return 0;
+    }
+    if (VERSION_GATED_OFFLINE_VERBS.includes(parsed.verb)) {
+      await assertCliCurrent(environment);
     }
     // Own properties only: a verb name must never resolve through the
     // prototype chain to something like `constructor`.

@@ -144,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.3.0");
+  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.4.0");
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });
@@ -729,6 +729,15 @@ test("reads the key-mode capability denial out of its packed error detail", asyn
 
 test("classifies every refusal the authoring surface speaks", async (testContext) => {
   const cases = [
+    // The client itself is the problem, and no retry of this binary succeeds
+    // (TR00703). Classified ahead of every other field for that reason.
+    {
+      name: "cli upgrade required",
+      status: 400,
+      body: { code: 3, ...violation("CliUpgradeRequired") },
+      kind: "cli_outdated",
+    },
+    { name: "cli upgrade required casing", status: 400, body: violation("cliupgraderequired"), kind: "cli_outdated" },
     { name: "rollout", status: 503, body: { code: 14, ...violation("SiteAuthoringRollout") }, kind: "platform_paused" },
     { name: "rollout casing", status: 503, body: violation("siteauthoringrollout"), kind: "platform_paused" },
     // The shape the authority resolver actually emits: a bare Unauthenticated

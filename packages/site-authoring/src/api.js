@@ -1,20 +1,48 @@
 import {
   CANONICAL_TIMESTAMP,
   CAPABILITY_REFUSAL_FIELD,
+  CLI_UPGRADE_COMMAND,
+  CLI_UPGRADE_REFUSAL_FIELD,
+  CLI_VERSION,
+  EXTERNAL_WRITES_SETTING_KEY,
+  EXTERNAL_WRITES_SETTING_LOCATION,
   LIMITS,
   REFUSAL_CAPABILITY_MISSING,
+  REFUSAL_CLI_OUTDATED,
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_PLAN_LIMIT,
   REFUSAL_PLATFORM_PAUSED,
   REFUSAL_THROTTLED,
   REFUSAL_UNCLASSIFIED,
 } from "./constants.js";
+import { normalizeLatestCliVersion } from "./cli-release.js";
 // The display-prefix shape lives with the store because acceptance on claim
 // must equal acceptance on save — a prefix admitted here but refused there
 // would turn a successful mint into an orphaned key.
 import { KEY_PREFIX } from "./credentials.js";
 import { isCanonicalUuid, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import {
+  DEFAULT_REDIRECT_STATUS,
+  GONE_STATUS,
+  REDIRECT_KIND_GONE,
+  REDIRECT_KIND_REDIRECT,
+  REDIRECT_ORIGIN_AUTHORED,
+  REDIRECT_ORIGIN_PATH_HISTORY,
+} from "./redirects-contract.js";
 import { ApiError, isWellFormedCredential } from "./transport.js";
+// The revision's shape lives with the manifest that records it: a value this
+// module admitted but the registry then dropped would be recorded on a push
+// and unreadable on the next pull, which reads as "never reconciled" forever.
+import { normalizePageBodyRevision } from "./workspace.js";
+
+/**
+ * The proto enum spellings the redirect map travels as. The CLI's own
+ * vocabulary is the lowercase word the workspace file uses; these are the wire
+ * identities it is translated from, kept beside the translation.
+ */
+const REDIRECT_KIND_REDIRECT_WIRE = "SITE_REDIRECT_KIND_REDIRECT";
+const REDIRECT_KIND_GONE_WIRE = "SITE_REDIRECT_KIND_GONE";
+const REDIRECT_ORIGIN_AUTHORED_WIRE = "SITE_REDIRECT_ORIGIN_AUTHORED";
 
 /**
  * The wire vocabulary and the read helpers every verb shares.
@@ -309,7 +337,8 @@ export function sitePath(siteId, suffix) {
 const REFUSAL_GUIDANCE = Object.freeze({
   [REFUSAL_PLATFORM_PAUSED]:
     "Taproot has paused external site authoring platform-wide. The credential and the request are both fine; "
-    + "retry later or ask the operator.",
+    + "retry later, or ask a Taproot administrator to re-enable the platform setting "
+    + `'${EXTERNAL_WRITES_SETTING_KEY}' (${EXTERNAL_WRITES_SETTING_LOCATION}).`,
   [REFUSAL_CREDENTIAL_REJECTED]:
     "The site authoring credential was rejected: it is invalid, revoked, or bound to a different site. "
     + "Stop and re-issue it; retrying cannot succeed.",
@@ -331,6 +360,27 @@ const REFUSAL_GUIDANCE = Object.freeze({
 export function announceRefusal(error, onProgress, action = "request") {
   if (!(error instanceof ApiError)) return;
   const kind = error.refusalKind();
+  if (kind === REFUSAL_CLI_OUTDATED) {
+    onProgress("");
+    onProgress(`CLI UPGRADE REQUIRED (refusal=${REFUSAL_CLI_OUTDATED}, field=${CLI_UPGRADE_REFUSAL_FIELD})`);
+    onProgress(
+      `  Taproot supports only the latest published release of this package, and refused this ${action} because `
+        + `this CLI (${CLI_VERSION}) is behind it. Nothing about the credential, the request, or the site is wrong, `
+        + "and no retry of this version can succeed.",
+    );
+    onProgress(`  Upgrade with: ${CLI_UPGRADE_COMMAND}`);
+    // The server names both versions and says when waiting is the right move
+    // (a deploy that landed ahead of its npm publish). Surface it verbatim
+    // rather than restating a policy this side does not own; the bounded
+    // ApiError message stays the fallback for a server that sent no
+    // description.
+    const serverDescription = error.descriptionFor?.(CLI_UPGRADE_REFUSAL_FIELD);
+    onProgress(`  Taproot's own detail: ${
+      sanitizeDiagnostic(serverDescription ?? error.message, "the request was rejected.")
+    }`);
+    onProgress("");
+    return;
+  }
   if (kind === REFUSAL_CAPABILITY_MISSING) {
     const { permission, granted, required } = error.capability;
     onProgress("");
@@ -407,6 +457,12 @@ export function normalizePageSummary(value) {
     status: enumValue(summary.status, PAGE_STATUSES, PAGE_STATUS_UNKNOWN, "api.page_status", "page status"),
     hasDraft: summary.hasDraft === true,
     isGenerated: summary.isGenerated === true,
+    // Absent against a Taproot that predates the revision contract, and absent
+    // on the listings that never resolve stored body state. Both mean the same
+    // thing to a caller — "this read cannot say what version you are looking
+    // at" — and both are carried as `undefined` rather than as a sentinel that
+    // would compare unequal to every recorded baseline and refuse every push.
+    bodyRevision: normalizePageBodyRevision(summary.bodyRevision),
   };
 }
 
@@ -499,6 +555,98 @@ export async function saveNavigation(client, siteId, navItems) {
     "site navigation",
   );
   return Array.isArray(response.navItems) ? response.navItems : [];
+}
+
+/**
+ * Reads the site's whole redirect map with the revision a replace must carry
+ * (TR00702).
+ */
+export async function getSiteRedirectMap(client, siteId) {
+  return requireRedirectMap(
+    await client.request(sitePath(siteId, "redirects"), {
+      maximumResponseBytes: LIMITS.redirectMapResponseBytes,
+    }),
+    siteId,
+  );
+}
+
+/**
+ * Replaces the whole map. `expectedRevision` is the revision the map was read
+ * at; the site refuses the write rather than dropping an entry a rename
+ * recorded since.
+ */
+export async function replaceSiteRedirectMap(client, siteId, expectedRevision, entries) {
+  return requireRedirectMap(
+    await client.request(sitePath(siteId, "redirects"), {
+      method: "PUT",
+      body: { siteId, expectedRevision, entries: entries.map(toWireRedirectEntry) },
+      // The reply is the whole replaced map, as large as the read.
+      maximumResponseBytes: LIMITS.redirectMapResponseBytes,
+    }),
+    siteId,
+  );
+}
+
+/**
+ * The wire shape of one entry. `origin` is deliberately not sent: it is what
+ * the site decided about a stored row, and echoing a pulled value back would
+ * be asking to relabel a rename-recorded entry as one this workspace authored.
+ */
+function toWireRedirectEntry(entry) {
+  return entry.kind === REDIRECT_KIND_GONE
+    ? { path: entry.path, kind: REDIRECT_KIND_GONE_WIRE, status: GONE_STATUS }
+    : {
+      path: entry.path,
+      kind: REDIRECT_KIND_REDIRECT_WIRE,
+      target: entry.target,
+      status: entry.status,
+    };
+}
+
+function requireRedirectMap(value, siteId) {
+  const response = requireObject(value, "api.redirects_contract", "site redirects");
+  if (typeof response.revision !== "string" || response.revision === "") {
+    throw new SiteAuthoringError(
+      "api.redirects_contract",
+      "Taproot returned a redirect map with no revision, so a later push could not be fenced against it.",
+      { field: "revision" },
+    );
+  }
+  if (typeof response.siteId === "string" && response.siteId !== "" && response.siteId !== siteId) {
+    throw new SiteAuthoringError(
+      "api.redirects_contract",
+      "Taproot returned a redirect map for a different site.",
+      { field: "siteId" },
+    );
+  }
+  const entries = Array.isArray(response.entries) ? response.entries : [];
+  return {
+    revision: response.revision,
+    entries: entries.map((entry) => normalizeRedirectMapEntry(entry)),
+  };
+}
+
+/**
+ * Reads one entry off the wire. Transcoding omits proto default values, so an
+ * absent `kind`, `status`, or `origin` is the enum's zero — which the contract
+ * reads as a redirect, the default status, and path history respectively.
+ */
+function normalizeRedirectMapEntry(entry) {
+  const source = requireObject(entry, "api.redirects_contract", "site redirect entry");
+  const kind = source.kind === REDIRECT_KIND_GONE_WIRE ? REDIRECT_KIND_GONE : REDIRECT_KIND_REDIRECT;
+  return {
+    path: typeof source.path === "string" ? source.path : "",
+    kind,
+    target: kind === REDIRECT_KIND_GONE || typeof source.target !== "string" ? "" : source.target,
+    status: Number.isSafeInteger(source.status) && source.status > 0
+      ? source.status
+      : kind === REDIRECT_KIND_GONE
+      ? GONE_STATUS
+      : DEFAULT_REDIRECT_STATUS,
+    origin: source.origin === REDIRECT_ORIGIN_AUTHORED_WIRE
+      ? REDIRECT_ORIGIN_AUTHORED
+      : REDIRECT_ORIGIN_PATH_HISTORY,
+  };
 }
 
 /**
@@ -1326,7 +1474,14 @@ export async function startCliAuthorization(client, { keyName }, requestOptions 
   const response = requireObject(
     // No site: TR00645 made the account-level sign-in the front door, so the
     // CLI no longer has to know a site id before it can authorize at all.
-    await client.request(CLI_AUTHORIZATION_PATH, { ...requestOptions, method: "POST", body: { keyName } }),
+    // `cliVersion` is sent on both calls every online verb passes through
+    // (TR00703). Sign-in is the earlier of the two, so an outdated CLI is told
+    // to upgrade before an owner is asked to approve anything.
+    await client.request(CLI_AUTHORIZATION_PATH, {
+      ...requestOptions,
+      method: "POST",
+      body: { keyName, cliVersion: CLI_VERSION },
+    }),
     "login.start_contract",
     "CLI authorization",
   );
@@ -1404,7 +1559,7 @@ export async function exchangeSiteAuthoringToken(client, { siteId, capabilities 
     await client.request(TOKEN_EXCHANGE_PATH, {
       ...requestOptions,
       method: "POST",
-      body: { siteId, capabilities },
+      body: { siteId, capabilities, cliVersion: CLI_VERSION },
     }),
     "exchange.contract",
     "token exchange",
@@ -1431,6 +1586,23 @@ export async function exchangeSiteAuthoringToken(client, { siteId, capabilities 
     ...(typeof response.signInExpiresAt === "string" && response.signInExpiresAt.length > 0
       ? { signInExpiresAt: requireCanonicalTimestamp(response.signInExpiresAt, "exchange.contract", "signInExpiresAt").value }
       : {}),
+    // Whether the platform is accepting external authoring writes at all
+    // (TR00692). Read strictly: only a real boolean is a state, so a server
+    // that predates the field leaves this undefined rather than reading as
+    // paused and warning before every write against a healthy platform.
+    ...(typeof response.externalWritesEnabled === "boolean"
+      ? { externalWritesEnabled: response.externalWritesEnabled }
+      : {}),
+    // The latest published release Taproot accepts (TR00703). This exchange
+    // already succeeded, so it is never news about *this* request — it is what
+    // lets the offline verbs refuse later. Read strictly for the same reason
+    // the switch above is: only a value this side can compare is kept, so a
+    // server that predates the field, or one that answers something
+    // unparseable, leaves the local gate silent rather than refusing work it
+    // cannot justify.
+    ...(normalizeLatestCliVersion(response.latestCliVersion) === undefined
+      ? {}
+      : { latestCliVersion: response.latestCliVersion }),
   };
 }
 

@@ -6,12 +6,21 @@ import path from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/cli.js";
-import { LIMITS } from "../src/constants.js";
+import {
+  CLI_UPGRADE_REFUSAL_FIELD,
+  CLI_VERSION,
+  EXTERNAL_WRITES_SETTING_KEY,
+  EXTERNAL_WRITES_SETTING_LOCATION,
+  LIMITS,
+  REFUSAL_CLI_OUTDATED,
+} from "../src/constants.js";
 import { SiteAuthoringError } from "../src/errors.js";
 import { readCredentialStore, saveCredential } from "../src/credentials.js";
+import { warnIfExternalWritesPaused } from "../src/session.js";
 import { login } from "../src/verbs/login.js";
 import { logout } from "../src/verbs/logout.js";
 import { status } from "../src/verbs/status.js";
+import { whoami } from "../src/verbs/whoami.js";
 
 // ---------------------------------------------------------------------------
 // The values that must never leave this process
@@ -260,7 +269,7 @@ test("login stores an approved credential and never emits the secret or the devi
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.4.0" },
     verb: "login",
     accountId: ACCOUNT_ID,
     keyId: KEY_ID,
@@ -306,7 +315,10 @@ test("login stores an approved credential and never emits the secret or the devi
   // Unauthenticated on the wire, and asking for exactly what the contract says.
   const start = wire.calls.find((call) => call.pathname === START_PATH);
   assert.equal(Object.hasOwn(start.headers, "authorization"), false);
-  assert.deepEqual(start.body, { keyName: "Laptop CLI" });
+  // The version rides on sign-in as well as on the exchange (TR00703): it is
+  // the earlier of the two calls, so an outdated CLI is told to upgrade before
+  // an owner is asked to approve anything.
+  assert.deepEqual(start.body, { keyName: "Laptop CLI", cliVersion: CLI_VERSION });
   for (const claim of wire.calls.filter((call) => call.pathname === CLAIM_PATH)) {
     assert.equal(Object.hasOwn(claim.headers, "authorization"), false);
     assert.deepEqual(claim.body, { deviceCode: DEVICE_CODE });
@@ -420,6 +432,57 @@ test("login maps each terminal outcome to a stable code and stores nothing", asy
       assert.equal(await storeContents(site), undefined, "nothing may be stored");
     });
   }
+});
+
+/**
+ * Sign-in is the earlier of the two calls that carry this CLI's version, and it
+ * sits outside every verb's own refusal guidance — so this pins that a refusal
+ * raised there is announced with the server's own description, which is where
+ * both versions and the install command live (TR00703).
+ */
+test("login announces the server's upgrade instruction when this CLI is behind", async (testContext) => {
+  const site = await fixture(testContext);
+  const upgradeDescription = "This @taprootio/site-authoring CLI reports version 0.1.0; Taproot accepts only the "
+    + "latest published release, 9.9.9. Upgrade with: npm install -g @taprootio/site-authoring@latest.";
+  const wire = api([{
+    method: "POST",
+    pathname: START_PATH,
+    reply: () =>
+      jsonResponse(
+        { code: 3, details: [{ fieldViolations: [{ field: "CliUpgradeRequired", description: upgradeDescription }] }] },
+        400,
+      ),
+  }]);
+  const { invocation, progress } = invoke(site, wire, { verb: "login" });
+
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.field === "CliUpgradeRequired" && error.refusalKind() === "cli_outdated",
+  );
+
+  assert.ok(progress.some((line) => line.includes(upgradeDescription)));
+  assert.ok(progress.some((line) => line.includes("npm install -g @taprootio/site-authoring@latest")));
+  assert.equal(await storeContents(site), undefined, "nothing may be stored");
+});
+
+/**
+ * The start endpoint's throttle is about a network, not a credential, so the
+ * shared credential-budget guidance must not be announced ahead of the line
+ * that says so (TR00703 kept the translation ahead of the announcement).
+ */
+test("a throttled sign-in start is translated, not announced as a credential budget", async (testContext) => {
+  const site = await fixture(testContext);
+  const wire = api([{
+    method: "POST",
+    pathname: START_PATH,
+    reply: () => jsonResponse({ code: 8, message: "slow down" }, 429),
+  }]);
+  const { invocation, progress } = invoke(site, wire, { verb: "login" });
+
+  await assert.rejects(login(invocation), (error) => error?.code === "login.throttled");
+
+  assert.ok(!progress.some((line) => line.includes("request budget")));
+  assert.equal(await storeContents(site), undefined, "nothing may be stored");
 });
 
 test("login gives up on its own deadline with login.timeout and stores nothing", async (testContext) => {
@@ -1122,9 +1185,9 @@ test("logout with nothing stored succeeds and reports removed: false", async (te
 // Precedence
 // ---------------------------------------------------------------------------
 
-function statusRoutes() {
+function statusRoutes(exchange = exchangeRoute()) {
   return [
-    exchangeRoute(),
+    exchange,
     {
       method: "GET",
       pathname: READINESS,
@@ -1236,6 +1299,402 @@ test("an expired stored credential is still sent, with the expiry said out loud"
   assert.equal((await status(invocation)).ok, true);
   assert.equal(exchangeBearerOf(wire), `Bearer ${STORED_KEY}`);
   assert.ok(progress.some((line) => line.includes("2020-01-01T00:00:00.000Z") && line.includes("taproot-site login")));
+});
+
+// ---------------------------------------------------------------------------
+// The platform authoring rollout switch (TR00692)
+// ---------------------------------------------------------------------------
+
+/** The exchange, answering with a named state for the platform switch. */
+function exchangeReporting(externalWritesEnabled) {
+  const route = exchangeRoute();
+  return { ...route, reply: { ...route.reply, externalWritesEnabled } };
+}
+
+/** The one exchange time this fixture's injected clock produces. */
+const EXCHANGED_AT = new Date(1_700_000_000_000).toISOString();
+
+test("status reports a paused platform on both channels, naming the setting and where it lives", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api(statusRoutes(exchangeReporting(false)));
+  const { invocation, progress } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  // The machine channel: a plain boolean an automation branches on without
+  // having to distinguish "paused" from "nobody said".
+  assert.deepEqual(result.platform, { externalWritesEnabled: false });
+  // The human channel names the switch and its home. Matched against the
+  // exported constants rather than prose, so rewording the sentence is free
+  // and dropping the setting key is not.
+  assert.ok(progress.some((line) =>
+    line.includes(EXTERNAL_WRITES_SETTING_KEY) && line.includes(EXTERNAL_WRITES_SETTING_LOCATION)
+  ));
+});
+
+test("status reports an enabled platform without naming a remedy", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api(statusRoutes(exchangeReporting(true)));
+  const { invocation, progress } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  assert.deepEqual(result.platform, { externalWritesEnabled: true });
+  assert.ok(!progress.some((line) => line.includes(EXTERNAL_WRITES_SETTING_KEY)));
+});
+
+test("status says the platform switch is unknown rather than guessing it", async (testContext) => {
+  const site = await fixture(testContext);
+  const wire = api(statusRoutes());
+  const { invocation } = invoke(site, wire, {
+    verb: "status",
+    environment: { ...site.environment, TAPROOT_SITE_KEY: "tr_live_environment_supplied_site_credential" },
+  });
+
+  const result = await status(invocation);
+
+  // No exchange happens on this path and nothing else on the contract exposes
+  // the switch, so the honest answer is that it was never reported. Reporting
+  // `externalWritesEnabled: false` here would warn before every write against
+  // a perfectly healthy platform.
+  assert.equal(result.platform.externalWritesKnown, false);
+  assert.equal(result.platform.externalWritesEnabled, undefined);
+});
+
+test("status treats an exchange that never reported the switch as unknown, not paused", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  // The default exchange reply carries no `externalWritesEnabled`: the wire
+  // shape of a Taproot that predates the field, which a rolling deploy can
+  // still answer from. Absence is a version signal, never a pause.
+  const wire = api(statusRoutes());
+  const { invocation, progress } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  assert.equal(exchangeBearerOf(wire), `Bearer ${STORED_KEY}`);
+  assert.equal(result.platform.externalWritesKnown, false);
+  assert.equal(result.platform.externalWritesEnabled, undefined);
+  assert.ok(!progress.some((line) => line.includes(EXTERNAL_WRITES_SETTING_KEY)));
+});
+
+test("the exchange records the platform switch, dated, and whoami reports it offline", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api(statusRoutes(exchangeReporting(false)));
+  await status(invoke(site, wire, { verb: "status" }).invocation);
+
+  const stored = await storeContents(site);
+  assert.equal(stored.credentials[0].lastExchange.externalWritesEnabled, false);
+  assert.equal(stored.credentials[0].lastExchange.at, EXCHANGED_AT);
+
+  // Offline: whoami reads the record and makes no request at all.
+  const offline = api([]);
+  const { invocation, progress } = invoke(site, offline, { verb: "whoami" });
+  const result = await whoami(invocation);
+
+  assert.equal(offline.calls.length, 0);
+  assert.equal(result.lastExchange.externalWritesEnabled, false);
+  assert.equal(result.lastExchange.at, EXCHANGED_AT);
+  // Dated on the human channel too, because an undated flag from an offline
+  // command reads as a fact about right now.
+  assert.ok(progress.some((line) => line.includes(EXCHANGED_AT) && line.includes(EXTERNAL_WRITES_SETTING_KEY)));
+});
+
+test("a sign-in stored before the switch existed still loads, and whoami says it was not recorded", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site, {
+    // Exactly the shape TR00645 wrote: no exchange time, no platform state.
+    lastExchange: {
+      siteId: SITE_ID,
+      capabilities: ["delegation.content"],
+      expiresAt: "2026-12-31T23:59:59.000Z",
+    },
+  });
+
+  const { invocation, progress } = invoke(site, api([]), { verb: "whoami" });
+  const result = await whoami(invocation);
+
+  // Absent is "not recorded", never "enabled": an upgrade must not read as a
+  // healthy platform, and it must not read as a corrupt store either.
+  assert.equal(result.lastExchange.externalWritesEnabled, undefined);
+  assert.equal(result.lastExchange.at, undefined);
+  assert.ok(progress.some((line) => line.includes("not recorded")));
+});
+
+test("the pre-write warning fires on a paused platform and stays silent otherwise", async (testContext) => {
+  const warned = (externalWritesEnabled) => {
+    const progress = [];
+    const printed = warnIfExternalWritesPaused(
+      { platform: { externalWritesEnabled }, onProgress: (line) => progress.push(line) },
+      "pages push",
+    );
+    return { printed, progress };
+  };
+
+  await testContext.test("paused warns exactly once, naming the setting and its home", () => {
+    const { printed, progress } = warned(false);
+    assert.equal(printed, true);
+    // Exactly one line: a verb that prints a paragraph before every write
+    // trains an agent to skip its output.
+    assert.equal(progress.length, 1);
+    assert.ok(progress[0].includes(EXTERNAL_WRITES_SETTING_KEY));
+    assert.ok(progress[0].includes(EXTERNAL_WRITES_SETTING_LOCATION));
+  });
+
+  await testContext.test("enabled says nothing", () => {
+    assert.deepEqual(warned(true), { printed: false, progress: [] });
+  });
+
+  await testContext.test("unknown says nothing, because nothing was reported", () => {
+    assert.deepEqual(warned(undefined), { printed: false, progress: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Only the latest published CLI is supported (TR00703)
+// ---------------------------------------------------------------------------
+
+/** A writable stream stand-in, so a run through `runCli` can be read back. */
+function sink() {
+  let value = "";
+  return {
+    write: (chunk) => {
+      value += chunk;
+    },
+    read: () => value,
+  };
+}
+
+/** The exchange, naming a latest published release. */
+function exchangeNamingLatest(latestCliVersion) {
+  const route = exchangeRoute();
+  return { ...route, reply: { ...route.reply, latestCliVersion } };
+}
+
+/** A stored sign-in whose last exchange recorded a latest release. */
+function seedRecordingLatest(site, latestCliVersion) {
+  return seedCredential(site, {
+    lastExchange: {
+      siteId: SITE_ID,
+      capabilities: ["delegation.content"],
+      expiresAt: "2026-12-31T23:59:59.000Z",
+      at: EXCHANGED_AT,
+      ...(latestCliVersion === undefined ? {} : { latestCliVersion }),
+    },
+  });
+}
+
+/**
+ * What the three offline verbs answer for this fixture, through the real CLI
+ * entry point — which is where the gate lives, so a test that called the verb
+ * function directly would prove nothing.
+ *
+ * `fetch` throws, so any request at all fails the test rather than reaching a
+ * network. Stdout is JSON for every failure and for every success except a
+ * bare `help`, whose reference output is human-readable unless `--json` asks
+ * otherwise.
+ */
+async function runOffline(site, arguments_) {
+  const stdout = sink();
+  const stderr = sink();
+  const exitCode = await runCli({
+    arguments_,
+    cwd: site.project,
+    environment: site.environment,
+    stdout,
+    stderr,
+    fetch: () => {
+      throw new Error("an offline verb made a request");
+    },
+  });
+  const output = stdout.read();
+  return {
+    exitCode,
+    result: output.startsWith("{") ? JSON.parse(output) : undefined,
+    stdout: output,
+    stderr: stderr.read(),
+  };
+}
+
+test("the exchange sends this CLI's version and records the latest Taproot named", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api(statusRoutes(exchangeNamingLatest("9.9.9")));
+  const { invocation, progress } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  const exchange = wire.calls.find((call) => call.pathname === EXCHANGE_PATH);
+  assert.equal(exchange.body.cliVersion, CLI_VERSION);
+  // Reported on both channels, and named apart from the result's own `cli`
+  // block so neither shadows the other.
+  assert.equal(result.cliRelease.version, CLI_VERSION);
+  assert.equal(result.cliRelease.latestVersion, "9.9.9");
+  assert.equal(result.cliRelease.behind, true);
+  assert.ok(progress.some((line) => line.includes("9.9.9")));
+
+  // Recorded with the sign-in, which is the only thing that lets the offline
+  // verbs refuse later.
+  const stored = await storeContents(site);
+  assert.equal(stored.credentials[0].lastExchange.latestCliVersion, "9.9.9");
+});
+
+test("status says the latest release is unknown rather than guessing it", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  // The default exchange reply names no latest: the wire shape of a Taproot
+  // that predates the field.
+  const wire = api(statusRoutes());
+  const { invocation } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  assert.equal(result.cliRelease.latestKnown, false);
+  assert.equal(result.cliRelease.latestVersion, undefined);
+  const stored = await storeContents(site);
+  assert.equal(stored.credentials[0].lastExchange.latestCliVersion, undefined);
+});
+
+test("a latest version the CLI cannot compare is dropped rather than recorded", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api(statusRoutes(exchangeNamingLatest("not a version")));
+  const { invocation } = invoke(site, wire, { verb: "status" });
+
+  const result = await status(invocation);
+
+  // Keeping it would store a value that could never gate anything; refusing
+  // the exchange over it would break a working run on a cosmetic field.
+  assert.equal(result.cliRelease.latestKnown, false);
+  const stored = await storeContents(site);
+  assert.equal(stored.credentials[0].lastExchange.latestCliVersion, undefined);
+});
+
+test("whoami reports the recorded latest release offline, dated with its exchange", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedRecordingLatest(site, CLI_VERSION);
+
+  const offline = api([]);
+  const { invocation, progress } = invoke(site, offline, { verb: "whoami" });
+  const result = await whoami(invocation);
+
+  assert.equal(offline.calls.length, 0);
+  assert.equal(result.lastExchange.latestCliVersion, CLI_VERSION);
+  assert.ok(progress.some((line) => line.includes(EXCHANGED_AT) && line.includes(CLI_VERSION)));
+});
+
+test("a sign-in stored before the latest release was recorded still loads", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedRecordingLatest(site, undefined);
+
+  const { invocation, progress } = invoke(site, api([]), { verb: "whoami" });
+  const result = await whoami(invocation);
+
+  assert.equal(result.lastExchange.latestCliVersion, undefined);
+  assert.ok(progress.some((line) => line.includes("not recorded")));
+});
+
+test("the offline verbs refuse once a newer release has been recorded", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedRecordingLatest(site, "9.9.9");
+
+  for (const arguments_ of [["help"], ["whoami"], ["validate", path.join(site.project, "fixture")]]) {
+    await testContext.test(arguments_[0], async () => {
+      const { exitCode, result, stderr } = await runOffline(site, arguments_);
+
+      assert.equal(exitCode, 1);
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "cli.outdated");
+      // The same field and classification the server refuses with, so an agent
+      // branches on one value whichever side answered.
+      assert.equal(result.error.field, CLI_UPGRADE_REFUSAL_FIELD);
+      assert.equal(result.error.refusal, REFUSAL_CLI_OUTDATED);
+      assert.ok(stderr.includes("npm install -g"));
+    });
+  }
+
+  // The two invocations that must always answer: they are how someone finds
+  // out what they have and how to fix it.
+  await testContext.test("--version and --help still answer", async () => {
+    const version = sink();
+    assert.equal(await runCli({ arguments_: ["--version"], environment: site.environment, stdout: version, stderr: sink() }), 0);
+    assert.equal(version.read().trim(), CLI_VERSION);
+    const help = sink();
+    assert.equal(await runCli({ arguments_: ["--help"], environment: site.environment, stdout: help, stderr: sink() }), 0);
+    assert.match(help.read(), /CliUpgradeRequired/u);
+    // `env` too: it is how an outdated operator finds the store the recording
+    // lives in, so it stays outside the gate by design.
+    const environment = await runOffline(site, ["env"]);
+    assert.equal(environment.exitCode, 0, environment.stderr);
+    assert.equal(environment.result.ok, true);
+  });
+});
+
+test("the offline verbs run when the recording is current, absent, or unreadable", async (testContext) => {
+  await testContext.test("a recorded latest equal to this CLI proceeds", async (caseContext) => {
+    const site = await fixture(caseContext);
+    await seedRecordingLatest(site, CLI_VERSION);
+    const { exitCode, result } = await runOffline(site, ["help", "--json"]);
+    assert.equal(exitCode, 0);
+    assert.equal(result.ok, true);
+  });
+
+  await testContext.test("a recorded latest behind this CLI proceeds", async (caseContext) => {
+    const site = await fixture(caseContext);
+    await seedRecordingLatest(site, "0.0.1");
+    const { exitCode, result } = await runOffline(site, ["help", "--json"]);
+    assert.equal(exitCode, 0);
+    assert.equal(result.ok, true);
+  });
+
+  // A clean machine must still be able to validate a fixture: nothing recorded
+  // is not evidence that this CLI is behind.
+  await testContext.test("nothing recorded proceeds", async (caseContext) => {
+    const site = await fixture(caseContext);
+    const { exitCode, result } = await runOffline(site, ["help", "--json"]);
+    assert.equal(exitCode, 0);
+    assert.equal(result.ok, true);
+  });
+
+  // Neither is a store this process cannot read. Turning a corrupt store into
+  // a refusal to run `help` would take away the command that explains the fix.
+  await testContext.test("a store that cannot be read proceeds", async (caseContext) => {
+    const site = await fixture(caseContext);
+    await mkdir(site.storeDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(site.storePath, "{ not json", { mode: 0o600 });
+    const { exitCode, result } = await runOffline(site, ["help", "--json"]);
+    assert.equal(exitCode, 0);
+    assert.equal(result.ok, true);
+  });
+});
+
+// The store holds one record per API origin and npm publishes one package, so
+// the newest answer any Taproot gave is the current fact — otherwise a stale
+// development sign-in would mask production's answer.
+test("the highest recorded latest across every origin is the one that counts", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedRecordingLatest(site, "0.0.1");
+  await saveCredential(site.environment, {
+    apiOrigin: OTHER_API_ORIGIN,
+    accountId: ACCOUNT_ID,
+    key: STORED_KEY,
+    keyId: EXCHANGED_KEY_ID,
+    keyPrefix: KEY_PREFIX,
+    lastExchange: {
+      siteId: SITE_ID,
+      capabilities: ["delegation.content"],
+      expiresAt: "2026-12-31T23:59:59.000Z",
+      latestCliVersion: "9.9.9",
+    },
+  }, { now: () => 1_700_000_000_000 });
+
+  const { exitCode, result } = await runOffline(site, ["help"]);
+
+  assert.equal(exitCode, 1);
+  assert.equal(result.error.code, "cli.outdated");
 });
 
 // ---------------------------------------------------------------------------

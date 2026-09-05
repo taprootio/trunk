@@ -1,0 +1,33 @@
+{
+  "siteId": "a0000000-0000-4000-8000-000000000001",
+  "revision": "0000000000000000000000000000000000000000000000000000000000000001",
+  "entries": [
+    {
+      "path": "/classes.html",
+      "kind": "redirect",
+      "target": "/visit",
+      "status": 301,
+      "origin": "authored"
+    },
+    {
+      "path": "/schedule",
+      "kind": "redirect",
+      "target": "https://booking.example.test/riverbend",
+      "status": 302,
+      "origin": "authored"
+    },
+    {
+      "path": "/summer-2019-retreat.html",
+      "kind": "gone",
+      "status": 410,
+      "origin": "authored"
+    },
+    {
+      "path": "/welcome.html",
+      "kind": "redirect",
+      "target": "/",
+      "status": 301,
+      "origin": "path_history"
+    }
+  ]
+}

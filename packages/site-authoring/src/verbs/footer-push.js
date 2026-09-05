@@ -4,7 +4,7 @@ import { SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace, validateFooterDocument } from "../footer-contract.js";
 import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import { advanceFooterManifest, FOOTER_SETTINGS_FILE, readFooterWorkspaceContext } from "../footer-workspace.js";
-import { openSession, successResult } from "../session.js";
+import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
 import { readWorkspaceJson, WORKSPACE_LIMITS, writeWorkspaceJson } from "../workspace.js";
@@ -56,7 +56,12 @@ function translateConcurrency(error) {
 }
 
 export async function footerPush(invocation) {
-  const { client, config, siteId, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, config, siteId, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_FOOTER_PUSH);
   const context = await readFooterWorkspaceContext(config.workspaceDir, siteId);
   const { document: document_, footerSettings } = validateFooterWorkspaceDocument(
     await readWorkspaceJson(config.workspaceDir, FOOTER_SETTINGS_FILE, WORKSPACE_LIMITS.settingsBytes),

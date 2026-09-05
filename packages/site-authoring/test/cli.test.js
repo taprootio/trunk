@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.4.0" },
     verb,
   };
 }
@@ -41,6 +41,8 @@ const ROUTES = [
   { arguments_: ["pull"], verb: "pull" },
   { arguments_: ["pages", "push"], verb: "pages push" },
   { arguments_: ["nav", "push"], verb: "nav push" },
+  { arguments_: ["redirects", "pull"], verb: "redirects pull" },
+  { arguments_: ["redirects", "push"], verb: "redirects push" },
   { arguments_: ["theme", "push"], verb: "theme push" },
   { arguments_: ["footer", "push"], verb: "footer push" },
   { arguments_: ["media", "upload"], verb: "media upload" },
@@ -199,7 +201,10 @@ test("the shipped status handler honors explicit config from a config-free cwd a
       assert.equal(result.ok, true);
       assert.equal(result.verb, "status");
       assert.equal(result.siteId, SITE_ID);
-      assert.match(stderr.read(), /^Reading publishing readiness\./u);
+      // Not anchored: `status` states the platform authoring switch first, from
+      // local state, before any wire read (TR00692). What this pins is that the
+      // handler ran and reached its reads.
+      assert.match(stderr.read(), /Reading publishing readiness\./u);
       assert.doesNotMatch(`${stdout.read()}${stderr.read()}`, new RegExp(token, "u"));
     });
   }
@@ -464,7 +469,10 @@ test("exposes help and version at the binary and verb levels", async (testContex
     const verbStdout = sink();
     assert.equal(await runCli({ arguments_: ["validate", "--help"], stdout: verbStdout, stderr: sink() }), 0);
     assert.match(verbStdout.read(), /^Usage: taproot-site validate <fixture-directory>/u);
-    assert.match(verbStdout.read(), /reads no configuration or credential/u);
+    assert.match(verbStdout.read(), /uses no credential and reads no configuration/u);
+    // The version gate is the one thing this verb reads that is not its own
+    // input, so the boundary sentence has to state it (TR00703).
+    assert.match(verbStdout.read(), /recorded a newer published release/u);
     assert.match(verbStdout.read(), /does not prove authorization, live site ownership, concurrency/u);
     assert.doesNotMatch(verbStdout.read(), /TAPROOT_SITE_KEY/u);
     assert.doesNotMatch(verbStdout.read(), /--config/u);
@@ -560,7 +568,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.3.0\n");
+    assert.equal(versionStdout.read(), "0.4.0\n");
   }
 });
 
@@ -600,6 +608,31 @@ test("serves page and component reference help without configuration, credential
       arguments_: ["help", "media"],
       match: /^Media upload contract/u,
       contains: ["workspace root", "logo@2x.png", "imageId", "src", "urls"],
+    },
+    {
+      // The whole contract an agent needs to author redirects.json without
+      // reading source: the shape, the normalization rule, every refusal, and
+      // a complete example including a gone entry.
+      arguments_: ["help", "redirects"],
+      match: /^Redirect map workspace contract/u,
+      contains: [
+        "redirects.json is { siteId, revision, entries }",
+        "kind is 'redirect' (the default) or 'gone'",
+        "carries no target and serves 410",
+        "status defaults to 301 and accepts 301, 302, 307, 308",
+        "trailing slashes are stripped",
+        "'/faqs.html' is a real, representable path",
+        "absolute credential-free http(s) URL",
+        "a chain (a target that is itself a source in the same map)",
+        "a loop (an entry targeting itself)",
+        "a usable source once the home page has moved",
+        "at most 2000 entries",
+        "the count the last pull recorded",
+        "redirects.concurrent_modification",
+        "Converting an engagement's CSV into this file is the agent's job",
+        "eventually consistent",
+        "\"kind\": \"gone\"",
+      ],
     },
     {
       arguments_: ["help", "preview"],
@@ -679,10 +712,10 @@ test("serves page and component reference help without configuration, credential
       contains: [
         "Shipped example: ",
         `Validate it: taproot-site validate "${SHIPPED_FIXTURE_DIRECTORY}"`,
-        "Required root fields: manifestVersion, siteId, pages, pagesTruncated, navigation, settings, "
+        "Required root fields: manifestVersion, siteId, pages, pagesTruncated, navigation, redirects, settings, "
         + "settingsSkipped, fixture.",
         "Accepted and not read: pulledAt, deployments",
-        "manifestVersion must be 5; fixture.contractVersion must be 1.",
+        "manifestVersion must be 6; fixture.contractVersion must be 1.",
         "workspaceMode editable",
         ".md is 'markdown', .pm.json is 'prosemirror'",
         "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty",
@@ -728,6 +761,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "components", "--json"], topic: "component-types", field: "components" },
     { arguments_: ["help", "component", "image-banner", "--json"], topic: "component", field: "component" },
     { arguments_: ["help", "nav", "--json"], topic: "workflow", field: "reference" },
+    { arguments_: ["help", "redirects", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "media", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "preview", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "theme", "--json"], topic: "presentation", field: "reference" },
@@ -752,9 +786,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.3.0" },
+          cli: { name: "@taprootio/site-authoring", version: "0.4.0" },
           verb: "help",
-          referenceVersion: 16,
+          referenceVersion: 17,
           topic: scenario.topic,
         },
       );
@@ -801,6 +835,7 @@ test("reference help reports stable usage errors with valid alternatives", async
         "components",
         "component",
         "nav",
+        "redirects",
         "media",
         "preview",
         "theme",
@@ -858,6 +893,7 @@ test("reference help rejects malformed topic shapes with help.usage", async (con
       ["help", "pages", "free-form"],
       ["help", "components", "hero-section"],
       ["help", "footer", "extra"],
+      ["help", "redirects", "gone"],
       ["help", "components", "--json", "--json"],
       ["help", "components", "--quiet"],
     ]

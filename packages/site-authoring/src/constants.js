@@ -1,5 +1,5 @@
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.3.0";
+export const CLI_VERSION = "0.4.0";
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";
@@ -82,6 +82,8 @@ export const VERB_LOGIN = "login";
 export const VERB_LOGOUT = "logout";
 export const VERB_PAGES_PUSH = "pages push";
 export const VERB_NAV_PUSH = "nav push";
+export const VERB_REDIRECTS_PULL = "redirects pull";
+export const VERB_REDIRECTS_PUSH = "redirects push";
 export const VERB_THEME_PUSH = "theme push";
 export const VERB_FOOTER_PUSH = "footer push";
 export const VERB_MEDIA_UPLOAD = "media upload";
@@ -109,6 +111,7 @@ export const REFUSAL_CREDENTIAL_REJECTED = "credential_rejected";
 export const REFUSAL_PLAN_LIMIT = "plan_limit";
 export const REFUSAL_THROTTLED = "throttled";
 export const REFUSAL_CAPABILITY_MISSING = "capability_missing";
+export const REFUSAL_CLI_OUTDATED = "cli_outdated";
 export const REFUSAL_UNCLASSIFIED = "unclassified";
 
 export const REFUSAL_KINDS = Object.freeze([
@@ -117,6 +120,7 @@ export const REFUSAL_KINDS = Object.freeze([
   REFUSAL_PLAN_LIMIT,
   REFUSAL_THROTTLED,
   REFUSAL_CAPABILITY_MISSING,
+  REFUSAL_CLI_OUTDATED,
   REFUSAL_UNCLASSIFIED,
 ]);
 
@@ -126,6 +130,34 @@ export const REFUSAL_KINDS = Object.freeze([
 export const ROLLOUT_REFUSAL_FIELD = "SiteAuthoringRollout";
 export const CREDENTIAL_REFUSAL_FIELD = "ExternalApiKey";
 export const PLAN_LIMIT_REFUSAL_FIELD = "UpgradePrompt";
+
+/**
+ * The field Taproot refuses an outdated CLI with (TR00703).
+ *
+ * Named so the name alone is the instruction, because for every CLI published
+ * before this check that is the whole message: an unknown refusal field prints
+ * as "Taproot rejected the request field '<name>'." and nothing else.
+ */
+export const CLI_UPGRADE_REFUSAL_FIELD = "CliUpgradeRequired";
+
+/**
+ * How an operator gets current. Composed from {@link CLI_NAME} so the command
+ * in a refusal cannot drift from the package that refusal is about.
+ */
+export const CLI_UPGRADE_COMMAND = `npm install -g ${CLI_NAME}@latest`;
+
+/**
+ * The platform switch behind every `platform_paused` refusal, and where the one
+ * person who can undo it goes to look (TR00692).
+ *
+ * Held here rather than written out at each site because four surfaces say it —
+ * the pre-write warning, `status`, `whoami`, and the refusal guidance — and a
+ * setting key spelled four ways is a key an operator cannot search for. The key
+ * is a wire identity and is never reworded; the location is display text.
+ */
+export const EXTERNAL_WRITES_SETTING_KEY = "site_authoring.external_writes_enabled";
+export const EXTERNAL_WRITES_SETTING_LOCATION =
+  "Admin → Platform settings → Site Authoring (\"External site authoring writes enabled\")";
 
 /**
  * The `google.rpc.ErrorInfo` reason a key-mode permission denial carries
@@ -165,6 +197,10 @@ export const LIMITS = Object.freeze({
   configDiscoveryParents: 32,
   workspacePathBytes: 4 * 1024,
   apiResponseBytes: 1024 * 1024,
+  // The redirect map is the one read whose valid size exceeds the ordinary
+  // response bound: two thousand entries with long absolute targets. Sized
+  // with the workspace file that holds it (WORKSPACE_LIMITS.redirectsBytes).
+  redirectMapResponseBytes: 8 * 1024 * 1024,
   requestMilliseconds: 60_000,
   uploadMilliseconds: 5 * 60_000,
   deploymentMilliseconds: 30 * 60_000,

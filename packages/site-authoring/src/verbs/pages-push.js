@@ -9,7 +9,7 @@ import {
 } from "../api.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
-import { boundedList, openSession, successResult } from "../session.js";
+import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
 import {
   hasNamedFreeFormSectionContext,
@@ -18,7 +18,10 @@ import {
 } from "../content/free-form-sections.js";
 import { CONTENT_ERROR_CODES } from "../content/vocabulary.js";
 import {
+  deleteWorkspaceFile,
+  internalPageObservedRevisionFile,
   MEDIA_MANIFEST_FILE_NAME,
+  normalizePageBodyRevision,
   normalizePagePath,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_SOURCE_FORMAT_MARKDOWN,
@@ -28,6 +31,7 @@ import {
   PAGES_DIRECTORY,
   readManifest,
   readMediaManifest,
+  readObservedPageRevision,
   readOnlySystem404Projections,
   readWorkspaceFile,
   readWorkspaceJson,
@@ -38,6 +42,7 @@ import {
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
   workspaceContentHash,
+  workspaceFileExists,
   writeManifest,
 } from "../workspace.js";
 
@@ -458,6 +463,45 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
 }
 
 /**
+ * Refuses to overwrite a live page that moved since this workspace last
+ * reconciled with it.
+ *
+ * TR00622 left one detection gap open deliberately: a remote edit made between
+ * this workspace's own push and its next pull was adopted as the new baseline
+ * rather than reported, because the bytes a push sends are not comparable with
+ * the bytes a read returns and closing it needed a revision on the read
+ * contract. This is that revision, so the gap closes here: the site states the
+ * revision of each page's stored authoring state, the workspace records the one
+ * it last wrote or pulled, and a push into a page carrying a different one is
+ * refused before a single mutation is sent.
+ *
+ * The guard is armed by knowledge, not by policy. A page the workspace has
+ * never reconciled with records no revision, and a Taproot that predates the
+ * contract reports none; neither is evidence of a concurrent edit, and refusing
+ * on absence would make the ordinary first push of a workspace impossible.
+ * Both leave this exactly where TR00622 left it, which is where the caller
+ * already is.
+ */
+function requireReconciledRevision({ file, pagePath, target, entry, observedRevision }) {
+  // What the operator was shown by a refused pull outranks what the manifest
+  // last reconciled with. Without that, this guard would also refuse the pull
+  // conflict's own documented recovery, and the only way out of a conflict
+  // would be to abandon the local source.
+  const recorded = observedRevision ?? normalizePageBodyRevision(entry?.baseline?.revision);
+  const live = target.bodyRevision;
+  if (recorded === undefined || live === undefined || recorded === live) return;
+  const selector = pagePath || "/";
+  throw new SiteAuthoringError(
+    "pages.push_conflict",
+    `Page '${selector}' changed on the site since this workspace last reconciled with it: it now reports revision `
+      + `${live}, and '${file}' was written against ${recorded}. No page was pushed. Run `
+      + `'taproot-site pull' to see what differs and to adopt the site's version, or delete '${file}' and pull `
+      + "again to take the site's document as this page's source.",
+    { field: file, alternatives: [recorded, live] },
+  );
+}
+
+/**
  * The metadata checks that are *not* part of deciding which page a source is.
  *
  * They are separate because a file that declares `path: about` is a source for
@@ -557,7 +601,12 @@ export async function validateWorkspacePageDocument({
 }
 
 export async function pagesPush(invocation) {
-  const { client, config, siteId, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, config, siteId, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_PAGES_PUSH);
   const allowRawHtml = invocation.allowRawHtml === true;
   // Both manifests are bound to the site before anything is planned or sent:
   // every id in them is site-scoped, and a workspace pulled from another site
@@ -837,6 +886,18 @@ export async function pagesPush(invocation) {
             file,
           );
         }
+        // The record this push may spend has to be removable after the send:
+        // a directory or a symlink at its path is refused here, before any
+        // page is written, rather than discovered after the site has changed.
+        const observedRecordFile = internalPageObservedRevisionFile(target.pageId);
+        if (observedRecordFile !== undefined) await workspaceFileExists(config.workspaceDir, observedRecordFile);
+        requireReconciledRevision({
+          file,
+          pagePath,
+          target,
+          entry: manifestByPageId.get(target.pageId),
+          observedRevision: await readObservedPageRevision(config.workspaceDir, target.pageId),
+        });
       }
 
       // The duplicate-source check above only catches two workspace files
@@ -942,15 +1003,39 @@ export async function pagesPush(invocation) {
           file: page.file,
           sourceFormat: page.sourceFormat,
           // The page's remote body is now derived from exactly these bytes.
-          // Only the local half of the baseline is recorded: a read re-projects
-          // image delivery and re-serializes component data, so a hash of what
-          // was sent is not comparable with a hash of what a pull would read.
-          // The next pull establishes the remote half from what it actually
-          // reads, which is the only comparison that holds.
-          baseline: { sourceHash: page.sourceHash },
+          // No remote *hash* is recorded: a read re-projects image delivery and
+          // re-serializes component data, so a hash of what was sent is not
+          // comparable with a hash of what a pull would read, and the next pull
+          // establishes that half from what it actually reads.
+          //
+          // The revision is different in kind and is recorded here. It is the
+          // site's own statement about the stored state this mutation just
+          // wrote, so it is directly comparable with the revision the next read
+          // reports — which is what lets the *next* push tell "nobody else
+          // touched this page" from "someone did", without a pull in between.
+          // Absent against a Taproot that predates the contract, and then
+          // dropped rather than carried forward: this push moved the stored
+          // state, so whatever was recorded describes a version that no longer
+          // exists, and keeping it would refuse the *next* push over a change
+          // this workspace made itself.
+          baseline: {
+            sourceHash: page.sourceHash,
+            ...(summary.bodyRevision === undefined ? {} : { revision: summary.bodyRevision }),
+          },
           pendingApproval: true,
         });
         if (existing === undefined) manifest.pages.push(record);
+        // The override this page's record permitted has now been taken, and
+        // the baseline above records what the site holds because of it.
+        // Keeping the record would let a *later* push overwrite somebody
+        // else's edit without anyone having been shown it. Removed after the
+        // manifest record is written, so a failure here can never leave a
+        // successful mutation unrecorded; the record's shape was checked
+        // before anything was sent.
+        const observedRevisionFile = internalPageObservedRevisionFile(summary.pageId);
+        if (observedRevisionFile !== undefined) {
+          await deleteWorkspaceFile(config.workspaceDir, observedRevisionFile);
+        }
       }
     } finally {
       if (manifestDirty) await writeManifest(config.workspaceDir, manifest);

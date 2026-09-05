@@ -14,6 +14,13 @@ import {
   FIXTURE_ROOT_FIELDS,
 } from "../fixture-contract.js";
 import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
+import {
+  isRedirectMapRevision,
+  REDIRECT_KIND_GONE,
+  REDIRECTS_FILE_NAME,
+  validateRedirectsDocument,
+  normalizeRedirectPath,
+} from "../redirects-contract.js";
 import { boundedList, successResult } from "../session.js";
 import { SETTINGS_GROUPS, SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "../settings-catalog.js";
 import { validateFooterWorkspaceDocument } from "./footer-push.js";
@@ -116,6 +123,23 @@ function validateFixtureManifest(manifest) {
       "fixture.navigation_invalid",
       `The fixture manifest must bind '${NAVIGATION_FILE_NAME}' and its non-negative item count.`,
       "navigation",
+    );
+  }
+  // The redirect baseline is bound the way navigation is, with the revision a
+  // push is fenced by. A fixture's revision is a deterministic placeholder like
+  // every other identity in one — it proves the shape, never a live read.
+  if (
+    !isPlainObject(manifest.redirects)
+    || manifest.redirects.file !== REDIRECTS_FILE_NAME
+    || !isRedirectMapRevision(manifest.redirects.revision)
+    || !Number.isSafeInteger(manifest.redirects.entries)
+    || manifest.redirects.entries < 0
+  ) {
+    fail(
+      "fixture.redirects_invalid",
+      `The fixture manifest must bind '${REDIRECTS_FILE_NAME}', a 64-character lowercase hex revision, and its `
+        + "non-negative entry count.",
+      "redirects",
     );
   }
   if (!Array.isArray(manifest.settingsSkipped) || manifest.settingsSkipped.length !== 0) {
@@ -453,6 +477,51 @@ export async function validateFixture(invocation = {}) {
     );
   }
 
+  onProgress("Validating the redirect map: paths, targets, statuses, chains, and loops.");
+  const redirectsDocument = await readWorkspaceJson(
+    fixtureRoot,
+    REDIRECTS_FILE_NAME,
+    WORKSPACE_LIMITS.redirectsBytes,
+  );
+  const redirects = validateRedirectsDocument(redirectsDocument, manifest.siteId);
+  if (redirects.entries.length !== manifest.redirects.entries) {
+    fail(
+      "fixture.redirects_count_mismatch",
+      `${REDIRECTS_FILE_NAME} contains ${redirects.entries.length} entr${
+        redirects.entries.length === 1 ? "y" : "ies"
+      }, but the fixture manifest records ${manifest.redirects.entries}.`,
+      "redirects.entries",
+    );
+  }
+  // A fixture is self-contained, so the occupancy rule the site enforces can be
+  // checked here too: a source the fixture's own pages occupy would be refused
+  // at the API, and saying so offline is the whole point of this verb. Paths
+  // compare case-insensitively, as the site's citext path column does, and a
+  // refusal names the entry where the author wrote it: the validated map is
+  // sorted by path, so its index is not the document's.
+  const fixturePagePaths = new Set(
+    manifest.pages.map((entry) =>
+      (`/${normalizePagePath(entry.path) ?? ""}`.replace(/\/+$/u, "") || "/").toLowerCase()
+    ),
+  );
+  const authoredIndexByPath = new Map();
+  for (const [index, entry] of redirectsDocument.entries.entries()) {
+    const path = normalizeRedirectPath(entry?.path);
+    if (path !== undefined && !authoredIndexByPath.has(path.toLowerCase())) {
+      authoredIndexByPath.set(path.toLowerCase(), index);
+    }
+  }
+  for (const entry of redirects.entries) {
+    const key = entry.path.toLowerCase();
+    if (fixturePagePaths.has(key)) {
+      fail(
+        "fixture.redirect_path_occupied",
+        `Redirect source '${entry.path}' is a page in this fixture, so it cannot also be a redirect source.`,
+        `entries[${authoredIndexByPath.get(key) ?? 0}].path`,
+      );
+    }
+  }
+
   onProgress("Validating the closed footer document and local page/image targets.");
   validateFooterWorkspaceDocument(
     await readWorkspaceJson(fixtureRoot, FOOTER_SETTINGS_FILE, WORKSPACE_LIMITS.settingsBytes),
@@ -483,6 +552,10 @@ export async function validateFixture(invocation = {}) {
         ...(reportedPages.truncated ? { itemsTruncated: true } : {}),
       },
       navigation: { items: navigation.items, maximumDepth: NAVIGATION_MAXIMUM_DEPTH },
+      redirects: {
+        entries: redirects.entries.length,
+        gone: redirects.entries.filter((entry) => entry.kind === REDIRECT_KIND_GONE).length,
+      },
       themes: 2,
       appearanceSettings: presentation.scalarOperations.length,
       footer: true,
@@ -497,6 +570,7 @@ export async function validateFixture(invocation = {}) {
       "fixture structure and bounded files",
       "page content and named theme contexts",
       "navigation shape and local page-resource references",
+      "redirect-map shape, normalization, chains, loops, and fixture-local path occupancy",
       "complete theme, appearance, header, brand, and footer semantics",
       "fixture-local image identities and reserved delivery origins",
     ],

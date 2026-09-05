@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { atomicWriteFile } from "./atomic-file.js";
-import { hasAsciiControl, SiteAuthoringError } from "./errors.js";
+import { hasAsciiControl, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
 /**
  * The local workspace: what `pull` writes, what the push verbs read back, and
@@ -103,15 +103,141 @@ export function internalPageBaselineFile(pageId) {
     : undefined;
 }
 
-// Version 5 makes the page list a source registry: each entry names the one
-// authoritative `file` for its path, the `sourceFormat` that file carries, and
-// the `baseline` hashes pull compares against to detect a remote edit it
-// cannot reconcile. Version 4 classified pulled page files as editable,
-// metadata-only, or an integrity-checked read-only projection but recorded no
-// registry, so a push against one cannot tell an intentional format change
-// from a stale entry. The package is in-repo and unreleased, so an older
-// manifest is re-pulled rather than migrated.
-export const MANIFEST_VERSION = 5;
+/**
+ * Where the revision of a *preserved* remote body is recorded, beside the body
+ * itself.
+ *
+ * The manifest records what this workspace last **reconciled** with, and a
+ * refused pull reconciles nothing — it writes no manifest at all, which is what
+ * makes the same conflict repeat until somebody resolves it. But the refusal
+ * does show the operator the site's version, and after that the site's version
+ * is no longer news. Without somewhere to record that, the push refusal added
+ * for a concurrent remote edit would also refuse the pull conflict's own
+ * documented recovery — "push the local source to make the site match it" —
+ * and the only way out of a conflict would be to give up the local source.
+ *
+ * So this records what the workspace last **saw**, which is a different fact.
+ * A push into a page whose site revision equals the one already shown is the
+ * operator's informed override; a push into one that has moved *again* is still
+ * refused. Any pull that reconciles the page removes it, because the manifest
+ * then carries the newer and stronger claim.
+ */
+export function internalPageObservedRevisionFile(pageId) {
+  return typeof pageId === "string" && SAFE_SEGMENT.test(pageId)
+    ? `${INTERNAL_PAGE_BASELINE_DIRECTORY}/${pageId}.revision.json`
+    : undefined;
+}
+
+// Version 6 records the site's own `baseline.revision` for every tracked page:
+// the opaque revision of the stored authoring state the site reported when this
+// workspace last agreed with it. Version 5 could only compare one pull's body
+// against the next, because the bytes a push sends are not the bytes a read
+// returns — so a push could not tell whether the page it was about to
+// overwrite had moved since, and a change in the API's image-delivery
+// projection between two pulls read as a remote edit. Version 5 made the page
+// list a source registry (`file`, `sourceFormat`, `baseline`); version 4
+// classified pulled files but recorded no registry. The package is in-repo and
+// its manifests are workspace state, so an older one is re-pulled rather than
+// migrated.
+export const MANIFEST_VERSION = 6;
+
+/**
+ * The shape of a page body revision as the site reports it: a scheme name and
+ * a hex digest. The CLI never derives one — it only records what it was told
+ * and compares it with what it is told next — so this is a containment check
+ * on a server string that reaches the manifest and the terminal, not a claim
+ * about how the value is computed.
+ */
+export const PAGE_BODY_REVISION = /^[a-z][a-z0-9]{0,15}:[0-9a-f]{16,128}$/u;
+
+/** A revision as recorded or reported, or `undefined` when there is not one. */
+export function normalizePageBodyRevision(value) {
+  return typeof value === "string" && PAGE_BODY_REVISION.test(value) ? value : undefined;
+}
+
+/**
+ * The revision of the remote body this workspace last saw for a page, or
+ * `undefined` when it has not seen one it did not also reconcile with.
+ *
+ * Damaged or absent internal state is simply "nothing seen": it costs the
+ * operator one pull, which is the same position a workspace that has never
+ * conflicted is in, and is never worth refusing a verb over.
+ */
+export async function readObservedPageRevision(workspaceDir, pageId) {
+  return (await readObservedPageRecord(workspaceDir, pageId))?.revision;
+}
+
+/**
+ * Everything a refused pull recorded for a page: the version the operator was
+ * shown, and the differences the refusal named beside it.
+ *
+ * The version is named either way it can be named. A site that reports a
+ * revision is recorded by `revision`; a site that predates the revision
+ * contract is compared by the canonical hash of its body, and is recorded by
+ * `remoteHash` instead — the same value that comparison is made against. A
+ * hash-only record therefore reports no revision, which is what keeps
+ * `readObservedPageRevision` — and so the push guard it arms — untouched by
+ * this: an override is a statement about a revision, and there is none here.
+ *
+ * The differences are recorded rather than recomputed because the refusal
+ * overwrites the preserved baseline with the version it is refusing. On the
+ * next pull, with nothing further changed on the site, a fresh comparison would
+ * find the preserved copy and the site's document identical and report "the
+ * change is in the page's title, path, or description" for what was a body
+ * edit. The record is what lets a repeated refusal say the same true thing the
+ * first one did; a page that has moved *again* carries a different revision, so
+ * the record no longer applies and the comparison is redone.
+ *
+ * Fail-soft on everything, exactly like the revision read it backs: this is
+ * workspace state a hand edit or an interrupted write can reach, and no verb is
+ * worth refusing over a diagnostic.
+ */
+export async function readObservedPageRecord(workspaceDir, pageId) {
+  const file = internalPageObservedRevisionFile(pageId);
+  if (file === undefined) return undefined;
+  let parsed;
+  try {
+    // The existence check is inside the guard too: a directory or a symlink
+    // where the record should be is "nothing seen", not a refusal.
+    if (!await workspaceFileExists(workspaceDir, file)) return undefined;
+    parsed = await readWorkspaceJson(workspaceDir, file, WORKSPACE_LIMITS.settingsBytes);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || parsed.pageId !== pageId) {
+    return undefined;
+  }
+  const revision = normalizePageBodyRevision(parsed.revision);
+  const remoteHash = typeof parsed.remoteHash === "string" && WORKSPACE_CONTENT_HASH.test(parsed.remoteHash)
+    ? parsed.remoteHash
+    : undefined;
+  // A record naming neither version says nothing about what was shown, which is
+  // the same position as no record at all.
+  if (revision === undefined && remoteHash === undefined) return undefined;
+  return { revision, remoteHash, differences: normalizeObservedDifferences(parsed.differences) };
+}
+
+/**
+ * How many recorded paths one record carries back. The same bound
+ * `SiteAuthoringError#withDifferences` applies, because these paths reach a
+ * refusal's message and its `differences` field by that route.
+ */
+const OBSERVED_DIFFERENCE_PATHS = 100;
+
+/** A recorded `{ paths, truncated }`, or `undefined` when there is not one. */
+function normalizeObservedDifferences(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || !Array.isArray(value.paths)) {
+    return undefined;
+  }
+  return {
+    paths: value.paths
+      .filter((entry) => typeof entry === "string")
+      .slice(0, OBSERVED_DIFFERENCE_PATHS)
+      .map((entry) => sanitizeDiagnostic(entry, "path")),
+    truncated: value.truncated === true,
+  };
+}
+
 export const PAGE_WORKSPACE_MODE_EDITABLE = "editable";
 export const PAGE_WORKSPACE_MODE_METADATA_ONLY = "metadata-only";
 export const PAGE_WORKSPACE_MODE_READ_ONLY = "read-only";
@@ -129,6 +255,10 @@ export const WORKSPACE_LIMITS = Object.freeze({
   // One authored page: a Markdown source or a ProseMirror document.
   documentBytes: 2 * 1024 * 1024,
   navigationBytes: 1024 * 1024,
+  // The redirect map: sized from the contract's own bounds (entries, path
+  // and target bytes, pretty-printed JSON overhead) rather than borrowed from
+  // the navigation tree, so the site's own pulled map always reads back.
+  redirectsBytes: 8 * 1024 * 1024,
   settingsBytes: 256 * 1024,
   manifestBytes: 8 * 1024 * 1024,
   mediaBytes: 32 * 1024 * 1024,
@@ -223,10 +353,13 @@ function isDiscoverablePageSource(file) {
  * - An entry whose `file` is missing, unrecognized, or not a file the workspace
  *   walk could have produced is **dropped**. It names no source this package
  *   would ever read, so there is nothing to protect.
- * - A `baseline` that is not a usable pair of hashes is **discarded and
- *   reported**. Losing it costs one pull's worth of conflict detection and
+ * - A `baseline` carrying no usable hash and no usable revision is **discarded
+ *   and reported**. Losing it costs one pull's worth of conflict detection and
  *   nothing else: the next pull re-establishes it from what it reads, and the
- *   authored source is never written over in the meantime.
+ *   authored source is never written over in the meantime. Individual members
+ *   are dropped the same way — an unusable `revision` beside two good hashes
+ *   leaves the entry compared the way version 5 compared it, which is the same
+ *   position a workspace that has not pulled since is in.
  * - A `sourceFormat` that disagrees with the file's own extension is recorded
  *   as `formatMismatch` and the extension wins. `pages push` refuses on it —
  *   it is a hand-edited manifest and re-pulling is the fix — while `pull`
@@ -254,9 +387,14 @@ export function pageSourceRegistry(manifest) {
     const declared = entry.baseline;
     const remoteHash = normalizeBaselineHash(declared?.remoteHash);
     const sourceHash = normalizeBaselineHash(declared?.sourceHash);
-    const baseline = remoteHash === undefined && sourceHash === undefined
+    const revision = normalizePageBodyRevision(declared?.revision);
+    const baseline = remoteHash === undefined && sourceHash === undefined && revision === undefined
       ? undefined
-      : { ...(remoteHash === undefined ? {} : { remoteHash }), ...(sourceHash === undefined ? {} : { sourceHash }) };
+      : {
+        ...(remoteHash === undefined ? {} : { remoteHash }),
+        ...(sourceHash === undefined ? {} : { sourceHash }),
+        ...(revision === undefined ? {} : { revision }),
+      };
     const record = {
       pageId: entry.pageId,
       file: entry.file,

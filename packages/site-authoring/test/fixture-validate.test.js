@@ -292,6 +292,38 @@ test("validate drops the header-width hint once the workspace opts into the wide
   assert.equal(json.validated.appearanceSettings, 27);
 });
 
+test("validate refuses a redirect source that a fixture page occupies under any spelling, naming the authored entry", async (context) => {
+  // The site compares paths case-insensitively (citext), so the offline check
+  // must too; and the refusal names the entry where the author wrote it, not
+  // its position in the path-sorted map the validator returns.
+  const { fixture } = await copiedFixture(context);
+  const redirectsPath = path.join(fixture, "redirects.json");
+  const redirects = JSON.parse(await readFile(redirectsPath, "utf8"));
+  // Nothing may target the page, or the new source would be refused as a
+  // chain before occupancy is ever considered.
+  for (const entry of redirects.entries) {
+    if (entry.target === "/visit") entry.target = "https://booking.example.test/classes";
+  }
+  redirects.entries.push({
+    path: "/Visit",
+    kind: "redirect",
+    target: "https://booking.example.test/moved",
+    status: 301,
+  });
+  await writeFile(redirectsPath, `${JSON.stringify(redirects, null, 2)}\n`);
+  const manifestPath = path.join(fixture, "manifest.fixture.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.redirects.entries = redirects.entries.length;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const result = await runValidation(fixture);
+
+  assert.equal(result.exitCode, 1, result.stderr);
+  const { error } = JSON.parse(result.stdout);
+  assert.equal(error.code, "fixture.redirect_path_occupied");
+  assert.equal(error.field, `entries[${redirects.entries.length - 1}].path`);
+});
+
 test("validate ignores GITHUB_OUTPUT on both success and usage failure", async (context) => {
   const { fixture } = await copiedFixture(context, "fixture with actions output");
   const outputPath = path.join(fixture, "github-output.txt");

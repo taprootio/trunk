@@ -13,6 +13,13 @@ import {
   SHIPPED_FIXTURE_NAME,
   shippedFixtureDirectory,
 } from "./fixture-contract.js";
+import {
+  DEFAULT_REDIRECT_STATUS,
+  GONE_STATUS,
+  REDIRECT_LIMITS,
+  REDIRECT_STATUSES,
+  REDIRECTS_FILE_NAME,
+} from "./redirects-contract.js";
 import { SETTINGS_GROUPS } from "./settings-catalog.js";
 import {
   canonicalizeComponentData,
@@ -49,7 +56,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 16;
+export const REFERENCE_VERSION = 17;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
@@ -69,6 +76,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Describe one component schema and show a valid example.",
   }),
   Object.freeze({ name: "nav", usage: `${CLI_BINARY_NAME} help nav`, summary: "Describe nav.json item shapes." }),
+  Object.freeze({
+    name: "redirects",
+    usage: `${CLI_BINARY_NAME} help redirects`,
+    summary: "Author redirects.json: entry shape, normalization, and the refusals.",
+  }),
   Object.freeze({
     name: "media",
     usage: `${CLI_BINARY_NAME} help media`,
@@ -123,6 +135,81 @@ const WORKFLOW_REFERENCES = Object.freeze({
         resourceId: "<resourceId-from-manifest>",
         children: Object.freeze([]),
       })]),
+    }),
+  }),
+  redirects: Object.freeze({
+    title: "Redirect map workspace contract",
+    summary:
+      `${REDIRECTS_FILE_NAME} is the site's whole redirect map. 'redirects push' replaces it, fenced by the `
+      + "revision 'redirects pull' recorded, so a stale write is refused rather than deleting an entry a page "
+      + "rename added.",
+    usage: `${CLI_BINARY_NAME} redirects pull | ${CLI_BINARY_NAME} redirects push`,
+    details: Object.freeze([
+      `${REDIRECTS_FILE_NAME} is { siteId, revision, entries }, not a bare array. 'redirects pull' writes it and `
+      + "records the revision in .taproot-site-manifest.json; 'pull' writes it too.",
+      "An entry is { path, kind, target, status }. kind is 'redirect' (the default) or 'gone'; a gone entry "
+      + `carries no target and serves ${GONE_STATUS}.`,
+      `status defaults to ${DEFAULT_REDIRECT_STATUS} and accepts ${REDIRECT_STATUSES.join(", ")}. A migration `
+      + `wants ${DEFAULT_REDIRECT_STATUS}: it is what tells search engines the old URL has moved for good.`,
+      "path is normalized exactly as the published-site edge normalizes a request: a leading slash is added, "
+      + "trailing slashes are stripped, and nothing else changes — so a legacy source keeps its suffix and "
+      + "'/faqs.html' is a real, representable path. It carries no query string, fragment, or host.",
+      "Write a path — and the path part of a site-relative target — in the percent-encoded spelling a browser "
+      + "sends ('/caf%C3%A9', '/old%20page'), never the raw one: the edge keys on the encoded pathname, so a raw "
+      + "space or non-ASCII character is stored under a key no request matches, and a raw target beside an "
+      + "encoded source is the self-loop loop detection cannot see.",
+      "target is a site-relative path such as '/classes', or an absolute credential-free http(s) URL. A "
+      + "site-relative target keeps its trailing slash: it is a Location a browser follows, not a route key.",
+      "A path, or the path part of a site-relative target, is refused when any segment is '.' or '..', when two "
+      + "slashes run together, or when a dot or slash is percent-encoded ('%2e', '%2f'); a target's query string "
+      + "may carry any of those. The edge and the generator resolve "
+      + "those away, so '/x/../visit' would be checked as itself and served as '/visit' — past the occupancy, "
+      + "chain, and loop rules that were asked about a different path. Write the resolved path instead.",
+      "origin is reported by the site and ignored on push: 'authored' is what you declared, 'path_history' is "
+      + "what a page or tag rename recorded. Pull the map, edit it, push the whole thing back — an entry you "
+      + "did not change keeps its origin.",
+      "Refused, offline and again at the site, each naming the entry index: a chain (a target that is itself a "
+      + "source in the same map); a loop (an entry targeting itself); a duplicate path; a gone entry carrying a "
+      + "target; and a status outside the allowed set. A chain or loop is judged on the target's path alone, so "
+      + "'/b?x=1' and '/b' are the same destination to it.",
+      "Refused by the site, which alone knows what it serves: a path a live page, Docs resource, or generated "
+      + "resource already occupies. '/' is such a path while the site's home page is served there — and a "
+      + "usable source once the home page has moved, which is the entry a home-page rename records.",
+      `Bounded: at most ${REDIRECT_LIMITS.entries} entries, ${REDIRECT_LIMITS.pathBytes} bytes of path, and `
+      + `${REDIRECT_LIMITS.targetBytes} bytes of target, matching the edge's own key and value limits.`,
+      `The ${REDIRECT_LIMITS.pathBytes}-byte path bound governs what you declare, not what the site already `
+      + "holds. A page may sit at a longer path, and renaming it records a path_history entry there that "
+      + "'redirects pull' returns; such an entry passes 'validate' and pushes back unchanged. The site is the "
+      + "authority on that — it alone knows whether a push introduces the path or carries it back — so a push "
+      + "that lengthens or changes one is still refused there.",
+      `The ${REDIRECT_LIMITS.entries}-entry bound is scoped the same way: a pulled map already holding more `
+      + "than that validates and pushes back unchanged, and only a document holding more entries than both the "
+      + "bound and the count the last pull recorded is refused — so accumulated path history never has to be "
+      + "deleted to make a push land.",
+      "A push whose recorded revision predates a page rename is refused as redirects.concurrent_modification. "
+      + `Run 'redirects pull', reconcile ${REDIRECTS_FILE_NAME}, and retry; nothing was written.`,
+      "Converting an engagement's CSV into this file is the agent's job. The CLI's contract is JSON, on "
+      + "purpose: a real migration list needs judgement about which old URLs still deserve a destination and "
+      + "which are simply gone.",
+      "Entries take effect on the next deploy, staging first. They are written to the edge's key-value store "
+      + "when the deploy syncs routing, and that store is eventually consistent, so a spot-check run "
+      + "immediately afterwards can briefly still see the previous map. Re-check before concluding an entry "
+      + "did not land.",
+    ]),
+    example: Object.freeze({
+      siteId: "<site-uuid>",
+      revision: "<revision-recorded-by-redirects-pull>",
+      entries: Object.freeze([
+        Object.freeze({ path: "/faqs.html", kind: "redirect", target: "/faq", status: 301 }),
+        Object.freeze({ path: "/old-blog", kind: "redirect", target: "/journal", status: 301 }),
+        Object.freeze({
+          path: "/book",
+          kind: "redirect",
+          target: "https://booking.example.test/riverbend",
+          status: 302,
+        }),
+        Object.freeze({ path: "/summer-2019-retreat.html", kind: "gone" }),
+      ]),
     }),
   }),
   media: Object.freeze({
@@ -194,6 +281,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty: a "
       + "partial snapshot is not a fixture.",
       `navigation binds { file: "${NAVIGATION_FILE_NAME}", items }, and items must equal the tree's own item count.`,
+      `redirects binds { file: "${REDIRECTS_FILE_NAME}", revision, entries }, and entries must equal the map's own `
+      + "entry count. The revision is a deterministic 64-character lowercase hex placeholder, like every other "
+      + "identity in a fixture: it proves the shape, never a live read. No redirect source may be a page in the "
+      + `same fixture. See '${CLI_BINARY_NAME} help redirects' for the entry contract.`,
       `settings binds all ${SETTINGS_GROUPS.length} authorable groups, each with settingsType, file, and entityId: ${
         SETTINGS_GROUPS.map((group) => `${group.settingsType} to '${SETTINGS_DIRECTORY}/${group.file}'`).join("; ")
       }.`,
@@ -690,9 +781,11 @@ const FREE_FORM_REFERENCE = Object.freeze({
       pull:
         "pull keeps a tracked source that is still on disk and never writes a second editable file for the same page.",
       internalState:
-        `${INTERNAL_PAGE_BASELINE_DIRECTORY}/<pageId>.pm.json holds the site's document for a page tracked as Markdown. `
-        + "It is internal state: it is never discovered as a page source and is never pushed, and any pull rewrites "
-        + "it, so it is safe to ignore in version control.",
+        `${INTERNAL_PAGE_BASELINE_DIRECTORY}/<pageId>.pm.json holds the site's document for a page tracked as Markdown, `
+        + "and <pageId>.revision.json beside it records the revision a refused pull already showed you — which is what "
+        + "lets the refusal's own recovery push proceed. Both are internal state: never discovered as a page source "
+        + "and never pushed, and a pull that reconciles the page rewrites or removes them, so they are safe to ignore "
+        + "in version control.",
       formatChange:
         "Remove the tracked source, then author the other format beside it. Two editable sources for one path is a "
         + "refusal, not a guess.",
@@ -706,6 +799,24 @@ const FREE_FORM_REFERENCE = Object.freeze({
         + "refuses before changing anything under pages/ and preserves the site's version as internal state. A "
         + "locally edited .pm.json is kept rather than overwritten, and only collides when the site changed too.",
       conflictError: "pages.pull_conflict",
+      conflictDetail:
+        "A reported conflict names the JSON paths at which the site's document differs from the copy this workspace "
+        + "last reconciled with, in error.differences, which carries three states. Absent: the two documents were "
+        + "never compared, because this workspace kept no copy of the site's previous version. Empty: they were "
+        + "compared and the body is identical, so the change was to the page's title, path, or description. "
+        + "Non-empty: the JSON paths at which the body differs.",
+      pushConflict:
+        "pages push fails closed on a concurrent remote edit: the site reports each page's stored-state revision, the "
+        + "workspace records the revision of what it last wrote or pulled, and a push whose target now carries a "
+        + "different revision is refused before any page is sent. The refusal carries both revisions in "
+        + "error.alternatives, recorded first and live second. The guard is armed once both are known — a page this "
+        + "workspace has never reconciled with, or a Taproot that predates the revision contract, leaves it unarmed "
+        + "rather than refusing every push. A pull that refuses records the revision it showed you, so the pull "
+        + "conflict's own recovery push still goes through; a page that moved again since is refused again.",
+      pushConflictError: "pages.push_conflict",
+      revisionSource:
+        "baseline.revision in the manifest, from bodyRevision on the page read, the page listing, and the create and "
+        + "update responses. It is opaque: compare it, never derive or parse it.",
       conflictRecovery:
         "Either push the local source to make the site match it, or delete the local source and pull again to adopt "
         + "the site's document as that page's source.",
@@ -993,7 +1104,13 @@ export function formatReferenceResult(result) {
         sourceRule.renamedSource
       } (${sourceRule.renamedSourceError})\n  conflicts             ${
         sourceRule.conflict
-      } (${sourceRule.conflictError})\n  recovery              ${
+      } (${sourceRule.conflictError})\n  conflict detail       ${
+        sourceRule.conflictDetail
+      }\n  push conflicts        ${
+        sourceRule.pushConflict
+      } (${sourceRule.pushConflictError})\n  revision              ${
+        sourceRule.revisionSource
+      }\n  recovery              ${
         sourceRule.conflictRecovery
       }\n  push selection        ${sourceRule.pushSelection}\n\nSystem page projections:\n${
         page.workspace.systemPages.map((systemPage) =>

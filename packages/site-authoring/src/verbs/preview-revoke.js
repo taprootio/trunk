@@ -6,7 +6,7 @@ import {
 } from "../api.js";
 import { VERB_PREVIEW_REVOKE } from "../constants.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
-import { openSession, successResult } from "../session.js";
+import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 
 export async function previewRevoke(invocation) {
   if (!Array.isArray(invocation.previewIds) || invocation.previewIds.length !== 2) {
@@ -31,7 +31,12 @@ export async function previewRevoke(invocation) {
     );
   }
   const [pageId, snapshotId] = invocation.previewIds;
-  const { client, siteId, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, siteId, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_PREVIEW_REVOKE);
   try {
     return await withRefusalGuidance(onProgress, "authoring preview revocation", async () => {
       onProgress("Revoking the authoring preview and scheduling its artifacts for cleanup.");

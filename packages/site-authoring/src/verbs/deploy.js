@@ -17,9 +17,29 @@ import {
   VERB_DEPLOY,
 } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
-import { boundedList, openSession, successResult } from "../session.js";
+import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { CANDIDATE_SELECTABLE_SETTINGS_TYPES } from "../settings-catalog.js";
 import { readManifest, writeManifest } from "../workspace.js";
+
+/**
+ * What a deploy does not finish (TR00702).
+ *
+ * A deploy writes the site's redirect and gone entries into the edge's
+ * key-value store as part of syncing routing. That store is eventually
+ * consistent, so a spot-check run the second a deploy reports success can
+ * briefly read the previous map, and taking that for "the redirect did not
+ * land" is the wrong conclusion to reach in front of a customer waiting to cut
+ * DNS over.
+ *
+ * No number is quoted, because there is none to quote: the coordinator holds
+ * nothing back for a standard site's redirects. Its propagation grace governs
+ * only the *deletion* of a superseded Docs pointer namespace; a standard site's
+ * rows are written and removed immediately.
+ */
+const REDIRECT_PROPAGATION_NOTE =
+  "Redirect and gone entries are written to the edge's key-value store when this deploy syncs routing. That "
+  + "store is eventually consistent, so a spot-check run immediately afterwards can briefly still see the "
+  + "previous map; re-check before concluding an entry is missing.";
 
 /**
  * `deploy --staging` / `deploy --production` — readiness, deploy, poll to
@@ -202,7 +222,12 @@ export async function deploy(invocation) {
       "deployTarget",
     );
   }
-  const { client, config, siteId, now, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, config, siteId, now, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_DEPLOY);
   const manifest = await readManifest(config.workspaceDir, siteId, { required: false });
   const selection = explicitSelection(invocation);
 
@@ -233,6 +258,7 @@ export async function deploy(invocation) {
         now,
       });
       await recordDeployment(config, manifest, "production", completed);
+      onProgress(REDIRECT_PROPAGATION_NOTE);
       return successResult(VERB_DEPLOY, siteId, {
         target,
         environment: DEPLOYMENT_ENVIRONMENT_PRODUCTION,
@@ -310,6 +336,7 @@ export async function deploy(invocation) {
     });
     await recordDeployment(config, manifest, "staging", completed);
     const stagingPreview = await inspectStagingPreview(client, siteId, onProgress);
+    onProgress(REDIRECT_PROPAGATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {
       target,
       environment: DEPLOYMENT_ENVIRONMENT_STAGING,

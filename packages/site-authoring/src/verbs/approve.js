@@ -7,7 +7,7 @@ import {
 } from "../api.js";
 import { VERB_APPROVE } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
-import { boundedList, openSession, successResult } from "../session.js";
+import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import {
   normalizePagePath,
   readManifest,
@@ -36,7 +36,12 @@ const MAXIMUM_REPORTED = 200;
 const MAXIMUM_BATCH = 100;
 
 export async function approve(invocation) {
-  const { client, config, siteId, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, config, siteId, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_APPROVE);
   const manifest = await readManifest(config.workspaceDir, siteId);
   const manifestByPageId = new Map(
     manifest.pages.filter((entry) => typeof entry?.pageId === "string").map((entry) => [entry.pageId, entry]),

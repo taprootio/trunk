@@ -34,6 +34,43 @@ Node 22 or later. The package has one runtime dependency,
 against one Espalier theme contract, and a floating range would let an install
 resolve a different contract than the CLI was tested against.
 
+## Keeping the CLI current
+
+Taproot accepts only the latest published release of this package. There is no
+compatibility window: the contract moves with every release, and a CLI behind
+the current one is refused at sign-in and at every online verb that exchanges
+the sign-in for a site credential, before it validates or writes anything.
+`TAPROOT_SITE_KEY` runs perform no sign-in and no exchange, so they are not
+version-gated and their `status` reports `cliRelease.latestKnown: false`; keep
+an automation's CLI current yourself.
+
+```bash
+npm install -g @taprootio/site-authoring@latest
+```
+
+A refusal names the field `CliUpgradeRequired`, classifies as
+`refusal: "cli_outdated"`, and carries both versions and that command. Nothing
+is wrong with the credential, the request, or the site, and no retry of an
+outdated version succeeds. If the newer release is only minutes old, npm may
+not serve it yet — wait a moment and run the upgrade again.
+
+Each sign-in exchange also reports the latest published release. `status` shows
+it as `cliRelease`, `whoami` reports what the last exchange recorded (dated with
+that exchange), and once a newer release has been recorded the offline verbs —
+`help`, `validate`, and `whoami` — refuse with the same message rather than
+letting an agent keep authoring against a contract that has moved. With nothing
+recorded they run, so a clean machine can still validate a fixture.
+`taproot-site --version` and `--help` always answer.
+
+Do not pin this package's version in a script. Every release retires the one
+before it, so a pin is a scheduled outage.
+
+**0.4.0 introduces this gate.** From the API deploy that ships with it, every
+CLI older than the release that API was built with is refused with
+`CliUpgradeRequired`. The release order is: merge to private `main`, then the
+npm publish of 0.4.0, then the API deploy — publishing first is what keeps the
+upgrade available to anyone the deploy refuses.
+
 ## First commands
 
 `taproot-site --help` lists every verb and the configuration contract.
@@ -50,7 +87,8 @@ taproot-site help component hero-section --json
 
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
 with no credential, no network, and no write: a directory laid out like a
-pulled workspace — `pages/`, `nav.json`, and the four `settings/` documents —
+pulled workspace — `pages/`, `nav.json`, `redirects.json`, and the four
+`settings/` documents —
 whose `manifest.fixture.json` binds deterministic page, resource, image, and
 settings identities under a versioned `fixture` block. It proves structure,
 page content and theme contexts, navigation references, the complete theme,
@@ -186,9 +224,12 @@ taproot-site deploy --staging
 taproot-site deploy --production
 ```
 
-`pull` snapshots pages, navigation, and settings into the workspace:
-`pages/`, `nav.json`, `settings/`, `media/`, and two dot-prefixed manifests
-that carry site binding and page identity between commands. Every page path
+`pull` snapshots pages, navigation, redirects, and settings into the
+workspace: `pages/`, `nav.json`, `redirects.json`, `settings/`, `media/`, and
+two dot-prefixed manifests that carry site binding and page identity between
+commands. Against a Taproot that does not serve the redirect map yet, `pull`
+writes no `redirects.json` and records no redirect baseline, and
+`redirects push` asks for a pull once the site has one. Every page path
 has exactly one authoritative source — `pages/<name>.md` in the documented
 Markdown subset with `title`, `path`, and `description` front matter, or
 `pages/<name>.pm.json` as a ProseMirror document — and pull never writes a
@@ -199,11 +240,18 @@ edited on the site since the last pull is a `pages.pull_conflict` refusal
 before anything under `pages/` changes, with both recovery paths named.
 
 `pages push [page-path...]` validates and sends the selected pages, or every
-workspace page when none is named; the homepage is addressed as `/`.
+workspace page when none is named; the homepage is addressed as `/`. It fails
+closed with `pages.push_conflict` when a page's stored-state revision has
+moved since this workspace last reconciled with it, naming both revisions;
+`pull` first, or push after a refused pull has shown you the site's version.
 `media upload [path...]` uploads raster files and records component-ready
 delivery fields. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
-settings, and the closed footer document.
+settings, and the closed footer document. `redirects pull` writes the site's
+redirect map to `redirects.json` with a baseline, and `redirects push`
+validates the file offline and replaces the whole map; `help redirects`
+states the entry shape (`path`, `kind` redirect or gone, `target`, `status`
+defaulting to 301), the normalization rule, and every refusal.
 
 `preview page <page-path-or-id>` renders one persisted draft behind the
 staging gate and mints a browser handoff URL, reported only in the final JSON
@@ -216,7 +264,8 @@ for another. The handoff also expires two minutes after it is minted;
 `approve [page-path...]` publishes drafts into the approved candidate pool.
 It stages; nothing reaches an audience until `deploy --staging` publishes the
 candidate and `deploy --production` promotes that completed staging
-deployment. `status` reports deployments, readiness, and image processing.
+deployment. `status` reports the platform authoring switch, the CLI release,
+deployments, readiness, and image processing.
 
 ## Output contract
 
@@ -225,8 +274,10 @@ whose approval code and URL exist only as progress). Stdout carries exactly
 one JSON object per run, schema version `1`: `ok`, the CLI name and version,
 the verb, and the verb's own result on success; a stable `error.code` with an
 optional `field`, `status`, and classified `refusal` on failure. Exit codes are
-`0` success, `1` failure, and `2` usage fault. The five refusal classes an
-automation should branch on are `platform_paused` (external authoring is
+`0` success, `1` failure, and `2` usage fault. The six refusal classes an
+automation should branch on are `cli_outdated` (this package is behind the
+latest published release, which is the only one Taproot accepts; upgrade it,
+and see "Keeping the CLI current"), `platform_paused` (external authoring is
 paused; retry later), `credential_rejected` (stop and re-issue),
 `capability_missing` (the credential is valid and correctly scoped but was
 not exchanged for a capability the request needs; the refusal carries
@@ -241,6 +292,27 @@ random delimiter block, plus `taproot_site_verb` on success. Credentials,
 Authorization values, signed upload headers, preview handoffs outside the
 final result, and page bodies never appear in progress, diagnostics, JSON, or
 Actions output.
+
+### Every write answers `platform_paused`
+
+`pull` and `status` succeed, and every write is refused with
+`refusal: "platform_paused"` and `field: "SiteAuthoringRollout"`. Nothing is
+wrong with the credential, the request, or the site: Taproot has external site
+authoring switched off platform-wide. A Taproot administrator turns it back on
+with the platform setting `site_authoring.external_writes_enabled`, under
+Admin → Platform settings → Site Authoring ("External site authoring writes
+enabled"); nobody else can, and no amount of retrying or re-issuing changes it.
+
+You do not have to discover this from a refusal. Each sign-in exchange reports
+the switch's state, so `status` names it as `platform.externalWritesEnabled`
+and every write verb prints one warning before it does any work when the last
+exchange said the platform was paused. The warning is advisory and never a
+gate — the switch is enforced inside each write's own transaction, so a run
+that starts while it is off still succeeds if an operator turns it on
+meanwhile. `whoami` stays offline and reports what the last exchange recorded,
+dated with that exchange; `status` is where a current answer comes from.
+`TAPROOT_SITE_KEY` runs perform no exchange, so their `status` reports
+`platform.externalWritesKnown: false` rather than guessing.
 
 ## Public release
 

@@ -22,6 +22,7 @@ export const FIXTURE_REQUIRED_ROOT_FIELDS = Object.freeze([
   "pages",
   "pagesTruncated",
   "navigation",
+  "redirects",
   "settings",
   "settingsSkipped",
   "fixture",

@@ -7,7 +7,7 @@ import {
 } from "../api.js";
 import { VERB_PREVIEW_PAGE } from "../constants.js";
 import { asSiteAuthoringError, isCanonicalUuid, SiteAuthoringError } from "../errors.js";
-import { openSession, successResult } from "../session.js";
+import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { normalizePagePath, readManifest } from "../workspace.js";
 
 /**
@@ -40,7 +40,12 @@ export async function previewPage(invocation) {
       { field: "pageSelector", exitCode: 2 },
     );
   }
-  const { client, config, siteId, now, onProgress } = await openSession(invocation);
+  const session = await openSession(invocation);
+  const { client, config, siteId, now, onProgress } = session;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  warnIfExternalWritesPaused(session, VERB_PREVIEW_PAGE);
   let pageId = selector;
   if (!isCanonicalUuid(selector)) {
     const pagePath = normalizePagePath(selector);

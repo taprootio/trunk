@@ -9,6 +9,7 @@ import {
   CLI_AUTHORIZATION_CLAIM_STATUS_PENDING,
   poll,
   startCliAuthorization,
+  announceRefusal,
 } from "../api.js";
 import {
   AUTHORIZE_CLI_PATH,
@@ -328,7 +329,16 @@ export async function login(invocation) {
   try {
     authorization = await startCliAuthorization(client, { keyName });
   } catch (error) {
-    throw translateStartApiError(error);
+    // Announced only when the refusal survives translation: sign-in is the
+    // earlier of the two calls that carry this CLI's version, so it is where
+    // an outdated CLI is told to upgrade, and the remedy is a command the
+    // operator has to be handed rather than a field name (TR00703). A throttle
+    // is translated instead, because the shared guidance names a credential
+    // that does not exist yet, and announcing it first would contradict the
+    // translated line that follows.
+    const translated = translateStartApiError(error);
+    if (translated === error) announceRefusal(error, onProgress, "sign-in");
+    throw translated;
   }
 
   const verificationUrl = verificationUrlFor(apiBaseUrl);

@@ -112,6 +112,31 @@ export class SiteAuthoringError extends Error {
     return this;
   }
 
+  /**
+   * Attach the JSON paths at which two documents differ.
+   *
+   * Separate from `alternatives`, which is the bounded list of other values or
+   * targets a caller can act on — the files in a pull conflict, but equally the
+   * help topics, page types, or revisions another failure offers. These name
+   * locations inside one document, decide nothing, and exist so a conflict can
+   * be triaged without re-fetching both sides by hand.
+   *
+   * A list and no list are different facts, so anything that is not a list
+   * leaves the field unset rather than becoming an empty one: `[]` means the
+   * documents were compared and found identical, and absent means there was
+   * nothing to compare them against. Collapsing the second into the first would
+   * tell an agent the body is unchanged for a comparison that never ran.
+   */
+  withDifferences(paths) {
+    this.differences = Array.isArray(paths)
+      ? paths
+        .filter((value) => typeof value === "string")
+        .slice(0, 100)
+        .map((value) => sanitizeDiagnostic(value, "path"))
+      : undefined;
+    return this;
+  }
+
   /** Attach the non-secret identity needed to inspect or revoke a created preview. */
   withPreviewRecovery(preview) {
     const recovery = normalizePreviewRecovery(preview);

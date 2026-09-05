@@ -1,5 +1,5 @@
 {
-  "manifestVersion": 5,
+  "manifestVersion": 6,
   "siteId": "a0000000-0000-4000-8000-000000000001",
   "pulledAt": "2026-09-04T00:00:00.000Z",
   "pages": [
@@ -36,6 +36,11 @@
   "navigation": {
     "file": "nav.json",
     "items": 3
+  },
+  "redirects": {
+    "file": "redirects.json",
+    "revision": "0000000000000000000000000000000000000000000000000000000000000001",
+    "entries": 4
   },
   "settings": [
     {

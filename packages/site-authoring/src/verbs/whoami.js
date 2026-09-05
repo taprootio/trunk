@@ -1,8 +1,66 @@
-import { CLI_BINARY_NAME, PUBLISH_KEY_ENVIRONMENT_VARIABLE, VERB_LOGIN, VERB_USE, VERB_WHOAMI } from "../constants.js";
+import {
+  CLI_BINARY_NAME,
+  CLI_UPGRADE_COMMAND,
+  CLI_VERSION,
+  EXTERNAL_WRITES_SETTING_KEY,
+  EXTERNAL_WRITES_SETTING_LOCATION,
+  PUBLISH_KEY_ENVIRONMENT_VARIABLE,
+  VERB_LOGIN,
+  VERB_STATUS,
+  VERB_USE,
+  VERB_WHOAMI,
+} from "../constants.js";
+import { isBehindLatest } from "../cli-release.js";
 import { credentialApiOrigin, findCredential } from "../credentials.js";
 import { SITE_AUTHORING_CAPABILITIES } from "../capabilities.js";
 import { openAnonymousSession, successResult } from "../session.js";
 import { environmentNameFor } from "../settings.js";
+
+/**
+ * What the last exchange recorded about the platform authoring switch, dated
+ * with that exchange (TR00692).
+ *
+ * Never presented as the current state: this verb makes no request, so the
+ * value is as old as the last exchange, and `status` is where a current answer
+ * comes from. A record written before the field existed says so plainly rather
+ * than reading as "enabled".
+ */
+function platformLine(lastExchange) {
+  const when = lastExchange.at === undefined ? "at that exchange" : `as of ${lastExchange.at}`;
+  if (lastExchange.externalWritesEnabled === undefined) {
+    return `Platform authoring switch: not recorded by that exchange. Run '${CLI_BINARY_NAME} ${VERB_STATUS}' `
+      + "for a current answer.";
+  }
+  return lastExchange.externalWritesEnabled
+    ? `Platform authoring switch ${when}: external site authoring writes were enabled. This is a recording, not a `
+      + `live read; run '${CLI_BINARY_NAME} ${VERB_STATUS}' for the current answer.`
+    : `Platform authoring switch ${when}: external site authoring writes were PAUSED platform-wide. A Taproot `
+      + `administrator re-enables the platform setting '${EXTERNAL_WRITES_SETTING_KEY}' `
+      + `(${EXTERNAL_WRITES_SETTING_LOCATION}). This is a recording, not a live read; run `
+      + `'${CLI_BINARY_NAME} ${VERB_STATUS}' for the current answer.`;
+}
+
+/**
+ * The latest published CLI release that exchange recorded (TR00703), dated the
+ * same way and for the same reason.
+ *
+ * A run that is actually behind never reaches here — the gate in `runCli`
+ * refuses `whoami` outright — so this line is what a *current* CLI reads as
+ * confirmation, and what a CLI whose store predates the field reads as "not
+ * recorded". It is still stated as a recording rather than as live fact,
+ * because that is what it is.
+ */
+function cliReleaseLine(lastExchange) {
+  if (lastExchange.latestCliVersion === undefined) {
+    return `Latest CLI release: not recorded by that exchange. This CLI is ${CLI_VERSION}; run `
+      + `'${CLI_BINARY_NAME} ${VERB_STATUS}' for a current answer.`;
+  }
+  const when = lastExchange.at === undefined ? "at that exchange" : `as of ${lastExchange.at}`;
+  return isBehindLatest(lastExchange.latestCliVersion)
+    ? `Latest CLI release ${when}: ${lastExchange.latestCliVersion}. This CLI is ${CLI_VERSION} and is behind it; `
+      + `Taproot accepts only the latest. Upgrade with: ${CLI_UPGRADE_COMMAND}`
+    : `Latest CLI release ${when}: ${lastExchange.latestCliVersion}. This CLI is ${CLI_VERSION}.`;
+}
 
 /**
  * `taproot-site whoami` — which Taproot, which account, which site, until when.
@@ -75,6 +133,12 @@ export async function whoami(invocation) {
       `That credential ${lapsed ? "expired" : "expires"} ${lastExchange.expiresAt}`
         + `${lapsed ? "; the next command mints another." : "."}`,
     );
+    // The platform authoring switch as of that exchange, dated (TR00692). It is
+    // reported as a recording rather than as the current state, because this
+    // command is offline by design and an operator reading an undated flag
+    // would take a snapshot from last week for a fact about right now.
+    onProgress(platformLine(lastExchange));
+    onProgress(cliReleaseLine(lastExchange));
   }
 
   return successResult(VERB_WHOAMI, config?.siteId, {
@@ -101,6 +165,20 @@ export async function whoami(invocation) {
         capabilities: lastExchange.capabilities,
         expiresAt: lastExchange.expiresAt,
         expired: Date.parse(lastExchange.expiresAt) <= now,
+        // Both absent on a record written before TR00692, and
+        // `externalWritesEnabled` also absent when the server that answered the
+        // exchange predated the field. Absent means "not recorded", never
+        // "enabled": an automation that wants a current answer reads
+        // `platform` off `status`, which says which of the three states it is.
+        ...(lastExchange.at === undefined ? {} : { at: lastExchange.at }),
+        ...(lastExchange.externalWritesEnabled === undefined
+          ? {}
+          : { externalWritesEnabled: lastExchange.externalWritesEnabled }),
+        // Absent on a record written before TR00703, and on one whose server
+        // predated the field. Absent means "not recorded", never "current".
+        ...(lastExchange.latestCliVersion === undefined
+          ? {}
+          : { latestCliVersion: lastExchange.latestCliVersion }),
       },
     }),
     ...(environmentOverride ? { capabilitiesKnown: false } : {}),

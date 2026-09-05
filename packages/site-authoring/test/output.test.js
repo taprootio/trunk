@@ -13,6 +13,7 @@ const RESERVED_ERROR_KEYS = [
   "alternatives",
   "code",
   "completedWrites",
+  "differences",
   "field",
   "preview",
   "refusal",
@@ -32,6 +33,7 @@ test("the machine-readable failure carries only the reviewed keys", () => {
     status: "grpc:8",
   })
     .withCompletedWrites(["lightTheme"])
+    .withDifferences(["$.content[0].text"])
     .withPreviewRecovery({
       siteId: "11111111-1111-4111-8111-111111111111",
       pageId: "22222222-2222-4222-8222-222222222222",
@@ -42,8 +44,22 @@ test("the machine-readable failure carries only the reviewed keys", () => {
   const result = failureResult(error);
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: "0.3.0" });
+  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: "0.4.0" });
   assert.deepEqual(Object.keys(result.error).sort(), RESERVED_ERROR_KEYS);
+  assert.deepEqual(result.error.differences, ["$.content[0].text"]);
+});
+
+test("differences distinguishes a body that matched from one that was never compared", () => {
+  // Three states, and an agent acts differently on each: absent sends it to
+  // fetch the site's document, an empty list sends it to the page's title,
+  // path, and description, and a non-empty one names where to look. Emitting
+  // nothing for the empty list made the first two indistinguishable, so the
+  // reference help's own account of the contract was unreachable through it.
+  const compared = new SiteAuthoringError("pages.pull_conflict", "conflict").withDifferences([]);
+  const uncompared = new SiteAuthoringError("pages.pull_conflict", "conflict").withDifferences(undefined);
+
+  assert.deepEqual(failureResult(compared).error.differences, []);
+  assert.equal("differences" in failureResult(uncompared).error, false);
 });
 
 test("surfaces a classified refusal and stays silent about an unclassified one", () => {

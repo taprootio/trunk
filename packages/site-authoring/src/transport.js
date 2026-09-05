@@ -2,6 +2,7 @@ import {
   CAPABILITY_REFUSAL_FIELD,
   CAPABILITY_REFUSAL_REASON,
   CLI_NAME,
+  CLI_UPGRADE_REFUSAL_FIELD,
   CLI_VERSION,
   CREDENTIAL_REFUSAL_FIELD,
   GRPC_RESOURCE_EXHAUSTED,
@@ -12,6 +13,7 @@ import {
   PLAN_LIMIT_REFUSAL_FIELD,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   REFUSAL_CAPABILITY_MISSING,
+  REFUSAL_CLI_OUTDATED,
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_PLAN_LIMIT,
   REFUSAL_PLATFORM_PAUSED,
@@ -443,10 +445,17 @@ export class ApiError extends SiteAuthoringError {
 
   /**
    * Classifies a refusal into the one thing the caller should do next. The
-   * five kinds are genuinely different behaviors, and collapsing them into
+   * six kinds are genuinely different behaviors, and collapsing them into
    * "the request failed" is what makes an agent retry a revoked credential
    * forever or treat a plan ceiling as a transient outage:
    *
+   * - `cli_outdated` (field `CliUpgradeRequired`) — this CLI is behind the
+   *   latest published release, and Taproot supports only the latest. **Upgrade
+   *   this package**; nothing about the credential, the request, or the site is
+   *   wrong, and no retry of this version can succeed. Classified first,
+   *   because it is the one refusal that says the client itself is the problem:
+   *   every other kind describes a state the current binary could act on
+   *   (TR00703).
    * - `platform_paused` (field `SiteAuthoringRollout`) — external authoring is
    *   switched off platform-wide. **Retry later** or ask the operator; the
    *   credential and the request are both fine.
@@ -484,6 +493,7 @@ export class ApiError extends SiteAuthoringError {
   refusalKind() {
     // Fields first: they are the specific statement, and a named refusal
     // outranks whatever status happens to carry it.
+    if (this.hasField(CLI_UPGRADE_REFUSAL_FIELD)) return REFUSAL_CLI_OUTDATED;
     if (this.hasField(ROLLOUT_REFUSAL_FIELD)) return REFUSAL_PLATFORM_PAUSED;
     if (this.hasField(CREDENTIAL_REFUSAL_FIELD)) return REFUSAL_CREDENTIAL_REJECTED;
     if (this.hasField(PLAN_LIMIT_REFUSAL_FIELD)) return REFUSAL_PLAN_LIMIT;
@@ -500,8 +510,8 @@ export class ApiError extends SiteAuthoringError {
   }
 }
 
-async function parseJsonResponse(response, signal) {
-  const bytes = await readBoundedBody(response, signal);
+async function parseJsonResponse(response, signal, maximumBytes = LIMITS.apiResponseBytes) {
+  const bytes = await readBoundedBody(response, signal, maximumBytes);
   try {
     return JSON.parse(bytes.toString("utf8"));
   } catch {
@@ -610,6 +620,11 @@ export class SiteApiClient {
     attempts = LIMITS.requestAttempts,
     deadline,
     now = this.now,
+    // How large a body this one call may read. The default bounds every read
+    // the way it always has; a caller raises it only for the one contract
+    // whose valid answer is larger, and never above what its workspace file
+    // may hold.
+    maximumResponseBytes = LIMITS.apiResponseBytes,
   } = {}, replaceableMutation) {
     const url = new URL(path, this.apiBaseUrl);
     if (
@@ -618,6 +633,9 @@ export class SiteApiClient {
       || !ALLOWED_METHODS.has(method)
       || (deadline !== undefined && !Number.isFinite(deadline))
       || typeof now !== "function"
+      || !Number.isSafeInteger(maximumResponseBytes)
+      || maximumResponseBytes <= 0
+      || maximumResponseBytes > LIMITS.redirectMapResponseBytes
     ) {
       throw new SiteAuthoringError(
         "transport.request_contract",
@@ -695,7 +713,7 @@ export class SiteApiClient {
       }
       if (response.status >= 200 && response.status < 300 && !response.redirected) {
         try {
-          const parsed = await parseJsonResponse(response, attemptSignal);
+          const parsed = await parseJsonResponse(response, attemptSignal, maximumResponseBytes);
           if (remainingBudget(deadline, now) <= 0) throw deadlineError();
           return parsed;
         } catch (error) {
@@ -729,7 +747,7 @@ export class SiteApiClient {
       }
       let responseBody;
       try {
-        responseBody = await parseJsonResponse(response, attemptSignal);
+        responseBody = await parseJsonResponse(response, attemptSignal, maximumResponseBytes);
       } catch {
         // A response arrived, so the mutation's fate is whatever its status
         // says: a 4xx refused it, a 5xx may have committed it first.
