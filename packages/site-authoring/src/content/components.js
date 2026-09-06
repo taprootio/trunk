@@ -1,7 +1,9 @@
-// Espalier 4.2 exposes this registry value only through its root component,
-// whose import also registers `esp-root`. Replace this with the side-effect-free
-// shared registry export when Espalier publishes that package subpath.
-import { BUILT_IN_IMAGE_TEXTURES } from "@taprootio/espalier/root";
+// Espalier 4.8.0 publishes the texture registry as a side-effect-free subpath
+// (TR00630). Import it from there, never from `@taprootio/espalier/root`: that
+// module registers `esp-root`, so a process already holding another Espalier
+// copy — the generator's Playwright Node process, for one — cannot load this
+// pipeline at all once a component module is in the graph.
+import { BUILT_IN_IMAGE_TEXTURES } from "@taprootio/espalier/shared/image-texture-registry";
 import { hasAsciiControl } from "../errors.js";
 import {
   CONTENT_ERROR_CODES as CODES,
@@ -195,7 +197,8 @@ const TESTIMONIAL = Object.freeze({
   borderWidth: num({
     integer: true,
     minimum: 0,
-    description: "Pixel border around the whole set of quotations — the grid or the carousel; 0 leaves it unbordered.",
+    description:
+      "Pixel border around each quotation, as on a card grid; a carousel shows the visible slide's own box and is never framed. 0 boxes nothing.",
   }),
 });
 

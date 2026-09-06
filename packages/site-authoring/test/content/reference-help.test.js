@@ -1,3 +1,4 @@
+import { BUILT_IN_IMAGE_TEXTURES } from "@taprootio/espalier/shared/image-texture-registry";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -48,7 +49,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 17);
+  assert.equal(REFERENCE_VERSION, 18);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -567,7 +568,9 @@ test("every borderWidth says what it boxes, and the grids say their item text is
     "feature-grid": /border around each item, as on a card grid; the grid itself is never framed/u,
     "card-grid": /border around each card; the grid itself is never framed/u,
     "cta": /border around the call-to-action panel/u,
-    "testimonial": /border around the whole set of quotations — the grid or the carousel/u,
+    // TR00719: the testimonial was the rule's last exception; a carousel now
+    // shows the visible slide's own box rather than a frame around the strip.
+    "testimonial": /border around each quotation, as on a card grid; a carousel shows the visible slide's own box and is never framed/u,
   };
   for (const [componentType, expected] of Object.entries(boxed)) {
     const component = getComponentReference(componentType);
@@ -624,6 +627,10 @@ test("nested schema output retains required image keys, array bounds, and nullab
     "scanlines",
     "duotone",
   ]);
+  // The literal above is the vocabulary agents see; this is what keeps it
+  // Espalier's rather than ours (TR00630). A copied list would satisfy the
+  // literal forever while drifting from the renderer that has to honour it.
+  assert.deepEqual(texture.builtInValues, [...BUILT_IN_IMAGE_TEXTURES]);
   assert.deepEqual(texture.applicationRegistered, {
     accepted: true,
     requirement: "Register the texture with Espalier before rendering the page.",

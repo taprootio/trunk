@@ -90,7 +90,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", () => {
   assert.doesNotThrow(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "4.7.0");
+  assert.equal(getThemeReference().espalierVersion, "4.8.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");

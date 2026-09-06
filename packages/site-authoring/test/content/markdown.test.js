@@ -495,6 +495,12 @@ const GOLDENS = [
       + "```\n\n"
       + "```component:card-grid\n"
       + "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}\n"
+      + "```\n\n"
+      + "```component:testimonial\n"
+      + "{\"items\":[{\"quote\":\"The 6am class is the reason I finally kept a morning routine.\",\"authorName\":\"Priya Raman\",\"authorTitle\":\"Member since 2023\",\"authorImage\":null},{\"quote\":\"I came in nervous and left already planning my next visit.\",\"authorName\":\"Dana Whitfield\",\"authorTitle\":\"First-time student\",\"authorImage\":null}],\"columns\":2,\"borderWidth\":1}\n"
+      + "```\n\n"
+      + "```component:testimonial\n"
+      + "{\"items\":[{\"quote\":\"Two months in, I can hold poses I could not attempt in January.\",\"authorName\":\"Marcus Ellery\",\"authorTitle\":\"Barre regular\",\"authorImage\":null}],\"carousel\":true,\"borderWidth\":1}\n"
       + "```\n"
       + ":::",
     doc: representativeSectionDocument,

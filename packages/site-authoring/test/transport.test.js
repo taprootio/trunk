@@ -144,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.4.0");
+  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.5.0");
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });
