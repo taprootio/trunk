@@ -56,10 +56,6 @@ export const SETTINGS_GROUPS = Object.freeze([
       { name: "darkTheme", wireType: "theme" },
       ...stringFields(
         "defaultScheme",
-        "fontBrand",
-        "fontWeightBrand",
-        "fontMenu",
-        "fontWeightMenu",
         "lightLogoId",
         "lightLogoUrl",
         "darkLogoId",

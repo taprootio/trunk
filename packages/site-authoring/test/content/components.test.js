@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canonicalizeComponentData, isComponentType, validateComponentBlock } from "../../src/content/components.js";
+import {
+  canonicalizeComponentData,
+  getComponentDefinition,
+  isComponentType,
+  validateComponentBlock,
+} from "../../src/content/components.js";
 import { validateDocument } from "../../src/content/validate-document.js";
 import { CONTENT_LIMITS } from "../../src/content/vocabulary.js";
 
@@ -106,6 +111,7 @@ const COMPLETE = {
     scrim: "radial",
     scrimStrength: "strong",
     bannerScheme: "dark",
+    textShadow: "strong",
     texture: "linen",
     textureScale: "coarse",
   },
@@ -147,6 +153,20 @@ test("rejects one wrong value in every registry shape", async (testContext) => {
       assert.deepEqual(errors.map((error) => error.path), [path]);
     });
   }
+});
+
+test("accepts every image banner text shadow strength and rejects an unknown one", () => {
+  for (const textShadow of ["none", "light", "medium", "strong"]) {
+    assert.deepEqual(validate("image-banner", { ...COMPLETE["image-banner"], textShadow }), []);
+  }
+  const errors = validate("image-banner", { ...COMPLETE["image-banner"], textShadow: "extreme" });
+  assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
+  assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/textShadow"]);
+});
+
+test("defaults the image banner text shadow to none", () => {
+  assert.equal(getComponentDefinition("image-banner").defaultData.textShadow, "none");
+  assert.deepEqual(validate("image-banner", { image: COMPLETE["image-banner"].image }), []);
 });
 
 test("holds the CTA variant to the narrowed primary|danger vocabulary", async (testContext) => {

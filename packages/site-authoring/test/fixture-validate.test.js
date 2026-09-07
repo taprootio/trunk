@@ -142,7 +142,7 @@ test("the shipped example fixture validates without credentials, network, or wri
       pages: 2,
       navigationItems: 3,
       themes: 2,
-      appearanceSettings: 27,
+      appearanceSettings: 23,
       footer: true,
     },
   );
@@ -255,7 +255,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       pages: 8,
       navigationItems: 10,
       themes: 2,
-      appearanceSettings: 27,
+      appearanceSettings: 23,
       footer: true,
     },
   );
@@ -289,7 +289,7 @@ test("validate drops the header-width hint once the workspace opts into the wide
   const json = JSON.parse(result.stdout);
   assert.deepEqual(json.hints, []);
   assert.doesNotMatch(result.stderr, /Hint:/u);
-  assert.equal(json.validated.appearanceSettings, 27);
+  assert.equal(json.validated.appearanceSettings, 23);
 });
 
 test("validate refuses a redirect source that a fixture page occupies under any spelling, naming the authored entry", async (context) => {
@@ -442,6 +442,21 @@ test("offline failures retain the push validators' stable code and field", async
       },
       code: "theme.setting_invalid",
       field: "taproot-styles.defaultScheme",
+    },
+    {
+      // TR00728: a fixture (or a workspace) authored before the change can
+      // still carry a retired scalar font at the top level of the styles
+      // document. There is no compatibility read path, so validate must
+      // refuse it with the same stable code and field push does.
+      label: "retired top-level scalar font",
+      mutate: async (fixture) => {
+        const file = path.join(fixture, "settings/taproot-styles.json");
+        const document_ = JSON.parse(await readFile(file, "utf8"));
+        document_.settings.fontMenu = "Georgia, serif";
+        await writeFile(file, `${JSON.stringify(document_, undefined, 2)}\n`);
+      },
+      code: "appearance.retired_scalar",
+      field: "taproot-styles.fontMenu",
     },
     {
       label: "navigation page reference",

@@ -26,34 +26,6 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     values: Object.freeze(["system", "light", "dark"]),
     default: "light",
   }),
-  Object.freeze({
-    settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
-    name: "fontBrand",
-    path: "taproot-styles.fontBrand",
-    type: "string",
-    default: "",
-  }),
-  Object.freeze({
-    settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
-    name: "fontWeightBrand",
-    path: "taproot-styles.fontWeightBrand",
-    type: "string",
-    default: "",
-  }),
-  Object.freeze({
-    settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
-    name: "fontMenu",
-    path: "taproot-styles.fontMenu",
-    type: "string",
-    default: "",
-  }),
-  Object.freeze({
-    settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
-    name: "fontWeightMenu",
-    path: "taproot-styles.fontWeightMenu",
-    type: "string",
-    default: "",
-  }),
   ...["lightLogoId", "darkLogoId", "lightCanvasImageId", "darkCanvasImageId"].map((name) =>
     Object.freeze({
       settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
@@ -186,6 +158,33 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
   ),
 ]);
 
+// TR00728: these four scalars were retired in favor of per-scheme theme
+// properties (docs/architecture/decisions/site-fonts-are-per-scheme-theme-properties.md).
+// There is no compatibility read path: a workspace pulled before the change
+// can still carry them at the top level of the styles document, and the
+// owner must move each value into lightTheme/darkTheme by hand rather than
+// have it silently discarded. Declaration order is refusal order.
+const RETIRED_TAPROOT_STYLES_SCALARS = Object.freeze([
+  "fontBrand",
+  "fontWeightBrand",
+  "fontMenu",
+  "fontWeightMenu",
+]);
+
+function refuseRetiredScalarFonts(stylesDocument) {
+  if (stylesDocument === null || typeof stylesDocument !== "object") return;
+  for (const name of RETIRED_TAPROOT_STYLES_SCALARS) {
+    if (Object.hasOwn(stylesDocument, name)) {
+      fail(
+        "appearance.retired_scalar",
+        `taproot-styles.${name} is retired; move its value into lightTheme.${name} and darkTheme.${name} `
+          + "instead. Fonts are per-scheme theme properties now.",
+        `taproot-styles.${name}`,
+      );
+    }
+  }
+}
+
 export const APPEARANCE_READ_ONLY_FIELDS = Object.freeze([
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.lightLogoUrl" }),
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.darkLogoUrl" }),
@@ -297,6 +296,7 @@ export function buildAppearanceScalarOperations(documents, knownImageIds) {
   if (!(knownImageIds instanceof Set)) {
     throw new TypeError("Appearance validation requires the known site-owned image identities.");
   }
+  refuseRetiredScalarFonts(documents[SETTINGS_TYPE_TAPROOT_STYLES]);
   return APPEARANCE_SCALAR_FIELDS.map((definition) => ({
     settingsType: definition.settingsType,
     setting: definition.name,

@@ -664,10 +664,6 @@ function themeWorkspace(overrides = {}) {
       lightTheme: agentTheme(DEFAULT_SITE_THEME.light.theme),
       darkTheme: agentTheme(DEFAULT_SITE_THEME.dark.theme),
       defaultScheme: "system",
-      fontBrand: "\"Inika\", serif",
-      fontWeightBrand: "600",
-      fontMenu: "",
-      fontWeightMenu: "",
       lightLogoId: "",
       darkLogoId: "",
       lightCanvasImageId: "",
@@ -1184,7 +1180,7 @@ test("theme push validates roles, contexts, and anchors before saving themes las
 
   assert.equal(result.ok, true);
   assert.equal(result.verb, "theme push");
-  assert.equal(result.written.items.length, 30);
+  assert.equal(result.written.items.length, 26);
   const mutations = wire.calls.filter((call) => call.method === "POST");
   assert.equal(mutations[0].pathname, `/api/v1/sites/${SITE_ID}/footer-settings`);
   assert.deepEqual(mutations[0].body.footerSettings.bottomLinks, currentFooter.bottomLinks);
@@ -1207,6 +1203,40 @@ test("theme push validates roles, contexts, and anchors before saving themes las
   }
   assert.ok(progress.some((line) => line.includes("externally managed")));
   wire.assertQueryContracts();
+});
+
+test("theme push refuses a workspace still carrying a retired top-level scalar font", async (site) => {
+  // TR00728: a workspace pulled before the change can still carry fontBrand at
+  // the top level of taproot-styles.json. There is no compatibility read path
+  // (the ADR forbids one), so push must refuse rather than silently discard
+  // the authored value.
+  const workspace = await fixture(site, themeWorkspace({ style: { fontBrand: "Georgia, serif" } }));
+  const wire = api([]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "appearance.retired_scalar"
+      && error?.field === "taproot-styles.fontBrand",
+  );
+  assert.equal(wire.calls.length, 0);
+});
+
+test("theme push succeeds when the same fonts live only inside the per-scheme themes", async (site) => {
+  // The default fixture's themes already carry fontBrand/fontMenu (and their
+  // weights) inside lightTheme/darkTheme with nothing at the top level of
+  // taproot-styles.json, so the retired-scalar refusal above must not
+  // misfire on the normal, current-shape workspace.
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
+    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
+    { method: "POST", pattern: SETTING, reply: {} },
+  ]);
+
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+
+  assert.equal(result.ok, true);
 });
 
 test("theme push refuses an incomplete pair before the first API call", async (site) => {
@@ -6644,7 +6674,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.5.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.6.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7074,7 +7104,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.5.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.6.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

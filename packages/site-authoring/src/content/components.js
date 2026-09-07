@@ -253,6 +253,8 @@ const IMAGE_BANNER = Object.freeze({
   scrim: enumOf("auto", "none", "flat", "top", "bottom", "left", "right", "radial"),
   scrimStrength: enumOf("soft", "medium", "strong"),
   bannerScheme: enumOf("auto", "light", "dark"),
+  // Drop-shadow strength applied to the overlay text.
+  textShadow: enumOf("none", "light", "medium", "strong"),
   // A built-in or application-registered Espalier texture name.
   texture: textureName(),
   textureScale: enumOf("fine", "medium", "coarse"),
@@ -486,6 +488,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       scrim: "auto",
       scrimStrength: "medium",
       bannerScheme: "auto",
+      textShadow: "none",
       texture: "none",
       textureScale: "medium",
     },

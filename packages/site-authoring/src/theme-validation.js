@@ -44,10 +44,12 @@ export const REQUIRED_THEME_PROPERTIES = Object.freeze([
   "fontHeadings",
   "fontBrand",
   "fontMonospace",
+  "fontMenu",
   "fontWeightBody",
   "fontWeightHeadings",
   "fontWeightBrand",
   "fontWeightMonospace",
+  "fontWeightMenu",
 ]);
 
 const REQUIRED_ANGLE_LEAVES = Object.freeze([

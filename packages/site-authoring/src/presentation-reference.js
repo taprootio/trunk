@@ -57,12 +57,6 @@ function getEspalierVersion() {
 
 const OPTIONAL_THEME_FIELDS = Object.freeze([
   "explicitMappingTokens",
-  // Espalier 4.7.0 menu typography: documented so the theme help covers the
-  // installed contract, optional so pulled baselines that predate it stay
-  // complete (the server seeds and requires the fields listed in
-  // DefaultSiteTheme.RequiredProperties only).
-  "fontMenu",
-  "fontWeightMenu",
   "boxBackgroundImage",
   "boxBackgroundImageOpacity",
   "vellumOpacity",
@@ -350,11 +344,12 @@ export function getAppearanceReference() {
       "navDrawerStyle 'full-screen' (the published default) opens the mobile menu over the whole viewport with the "
       + "brand centered above large centered items and navDrawerTransition choosing how it appears (fade, slide-down, "
       + "slide-up, slide-left, or slide-right); 'panel' keeps the side panel, which exists for application-style "
-      + "menus with many groups. fontMenu and fontWeightMenu set the navigation face the way fontBrand sets the "
-      + "brand; an empty fontMenu falls back to the body font, never to headings.",
+      + "menus with many groups. The navigation face itself is not an appearance scalar: fontMenu and fontWeightMenu "
+      + "are per-scheme theme fields set in settings.lightTheme/darkTheme the same way fontBrand is, and an empty "
+      + "fontMenu falls back to the body font, never to headings.",
     mutationOrder: [
       "fresh footer read plus concurrency-protected ten-color overlay",
-      "default scheme, brand fonts and assets, favicon, and header scalars",
+      "default scheme, assets, favicon, and header scalars",
       "complete light theme, then complete dark theme",
     ],
     nonAtomic: true,

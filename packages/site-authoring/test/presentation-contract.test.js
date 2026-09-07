@@ -90,7 +90,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", () => {
   assert.doesNotThrow(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "4.8.0");
+  assert.equal(getThemeReference().espalierVersion, "4.9.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -186,8 +186,6 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
       headerWidth: defaults["settings.headerWidth"],
       navDrawerStyle: defaults["settings.navDrawerStyle"],
       navDrawerTransition: defaults["settings.navDrawerTransition"],
-      fontMenu: defaults["settings.fontMenu"],
-      fontWeightMenu: defaults["settings.fontWeightMenu"],
       navMenuDisplay: defaults["settings.navMenuDisplay"],
       headerPosition: defaults["settings.headerPosition"],
       showThemeToggle: defaults["settings.showThemeToggle"],
@@ -203,8 +201,6 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
       headerWidth: "contained",
       navDrawerStyle: "full-screen",
       navDrawerTransition: "fade",
-      fontMenu: "",
-      fontWeightMenu: "",
       navMenuDisplay: "auto",
       headerPosition: "normal",
       showThemeToggle: false,
@@ -220,8 +216,6 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
     "string HeaderWidth = Taproot.Domain.Entities.HeaderWidth.Contained",
     "string NavDrawerStyle = HeaderNavDrawerStyle.FullScreen",
     "string NavDrawerTransition = HeaderNavDrawerTransition.Fade",
-    "string FontMenu = \"\"",
-    "string FontWeightMenu = \"\"",
     "string NavMenuDisplay = HeaderNavigationDisplay.Auto",
     "bool ShowThemeToggle = false",
     "string HeaderPosition = Taproot.Domain.Entities.HeaderPosition.Normal",
