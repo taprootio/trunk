@@ -119,6 +119,7 @@ export const SETTINGS_GROUPS = Object.freeze([
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },
       { name: "albumBorderWidth", wireType: "int" },
+      { name: "albumMaxImagesPerRow", wireType: "int" },
       { name: "footerSettings", wireType: "document", zero: {} },
     ]),
   }),
