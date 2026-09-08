@@ -52,6 +52,7 @@ export interface RenderProseMirrorOptions {
   freeFormSections?: boolean;
   imageDefaults?: {
     placement?: TiptapImagePresentationPlacement | string | null;
+    /** The page shell emits this default once so rich-text formats inherit it. */
     maxHeightVh?: TiptapImageMaxHeightVh | number | null;
   };
 }
@@ -1013,7 +1014,7 @@ function resolveImagePresentation(
   attrs: Record<string, JsonValue | undefined>,
   defaults: RenderProseMirrorOptions["imageDefaults"],
 ): Record<string, string | number | undefined> {
-  const maxHeight = resolveMaxHeight(attrs.maxHeightVh, defaults?.maxHeightVh);
+  const explicitMaxHeight = explicitImageMaxHeight(attrs.maxHeightVh);
   const maxHeightOverride = normalizeCssLengthOverride(attrs.maxHeight, { allowNone: true });
   const borderWidthOverride = normalizeCssLengthOverride(attrs.borderWidth);
   const placement = resolvePlacement(attrs, defaults?.placement);
@@ -1022,9 +1023,12 @@ function resolveImagePresentation(
   if (maxHeightOverride) styleParts.push(`--taproot-article-image-max-height: ${maxHeightOverride}`);
   if (borderWidthOverride) styleParts.push(`--esp-image-border: ${imageBorderValue(borderWidthOverride)}`);
   return {
+    // The page shell owns the inherited site default so HTML and structured
+    // rich text share it. Serialize only an explicit legacy choice; this
+    // includes 60vh when it intentionally overrides a taller site default.
     // An explicit CSS max height supersedes the legacy vh enum entirely.
-    ...(maxHeightOverride === null && maxHeight !== DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH
-      ? { "data-image-max-height-vh": maxHeight }
+    ...(maxHeightOverride === null && explicitMaxHeight !== null
+      ? { "data-image-max-height-vh": explicitMaxHeight }
       : {}),
     ...(maxHeightOverride ? { "data-image-max-height": maxHeightOverride } : {}),
     ...(borderWidthOverride ? { "data-image-border-width": borderWidthOverride } : {}),
@@ -1034,11 +1038,9 @@ function resolveImagePresentation(
   };
 }
 
-function resolveMaxHeight(value: unknown, defaultValue: unknown): TiptapImageMaxHeightVh {
-  if (value === TIPTAP_SITE_DEFAULT || value === undefined || value === null) {
-    return normalizeImageMaxHeight(defaultValue);
-  }
-  return normalizeImageMaxHeight(value);
+function explicitImageMaxHeight(value: unknown): TiptapImageMaxHeightVh | null {
+  if (value === TIPTAP_SITE_DEFAULT || value === undefined || value === null) return null;
+  return isImageMaxHeightOption(value) ? imageMaxHeightOption(value) : null;
 }
 
 function resolvePlacement(
@@ -1068,10 +1070,15 @@ function isAbsentPresentationValue(value: unknown): boolean {
 }
 
 export function normalizeImageMaxHeight(value: unknown): TiptapImageMaxHeightVh {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS.includes(parsed as TiptapImageMaxHeightVh)
-    ? parsed as TiptapImageMaxHeightVh
-    : DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH;
+  return isImageMaxHeightOption(value) ? imageMaxHeightOption(value) : DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH;
+}
+
+function isImageMaxHeightOption(value: unknown): boolean {
+  return TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS.includes(imageMaxHeightOption(value));
+}
+
+function imageMaxHeightOption(value: unknown): TiptapImageMaxHeightVh {
+  return (typeof value === "number" ? value : Number(value)) as TiptapImageMaxHeightVh;
 }
 
 const CSS_LENGTH_UNITS = "px|em|rem|ch|ex|vw|vh|svh|lvh|dvh|svw|lvw|dvw|vmin|vmax|%";

@@ -1,6 +1,6 @@
 {
   "name": "@taprootio/site-authoring",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Taproot site authoring CLI: sign in once in the browser, then pull, validate, push, preview, approve, and deploy a site from the terminal",
   "type": "module",
   "license": "ISC",
@@ -28,7 +28,7 @@
     "README.md"
   ],
   "dependencies": {
-    "@taprootio/espalier": "4.10.0"
+    "@taprootio/espalier": "4.11.0"
   },
   "scripts": {
     "test": "node --test",
