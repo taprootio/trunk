@@ -24,6 +24,20 @@ export function parseSemVer(version) {
   };
 }
 
+/**
+ * npm dependency pins and release versions use the same strict SemVer grammar.
+ * A range, a leading-zero prerelease identifier, or any other version text that
+ * npm could resolve differently over time is not an exact release contract.
+ */
+export function assertExactVersion(version, label = "version") {
+  try {
+    parseSemVer(version);
+  } catch {
+    fail(`${label} must be an exact semantic version`);
+  }
+  return version;
+}
+
 export function compareSemVer(leftVersion, rightVersion) {
   const left = parseSemVer(leftVersion);
   const right = parseSemVer(rightVersion);
@@ -53,6 +67,7 @@ export function compareSemVer(leftVersion, rightVersion) {
 }
 
 export function assertMonotonicRelease(candidateVersion, publishedVersions) {
+  assertExactVersion(candidateVersion, "candidate version");
   let normalizedVersions = publishedVersions;
   if (typeof normalizedVersions === "string") normalizedVersions = [normalizedVersions];
   if (
@@ -77,6 +92,20 @@ export function assertMonotonicRelease(candidateVersion, publishedVersions) {
   }
 }
 
+export function assertNpmIntegrity(integrity, label = "npm package integrity") {
+  if (typeof integrity !== "string") {
+    fail(`${label} must be a SHA-512 Subresource Integrity value`);
+  }
+  const match = /^sha512-([A-Za-z0-9+/]+={0,2})$/u.exec(integrity);
+  if (!match) fail(`${label} must be a SHA-512 Subresource Integrity value`);
+
+  const digest = Buffer.from(match[1], "base64");
+  if (digest.length !== 64 || digest.toString("base64") !== match[1]) {
+    fail(`${label} must be a SHA-512 Subresource Integrity value`);
+  }
+  return integrity;
+}
+
 export function npmPackIntegrity(packResult) {
   let packs = [];
   if (Array.isArray(packResult)) {
@@ -94,7 +123,7 @@ export function npmPackIntegrity(packResult) {
   ) {
     fail("npm pack output must contain exactly one package with an integrity value");
   }
-  return packs[0].integrity;
+  return assertNpmIntegrity(packs[0].integrity, "npm pack integrity");
 }
 
 function decodeStatement(attestationBundle) {

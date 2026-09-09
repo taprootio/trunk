@@ -46,11 +46,10 @@ jobs:
           package_version="$(node -p "require('./package.json').version")"
           repository_url="$(node -p "require('./package.json').repository.url")"
           repository_directory="$(node -p "require('./package.json').repository.directory")"
-          artifact_version="$(node -p "require('./package.json').dependencies['@taprootio/docs-artifact']")"
           test "$GITHUB_REF_NAME" = "docs-publisher-v${package_version}"
           test "$repository_url" = "https://github.com/taprootio/trunk.git"
           test "$repository_directory" = "packages/docs-publisher"
-          test "$artifact_version" = "1.1.0"
+          node ../../scripts/npm-release.mjs exact-dependency @taprootio/docs-artifact
 
       - name: Install the exact public artifact contract and test the publisher
         working-directory: packages/docs-publisher
@@ -61,55 +60,7 @@ jobs:
       - name: Enforce release order and detect an identical completed npm publish
         id: registry
         working-directory: packages/docs-publisher
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_name="$(node -p "require('./package.json').name")"
-          package_version="$(node -p "require('./package.json').version")"
-          package_spec="${package_name}@${package_version}"
-          versions_file="$RUNNER_TEMP/docs-publisher-versions.json"
-          versions_error="$RUNNER_TEMP/docs-publisher-versions.error"
-          if ! npm view "$package_name" versions --json --registry=https://registry.npmjs.org/ > "$versions_file" 2> "$versions_error"; then
-            if grep -Fxq "npm error code E404" "$versions_error"; then
-              echo "[]" > "$versions_file"
-            else
-              cat "$versions_error" >&2
-              exit 1
-            fi
-          fi
-          node ../../scripts/npm-release-guard.mjs order "$package_version" "$versions_file"
-
-          integrity_file="$RUNNER_TEMP/docs-publisher-integrity.txt"
-          integrity_error="$RUNNER_TEMP/docs-publisher-integrity.error"
-          if npm view "$package_spec" dist.integrity --registry=https://registry.npmjs.org/ > "$integrity_file" 2> "$integrity_error"; then
-            published_integrity="$(tr -d '\r\n' < "$integrity_file")"
-            test -n "$published_integrity"
-            npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/docs-publisher-pack.json"
-            local_integrity="$(node ../../scripts/npm-release-guard.mjs pack-integrity "$RUNNER_TEMP/docs-publisher-pack.json")"
-            test "$local_integrity" = "$published_integrity"
-
-            audit_directory="$RUNNER_TEMP/docs-publisher-provenance"
-            mkdir -p "$audit_directory"
-            npm install --prefix "$audit_directory" --ignore-scripts --no-audit --no-fund --save-exact "$package_spec"
-            npm --prefix "$audit_directory" audit signatures --json --include-attestations > "$RUNNER_TEMP/docs-publisher-attestations.json"
-            node ../../scripts/npm-release-guard.mjs provenance \
-              "$RUNNER_TEMP/docs-publisher-attestations.json" \
-              "$package_name" \
-              "$package_version" \
-              "https://github.com/taprootio/trunk" \
-              ".github/workflows/publish-docs-publisher.yml" \
-              "refs/tags/$GITHUB_REF_NAME" \
-              "$GITHUB_SHA"
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-            echo "$package_spec already exists with identical package integrity and verified Trunk provenance."
-          else
-            if grep -Fxq "npm error code E404" "$integrity_error"; then
-              echo "should_publish=true" >> "$GITHUB_OUTPUT"
-            else
-              cat "$integrity_error" >&2
-              exit 1
-            fi
-          fi
+        run: node ../../scripts/npm-release.mjs inspect .github/workflows/publish-docs-publisher.yml
 
       - name: Publish immutable public package with provenance
         if: steps.registry.outputs.should_publish == 'true'
@@ -118,4 +69,4 @@ jobs:
           # Keep this after deleting NPM_TOKEN: an empty token lets npm's OIDC
           # trusted publishing replace the setup-node registry configuration.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance --ignore-scripts
+        run: node ../../scripts/npm-release.mjs publish

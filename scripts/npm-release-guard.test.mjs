@@ -7,7 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  assertExactVersion,
   assertMonotonicRelease,
+  assertNpmIntegrity,
   assertNpmProvenance,
   compareSemVer,
   npmPackIntegrity,
@@ -23,6 +25,7 @@ const expected = {
   commit: "0123456789abcdef0123456789abcdef01234567",
 };
 const guardPath = fileURLToPath(new URL("./npm-release-guard.mjs", import.meta.url));
+const integrity = `sha512-${Buffer.alloc(64, 1).toString("base64")}`;
 
 function provenanceStatement(overrides = {}) {
   return {
@@ -83,6 +86,17 @@ test("semantic version comparison and the release-order guard fail closed", () =
     () => assertMonotonicRelease("1.1.9", ["1.0.0", "1.2.0"]),
     /precedes already-published 1\.2\.0/u,
   );
+  assert.throws(
+    () => assertMonotonicRelease("01.2.0", []),
+    /candidate version must be an exact semantic version/u,
+  );
+});
+
+test("exact versions reject ranges and malformed semantic version text", () => {
+  assert.equal(assertExactVersion("1.2.3-rc.1"), "1.2.3-rc.1");
+  for (const version of ["^1.2.3", "1.2", "1.2.3+build", "1.2.3-rc..1"]) {
+    assert.throws(() => assertExactVersion(version), /must be an exact semantic version/u);
+  }
 });
 
 // npm 12 currently returns a flat array for this invocation. The scalar and
@@ -110,9 +124,19 @@ test("the release-order guard rejects malformed versions response shapes", () =>
 });
 
 test("npm pack integrity accepts npm 11 and npm 12 response shapes", () => {
-  const pack = { name: expected.packageName, integrity: "sha512-candidate" };
+  const pack = { name: expected.packageName, integrity };
   assert.equal(npmPackIntegrity([pack]), pack.integrity);
   assert.equal(npmPackIntegrity({ [expected.packageName]: pack }), pack.integrity);
+});
+
+test("npm integrity requires a canonical SHA-512 value", () => {
+  assert.equal(assertNpmIntegrity(integrity), integrity);
+  for (const malformed of ["", "sha256-YQ==", "sha512-YQ==", "sha512-not-base64"]) {
+    assert.throws(
+      () => assertNpmIntegrity(malformed),
+      /must be a SHA-512 Subresource Integrity value/u,
+    );
+  }
 });
 
 test("npm pack integrity rejects ambiguous or malformed response shapes", () => {
@@ -120,7 +144,7 @@ test("npm pack integrity rejects ambiguous or malformed response shapes", () => 
     null,
     [],
     {},
-    [{ integrity: "sha512-one" }, { integrity: "sha512-two" }],
+    [{ integrity }, { integrity }],
     { [expected.packageName]: { name: expected.packageName } },
     { [expected.packageName]: { integrity: "" } },
   ]) {
@@ -129,6 +153,10 @@ test("npm pack integrity rejects ambiguous or malformed response shapes", () => 
       /npm pack output must contain exactly one package with an integrity value/u,
     );
   }
+  assert.throws(
+    () => npmPackIntegrity({ [expected.packageName]: { integrity: "sha512-YQ==" } }),
+    /npm pack integrity must be a SHA-512 Subresource Integrity value/u,
+  );
 });
 
 test("the CLI dispatches pack integrity and rejects invalid command arity", (testContext) => {
@@ -137,7 +165,7 @@ test("the CLI dispatches pack integrity and rejects invalid command arity", (tes
   const packFile = join(directory, "pack.json");
   writeFileSync(
     packFile,
-    JSON.stringify({ [expected.packageName]: { integrity: "sha512-cli" } }),
+    JSON.stringify({ [expected.packageName]: { integrity } }),
   );
 
   const success = spawnSync(
@@ -146,7 +174,7 @@ test("the CLI dispatches pack integrity and rejects invalid command arity", (tes
     { encoding: "utf8" },
   );
   assert.equal(success.status, 0, success.stderr);
-  assert.equal(success.stdout.trim(), "sha512-cli");
+  assert.equal(success.stdout.trim(), integrity);
 
   for (const args of [["order"], ["pack-integrity"], ["provenance"]]) {
     const failure = spawnSync(process.execPath, [guardPath, ...args], { encoding: "utf8" });
@@ -175,5 +203,13 @@ test("an existing package succeeds only with verified provenance for this Trunk 
       ...expected,
     }),
     /does not bind/u,
+  );
+  assert.throws(
+    () => assertNpmProvenance({ audit: { ...auditWith(provenanceStatement()), invalid: [{}] }, ...expected }),
+    /invalid or missing registry signature or attestation/u,
+  );
+  assert.throws(
+    () => assertNpmProvenance({ audit: { ...auditWith(provenanceStatement()), missing: [{}] }, ...expected }),
+    /invalid or missing registry signature or attestation/u,
   );
 });
