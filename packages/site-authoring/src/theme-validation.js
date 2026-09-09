@@ -1,9 +1,4 @@
-import {
-  encodeTheme,
-  LIGHTNESS_KEYS,
-  SEMANTIC_COLOR_NAMES,
-  validateThemePair,
-} from "@taprootio/espalier/shared/theme";
+import { encodeTheme, LIGHTNESS_KEYS, SEMANTIC_COLOR_NAMES, validateThemePair } from "@taprootio/espalier/shared/theme";
 
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
@@ -138,6 +133,30 @@ function hasThemePath(theme, path) {
   return true;
 }
 
+/** Collect absent contract keys without treating present invalid values as omissions. */
+export function missingThemeFields(theme, scheme) {
+  if (!isPlainObject(theme)) return [];
+  const fields = REQUIRED_THEME_PROPERTIES
+    .filter((property) => !Object.hasOwn(theme, property))
+    .map((property) => `${scheme}Theme.${property}`);
+  for (const path of REQUIRED_THEME_PATHS) {
+    const segments = path.split(".");
+    // A missing root property is already listed. A present null, array, or
+    // scalar remains a value-validation fault, not a request for a newer key.
+    if (!Object.hasOwn(theme, segments[0])) continue;
+    let current = theme;
+    for (const segment of segments) {
+      if (!isPlainObject(current)) break;
+      if (!Object.hasOwn(current, segment)) {
+        fields.push(`${scheme}Theme.${path}`);
+        break;
+      }
+      current = current[segment];
+    }
+  }
+  return fields;
+}
+
 function requireBoundedOpenMaps(theme, scheme) {
   for (const property of ["anchors", "contexts", "dataRamps"]) {
     const collection = theme[property];
@@ -155,9 +174,7 @@ function requireBoundedOpenMaps(theme, scheme) {
         Object.keys(collection).some((key) => [...key].length > MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS)
         || Object.values(collection).some((anchor) =>
           isPlainObject(anchor)
-          && Object.keys(anchor).some((key) =>
-            key !== "color" && [...key].length > MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS
-          )
+          && Object.keys(anchor).some((key) => key !== "color" && [...key].length > MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS)
         )
       )
     ) {
@@ -302,9 +319,11 @@ export function validateAndEncodeThemePair(lightTheme, darkTheme) {
   refuseAgentStylesheets(darkTheme, "dark");
   const warnings = result.warnings
     .slice(0, MAXIMUM_THEME_WARNINGS)
-    .map((warning) => [...sanitizeDiagnostic(warning, "Theme validation warning.")]
-      .slice(0, MAXIMUM_THEME_WARNING_SCALARS)
-      .join(""));
+    .map((warning) =>
+      [...sanitizeDiagnostic(warning, "Theme validation warning.")]
+        .slice(0, MAXIMUM_THEME_WARNING_SCALARS)
+        .join("")
+    );
   return {
     light,
     dark,

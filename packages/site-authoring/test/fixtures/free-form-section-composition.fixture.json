@@ -73,7 +73,7 @@
                 "label": "Rating"
               },
               {
-                "value": "112 Main St",
+                "value": "112 Main St\nTacoma, WA 98465",
                 "label": "Address",
                 "url": "/visit"
               },

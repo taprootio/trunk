@@ -61,7 +61,6 @@ const list = (item) => Object.freeze({ kind: "array", item });
 const shape = (fields, options = {}) => Object.freeze({ kind: "object", fields: Object.freeze(fields), ...options });
 const image = () => Object.freeze({ kind: "image" });
 const safeUrl = (options = {}) => Object.freeze({ kind: "safe-url", ...options });
-const actionUrl = () => Object.freeze({ kind: "action-url" });
 const textureName = () => Object.freeze({ kind: "texture-name", maximumLength: 64 });
 const withOmission = (spec, whenOmitted) => Object.freeze({ ...spec, whenOmitted: Object.freeze(whenOmitted) });
 
@@ -149,7 +148,7 @@ const CTA = Object.freeze({
   heading: str(),
   description: str(),
   buttonText: str(),
-  buttonUrl: actionUrl(),
+  buttonUrl: safeUrl(),
   variant: enumOf("primary", "danger"),
   borderWidth: num({
     integer: true,
@@ -534,15 +533,9 @@ function referenceSchema(spec) {
       return {
         type: "string",
         format: spec.allowEmpty === false ? "safe-url" : "safe-url-or-empty",
-        description:
-          `${spec.allowEmpty === false ? "An" : "Empty, or an"} explicit HTTP(S), mailto, or tel URL; a root-relative path that does not begin with //; a fragment; a query; or a relative URL. Backslashes and ASCII control characters are rejected.`,
-      };
-    case "action-url":
-      return {
-        type: "string",
-        format: "action-url-or-empty",
-        description:
-          "Empty, an explicit HTTP(S) URL, or a root-relative path that does not begin with //. Backslashes and ASCII control characters are rejected.",
+        description: `${
+          spec.allowEmpty === false ? "An" : "Empty, or an"
+        } explicit HTTP(S), mailto, or tel URL; a root-relative path that does not begin with //; a fragment; a query; or a relative URL. Backslashes and ASCII control characters are rejected. Contact URLs require a non-empty body and refuse tel:// and mailto:// authority forms.`,
       };
     case "texture-name":
       return {
@@ -645,9 +638,9 @@ function describe(spec) {
     case "uuid":
       return "a canonical lowercase UUID";
     case "safe-url":
-      return `${spec.allowEmpty === false ? "a" : "an empty string or a"} safe HTTP(S), mailto, tel, non-protocol-relative root path, fragment, query, or relative URL; backslashes and ASCII control characters are rejected`;
-    case "action-url":
-      return "an empty string, explicit HTTP(S) URL, or non-protocol-relative root path; backslashes and ASCII control characters are rejected";
+      return `${
+        spec.allowEmpty === false ? "a" : "an empty string or a"
+      } safe HTTP(S), mailto, tel, non-protocol-relative root path, fragment, query, or relative URL; backslashes and ASCII control characters are rejected`;
     case "texture-name":
       return "a lowercase hyphenated texture identifier of at most 64 characters";
     default:
@@ -682,25 +675,6 @@ function validateValue(spec, value, path, errors) {
         fail(describe(spec));
       }
       return;
-    case "action-url": {
-      if (typeof value !== "string") {
-        fail(describe(spec));
-        return;
-      }
-      const trimmed = value.trim();
-      const lower = trimmed.toLowerCase();
-      if (
-        value !== ""
-        && (trimmed === ""
-          || value.includes("\\")
-          || hasAsciiControl(value)
-          || trimmed.startsWith("//")
-          || (!trimmed.startsWith("/") && !lower.startsWith("http://") && !lower.startsWith("https://")))
-      ) {
-        fail(describe(spec));
-      }
-      return;
-    }
     case "texture-name":
       if (
         typeof value !== "string"

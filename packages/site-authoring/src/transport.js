@@ -22,7 +22,7 @@ import {
   ROLLOUT_REFUSAL_FIELD,
 } from "./constants.js";
 import { validateApiBaseUrl } from "./config.js";
-import { hasControlCharacter, SiteAuthoringError } from "./errors.js";
+import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
 // Every method the authoring verbs need. `pages push` updates with PATCH, page
 // deletion is DELETE, and `nav push` replaces the whole tree with PUT.
@@ -401,15 +401,24 @@ export class ApiError extends SiteAuthoringError {
     const grpcCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
     const fields = fieldViolations(body);
     const capability = capabilityRefusal(body);
+    // Only the known upgrade refusal may supply a human message. Other server
+    // errors can contain internal diagnostics and retain their generic output.
+    const upgradeMessage = fields.includes(CLI_UPGRADE_REFUSAL_FIELD)
+      && typeof body?.message === "string"
+      && body.message.length > 0
+      && body.message.length <= LIMITS.diagnosticScalars
+      && !hasControlCharacter(body.message)
+      ? sanitizeDiagnostic(body.message, "")
+      : undefined;
     super(
       "api.request_rejected",
-      fields.length > 0
+      upgradeMessage || (fields.length > 0
         ? `Taproot rejected the request field '${fields[0]}'.`
         : capability !== undefined
         ? `Taproot refused the request: this credential does not carry a capability granting '${
           capability.permission
         }'.`
-        : `Taproot rejected the request with HTTP ${httpStatus}.`,
+        : `Taproot rejected the request with HTTP ${httpStatus}.`),
       {
         // `fields` stays exactly what the wire named. The capability field is
         // the CLI's own label for a refusal that carries no field violation at

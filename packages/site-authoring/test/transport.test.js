@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CAPABILITY_REFUSAL_REASON, REFUSAL_KINDS } from "../src/constants.js";
+import { CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from "../src/constants.js";
 import { ApiError, capabilityRefusal, fieldViolations, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
 
@@ -144,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.6.3");
+  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.7.0");
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });
@@ -994,4 +994,27 @@ test("retains violation descriptions with the same bounds the fields get", async
     });
     assert.equal(error.descriptionFor("UpgradePrompt"), "first");
   });
+});
+
+
+test("generic error output retains a safe upgrade status message without exposing unrelated server diagnostics", async () => {
+  const message = "CLI 0.2.0 is outdated; latest is 9.9.9. Upgrade with: npm install -g @taprootio/site-authoring@latest.";
+  // The direct packed field is the API's actual wire shape, including for a
+  // request from a legacy CLI. This checks this release's generic error path;
+  // the immutable 0.2.0 binary ignores body.message and cannot be repaired here.
+  const body = (message, field = "CliUpgradeRequired") => ({
+    code: 3, message,
+    details: [{ "@type": "type.googleapis.com/google.rpc.BadRequest.FieldViolation", field }],
+  });
+  const client = new SiteApiClient({ apiBaseUrl: API_BASE_URL, token: TOKEN, fetch: async () => jsonResponse(body(message), 400) });
+  await assert.rejects(client.request("v1/site-authoring/authorable-sites"), (error) => {
+    assert.equal(error.message, message);
+    assert.equal(error.field, "CliUpgradeRequired");
+    assert.equal(error.status, "grpc:3");
+    return true;
+  });
+  for (const unsafe of ["", "bad\nmessage", "bad\u001b[31m", "x".repeat(LIMITS.diagnosticScalars + 1)]) {
+    assert.equal(new ApiError(400, body(unsafe)).message, "Taproot rejected the request field 'CliUpgradeRequired'.");
+  }
+  assert.equal(new ApiError(400, body(TOKEN, "OtherField")).message, "Taproot rejected the request field 'OtherField'.");
 });

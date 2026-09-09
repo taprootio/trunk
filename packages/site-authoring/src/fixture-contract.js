@@ -29,11 +29,11 @@ export const FIXTURE_REQUIRED_ROOT_FIELDS = Object.freeze([
 ]);
 
 /**
- * Root fields `pull` writes that a fixture may carry unchanged. They are
- * accepted and read for nothing: a fixture proves local structure, and neither
- * the snapshot time nor a recorded deployment can be checked without a server.
+ * Optional pull metadata. Snapshot time and deployment receipts are not live
+ * evidence. When appearance/footer are present, validate checks their local
+ * image bindings and footer hashes against the fixture settings.
  */
-export const FIXTURE_OPTIONAL_ROOT_FIELDS = Object.freeze(["pulledAt", "deployments"]);
+export const FIXTURE_OPTIONAL_ROOT_FIELDS = Object.freeze(["pulledAt", "deployments", "appearance", "footer"]);
 
 /** Every root field the manifest may declare. Anything else is refused. */
 export const FIXTURE_ROOT_FIELDS = Object.freeze(

@@ -2,8 +2,8 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { NAVIGATION_MAXIMUM_DEPTH, TEMPLATE_TYPE_FREE_FORM } from "../api.js";
-import { freeFormRootPresentation, sharedThemeContextNames } from "../content/free-form-sections.js";
 import { VERB_VALIDATE } from "../constants.js";
+import { freeFormRootPresentation, sharedThemeContextNames } from "../content/free-form-sections.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
 import {
   FIXTURE_CONTRACT_VERSION,
@@ -13,33 +13,34 @@ import {
   FIXTURE_METADATA_FIELDS,
   FIXTURE_ROOT_FIELDS,
 } from "../fixture-contract.js";
-import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
+import { initializeFixture } from "../fixture-init.js";
+import { appearanceManifestEntry, FOOTER_SETTINGS_FILE, footerManifestEntry } from "../footer-workspace.js";
 import {
   isRedirectMapRevision,
+  normalizeRedirectPath,
   REDIRECT_KIND_GONE,
   REDIRECTS_FILE_NAME,
   validateRedirectsDocument,
-  normalizeRedirectPath,
 } from "../redirects-contract.js";
 import { boundedList, successResult } from "../session.js";
 import { SETTINGS_GROUPS, SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "../settings-catalog.js";
-import { validateFooterWorkspaceDocument } from "./footer-push.js";
-import { validateNavigationWorkspaceDocument } from "./nav-push.js";
-import { validateWorkspacePageDocument, validateWorkspacePageSource } from "./pages-push.js";
-import { validateThemeWorkspace } from "./theme-push.js";
 import {
   MANIFEST_VERSION,
   NAVIGATION_FILE_NAME,
   normalizePagePath,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_WORKSPACE_MODE_EDITABLE,
-  pageSourceFormat,
   PAGES_DIRECTORY,
+  pageSourceFormat,
   readWorkspaceJson,
   SETTINGS_DIRECTORY,
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
 } from "../workspace.js";
+import { validateFooterWorkspaceDocument } from "./footer-push.js";
+import { validateNavigationWorkspaceDocument } from "./nav-push.js";
+import { validateWorkspacePageDocument, validateWorkspacePageSource } from "./pages-push.js";
+import { validateThemeWorkspace } from "./theme-push.js";
 
 const MAXIMUM_REPORTED = 200;
 const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
@@ -72,7 +73,11 @@ async function resolveFixtureRoot(cwd, fixturePath) {
     );
   }
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    fail("fixture.path_invalid", "The selected authoring fixture must be a real directory, not a link or file.", "fixturePath");
+    fail(
+      "fixture.path_invalid",
+      "The selected authoring fixture must be a real directory, not a link or file.",
+      "fixturePath",
+    );
   }
   try {
     return await realpath(candidate);
@@ -87,7 +92,11 @@ async function resolveFixtureRoot(cwd, fixturePath) {
 
 function validateFixtureManifest(manifest) {
   if (!isPlainObject(manifest)) {
-    fail("fixture.manifest_invalid", `${FIXTURE_MANIFEST_FILE_NAME} must contain one JSON object.`, FIXTURE_MANIFEST_FILE_NAME);
+    fail(
+      "fixture.manifest_invalid",
+      `${FIXTURE_MANIFEST_FILE_NAME} must contain one JSON object.`,
+      FIXTURE_MANIFEST_FILE_NAME,
+    );
   }
   const unknownRoot = Object.keys(manifest).filter((key) => !FIXTURE_ROOT_KEYS.has(key)).sort();
   if (unknownRoot.length > 0) {
@@ -291,7 +300,9 @@ function validateFixtureManifest(manifest) {
         `${field}.sourceFormat`,
       );
     }
-    if (pageIds.has(entry.pageId) || resourceIds.has(entry.resourceId) || files.has(entry.file) || paths.has(pagePath)) {
+    if (
+      pageIds.has(entry.pageId) || resourceIds.has(entry.resourceId) || files.has(entry.file) || paths.has(pagePath)
+    ) {
       fail(
         "fixture.page_duplicate",
         `${field} duplicates a pageId, resourceId, source file, or page path.`,
@@ -394,6 +405,7 @@ function headerWidthHints(headerWidth, rootBandPages) {
 }
 
 export async function validateFixture(invocation = {}) {
+  if (invocation.init) return await initializeFixture(invocation, validateFixture);
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
   const fixtureRoot = await resolveFixtureRoot(invocation.cwd ?? process.cwd(), invocation.fixturePath);
   onProgress(`Reading ${FIXTURE_MANIFEST_FILE_NAME}.`);
@@ -412,6 +424,29 @@ export async function validateFixture(invocation = {}) {
 
   onProgress("Validating the complete light/dark theme, appearance, header, brand, and footer colors.");
   const presentation = await validateThemeWorkspace(fixtureRoot, manifest.siteId, imageIds, settingsEntityIds);
+  const expectedAppearance = appearanceManifestEntry({
+    SETTING_TYPE_TAPROOT_STYLES: presentation.style,
+    SETTING_TYPE_BRAND: presentation.brand,
+    SETTING_TYPE_SITE_HEADER: presentation.header,
+  });
+  if (manifest.appearance !== undefined && JSON.stringify(manifest.appearance) !== JSON.stringify(expectedAppearance)) {
+    fail(
+      "fixture.appearance_invalid",
+      "The fixture appearance metadata must match its settings image identities.",
+      "appearance",
+    );
+  }
+  if (manifest.footer !== undefined) {
+    const expectedFooter = footerManifestEntry(presentation.publishing.footerSettings);
+    if (
+      !isPlainObject(manifest.footer) || Object.keys(manifest.footer).length !== Object.keys(expectedFooter).length
+      || Object.entries(expectedFooter).some(([key, value]) =>
+        JSON.stringify(manifest.footer[key]) !== JSON.stringify(value)
+      )
+    ) {
+      fail("fixture.footer_invalid", "The fixture footer metadata must match its footer document.", "footer");
+    }
+  }
   for (const warning of presentation.themes.warnings) onProgress(`Espalier warning: ${warning}`);
   const sharedContexts = sharedThemeContextNames(
     presentation.style.lightTheme,
@@ -427,7 +462,11 @@ export async function validateFixture(invocation = {}) {
   }
   const untracked = pageFiles.find((file) => !declaredFiles.has(file));
   if (untracked !== undefined) {
-    fail("fixture.page_untracked", `Page source '${untracked}' is not bound by ${FIXTURE_MANIFEST_FILE_NAME}.`, untracked);
+    fail(
+      "fixture.page_untracked",
+      `Page source '${untracked}' is not bound by ${FIXTURE_MANIFEST_FILE_NAME}.`,
+      untracked,
+    );
   }
   const validatedPages = [];
   const rootBandPages = [];

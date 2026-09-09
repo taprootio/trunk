@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.6.3" },
+    cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
     verb,
   };
 }
@@ -135,11 +135,13 @@ test("the shipped status handler honors explicit config from a config-free cwd a
   const configPath = path.join(project, "taproot-site.json");
   await writeFile(
     configPath,
-    `${JSON.stringify({
-      configVersion: 1,
-      siteId: SITE_ID,
-      workspaceDir: "site",
-    })}\n`,
+    `${
+      JSON.stringify({
+        configVersion: 1,
+        siteId: SITE_ID,
+        workspaceDir: "site",
+      })
+    }\n`,
   );
   // The endpoint is machine state since TR00645, so it is set here the way
   // `env local` sets it rather than in the project configuration.
@@ -154,6 +156,9 @@ test("the shipped status handler honors explicit config from a config-free cwd a
   const responses = (url, options) => {
     assert.equal(options.headers.authorization, `Bearer ${token}`);
     let body;
+    if (url.pathname.endsWith("/deploy/review")) {
+      return new Response("{}", { headers: { "content-type": "application/json" } });
+    }
     if (url.pathname.endsWith("/publishing/readiness")) {
       body = {
         state: "PAGE_PUBLISHING_READINESS_STATE_READY",
@@ -167,6 +172,8 @@ test("the shipped status handler honors explicit config from a config-free cwd a
       body = { deployments: [], nextPageToken: "" };
     } else if (url.pathname.endsWith("/images")) {
       body = { images: [], totalImages: 0, processingImages: 0, nextPageToken: "" };
+    } else if (url.pathname.endsWith("/broken-references")) {
+      body = {};
     } else {
       assert.fail(`unexpected request path ${url.pathname}`);
     }
@@ -444,7 +451,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   assert.equal(await runCli({ arguments_: ["--help"], stdout, stderr: sink() }), 0);
   assert.match(stdout.read(), /^Usage: taproot-site \[--config <path>\] <verb>/u);
   assert.match(stdout.read(), /^  help\s+Show offline authoring reference help/mu);
-  assert.match(stdout.read(), /^  validate\s+Validate a complete authoring fixture/mu);
+  assert.match(stdout.read(), /^  validate\s+Validate an offline fixture/mu);
   assert.match(stdout.read(), /validate,\nhelp, whoami, and env are offline and read-only/u);
   assert.match(stdout.read(), /^  login\s+Authorize this CLI against a Taproot account/mu);
   assert.match(stdout.read(), /^  logout\s+Discard the stored Taproot sign-in/mu);
@@ -469,13 +476,13 @@ test("exposes help and version at the binary and verb levels", async (testContex
     const verbStdout = sink();
     assert.equal(await runCli({ arguments_: ["validate", "--help"], stdout: verbStdout, stderr: sink() }), 0);
     assert.match(verbStdout.read(), /^Usage: taproot-site validate <fixture-directory>/u);
-    assert.match(verbStdout.read(), /uses no credential and reads no configuration/u);
+    assert.match(verbStdout.read(), /Validation uses no credential, configuration, network or write/u);
     // The version gate is the one thing this verb reads that is not its own
     // input, so the boundary sentence has to state it (TR00703).
     assert.match(verbStdout.read(), /recorded a newer published release/u);
     assert.match(verbStdout.read(), /does not prove authorization, live site ownership, concurrency/u);
     assert.doesNotMatch(verbStdout.read(), /TAPROOT_SITE_KEY/u);
-    assert.doesNotMatch(verbStdout.read(), /--config/u);
+    assert.match(verbStdout.read(), /source configuration for --init only/u);
   });
   // What login and logout help must say. They mention TAPROOT_SITE_KEY like
   // every other config-reading verb — the precedence rule is exactly what a
@@ -568,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.6.3\n");
+    assert.equal(versionStdout.read(), "0.7.0\n");
   }
 });
 
@@ -714,12 +721,12 @@ test("serves page and component reference help without configuration, credential
         `Validate it: taproot-site validate "${SHIPPED_FIXTURE_DIRECTORY}"`,
         "Required root fields: manifestVersion, siteId, pages, pagesTruncated, navigation, redirects, settings, "
         + "settingsSkipped, fixture.",
-        "Accepted and not read: pulledAt, deployments",
+        "Optional root fields: pulledAt, deployments, appearance, footer",
         "manifestVersion must be 6; fixture.contractVersion must be 1.",
         "workspaceMode editable",
         ".md is 'markdown', .pm.json is 'prosemirror'",
         "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty",
-        'navigation binds { file: "nav.json", items }',
+        "navigation binds { file: \"nav.json\", items }",
         "settings binds all 4 authorable groups",
         "SETTING_TYPE_SITE_PUBLISHING_PREFERENCES to 'settings/site-publishing-preferences.json'",
         "contractVersion, imageIds, deliveryOrigins",
@@ -786,9 +793,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.6.3" },
+          cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
           verb: "help",
-          referenceVersion: 19,
+          referenceVersion: 20,
           topic: scenario.topic,
         },
       );
@@ -798,7 +805,8 @@ test("emits versioned machine-readable reference topics", async (context) => {
 });
 
 test("preview reference documents the homepage spelling in human and JSON forms", async () => {
-  const homepageDetail = "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.";
+  const homepageDetail =
+    "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.";
 
   const humanOut = sink();
   assert.equal(await runCli({ arguments_: ["help", "preview"], environment: {}, stdout: humanOut, stderr: sink() }), 0);

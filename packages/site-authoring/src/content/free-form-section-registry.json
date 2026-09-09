@@ -384,7 +384,8 @@
             "required": true,
             "minScalars": 1,
             "maxScalars": 120,
-            "nonWhitespace": true
+            "nonWhitespace": true,
+            "pattern": "^(?![\\s\\S]*<[bB][rR]\\s*/?>)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028\\u2029\\ufeff]*$"
           },
           "label": {
             "type": "plain-text",
@@ -392,7 +393,8 @@
             "default": null,
             "minScalars": 1,
             "maxScalars": 120,
-            "nonWhitespace": true
+            "nonWhitespace": true,
+            "pattern": "^(?![\\s\\S]*<[bB][rR]\\s*/?>)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028\\u2029\\ufeff]*$"
           },
           "url": {
             "type": "safe-url",

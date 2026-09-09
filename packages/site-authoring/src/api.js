@@ -1,3 +1,4 @@
+import { normalizeLatestCliVersion } from "./cli-release.js";
 import {
   CANONICAL_TIMESTAMP,
   CAPABILITY_REFUSAL_FIELD,
@@ -15,12 +16,11 @@ import {
   REFUSAL_THROTTLED,
   REFUSAL_UNCLASSIFIED,
 } from "./constants.js";
-import { normalizeLatestCliVersion } from "./cli-release.js";
 // The display-prefix shape lives with the store because acceptance on claim
 // must equal acceptance on save — a prefix admitted here but refused there
 // would turn a successful mint into an orphaned key.
 import { KEY_PREFIX } from "./credentials.js";
-import { isCanonicalUuid, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import { isCanonicalUuid, normalizePreviewDiagnostic, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 import {
   DEFAULT_REDIRECT_STATUS,
   GONE_STATUS,
@@ -29,6 +29,7 @@ import {
   REDIRECT_ORIGIN_AUTHORED,
   REDIRECT_ORIGIN_PATH_HISTORY,
 } from "./redirects-contract.js";
+import { CANDIDATE_SELECTABLE_SETTINGS_TYPES } from "./settings-catalog.js";
 import { ApiError, isWellFormedCredential } from "./transport.js";
 // The revision's shape lives with the manifest that records it: a value this
 // module admitted but the registry then dropped would be recorded on a push
@@ -158,7 +159,10 @@ const AUTHORING_PREVIEW_FIELDS = Object.freeze({
   manifest: "AuthoringPreviewManifest",
 });
 const AUTHORING_PREVIEW_FIELD_ERRORS = Object.freeze({
-  [AUTHORING_PREVIEW_FIELDS.draft]: ["preview.no_draft", "The requested page does not have a persisted draft to preview."],
+  [AUTHORING_PREVIEW_FIELDS.draft]: [
+    "preview.no_draft",
+    "The requested page does not have a persisted draft to preview.",
+  ],
   [AUTHORING_PREVIEW_FIELDS.staging]: [
     "preview.staging_unavailable",
     "The site does not have an available staging hostname for authoring previews.",
@@ -172,7 +176,7 @@ const AUTHORING_PREVIEW_FIELD_ERRORS = Object.freeze({
   [AUTHORING_PREVIEW_FIELDS.siteCapacity]: [
     "preview.site_capacity",
     "This site already has the maximum number of queued or rendering authoring previews. "
-      + "Wait for one to finish rendering, or revoke a preview that is still queued or rendering.",
+    + "Wait for one to finish rendering, or revoke a preview that is still queued or rendering.",
   ],
   [AUTHORING_PREVIEW_FIELDS.authorityCapacity]: [
     "preview.authority_capacity",
@@ -184,7 +188,8 @@ const AUTHORING_PREVIEW_FIELD_ERRORS = Object.freeze({
   ],
 });
 const CANONICAL_SHA256 = /^sha256:[0-9a-f]{64}$/u;
-const CANONICAL_HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const CANONICAL_HOST =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const CANONICAL_HANDOFF = /^[A-Za-z0-9_-]{43}$/u;
 const AUTHORING_PREVIEW_PATH_PREFIX = "/_taproot/preview/pages";
 const AUTHORING_PREVIEW_LIFETIME_MILLISECONDS = 60 * 60_000;
@@ -342,8 +347,7 @@ const REFUSAL_GUIDANCE = Object.freeze({
   [REFUSAL_CREDENTIAL_REJECTED]:
     "The site authoring credential was rejected: it is invalid, revoked, or bound to a different site. "
     + "Stop and re-issue it; retrying cannot succeed.",
-  [REFUSAL_THROTTLED]:
-    "This credential exceeded its request budget. Back off and retry with delay.",
+  [REFUSAL_THROTTLED]: "This credential exceeded its request budget. Back off and retry with delay.",
 });
 
 /**
@@ -375,9 +379,9 @@ export function announceRefusal(error, onProgress, action = "request") {
     // ApiError message stays the fallback for a server that sent no
     // description.
     const serverDescription = error.descriptionFor?.(CLI_UPGRADE_REFUSAL_FIELD);
-    onProgress(`  Taproot's own detail: ${
-      sanitizeDiagnostic(serverDescription ?? error.message, "the request was rejected.")
-    }`);
+    onProgress(
+      `  Taproot's own detail: ${sanitizeDiagnostic(serverDescription ?? error.message, "the request was rejected.")}`,
+    );
     onProgress("");
     return;
   }
@@ -420,9 +424,9 @@ export function announceRefusal(error, onProgress, action = "request") {
     // verbatim (sanitized) rather than paraphrasing policy the CLI does not
     // own. The bounded ApiError message remains as the fallback.
     const serverDescription = error.descriptionFor?.("UpgradePrompt");
-    onProgress(`  Taproot's own detail: ${
-      sanitizeDiagnostic(serverDescription ?? error.message, "the request was rejected.")
-    }`);
+    onProgress(
+      `  Taproot's own detail: ${sanitizeDiagnostic(serverDescription ?? error.message, "the request was rejected.")}`,
+    );
     onProgress("");
     return;
   }
@@ -619,7 +623,10 @@ function requireRedirectMap(value, siteId) {
       { field: "siteId" },
     );
   }
-  const entries = Array.isArray(response.entries) ? response.entries : [];
+  if (response.entries !== undefined && !Array.isArray(response.entries)) {
+    throw new SiteAuthoringError("api.redirects_contract", "Taproot returned an invalid redirect entries list.");
+  }
+  const entries = response.entries ?? [];
   return {
     revision: response.revision,
     entries: entries.map((entry) => normalizeRedirectMapEntry(entry)),
@@ -770,13 +777,84 @@ export async function listSiteImages(client, siteId, requestOptions = {}) {
   return { images, summary, truncated: true };
 }
 
+/** Broken targets in the latest editable page bodies, authorized by Content. */
+export async function getSiteBrokenReferences(client, siteId) {
+  const code = "api.broken_references_contract";
+  const response = requireObject(
+    await client.request(sitePath(siteId, "broken-references")),
+    code,
+    "broken-reference report",
+  );
+  // Proto3 omits empty repeated fields. A present non-array is a bad report,
+  // not evidence that the site has no broken links.
+  const repeated = (value, field) => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+      throw new SiteAuthoringError(code, `Taproot returned an invalid ${field}.`, { field });
+    }
+    return value;
+  };
+  return repeated(response.pages, "pages").map((entry) => {
+    const page = requireObject(entry, code, "broken-reference page");
+    const missingPagePaths = repeated(page.missingPagePaths, "missingPagePaths");
+    if (missingPagePaths.some((path) => typeof path !== "string")) {
+      throw new SiteAuthoringError(code, "Taproot returned an invalid missing page path.", {
+        field: "missingPagePaths",
+      });
+    }
+    return {
+      pageId: requireCanonicalUuid(page.pageId, code, "pageId"),
+      pageTitle: text(page.pageTitle),
+      missingImageIds: repeated(page.missingImageIds, "missingImageIds")
+        .map((id) => requireCanonicalUuid(id, code, "missingImageIds")),
+      missingPagePaths,
+    };
+  });
+}
+
+/** Use the same changed release set the Deployments page selects. */
+export async function getDeploySelection(client, siteId) {
+  const code = "api.deploy_review_contract";
+  const review = requireObject(await client.request(sitePath(siteId, "deploy/review")), code, "deploy review");
+  const repeated = (value, field) => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new SiteAuthoringError(code, `Taproot returned an invalid ${field}.`, { field });
+    return value;
+  };
+  const stagedPageIds = repeated(review.stagedPages, "stagedPages").map((page) =>
+    requireCanonicalUuid(page?.pageId, code, "stagedPages.pageId")
+  );
+  const changed = repeated(review.settingsChanges, "settingsChanges").filter((group) => {
+    requireObject(group, code, "settings change");
+    if (!CANDIDATE_SELECTABLE_SETTINGS_TYPES.includes(group.settingsType)) {
+      throw new SiteAuthoringError(code, "Taproot returned an unsupported candidate settings group.");
+    }
+    return repeated(group.changes, "settings changes").length > 0;
+  });
+  if (review.navigationChanged !== undefined && typeof review.navigationChanged !== "boolean") {
+    throw new SiteAuthoringError(code, "Taproot returned an invalid navigation change flag.");
+  }
+  return {
+    stagedPageIds: [...new Set(stagedPageIds)],
+    selectedSettingsTypes: CANDIDATE_SELECTABLE_SETTINGS_TYPES.filter((type) =>
+      changed.some((group) => group.settingsType === type)
+    ),
+    includeNavigation: review.navigationChanged === true,
+  };
+}
+
 export async function getPublishingReadiness(client, siteId, selection = {}) {
   const response = requireObject(
-    await client.request(sitePath(siteId, `publishing/readiness${query([
-      ["stagedPageIds", selection.stagedPageIds],
-      ["selectedSettingsTypes", selection.selectedSettingsTypes],
-      ["includeNavigation", selection.includeNavigation],
-    ])}`)),
+    await client.request(sitePath(
+      siteId,
+      `publishing/readiness${
+        query([
+          ["stagedPageIds", selection.stagedPageIds],
+          ["selectedSettingsTypes", selection.selectedSettingsTypes],
+          ["includeNavigation", selection.includeNavigation],
+        ])
+      }`,
+    )),
     "api.readiness_contract",
     "publishing readiness",
   );
@@ -840,6 +918,79 @@ export async function getStagingPreviewStatus(client, siteId) {
   return { ready: true, stagingUrl: `https://${url.hostname}/` };
 }
 
+/** Mint a site-bound handoff; its URL is emitted only in final operational JSON. */
+export async function mintStagingPreviewHandoff(client, siteId, { now = Date.now } = {}) {
+  const code = "api.staging_handoff_contract";
+  const result = requireObject(
+    await client.request(sitePath(siteId, "staging-preview:mint-handoff"), {
+      method: "POST",
+      body: { siteId },
+    }),
+    code,
+    "staging handoff",
+  );
+  let origin;
+  let url;
+  try {
+    origin = new URL(result.stagingUrl);
+    url = new URL(result.url);
+  } catch {
+    throw new SiteAuthoringError(code, "Taproot returned an invalid staging handoff URL.");
+  }
+  const expires = requireCanonicalTimestamp(result.handoffExpiresAt, code, "handoffExpiresAt");
+  const current = now();
+  if (
+    result.siteId !== siteId || origin.protocol !== "https:" || !CANONICAL_HOST.test(origin.hostname)
+    || origin.port || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash
+    || url.origin !== origin.origin || url.username || url.password || url.pathname !== "/" || url.hash
+    || [...url.searchParams].length !== 1
+    || !/^[A-Za-z0-9_-]{43}$/u.test(url.searchParams.get("__taproot_preview_handoff") ?? "")
+    || expires.milliseconds <= current - AUTHORING_PREVIEW_CLOCK_SKEW_MILLISECONDS
+    || expires.milliseconds > current + AUTHORING_PREVIEW_HANDOFF_LIFETIME_MILLISECONDS
+        + AUTHORING_PREVIEW_CLOCK_SKEW_MILLISECONDS
+  ) {
+    throw new SiteAuthoringError(
+      code,
+      "Taproot returned a staging handoff outside its site, host or lifetime contract.",
+    );
+  }
+  return { stagingUrl: origin.href, url: url.href, handoffExpiresAt: expires.value };
+}
+
+function normalizePhaseTimings(history) {
+  if (history === undefined || history === null) return { known: false };
+  const code = "api.deployment_phase_contract";
+  requireObject(history, code, "deployment phase history");
+  if (
+    !Array.isArray(history.phases) || history.phases.length === 0 || history.phases.length > 32
+    || (history.truncated !== undefined && typeof history.truncated !== "boolean")
+  ) {
+    throw new SiteAuthoringError(code, "Taproot returned an invalid deployment phase history.");
+  }
+  const phases = history.phases.map((phase) => {
+    requireObject(phase, code, "deployment phase");
+    return {
+      status: enumValue(phase.status, DEPLOYMENT_STATUSES, DEPLOYMENT_STATUS_QUEUED, code, "phase status"),
+      at: requireCanonicalTimestamp(phase.enteredAt, code, "phase.enteredAt"),
+    };
+  });
+  return {
+    known: true,
+    truncated: history.truncated === true,
+    phases: phases.map((phase, index) => {
+      const next = phases[index + 1];
+      if (next && (next.at.milliseconds < phase.at.milliseconds || next.status === phase.status)) {
+        throw new SiteAuthoringError(code, "Taproot returned unordered or duplicate deployment phase evidence.");
+      }
+      return {
+        status: phase.status,
+        enteredAt: phase.at.value,
+        ...(next ? { endedAt: next.at.value, durationMilliseconds: next.at.milliseconds - phase.at.milliseconds } : {}),
+      };
+    }),
+  };
+}
+
 export function normalizeDeployment(value) {
   const deployment = requireObject(value, "api.deployment_contract", "deployment");
   return {
@@ -861,6 +1012,7 @@ export function normalizeDeployment(value) {
     completedAt: text(deployment.completedAt),
     errorMessage: text(deployment.errorMessage),
     pageCount: safeCount(deployment.pageCount),
+    phaseTimings: normalizePhaseTimings(deployment.phaseHistory),
   };
 }
 
@@ -878,11 +1030,16 @@ export async function listDeployments(
 ) {
   const response = requireObject(
     await client.request(
-      sitePath(siteId, `deployments${query([
-        ["pageSize", pageSize],
-        ["includeStaging", true],
-        ["environment", environment],
-      ])}`),
+      sitePath(
+        siteId,
+        `deployments${
+          query([
+            ["pageSize", pageSize],
+            ["includeStaging", true],
+            ["environment", environment],
+          ])
+        }`,
+      ),
       requestOptions,
     ),
     "api.deployment_contract",
@@ -895,11 +1052,24 @@ export async function listDeployments(
 }
 
 export async function deploySite(client, siteId, body) {
-  const response = requireObject(
-    await client.request(sitePath(siteId, "deploy"), { method: "POST", body }),
-    "api.deployment_contract",
-    "deploy",
-  );
+  let response;
+  try {
+    response = requireObject(
+      await client.request(sitePath(siteId, "deploy"), { method: "POST", body }),
+      "api.deployment_contract",
+      "deploy",
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.hasField("AuthoringPreviewFailed")) {
+      throw new SiteAuthoringError(
+        "deploy.preview_failed",
+        (error.descriptionFor("AuthoringPreviewFailed") ?? "A retained preview of a selected page failed.")
+          + " Use --allow-failed-preview only to explicitly override this refusal.",
+        { field: "AuthoringPreviewFailed", status: error.status },
+      );
+    }
+    throw error;
+  }
   return normalizeDeployment(response.deployment);
 }
 
@@ -962,6 +1132,7 @@ export async function poll({
 
 export async function waitForDeployment(client, { siteId, deploymentId, environment, onProgress, now }) {
   let misses = 0;
+  let lastEvidence;
   return await poll({
     client,
     now,
@@ -983,6 +1154,23 @@ export async function waitForDeployment(client, { siteId, deploymentId, environm
         return { done: false, progress: "Waiting for the deployment to appear in the deployment log." };
       }
       misses = 0;
+      const evidence = JSON.stringify(deployment.phaseTimings);
+      if (evidence !== lastEvidence) {
+        lastEvidence = evidence;
+        if (deployment.phaseTimings.known) {
+          for (const phase of deployment.phaseTimings.phases) {
+            onProgress(
+              `Deployment phase ${phase.status} entered ${phase.enteredAt}`
+                + (phase.durationMilliseconds === undefined
+                  ? "."
+                  : `; ${phase.durationMilliseconds}ms until ${phase.endedAt}.`),
+            );
+          }
+          if (deployment.phaseTimings.truncated) {
+            onProgress("Earlier deployment phase evidence was truncated by the server.");
+          }
+        } else onProgress("Deployment phase timings are unknown for this legacy deployment.");
+      }
       if (deployment.status === DEPLOYMENT_STATUS_COMPLETED) return { done: true, value: deployment };
       if (deployment.status === DEPLOYMENT_STATUS_FAILED) {
         throw new SiteAuthoringError(
@@ -1098,7 +1286,14 @@ export function normalizeAuthoringPreview(value, expected = {}) {
     draftRevision: preview.draftRevision,
     failureCode,
     stagingHost: requireCanonicalStagingHost(preview.stagingHost),
+    failureDiagnostic: normalizePreviewDiagnostic(preview.failureDiagnostic),
   };
+  if (
+    preview.failureDiagnostic !== undefined && preview.failureDiagnostic !== null
+    && (!normalized.failureDiagnostic || normalized.failureDiagnostic.pageId !== normalized.pageId)
+  ) {
+    throw new SiteAuthoringError("preview.status_contract", "Taproot returned an invalid preview failure diagnostic.");
+  }
   for (const field of ["siteId", "pageId", "snapshotId"]) {
     if (expected[field] !== undefined && normalized[field] !== expected[field]) {
       throw new SiteAuthoringError(
@@ -1191,20 +1386,26 @@ export async function createAuthoringPreview(client, siteId, pageId) {
 
 export async function getAuthoringPreview(client, expected, requestOptions = {}) {
   return normalizeAuthoringPreview(
-    await client.request(sitePath(
-      expected.siteId,
-      `authoring-previews/pages/${encodeURIComponent(expected.pageId)}/${encodeURIComponent(expected.snapshotId)}`,
-    ), requestOptions),
+    await client.request(
+      sitePath(
+        expected.siteId,
+        `authoring-previews/pages/${encodeURIComponent(expected.pageId)}/${encodeURIComponent(expected.snapshotId)}`,
+      ),
+      requestOptions,
+    ),
     expected,
   );
 }
 
 export async function revokeAuthoringPreview(client, expected) {
   return normalizeAuthoringPreview(
-    await client.request(sitePath(
-      expected.siteId,
-      `authoring-previews/pages/${encodeURIComponent(expected.pageId)}/${encodeURIComponent(expected.snapshotId)}`,
-    ), { method: "DELETE" }),
+    await client.request(
+      sitePath(
+        expected.siteId,
+        `authoring-previews/pages/${encodeURIComponent(expected.pageId)}/${encodeURIComponent(expected.snapshotId)}`,
+      ),
+      { method: "DELETE" },
+    ),
     expected,
   );
 }
@@ -1228,9 +1429,19 @@ function assertAuthoringPreviewState(preview, now) {
         { status: preview.status },
       );
     }
-    throw new SiteAuthoringError("preview.render_failed", "Taproot could not render the authoring preview.", {
-      status: preview.status,
-    });
+    throw new SiteAuthoringError(
+      "preview.render_failed",
+      "Taproot could not render the authoring preview."
+        + (preview.failureDiagnostic
+          ? ` Class ${preview.failureDiagnostic.errorClass}; page ${preview.pageId}`
+            + (preview.failureDiagnostic.nodeType ? `; node ${preview.failureDiagnostic.nodeType}` : "")
+            + (preview.failureDiagnostic.attribute ? `; attribute ${preview.failureDiagnostic.attribute}` : "") + "."
+          : ""),
+      {
+        status: preview.status,
+        previewDiagnostic: preview.failureDiagnostic,
+      },
+    );
   }
 }
 
@@ -1257,17 +1468,18 @@ export async function waitForAuthoringPreview(client, { created, onProgress, now
       return { done: false, progress: `Waiting for the authoring preview (${preview.status}).` };
     },
     timeoutCode: "preview.timeout",
-    timeoutError: () => lastStatus === AUTHORING_PREVIEW_STATUS_QUEUED
-      ? new SiteAuthoringError(
-        "preview.timeout",
-        `The render service has not claimed this job before the bounded deadline. Revoke it with: taproot-site preview revoke ${created.pageId} ${created.snapshotId}`,
-        { status: lastStatus },
-      )
-      : new SiteAuthoringError(
-        "preview.timeout",
-        `The render service claimed this job but did not finish before the bounded deadline. Revoke it with: taproot-site preview revoke ${created.pageId} ${created.snapshotId}`,
-        { status: lastStatus },
-      ),
+    timeoutError: () =>
+      lastStatus === AUTHORING_PREVIEW_STATUS_QUEUED
+        ? new SiteAuthoringError(
+          "preview.timeout",
+          `The render service has not claimed this job before the bounded deadline. Revoke it with: taproot-site preview revoke ${created.pageId} ${created.snapshotId}`,
+          { status: lastStatus },
+        )
+        : new SiteAuthoringError(
+          "preview.timeout",
+          `The render service claimed this job but did not finish before the bounded deadline. Revoke it with: taproot-site preview revoke ${created.pageId} ${created.snapshotId}`,
+          { status: lastStatus },
+        ),
   });
 }
 
@@ -1397,14 +1609,19 @@ export function normalizeAuthoringPreviewHandoff(value, ready, now) {
 export async function mintAuthoringPreviewHandoff(client, ready, { now }) {
   let response;
   try {
-    response = await client.replaceablePost(sitePath(
-      ready.siteId,
-      `authoring-previews/pages/${encodeURIComponent(ready.pageId)}/${encodeURIComponent(ready.snapshotId)}:mint-handoff`,
-    ), {
-      body: { siteId: ready.siteId, pageId: ready.pageId, snapshotId: ready.snapshotId },
-      deadline: ready.expiresAtMilliseconds,
-      now,
-    });
+    response = await client.replaceablePost(
+      sitePath(
+        ready.siteId,
+        `authoring-previews/pages/${encodeURIComponent(ready.pageId)}/${
+          encodeURIComponent(ready.snapshotId)
+        }:mint-handoff`,
+      ),
+      {
+        body: { siteId: ready.siteId, pageId: ready.pageId, snapshotId: ready.snapshotId },
+        deadline: ready.expiresAtMilliseconds,
+        now,
+      },
+    );
   } catch (error) {
     if (error instanceof SiteAuthoringError && error.code === "transport.deadline") {
       throw new SiteAuthoringError("preview.expired", "The authoring preview expired before a handoff was minted.");
@@ -1531,7 +1748,7 @@ export async function startCliAuthorization(client, { keyName }, requestOptions 
  */
 export async function listAuthorableSites(client, requestOptions = {}) {
   const response = requireObject(
-    await client.request(AUTHORABLE_SITES_PATH, requestOptions),
+    await client.request(`${AUTHORABLE_SITES_PATH}${query([["cliVersion", CLI_VERSION]])}`, requestOptions),
     "sites.contract",
     "authorable site list",
   );
@@ -1584,7 +1801,10 @@ export async function exchangeSiteAuthoringToken(client, { siteId, capabilities 
     // The sign-in's refreshed deadline. Not a secret, and absent on a server
     // that predates the sliding window.
     ...(typeof response.signInExpiresAt === "string" && response.signInExpiresAt.length > 0
-      ? { signInExpiresAt: requireCanonicalTimestamp(response.signInExpiresAt, "exchange.contract", "signInExpiresAt").value }
+      ? {
+        signInExpiresAt:
+          requireCanonicalTimestamp(response.signInExpiresAt, "exchange.contract", "signInExpiresAt").value,
+      }
       : {}),
     // Whether the platform is accepting external authoring writes at all
     // (TR00692). Read strictly: only a real boolean is a state, so a server

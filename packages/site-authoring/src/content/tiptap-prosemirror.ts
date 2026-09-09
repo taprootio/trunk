@@ -504,8 +504,7 @@ type NormalizedInlineFact = {
 /**
  * The row is a list, not a description list: a fact whose value names itself
  * carries no label, and `dl` has no valid shape for a `dd` without a `dt`.
- * The label keeps its leading source position so the CSS `order` rules that
- * lift the value above it stay unchanged for a labelled fact. The list roles
+ * Source order matches the visual order: value, then label. The list roles
  * are explicit because `list-style: none` makes WebKit drop them, and the
  * label is separated from the value by a space: search indexers take adjacent
  * inline elements as one word, and a whitespace-only anonymous flex item is
@@ -525,11 +524,11 @@ function renderInlineFacts(
       : escapeHtml(fact.value);
     const label = fact.label === undefined
       ? ""
-      : `${renderElement("span", { class: "taproot-inline-fact__label" }, escapeHtml(fact.label))} `;
+      : ` ${renderElement("span", { class: "taproot-inline-fact__label" }, escapeHtml(fact.label))}`;
     return renderElement(
       "li",
       { class: "taproot-inline-fact", role: "listitem" },
-      `${label}${renderElement("span", { class: "taproot-inline-fact__value" }, value)}`,
+      `${renderElement("span", { class: "taproot-inline-fact__value" }, value)}${label}`,
     );
   }).join("");
   return renderElement(

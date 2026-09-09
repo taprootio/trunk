@@ -1,13 +1,14 @@
 import { getSettingsGroup, saveSiteFooterSettings, setSetting, withRefusalGuidance } from "../api.js";
 import {
+  APPEARANCE_SCALAR_FIELDS,
   applyFooterColors,
   buildAppearanceScalarOperations,
   footerColorOverlay,
 } from "../appearance-contract.js";
 import { VERB_THEME_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
-import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import { projectFooterSettingsForWorkspace } from "../footer-contract.js";
+import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import {
   advanceFooterManifest,
   readAppearanceWorkspaceContext,
@@ -20,9 +21,7 @@ import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
-import {
-  validateAndEncodeThemePair,
-} from "../theme-validation.js";
+import { missingThemeFields, validateAndEncodeThemePair } from "../theme-validation.js";
 import {
   readWorkspaceJson,
   SETTINGS_DIRECTORY,
@@ -94,13 +93,49 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
       expectedEntityIds?.get(SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES),
     ),
   ]);
+  const documents = {
+    [SETTINGS_TYPE_TAPROOT_STYLES]: style,
+    [SETTINGS_TYPE_BRAND]: brand,
+    [SETTINGS_TYPE_SITE_HEADER]: header,
+  };
+  // Preflight the complete required-key inventory before any value validator
+  // can stop at a malformed value in an earlier group. Optional footer color
+  // leaves retain their existing empty-color fallback.
+  const missing = [];
+  for (const scheme of ["light", "dark"]) {
+    const name = `${scheme}Theme`;
+    if (!Object.hasOwn(style, name)) missing.push(name);
+    else missing.push(...missingThemeFields(style[name], scheme));
+  }
+  for (const definition of APPEARANCE_SCALAR_FIELDS) {
+    if (!Object.hasOwn(documents[definition.settingsType], definition.name)) {
+      missing.push(definition.path);
+    }
+  }
+  if (!Object.hasOwn(publishing, "footerSettings")) {
+    missing.push("site-publishing-preferences.footerSettings");
+  } else if (isPlainObject(publishing.footerSettings)) {
+    for (const scheme of ["light", "dark"]) {
+      if (!Object.hasOwn(publishing.footerSettings, scheme)) missing.push(`footerSettings.${scheme}`);
+    }
+  }
+  if (missing.length > 0) {
+    throw new SiteAuthoringError(
+      "theme.settings_missing",
+      "Required settings keys are missing. Run 'taproot-site pull' to update this workspace's contract.",
+      {
+        field: missing[0],
+        details: missing.map((field) => ({
+          code: "theme.setting_missing",
+          field,
+          message: `${field} is missing (added in a later contract; run taproot-site pull)`,
+        })),
+      },
+    );
+  }
   const themes = validateAndEncodeThemePair(style.lightTheme, style.darkTheme);
   const scalarOperations = buildAppearanceScalarOperations(
-    {
-      [SETTINGS_TYPE_TAPROOT_STYLES]: style,
-      [SETTINGS_TYPE_BRAND]: brand,
-      [SETTINGS_TYPE_SITE_HEADER]: header,
-    },
+    documents,
     knownImageIds,
   );
   const footerColors = footerColorOverlay(publishing.footerSettings);

@@ -3,22 +3,17 @@ import {
   DEPLOYMENT_ENVIRONMENT_STAGING,
   DEPLOYMENT_STATUS_COMPLETED,
   deploySite,
+  getDeploySelection,
   getPublishingReadiness,
-  getStagingPreviewStatus,
   listDeployments,
-  listSitePages,
-  PAGE_STATUS_APPROVED,
+  mintStagingPreviewHandoff,
   waitForDeployment,
   withRefusalGuidance,
 } from "../api.js";
-import {
-  DEPLOY_TARGET_PRODUCTION,
-  DEPLOY_TARGET_STAGING,
-  VERB_DEPLOY,
-} from "../constants.js";
+import { DEPLOY_TARGET_PRODUCTION, DEPLOY_TARGET_STAGING, VERB_DEPLOY } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import { CANDIDATE_SELECTABLE_SETTINGS_TYPES } from "../settings-catalog.js";
+import { checkStagingRedirects } from "../staging-check.js";
 import { readManifest, writeManifest } from "../workspace.js";
 
 /**
@@ -46,7 +41,7 @@ const REDIRECT_PROPAGATION_NOTE =
  * completion.
  *
  * Staging publishes a *candidate*: approved pages, navigation, and the
- * candidate-selectable settings groups. The server refuses an empty candidate,
+ * changed candidate-selectable settings groups. The server refuses an empty candidate,
  * so the CLI refuses it first and says what to do about it.
  *
  * Production is a promotion and only a promotion. `DeploySite` rejects a
@@ -68,7 +63,6 @@ const REDIRECT_PROPAGATION_NOTE =
  */
 
 const MAXIMUM_REPORTED_BLOCKERS = 50;
-const STAGING_ROUTE_PROBE_MILLISECONDS = 5_000;
 // Staged page ids ride in the readiness query string, so a very large candidate
 // is checked at site level instead of pushing an unbounded URL at the API.
 const MAXIMUM_READINESS_PAGE_IDS = 100;
@@ -89,13 +83,6 @@ function explicitSelection(invocation) {
     || (selectedSettingsTypes !== undefined && selectedSettingsTypes.length > 0)
     || includeNavigation === true;
   return { stagedPageIds, selectedSettingsTypes, includeNavigation, present };
-}
-
-function manifestSettingsTypes(manifest) {
-  const pulled = Array.isArray(manifest?.settings)
-    ? manifest.settings.map((entry) => entry?.settingsType).filter((value) => typeof value === "string")
-    : [];
-  return CANDIDATE_SELECTABLE_SETTINGS_TYPES.filter((type) => pulled.includes(type));
 }
 
 async function recordDeployment(config, manifest, key, deployment) {
@@ -139,78 +126,35 @@ function reportReadiness(readiness) {
     selectedPageCount: readiness.selectedPageCount,
     blockedPageCount: readiness.blockedPageCount,
     hasCandidateChanges: readiness.hasCandidateChanges,
+    hasSuccessfulStagingDeployment: readiness.hasSuccessfulStagingDeployment,
     blockers: blockers.items,
     ...(blockers.truncated ? { blockersTruncated: true } : {}),
   };
 }
 
-function stagingWarning(message) {
-  return { routeCheck: "unresolved", warning: message };
-}
-
-async function inspectStagingPreview(client, siteId, onProgress) {
-  let status;
+async function inspectStagingPreview(client, siteId, onProgress, now) {
+  let checks;
   try {
-    status = await getStagingPreviewStatus(client, siteId);
+    checks = await checkStagingRedirects(client, siteId, onProgress, now);
+    if (!checks.redirects.verified) {
+      onProgress(
+        "Warning: staging redirects are not all verified. Edge propagation may still be pending; run 'taproot-site redirects check' again.",
+      );
+    }
   } catch {
-    const warning = "The staging deployment completed, but Taproot could not report its staging URL."
-      + " Check the site's staging-host configuration before treating the deployment as viewable.";
-    onProgress(`Warning: ${warning}`);
-    return { url: "", ...stagingWarning(warning) };
+    onProgress(
+      "Warning: the deployment completed, but authenticated staging redirect checks could not finish. Run 'taproot-site redirects check' again.",
+    );
+    checks = { routeCheck: "unresolved", redirects: { verified: false, covered: false } };
   }
-  if (!status.ready) {
-    const warning = "The staging deployment completed, but Taproot does not report a ready staging URL.";
-    onProgress(`Warning: ${warning}`);
-    return { url: "", ...stagingWarning(warning) };
-  }
-
-  const stagingUrl = status.stagingUrl;
-  onProgress(`Staging URL: ${stagingUrl}`);
-  let response;
   try {
-    const timeout = client.timeoutSignal(STAGING_ROUTE_PROBE_MILLISECONDS);
-    const signal = client.signal ? AbortSignal.any([client.signal, timeout]) : timeout;
-    response = await client.fetch(stagingUrl, {
-      method: "GET",
-      redirect: "manual",
-      signal,
-      headers: {
-        accept: "text/html",
-        "user-agent": "taproot-site/staging-route-check",
-      },
-    });
+    // Mint after checks so the final single-use URL has never been consumed.
+    const handoff = await mintStagingPreviewHandoff(client, siteId, { now });
+    return { ...checks, ...handoff };
   } catch {
-    const warning = `The staging deployment completed at ${stagingUrl}, but the host could not be reached.`;
-    onProgress(`Warning: ${warning}`);
-    return { url: stagingUrl, ...stagingWarning(warning) };
+    onProgress("Warning: the deployment completed, but a staging handoff could not be minted.");
+    return { ...checks, url: "", warning: "Staging handoff unavailable; run redirects check to retry." };
   }
-
-  const location = response.headers.get("location");
-  await response.body?.cancel().catch(() => {});
-  let handoff;
-  try {
-    handoff = location ? new URL(location, stagingUrl) : undefined;
-  } catch {
-    handoff = undefined;
-  }
-  const stagingHost = new URL(stagingUrl).hostname;
-  const resolvesToSite = response.status >= 300
-    && response.status < 400
-    && handoff?.protocol === "https:"
-    && handoff.username === ""
-    && handoff.password === ""
-    && handoff.hash === ""
-    && handoff.pathname === "/api/v1/staging-preview/handoff"
-    && handoff.searchParams.getAll("siteId").length === 1
-    && handoff.searchParams.get("siteId") === siteId
-    && handoff.searchParams.getAll("host").length === 1
-    && handoff.searchParams.get("host") === stagingHost;
-  if (resolvesToSite) return { url: stagingUrl, routeCheck: "resolved" };
-
-  const warning = `The staging deployment completed at ${stagingUrl}, but the host returned HTTP ${response.status}`
-    + " instead of this site's staging gate. The deployment artifacts are complete, but the URL is not viewable.";
-  onProgress(`Warning: ${warning}`);
-  return { url: stagingUrl, ...stagingWarning(warning) };
 }
 
 export async function deploy(invocation) {
@@ -248,6 +192,7 @@ export async function deploy(invocation) {
         siteId,
         environment: DEPLOYMENT_ENVIRONMENT_PRODUCTION,
         stagingDeploymentId,
+        ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
       });
       onProgress(`Production deployment ${created.id} accepted; waiting for it to complete.`);
       const completed = await waitForDeployment(client, {
@@ -268,28 +213,16 @@ export async function deploy(invocation) {
       });
     }
 
-    onProgress("Listing approved pages for the staging candidate.");
-    const { pages, truncated } = await listSitePages(client, siteId, { onProgress });
-    if (truncated) {
-      // The candidate is built from this list, so a partial one silently
-      // publishes a subset of what was approved — and the deployment that
-      // follows reports success.
-      throw new SiteAuthoringError(
-        "deploy.live_list_truncated",
-        "The site has more pages than this CLI can enumerate, so the staging candidate would omit approved "
-          + "pages without saying so. Nothing was deployed.",
-        { field: "stagedPageIds" },
-      );
-    }
-    const stagedPageIds = selection.stagedPageIds
-      ?? pages.filter((summary) => summary.status === PAGE_STATUS_APPROVED).map((summary) => summary.pageId);
-    const selectedSettingsTypes = selection.selectedSettingsTypes ?? manifestSettingsTypes(manifest);
-    const includeNavigation = selection.includeNavigation ?? manifest?.navigation !== undefined;
+    onProgress("Reading the changed release set shown on the Deployments page.");
+    const defaults = await getDeploySelection(client, siteId);
+    const stagedPageIds = selection.stagedPageIds ?? defaults.stagedPageIds;
+    const selectedSettingsTypes = selection.selectedSettingsTypes ?? defaults.selectedSettingsTypes;
+    const includeNavigation = selection.includeNavigation ?? defaults.includeNavigation;
     if (stagedPageIds.length === 0 && selectedSettingsTypes.length === 0 && !includeNavigation) {
       throw new SiteAuthoringError(
         "deploy.empty_selection",
         "A staging deployment needs at least one approved page, settings group, or navigation change. "
-          + "Run 'taproot-site approve' (and 'taproot-site pull' to pick up navigation and settings) first.",
+          + "Run 'taproot-site approve' or change staged settings/navigation first.",
         { field: "Candidate" },
       );
     }
@@ -301,8 +234,8 @@ export async function deploy(invocation) {
     };
     onProgress(
       `Checking publishing readiness for ${stagedPageIds.length} page(s), `
-      + `${selectedSettingsTypes.length} settings group(s), `
-      + `navigation ${includeNavigation ? "included" : "excluded"}.`,
+        + `${selectedSettingsTypes.length} settings group(s), `
+        + `navigation ${includeNavigation ? "included" : "excluded"}.`,
     );
     const readiness = await getPublishingReadiness(client, siteId, {
       ...candidate,
@@ -325,6 +258,7 @@ export async function deploy(invocation) {
       siteId,
       environment: DEPLOYMENT_ENVIRONMENT_STAGING,
       ...candidate,
+      ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
     });
     onProgress(`Staging deployment ${created.id} accepted; waiting for it to complete.`);
     const completed = await waitForDeployment(client, {
@@ -335,7 +269,7 @@ export async function deploy(invocation) {
       now,
     });
     await recordDeployment(config, manifest, "staging", completed);
-    const stagingPreview = await inspectStagingPreview(client, siteId, onProgress);
+    const stagingPreview = await inspectStagingPreview(client, siteId, onProgress, now);
     onProgress(REDIRECT_PROPAGATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {
       target,
@@ -348,7 +282,7 @@ export async function deploy(invocation) {
       deployment: completed,
       readiness: reportReadiness(readiness),
       stagingPreview,
-      nextStep: "deploy --production",
+      nextStep: stagingPreview.redirects?.verified === true ? "deploy --production" : "redirects check",
     });
   });
 }

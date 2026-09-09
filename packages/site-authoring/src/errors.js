@@ -54,6 +54,21 @@ export function normalizePreviewRecovery(preview) {
   });
 }
 
+/** No renderer messages or content: only stable typed diagnostic tokens. */
+export function normalizePreviewDiagnostic(value) {
+  if (
+    !value || typeof value !== "object" || !isCanonicalUuid(value.pageId)
+    || typeof value.errorClass !== "string" || !/^[a-z][a-zA-Z0-9_.-]{0,127}$/u.test(value.errorClass)
+  ) return undefined;
+  const result = { errorClass: value.errorClass, pageId: value.pageId };
+  for (const field of ["nodeType", "attribute"]) {
+    if (value[field] === undefined || value[field] === "") continue;
+    if (typeof value[field] !== "string" || !/^[a-z][a-zA-Z0-9_-]{0,127}$/u.test(value[field])) return undefined;
+    result[field] = value[field];
+  }
+  return result;
+}
+
 function isUnsafeDiagnosticCodePoint(codePoint) {
   return codePoint <= 0x1f
     || (codePoint >= DELETE_CODE_POINT && codePoint <= C1_LAST_CODE_POINT)
@@ -88,6 +103,18 @@ export class SiteAuthoringError extends Error {
     this.code = typeof code === "string" && /^[a-z0-9_.-]+$/u.test(code)
       ? code
       : "site.failed";
+    this.details = Array.isArray(options.details)
+      ? options.details.slice(0, 256).filter((item) =>
+        item?.code === "theme.setting_missing"
+        && typeof item.field === "string" && typeof item.message === "string"
+      )
+        .map((item) => ({
+          code: item.code,
+          field: sanitizeDiagnostic(item.field, "").slice(0, 200),
+          message: "is missing (added in a later contract; run taproot-site pull)",
+        }))
+      : undefined;
+    this.previewDiagnostic = normalizePreviewDiagnostic(options.previewDiagnostic);
     this.field = typeof options.field === "string" ? sanitizeDiagnostic(options.field, "") : undefined;
     this.status = typeof options.status === "string" ? sanitizeDiagnostic(options.status, "") : undefined;
     this.alternatives = Array.isArray(options.alternatives)

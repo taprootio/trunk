@@ -46,19 +46,19 @@ import {
   PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_METADATA_ONLY,
   PAGE_WORKSPACE_MODE_READ_ONLY,
+  PAGES_DIRECTORY,
   pageSourceFormat,
   pageSourceRegistry,
-  PAGES_DIRECTORY,
   readObservedPageRecord,
   readWorkspaceFile,
   readWorkspaceJson,
   SETTINGS_DIRECTORY,
   SYSTEM_PAGE_NOT_FOUND_PATH,
   walkWorkspaceFiles,
+  WORKSPACE_LIMITS,
   workspaceContentHash,
   workspaceFileExists,
   workspaceFileNameForPage,
-  WORKSPACE_LIMITS,
   writeManifest,
   writeWorkspaceFile,
   writeWorkspaceJson,
@@ -171,7 +171,8 @@ function describeDifferenceSummary(differences) {
 }
 
 /**
- * Whether a workspace file still holds exactly the site's document.
+ * Whether a workspace file still holds exactly the site's document, or
+ * `undefined` when parsing failed and no comparison could be completed.
  *
  * Compared the way `remoteHash` is computed — canonically — and deliberately
  * not byte for byte. `FreeFormData.body` is a `google.protobuf.Struct`, so two
@@ -187,7 +188,7 @@ function holdsRemoteDocument(sourceBytes, remoteHash) {
   try {
     return canonicalDocumentHash(JSON.parse(sourceBytes.toString("utf8"))) === remoteHash;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -652,6 +653,7 @@ export async function pull(invocation) {
     const trackedPlans = new Map();
     const conflicts = [];
     let bufferedBytes = 0;
+    let revisionsRecordedWithoutBodyComparison = 0;
     for (const summary of freeForm) {
       const source = tracked.get(summary.pageId);
       if (source === undefined) continue;
@@ -742,9 +744,18 @@ export async function pull(invocation) {
       // one at all. There is nothing to protect and nothing to compare, so an
       // unrecorded hash simply establishes itself.
       const localKnown = source.baseline?.sourceHash !== undefined;
+      const sourceMatchesRemote = !localKnown && !markdown ? holdsRemoteDocument(sourceBytes, remoteHash) : undefined;
       const localChanged = localKnown
         ? source.baseline.sourceHash !== sourceHash
-        : !markdown && !holdsRemoteDocument(sourceBytes, remoteHash);
+        : !markdown && sourceMatchesRemote !== true;
+      // A first revision bypasses the old remote hash. Only the unbaselined
+      // ProseMirror path above can compare this source with the site's body;
+      // a failed parse completes no comparison, and sourceHash merely checks
+      // local edits against earlier local bytes.
+      // Report the adoption only after the whole pull writes its manifest.
+      if (revision !== undefined && source.baseline?.revision === undefined && sourceMatchesRemote === undefined) {
+        revisionsRecordedWithoutBodyComparison += 1;
+      }
       const keepLocal = markdown || localChanged;
       const conflicted = markdown ? remoteChanged : localChanged && remoteChanged;
       trackedPlans.set(summary.pageId, {
@@ -1012,6 +1023,11 @@ export async function pull(invocation) {
     };
     await writeManifest(config.workspaceDir, manifest);
     onProgress(`Wrote ${MANIFEST_FILE_NAME} describing ${manifestPages.length} pages.`);
+    if (revisionsRecordedWithoutBodyComparison > 0) {
+      onProgress(
+        `revision recorded for ${revisionsRecordedWithoutBodyComparison} pages that had none; bodies were not compared`,
+      );
+    }
     if (truncated) {
       onProgress("The page list was bounded before the site was fully enumerated; the manifest is partial.");
     }
@@ -1037,6 +1053,7 @@ export async function pull(invocation) {
         // receiving a freshly written one. A caller that expected an authored
         // Markdown page to survive the pull can assert on it.
         tracked: tracked.size,
+        revisionsRecordedWithoutBodyComparison,
         readOnly: manifestPages.filter((entry) => entry.workspaceMode === PAGE_WORKSPACE_MODE_READ_ONLY).length,
         truncated,
         items: reported.items,

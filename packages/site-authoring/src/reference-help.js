@@ -3,6 +3,14 @@ import { readFileSync } from "node:fs";
 import { TEMPLATE_TYPE_FREE_FORM } from "./api.js";
 import { CLI_BINARY_NAME } from "./constants.js";
 import {
+  canonicalizeComponentData,
+  COMPONENT_TYPES,
+  getComponentDefinition,
+  getComponentPropertyReference,
+} from "./content/components.js";
+import { FREE_FORM_SECTION_REGISTRY } from "./content/free-form-sections.js";
+import { CONTENT_ERROR_CODES, CONTENT_LIMITS, MARK_TYPES, NODE_TYPES } from "./content/vocabulary.js";
+import {
   FIXTURE_CONTRACT_VERSION,
   FIXTURE_DELIVERY_ORIGIN_DOMAIN,
   FIXTURE_MANIFEST_FILE_NAME,
@@ -14,6 +22,12 @@ import {
   shippedFixtureDirectory,
 } from "./fixture-contract.js";
 import {
+  formatPresentationReference,
+  getAppearanceReference,
+  getFooterReference,
+  getThemeReference,
+} from "./presentation-reference.js";
+import {
   DEFAULT_REDIRECT_STATUS,
   GONE_STATUS,
   REDIRECT_LIMITS,
@@ -22,25 +36,6 @@ import {
 } from "./redirects-contract.js";
 import { SETTINGS_GROUPS } from "./settings-catalog.js";
 import {
-  canonicalizeComponentData,
-  COMPONENT_TYPES,
-  getComponentDefinition,
-  getComponentPropertyReference,
-} from "./content/components.js";
-import { FREE_FORM_SECTION_REGISTRY } from "./content/free-form-sections.js";
-import {
-  CONTENT_ERROR_CODES,
-  CONTENT_LIMITS,
-  MARK_TYPES,
-  NODE_TYPES,
-} from "./content/vocabulary.js";
-import {
-  formatPresentationReference,
-  getAppearanceReference,
-  getFooterReference,
-  getThemeReference,
-} from "./presentation-reference.js";
-import {
   INTERNAL_PAGE_BASELINE_DIRECTORY,
   MANIFEST_VERSION,
   NAVIGATION_FILE_NAME,
@@ -48,15 +43,15 @@ import {
   PAGE_SOURCE_EXTENSIONS,
   PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_READ_ONLY,
-  pageSourceFormat,
   PAGES_DIRECTORY,
+  pageSourceFormat,
   SETTINGS_DIRECTORY,
   SYSTEM_PAGE_NOT_FOUND_PATH,
 } from "./workspace.js";
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 19;
+export const REFERENCE_VERSION = 20;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
@@ -139,12 +134,21 @@ const WORKFLOW_REFERENCES = Object.freeze({
   }),
   redirects: Object.freeze({
     title: "Redirect map workspace contract",
-    summary:
-      `${REDIRECTS_FILE_NAME} is the site's whole redirect map. 'redirects push' replaces it, fenced by the `
+    summary: `${REDIRECTS_FILE_NAME} is the site's whole redirect map. 'redirects push' replaces it, fenced by the `
       + "revision 'redirects pull' recorded, so a stale write is refused rather than deleting an entry a page "
       + "rename added.",
-    usage: `${CLI_BINARY_NAME} redirects pull | ${CLI_BINARY_NAME} redirects push`,
+    usage: `${CLI_BINARY_NAME} redirects pull | ${CLI_BINARY_NAME} redirects push | ${CLI_BINARY_NAME} redirects check`,
     details: Object.freeze([
+      "Run 'redirects check' after staging, or read deploy --staging's automatic check. The Node CLI consumes "
+      + "a separate staging handoff and checks the current map at the real edge, using an in-memory cookie and "
+      + "manual redirects. It reports each path, HTTP status and Location without following targets.",
+      "verified is true only if every entry matched and the map revision stayed unchanged during the check. "
+      + "The check proves the current map at staging, not a historical deployment. A mismatch can be propagation "
+      + "delay; re-run redirects check before promoting. Requests are bounded to 90 seconds, eight at a time; "
+      + "large JSON lists are truncated explicitly with failed entries first. Human output reports every entry.",
+      "stagingPreview.url is a fresh, single-use two-minute handoff, minted after checks. It is emitted only "
+      + "in final JSON, excluded from progress and GITHUB_OUTPUT; keep it private. The staging cookie lasts "
+      + "five minutes and remains subject to current site/host/credential permission.",
       `${REDIRECTS_FILE_NAME} is { siteId, revision, entries }, not a bare array. 'redirects pull' writes it and `
       + "records the revision in .taproot-site-manifest.json; 'pull' writes it too.",
       "An entry is { path, kind, target, status }. kind is 'redirect' (the default) or 'gone'; a gone entry "
@@ -239,6 +243,13 @@ const WORKFLOW_REFERENCES = Object.freeze({
     summary: "Render one persisted draft behind the normal staging gate.",
     usage: `${CLI_BINARY_NAME} preview page <page-path-or-id>`,
     details: Object.freeze([
+      "Preview failures carry safe error class, page ID, and node/attribute labels when known. Raw renderer "
+      + "messages and page content are not returned. A deploy refuses a retained failed preview matching a "
+      + "selected page's content until a newer matching preview is ready, the content changes, or the operator "
+      + "explicitly supplies --allow-failed-preview. Pending retries do not clear a known failure; previews "
+      + "remain optional and old snapshots without content identity do not block deployment.",
+      "deploy --staging and redirects check return a separate fresh single-use staging handoff in "
+      + "stagingPreview.url, after authenticating headless redirect checks. Handoffs never go to GITHUB_OUTPUT.",
       "A page path resolves through .taproot-site-manifest.json; a canonical page UUID works directly.",
       "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.",
       "Preview before approving: approve consumes the draft, so an approved page has no draft left to render and answers preview.no_draft. Review it on staging after a deploy instead.",
@@ -259,8 +270,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
     usage: `${CLI_BINARY_NAME} validate <fixture-directory>`,
     details: Object.freeze([
       `Required root fields: ${FIXTURE_REQUIRED_ROOT_FIELDS.join(", ")}.`,
-      `Accepted and not read: ${FIXTURE_OPTIONAL_ROOT_FIELDS.join(", ")} — pull writes them, and neither the snapshot `
-      + "time nor a recorded deployment can be checked offline. Any other root field is refused.",
+      `Optional root fields: ${FIXTURE_OPTIONAL_ROOT_FIELDS.join(", ")}. Appearance and footer metadata, when present, `
+      + "must match the local settings. Snapshot times and deployments are not live evidence. Other root fields are refused.",
       `manifestVersion must be ${MANIFEST_VERSION}; fixture.contractVersion must be ${FIXTURE_CONTRACT_VERSION}.`,
       "siteId, every pageId and resourceId, every settings entityId, and every fixture.imageIds entry is a canonical "
       + "lowercase UUID. They are deterministic fixture identities, not identities from a live site.",
@@ -295,6 +306,16 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "with no duplicates. Fixtures are copied and shipped, so a real delivery host in one would be a live "
       + "reference in every copy.",
       "validate reads the fixture and writes nothing to it. Copy the directory somewhere writable before editing it.",
+      "validate --init <new-directory> exports the current pulled workspace as a validated version-6 fixture with "
+      + "appearance and footer metadata. Run from the workspace or its configured project; --config may select the source.",
+      "Initialization keeps editable free-form pages as ProseMirror sources and reports excluded metadata/read-only pages. "
+      + "References to excluded pages must be resolved before the fixture can validate. It never copies credentials, "
+      + "internal reconciliation state, or deployment receipts. UUIDs and HTTP(S) origins are replaced with deterministic "
+      + "fixture identities and example.test origins; URL credentials, queries and fragments are removed. Authored prose is retained.",
+      "The destination must be outside the source workspace and must not exist; its parent must already exist without symlinks. Exports are bounded to 64 MiB. "
+      + "The source is unchanged; a failed fixture validation removes the newly created output.",
+      "Missing required settings are reported together in error.details with field paths and the pull remedy, "
+      + "separately from present-but-invalid values.",
     ]),
   }),
 });
@@ -416,32 +437,40 @@ function registryFieldReference(name, definition) {
           minItems: definition.urls.minItems,
           maxItems: definition.urls.maxItems,
           itemAdditionalProperties: !definition.urls.closedItems,
-          fields: Object.freeze(Object.entries(definition.urls.fields).map(([fieldName, field]) =>
-            registryFieldReference(fieldName, field)
-          )),
+          fields: Object.freeze(
+            Object.entries(definition.urls.fields).map(([fieldName, field]) =>
+              registryFieldReference(fieldName, field)
+            ),
+          ),
         }),
       }
       : {}),
     ...(definition.srcMustMatchUrls === true ? { srcMustMatchUrls: true } : {}),
     ...(definition.fields
       ? {
-        fields: Object.freeze(Object.entries(definition.fields).map(([fieldName, field]) => Object.freeze({
-          ...registryFieldReference(fieldName, field),
-          ...(field.requiredKeys ? { requiredKeys: [...field.requiredKeys] } : {}),
-          ...(field.optionalKeys ? { optionalKeys: [...field.optionalKeys] } : {}),
-          ...(field.tokenByValue ? { tokenByValue: { ...field.tokenByValue } } : {}),
-        }))),
+        fields: Object.freeze(
+          Object.entries(definition.fields).map(([fieldName, field]) =>
+            Object.freeze({
+              ...registryFieldReference(fieldName, field),
+              ...(field.requiredKeys ? { requiredKeys: [...field.requiredKeys] } : {}),
+              ...(field.optionalKeys ? { optionalKeys: [...field.optionalKeys] } : {}),
+              ...(field.tokenByValue ? { tokenByValue: { ...field.tokenByValue } } : {}),
+            })
+          ),
+        ),
       }
       : {}),
   });
 }
 
 function sectionAttributeReference() {
-  return Object.entries(FREE_FORM_SECTION_REGISTRY.section.attrs).map(([name, definition]) => Object.freeze({
-    ...registryFieldReference(name, definition),
-    label: definition.label,
-    help: definition.help,
-  }));
+  return Object.entries(FREE_FORM_SECTION_REGISTRY.section.attrs).map(([name, definition]) =>
+    Object.freeze({
+      ...registryFieldReference(name, definition),
+      label: definition.label,
+      help: definition.help,
+    })
+  );
 }
 
 const SECTION_IMAGE_EXAMPLE = Object.freeze({
@@ -490,7 +519,9 @@ function backgroundReference() {
     compactBehavior:
       "At the shared compact breakpoint, portraitImage and portraitFocus replace the landscape image and focus when supplied.",
     example: BACKGROUND_EXAMPLE,
-    markdownExample: `:::section ${JSON.stringify({ background: BACKGROUND_EXAMPLE })}\n## Practice with us\n\nFind your next class.\n:::`,
+    markdownExample: `:::section ${
+      JSON.stringify({ background: BACKGROUND_EXAMPLE })
+    }\n## Practice with us\n\nFind your next class.\n:::`,
   });
 }
 
@@ -522,7 +553,9 @@ function decorationReference() {
       "Use the complete site-owned processed-image result from media upload. src and every urls[].url must be HTTPS or non-protocol-relative root-relative delivery URLs; credentials, whitespace, controls, and backslashes are rejected.",
     tintTokens: Object.freeze({ ...DECORATION_DEFINITION.fields.tint.tokenByValue }),
     example: DECORATION_EXAMPLE,
-    markdownExample: `:::section ${JSON.stringify({ decoration: DECORATION_EXAMPLE })}\n## Rooted in warmth\n\nMove with confidence.\n:::`,
+    markdownExample: `:::section ${
+      JSON.stringify({ decoration: DECORATION_EXAMPLE })
+    }\n## Rooted in warmth\n\nMove with confidence.\n:::`,
     maskGuidance:
       "Use a transparent PNG or WebP whose alpha channel contains only the mark. The active section context supplies the tint in both schemes.",
     opaqueWarning:
@@ -562,18 +595,20 @@ function inlineFactsReference() {
       }),
     }),
     placement: Object.freeze({ ...INLINE_FACTS_DEFINITION.placement }),
-    valuePolicy:
-      `Required non-whitespace plain text; maximum ${items.fields.value.maxScalars} Unicode scalar values.`,
-    labelPolicy:
-      `Optional non-whitespace plain text; maximum ${items.fields.label.maxScalars} Unicode scalar values. `
+    valuePolicy: `Required non-whitespace plain text; maximum ${items.fields.value.maxScalars} Unicode scalar values. `
+      + "Unicode spaces, tabs, and LF/CRLF line breaks are allowed. Line breaks display on separate lines inside the value's link. Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal <br> tags are rejected.",
+    labelPolicy: `Optional non-whitespace plain text; maximum ${items.fields.label.maxScalars} Unicode scalar values. `
       + "Omit it when the value already names itself, such as a rating, an address, or a phone number; a row may "
-      + "mix labelled and standalone facts. An empty string is rejected, so omitting a label stays explicit.",
+      + "mix labelled and standalone facts. An empty string is rejected, so omitting a label stays explicit. "
+      + "Unicode spaces, tabs, and LF/CRLF line breaks are allowed; other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal <br> tags are rejected. The label follows the value in reading order and is outside its link.",
     urlPolicy:
-      "Optional safe HTTP(S), mailto, tel, non-protocol-relative root, fragment, query, or relative URL. Empty/whitespace-only values, other schemes, backslashes, and ASCII controls are rejected; tel: remains a native link.",
+      "Optional safe HTTP(S), mailto, tel, non-protocol-relative root, fragment, query, or relative URL. Empty/whitespace-only values, other schemes, backslashes, and ASCII controls are rejected; tel: remains a native link. Contact URLs require a body and refuse tel:// and mailto:// authority forms or control characters, consistently with navigation and footer links.",
     markdown: Object.freeze({
       fence: INLINE_FACTS_DEFINITION.markdown.fence,
       body: INLINE_FACTS_DEFINITION.markdown.body,
-      example: `\`\`\`${INLINE_FACTS_DEFINITION.markdown.fence}\n${JSON.stringify(INLINE_FACT_ITEMS_EXAMPLE, null, 2)}\n\`\`\``,
+      example: `\`\`\`${INLINE_FACTS_DEFINITION.markdown.fence}\n${
+        JSON.stringify(INLINE_FACT_ITEMS_EXAMPLE, null, 2)
+      }\n\`\`\``,
     }),
     examples: Object.freeze({ items: INLINE_FACT_ITEMS_EXAMPLE, proseMirror }),
   });
@@ -709,7 +744,8 @@ function tableReference() {
       captionMustImmediatelyPrecedeHeader: TABLE_DEFINITION.markdown.captionImmediate,
       outerPipes: TABLE_DEFINITION.markdown.outerPipes,
       literalPipeEscape: TABLE_DEFINITION.markdown.literalPipeEscape,
-      delimiter: `one or more hyphens per column (minimum ${TABLE_DEFINITION.markdown.delimiterMinHyphens}); no other text`,
+      delimiter:
+        `one or more hyphens per column (minimum ${TABLE_DEFINITION.markdown.delimiterMinHyphens}); no other text`,
       alignment: TABLE_DEFINITION.markdown.alignment,
       blankLineTerminates: TABLE_DEFINITION.markdown.blankLineTerminates,
     }),
@@ -722,31 +758,38 @@ function tableReference() {
     corrections: Object.freeze([
       Object.freeze({
         code: CONTENT_ERROR_CODES.childNotAllowed,
-        correction: "Move a table to the document root or directly into a top-level section; cells contain a paragraph, never another block.",
+        correction:
+          "Move a table to the document root or directly into a top-level section; cells contain a paragraph, never another block.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.attrUnknown,
-        correction: "Keep only the optional caption attribute on table; tableRow, tableHeader, and tableCell have no attributes or appearance controls.",
+        correction:
+          "Keep only the optional caption attribute on table; tableRow, tableHeader, and tableCell have no attributes or appearance controls.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableHeader,
-        correction: "Put exactly one tableRow first, use only tableHeader cells in it, and give every header non-whitespace text.",
+        correction:
+          "Put exactly one tableRow first, use only tableHeader cells in it, and give every header non-whitespace text.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableShape,
-        correction: "Use tableRow children, tableHeader only in the first row, tableCell after it, and keep tables at root or directly in a section.",
+        correction:
+          "Use tableRow children, tableHeader only in the first row, tableCell after it, and keep tables at root or directly in a section.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableRagged,
-        correction: "Add or remove cells so the delimiter and every data row have exactly the header row's column count.",
+        correction:
+          "Add or remove cells so the delimiter and every data row have exactly the header row's column count.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableBounds,
-        correction: `Use ${TABLE_DEFINITION.rows.minData}-${TABLE_DEFINITION.rows.maxData} data rows, ${TABLE_DEFINITION.columns.min}-${TABLE_DEFINITION.columns.max} columns, captions up to ${TABLE_DEFINITION.attrs.caption.maxScalars} scalars, and cells up to ${TABLE_DEFINITION.cells.maxTextScalars} text scalars.`,
+        correction:
+          `Use ${TABLE_DEFINITION.rows.minData}-${TABLE_DEFINITION.rows.maxData} data rows, ${TABLE_DEFINITION.columns.min}-${TABLE_DEFINITION.columns.max} columns, captions up to ${TABLE_DEFINITION.attrs.caption.maxScalars} scalars, and cells up to ${TABLE_DEFINITION.cells.maxTextScalars} text scalars.`,
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableCellContent,
-        correction: "Give every tableHeader and tableCell exactly one paragraph containing only text, hardBreak, and the supported marks/links.",
+        correction:
+          "Give every tableHeader and tableCell exactly one paragraph containing only text, hardBreak, and the supported marks/links.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.tableSpan,
@@ -754,7 +797,8 @@ function tableReference() {
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.markdownTable,
-        correction: "Use a pipe header, a matching hyphen-only delimiter, at least one data row, and a blank line before the next block.",
+        correction:
+          "Use a pipe header, a matching hyphen-only delimiter, at least one data row, and a blank line before the next block.",
       }),
       Object.freeze({
         code: CONTENT_ERROR_CODES.markdownTableAlignment,
@@ -1045,12 +1089,15 @@ function formatSectionAttr(attr) {
 
 function formatRegistryField(field, indent = "  ") {
   if (field.type === "processed-image") {
-    return `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} processed-image${field.nullable ? " | null" : ""}; ${
-      field.required ? "required" : `default ${JSON.stringify(field.default)}`
-    }; required keys ${field.requiredKeys.join(", ")}; optional keys ${
+    return `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} processed-image${
+      field.nullable ? " | null" : ""
+    }; ${field.required ? "required" : `default ${JSON.stringify(field.default)}`}; required keys ${
+      field.requiredKeys.join(", ")
+    }; optional keys ${
       field.optionalKeys.join(", ")
     }; responsive candidates ${field.responsiveUrls.minItems} through ${field.responsiveUrls.maxItems}; minWidth positive integer; optional type ${
-      field.responsiveUrls.fields.find((item) => item.name === "type").values.map((value) => JSON.stringify(value)).join(" | ")
+      field.responsiveUrls.fields.find((item) => item.name === "type").values.map((value) => JSON.stringify(value))
+        .join(" | ")
     }; src must match one candidate; unlisted keys rejected`;
   }
   const type = field.values ? field.values.map((value) => JSON.stringify(value)).join(" | ") : field.type;
@@ -1058,10 +1105,12 @@ function formatRegistryField(field, indent = "  ") {
   const itemBounds = field.minItems === undefined ? "" : `; items ${field.minItems} through ${field.maxItems}`;
   const scalarBounds = field.maxScalars === undefined
     ? ""
-    : `; ${field.minScalars} through ${field.maxScalars} Unicode scalar values${field.nonWhitespace ? "; non-whitespace" : ""}`;
-  const line = `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} ${type}${field.nullable ? " | null" : ""}; ${
-    field.required ? "required" : `default ${JSON.stringify(field.default)}`
-  }${bounds}${itemBounds}${scalarBounds}`;
+    : `; ${field.minScalars} through ${field.maxScalars} Unicode scalar values${
+      field.nonWhitespace ? "; non-whitespace" : ""
+    }`;
+  const line = `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} ${type}${
+    field.nullable ? " | null" : ""
+  }; ${field.required ? "required" : `default ${JSON.stringify(field.default)}`}${bounds}${itemBounds}${scalarBounds}`;
   return [line, ...(field.fields ?? []).map((child) => formatRegistryField(child, `${indent}  `))].join("\n");
 }
 
@@ -1098,23 +1147,11 @@ export function formatReferenceResult(result) {
         page.workspace.formats.map((format) => `  ${format.extension.padEnd(9)} ${format.purpose}`).join("\n")
       }\n\nOne source per page:\n  rule                  ${sourceRule.rule}\n  manifest fields       ${
         sourceRule.manifestFields.join(", ")
-      }\n  pull                  ${sourceRule.pull}\n  internal state        ${
-        sourceRule.internalState
-      }\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${
-        sourceRule.renamedSource
-      } (${sourceRule.renamedSourceError})\n  conflicts             ${
-        sourceRule.conflict
-      } (${sourceRule.conflictError})\n  conflict detail       ${
-        sourceRule.conflictDetail
-      }\n  push conflicts        ${
-        sourceRule.pushConflict
-      } (${sourceRule.pushConflictError})\n  revision              ${
-        sourceRule.revisionSource
-      }\n  recovery              ${
-        sourceRule.conflictRecovery
-      }\n  push selection        ${sourceRule.pushSelection}\n\nSystem page projections:\n${
+      }\n  pull                  ${sourceRule.pull}\n  internal state        ${sourceRule.internalState}\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${sourceRule.renamedSource} (${sourceRule.renamedSourceError})\n  conflicts             ${sourceRule.conflict} (${sourceRule.conflictError})\n  conflict detail       ${sourceRule.conflictDetail}\n  push conflicts        ${sourceRule.pushConflict} (${sourceRule.pushConflictError})\n  revision              ${sourceRule.revisionSource}\n  recovery              ${sourceRule.conflictRecovery}\n  push selection        ${sourceRule.pushSelection}\n\nSystem page projections:\n${
         page.workspace.systemPages.map((systemPage) =>
-          `  ${systemPage.path.padEnd(9)} ${systemPage.mode}; ${systemPage.projection}.\n${" ".repeat(12)}${systemPage.unchangedPush} ${systemPage.approval}\n${" ".repeat(12)}${systemPage.guidance}`
+          `  ${systemPage.path.padEnd(9)} ${systemPage.mode}; ${systemPage.projection}.\n${
+            " ".repeat(12)
+          }${systemPage.unchangedPush} ${systemPage.approval}\n${" ".repeat(12)}${systemPage.guidance}`
         ).join("\n")
       }\n  home      editable; ${page.workspace.systemHome}\n\nMarkdown front matter:\n${
         markdownFormat.metadata.map(formatMetadata).join("\n")
@@ -1127,18 +1164,31 @@ export function formatReferenceResult(result) {
       }\n\nSection photo background (closed object):\n${
         page.sections.background.fields.map((field) => formatRegistryField(field)).join("\n")
       }\n  delivery URLs         ${page.sections.background.deliveryUrlPolicy}\n  compact behavior      ${page.sections.background.compactBehavior}\n\nScrim opacity mapping:\n${
-        Object.entries(page.sections.background.scrimOpacityByValue).map(([name, opacity]) => `  ${name.padEnd(20)} ${opacity}`).join("\n")
+        Object.entries(page.sections.background.scrimOpacityByValue).map(([name, opacity]) =>
+          `  ${name.padEnd(20)} ${opacity}`
+        ).join("\n")
       }\n\nResponsive background example:\n${page.sections.background.markdownExample}\n\nSection decoration (closed object):\n${
         page.sections.decoration.fields.map((field) => formatRegistryField(field)).join("\n")
       }\n  delivery URLs         ${page.sections.decoration.deliveryUrlPolicy}\n\nTint mapping:\n${
-        Object.entries(page.sections.decoration.tintTokens).map(([name, token]) => `  ${name.padEnd(20)} ${token}`).join("\n")
-      }\n\nTransparent-mask example:\n${page.sections.decoration.markdownExample}\n\nMask guidance: ${
-      page.sections.decoration.maskGuidance
-      }\nWarning: ${page.sections.decoration.opaqueWarning}\n\nRoot defaults and placement:\n${
+        Object.entries(page.sections.decoration.tintTokens).map(([name, token]) => `  ${name.padEnd(20)} ${token}`)
+          .join("\n")
+      }\n\nTransparent-mask example:\n${page.sections.decoration.markdownExample}\n\nMask guidance: ${page.sections.decoration.maskGuidance}\nWarning: ${page.sections.decoration.opaqueWarning}\n\nRoot defaults and placement:\n${
         page.sections.placementMatrix.map(formatPlacement).join("\n")
-      }\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${page.tables.structure.inlineNodes.join(", ")}; marks ${page.tables.structure.marks.join(", ")}\n  pipes                 outer pipes ${page.tables.markdown.outerPipes}; write a literal pipe as ${page.tables.markdown.literalPipeEscape}\n  spans                 unsupported: ${page.tables.structure.unsupportedSpanAttrs.join(", ")}\n  alignment             ${page.tables.markdown.alignment}; delimiter cells contain hyphens only\n  termination           a blank line ends the table before another block\n\nRate table example:\n${page.tables.examples.rateTable}\n\nComparison table example:\n${page.tables.examples.comparisonTable}\n\nRejected alignment example (${CONTENT_ERROR_CODES.markdownTableAlignment}):\n${page.tables.examples.rejectedAlignment}\nRemove the ':' characters from the delimiter row.\n\nDirect ProseMirror table example:\n${JSON.stringify(page.tables.examples.proseMirror, null, 2)}\n\nTable error corrections:\n${
+      }\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${
+        page.tables.structure.inlineNodes.join(", ")
+      }; marks ${
+        page.tables.structure.marks.join(", ")
+      }\n  pipes                 outer pipes ${page.tables.markdown.outerPipes}; write a literal pipe as ${page.tables.markdown.literalPipeEscape}\n  spans                 unsupported: ${
+        page.tables.structure.unsupportedSpanAttrs.join(", ")
+      }\n  alignment             ${page.tables.markdown.alignment}; delimiter cells contain hyphens only\n  termination           a blank line ends the table before another block\n\nRate table example:\n${page.tables.examples.rateTable}\n\nComparison table example:\n${page.tables.examples.comparisonTable}\n\nRejected alignment example (${CONTENT_ERROR_CODES.markdownTableAlignment}):\n${page.tables.examples.rejectedAlignment}\nRemove the ':' characters from the delimiter row.\n\nDirect ProseMirror table example:\n${
+        JSON.stringify(page.tables.examples.proseMirror, null, 2)
+      }\n\nTable error corrections:\n${
         page.tables.corrections.map((entry) => `  ${entry.code.padEnd(34)} ${entry.correction}`).join("\n")
-      }\n\nInline facts:\n  placement             document root or directly inside a top-level section; ${page.inlineFacts.placement.measure} measure\n  items                 ${page.inlineFacts.attrs.items.minItems} through ${page.inlineFacts.attrs.items.maxItems}; closed objects in ${page.inlineFacts.attrs.items.itemFieldOrder.join(", ")} order\n  value                 ${page.inlineFacts.valuePolicy}\n  label                 ${page.inlineFacts.labelPolicy}\n  url                   ${page.inlineFacts.urlPolicy}\n  Markdown              fenced ${page.inlineFacts.markdown.fence} block whose body is a JSON array\n\nInline-facts Markdown example:\n${page.inlineFacts.markdown.example}\n\nDirect ProseMirror inlineFacts example:\n${JSON.stringify(page.inlineFacts.examples.proseMirror, null, 2)}\n\nRaw HTML: ${page.document.rawHtml.default} by default. For a tracked ${page.document.rawHtml.trackedProseMirror.format} document only: ${page.document.rawHtml.trackedProseMirror.behavior} Opt in with ${page.document.rawHtml.trackedProseMirror.optIn}. For ${page.document.rawHtml.markdown.format}, ${page.document.rawHtml.markdown.behavior} ${page.document.rawHtml.warning}\n\nComponents:\n${
+      }\n\nInline facts:\n  placement             document root or directly inside a top-level section; ${page.inlineFacts.placement.measure} measure\n  items                 ${page.inlineFacts.attrs.items.minItems} through ${page.inlineFacts.attrs.items.maxItems}; closed objects in ${
+        page.inlineFacts.attrs.items.itemFieldOrder.join(", ")
+      } order\n  value                 ${page.inlineFacts.valuePolicy}\n  label                 ${page.inlineFacts.labelPolicy}\n  url                   ${page.inlineFacts.urlPolicy}\n  Markdown              fenced ${page.inlineFacts.markdown.fence} block whose body is a JSON array\n\nInline-facts Markdown example:\n${page.inlineFacts.markdown.example}\n\nDirect ProseMirror inlineFacts example:\n${
+        JSON.stringify(page.inlineFacts.examples.proseMirror, null, 2)
+      }\n\nRaw HTML: ${page.document.rawHtml.default} by default. For a tracked ${page.document.rawHtml.trackedProseMirror.format} document only: ${page.document.rawHtml.trackedProseMirror.behavior} Opt in with ${page.document.rawHtml.trackedProseMirror.optIn}. For ${page.document.rawHtml.markdown.format}, ${page.document.rawHtml.markdown.behavior} ${page.document.rawHtml.warning}\n\nComponents:\n${
         page.components.map((component) => `  ${component.type.padEnd(16)} ${component.summary}`).join("\n")
       }\n\nWorkflow:\n${
         page.workflow.map((step) => `  ${step.command}: ${step.result}`).join("\n")

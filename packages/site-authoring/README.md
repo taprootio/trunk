@@ -38,8 +38,9 @@ resolve a different contract than the CLI was tested against.
 
 Taproot accepts only the latest published release of this package. There is no
 compatibility window: the contract moves with every release, and a CLI behind
-the current one is refused at sign-in and at every online verb that exchanges
-the sign-in for a site credential, before it validates or writes anything.
+the current one is refused at sign-in, at `sites`/`use` site listing, and at
+every online verb that exchanges the sign-in for a site credential, before it
+validates or writes anything.
 `TAPROOT_SITE_KEY` runs perform no sign-in and no exchange, so they are not
 version-gated and their `status` reports `cliRelease.latestKnown: false`; keep
 an automation's CLI current yourself.
@@ -51,8 +52,11 @@ npm install -g @taprootio/site-authoring@latest
 A refusal names the field `CliUpgradeRequired`, classifies as
 `refusal: "cli_outdated"`, and carries both versions and that command. Nothing
 is wrong with the credential, the request, or the site, and no retry of an
-outdated version succeeds. If the newer release is only minutes old, npm may
-not serve it yet — wait a moment and run the upgrade again.
+outdated version succeeds. The API puts the versions and remedy in both the
+status message and the stable field detail. Legacy 0.2.0 ignores those messages
+and prints only `CliUpgradeRequired`; if that is all you see, run the upgrade
+command above. If the newer release is only minutes old, npm may not serve it
+yet — wait a moment and run the upgrade again.
 
 Each sign-in exchange also reports the latest published release. `status` shows
 it as `cliRelease`, `whoami` reports what the last exchange recorded (dated with
@@ -184,11 +188,11 @@ explicitly and bypasses discovery. `login`, `logout`, `sites`, `use`,
 }
 ```
 
-| Field           | Rule                                                                                                                                            |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `configVersion` | Must be `1`.                                                                                                                                    |
-| `siteId`        | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.       |
-| `workspaceDir`  | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory.   |
+| Field           | Rule                                                                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configVersion` | Must be `1`.                                                                                                                                  |
+| `siteId`        | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.     |
+| `workspaceDir`  | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory. |
 
 The file is a small, closed JSON object. Unknown fields, duplicate keys, links
 in the path, and unsupported versions are refused before any credential is
@@ -265,7 +269,14 @@ for another. The handoff also expires two minutes after it is minted;
 It stages; nothing reaches an audience until `deploy --staging` publishes the
 candidate and `deploy --production` promotes that completed staging
 deployment. `status` reports the platform authoring switch, the CLI release,
-deployments, readiness, and image processing.
+deployments, readiness, image processing, and broken references under Content
+permission. `brokenReferences` names affected pages and their missing image IDs
+or internal page paths in the latest editable bodies. It reports `covered: true`,
+`totalPages`, and `pages`; an empty report means no missing targets were found.
+Output is bounded to 50 pages and 50 targets of each kind per page, with explicit
+`pagesTruncated`, `missingImageIdsTruncated`, or `missingPagePathsTruncated` flags.
+A denied, malformed, or failed read fails `status` instead of implying a clean
+site.
 
 ## Output contract
 
@@ -336,3 +347,85 @@ The package's tests run in both places. A few compare this package against
 sources that live only in the private monorepo — the canonical renderer, the
 shared section registry, the seeded default theme, and the API's contracts —
 and those skip by name in the public tree rather than pretending to pass.
+
+### Content corrections in 0.7.0
+
+CTA buttons accept the same safe destinations as hero actions, including `tel:`,
+`mailto:`, fragments, queries, and relative paths. New page content rejects empty
+contact destinations and the `tel://`/`mailto://` authority forms, consistently
+with navigation and footer validation. Previously stored page links retain their
+rendering behavior.
+
+Inline-fact values support LF/CRLF line breaks (including inside their link),
+and reading order is value then label. Unicode spaces and tabs remain valid.
+Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal `<br>` tags are rejected
+with the exact fact field path. A label is optional and stays outside the value's link. See
+`taproot-site help page free-form` and `taproot-site help component cta`.
+
+### Staging verification and deployment evidence
+
+`deploy --staging` selects the same changed pages, settings groups and navigation
+as the Deployments page. `status` checks that exact current candidate, so a
+completed CLI stage counts as successful until that candidate changes.
+
+A retained failed preview of selected page content refuses deployment as
+`deploy.preview_failed`, naming the page and snapshot. Render a new successful
+preview or change the content; `--allow-failed-preview` is the explicit override.
+Pending retries do not erase known failure. Previews remain optional. Expired
+snapshots removed by normal cleanup and legacy snapshots without a candidate
+fingerprint supply no gating evidence. Typed preview failure diagnostics contain
+only error class and known page/node/attribute labels, never renderer messages.
+
+Staging deploys check the current redirect map through the real staging edge.
+Run `taproot-site redirects check` to repeat after eventual edge propagation.
+The Node CLI consumes a separate handoff, retains its short staging cookie in
+memory, and requests each map path without following redirects. Results report
+path, HTTP status and Location; `verified` requires all entries to match and the
+map revision to remain unchanged. A mismatch is evidence to investigate, not a
+failed deployment. Checks describe the current map, not a historical release.
+Requests have a 90-second deadline with eight concurrent requests; large JSON
+lists have explicit truncation, prioritizing failures. Human output reports each
+entry. A gate/transport failure never counts as verified.
+
+`stagingPreview.url` is a fresh single-use two-minute handoff minted **after**
+checks. Opening it consumes it and establishes a five-minute staging cookie.
+Minting again replaces the same authority's previous handoff and cookie. Current
+site, host and credential permission are rechecked; key revocation stops access.
+Treat the URL as secret: it is returned only in final JSON, omitted from progress
+and `GITHUB_OUTPUT`. The same Actions exclusion applies to `preview page` URLs.
+
+Deployment results carry `phaseTimings`. New deployments retain up to 32 durable
+server-observed phase transitions, including repeated phases on retry. Durations
+are calculated only between recorded transitions. `truncated` marks missing
+older history; `known: false` marks legacy rows. CLI polling never invents phase
+timestamps. Progress reports the same recorded timestamps and durations.
+
+### Export a pulled workspace as an offline fixture
+
+From a pulled workspace (or its configured project), run:
+
+```bash
+taproot-site validate --init ../authoring-fixture
+taproot-site validate ../authoring-fixture
+```
+
+The destination must be new, outside the source workspace, and its parent must exist. Use
+`taproot-site --config path/to/taproot-site.json validate --init ../authoring-fixture`
+to select another source configuration. Initialization needs no credential or
+network. It exports editable free-form pages as ProseMirror with navigation,
+redirects, settings, and version-6 appearance/footer metadata, validates the
+result, and leaves the source unchanged. Excluded metadata/read-only pages are
+counted; unresolved references to them fail validation.
+
+Exported UUIDs and HTTP(S) origins are deterministic fixture values under
+`example.test`; URL credentials, query strings and fragments are removed.
+Configuration, credential files, internal state and deployment receipts are
+excluded. Authored prose remains. Exports are bounded to 64 MiB, and a failed
+validation removes the new output directory.
+
+Required settings omissions are collected in `error.details` with field paths
+and the `taproot-site pull` remedy. Present-but-invalid settings keep their
+value errors. Pull reports `pages.revisionsRecordedWithoutBodyComparison` and a
+human notice when it adopts first revisions without a completed body comparison.
+The count excludes new downloads, established revisions and compared bodies;
+it is not a claim that an adopted Markdown source matches the site.

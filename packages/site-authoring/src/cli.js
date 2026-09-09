@@ -1,3 +1,4 @@
+import { CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS, CAPABILITY_DESIGN } from "./capabilities.js";
 import {
   CLI_BINARY_NAME,
   CLI_NAME,
@@ -23,6 +24,7 @@ import {
   VERB_PREVIEW_PAGE,
   VERB_PREVIEW_REVOKE,
   VERB_PULL,
+  VERB_REDIRECTS_CHECK,
   VERB_REDIRECTS_PULL,
   VERB_REDIRECTS_PUSH,
   VERB_SITES,
@@ -54,11 +56,6 @@ import {
   REFERENCE_TOPICS,
   REFERENCE_VERSION,
 } from "./reference-help.js";
-import {
-  CAPABILITY_CONTENT,
-  CAPABILITY_DEPLOYMENTS,
-  CAPABILITY_DESIGN,
-} from "./capabilities.js";
 import { assertCliCurrent } from "./session.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
 
@@ -86,14 +83,16 @@ const VERBS = Object.freeze([
   {
     name: VERB_VALIDATE,
     tokens: ["validate"],
-    summary: "Validate a complete authoring fixture without credentials or mutation.",
+    summary: "Validate an offline fixture, or initialize one from a pulled workspace with --init.",
     positionals: "fixturePath",
     offline: true,
-    note: "Reads manifest.fixture.json plus the fixture's page, navigation, theme, appearance, header, brand, and footer files. "
+    note:
+      "Reads manifest.fixture.json plus the fixture's page, navigation, theme, appearance, header, brand, and footer files. "
       + "This proves local structure and semantics only. It does not prove authorization, live site ownership, concurrency, "
       + "persisted round trips, or rendering; run a real pull and authorized preview before deployment. "
       + `See '${CLI_BINARY_NAME} help fixture' for the manifest contract and for the path of the complete example `
-      + "fixture this package ships, which needs no credential and no pulled site.",
+      + "fixture this package ships, which needs no credential and no pulled site. "
+      + "With --init, the directory is a new destination; the current pulled workspace or --config supplies the source.",
   },
   {
     name: VERB_LOGIN,
@@ -200,7 +199,9 @@ const VERBS = Object.freeze([
       + "Markdown is deliberately one-way, so a page edited on the site since the last pull cannot be rewritten as "
       + "Markdown: pull refuses with pages.pull_conflict before changing anything under 'pages/', preserves the "
       + "site's version under '.taproot-site-state/', and leaves you to either push the local source or delete it "
-      + "and pull again. A locally edited '.pm.json' is kept rather than overwritten for the same reason.",
+      + "and pull again. A locally edited '.pm.json' is kept rather than overwritten for the same reason. "
+      + "First revisions adopted without a completed body comparison are counted in pages.revisionsRecordedWithoutBodyComparison "
+      + "and announced on the human channel. New downloads and compared bodies are excluded.",
   },
   {
     name: VERB_PAGES_PUSH,
@@ -209,7 +210,8 @@ const VERBS = Object.freeze([
     summary: "Create and update pages from the local workspace.",
     positionals: "pagePaths",
     allowRawHtml: true,
-    note: "Positional page paths narrow the push to those pages; with none, every workspace page is validated and sent. "
+    note:
+      "Positional page paths narrow the push to those pages; with none, every workspace page is validated and sent. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
       + "A selected path resolves to its one authoritative source from metadata alone, and that page is then validated "
       + "exactly as a whole push would validate it — site binding, manifest integrity, live create-or-update "
@@ -235,6 +237,14 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
     tokens: ["nav", "push"],
     summary: "Replace the whole navigation tree from the local workspace.",
+  },
+  {
+    name: VERB_REDIRECTS_CHECK,
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
+    tokens: ["redirects", "check"],
+    summary: "Check the current redirect map through the authenticated staging edge.",
+    note: "Reports path, HTTP status and Location without following redirects. Re-run after edge propagation. "
+      + "The result includes a fresh single-use staging handoff; keep it private.",
   },
   {
     name: VERB_REDIRECTS_PULL,
@@ -297,9 +307,8 @@ const VERBS = Object.freeze([
     name: VERB_DEPLOY,
     // Deployments is the only capability this verb *writes* with; the other two
     // are for reads and re-reads the server makes on its behalf (TR00691).
-    // Content: --staging builds the candidate from the live page list
-    // (DeploySiteRequest.staged_page_ids names the ids explicitly), and that
-    // list is gated on site.pages.edit_any.
+    // Content: staging redirect checks read the current redirect map;
+    // production also re-authorizes the stored candidate's pages.
     // Design: --production promotes a completed staging deployment, and the
     // pipeline re-authorizes that deployment's *stored* candidate — every
     // selected settings group and its navigation — against site.theme.manage,
@@ -340,13 +349,13 @@ const VERBS = Object.freeze([
   {
     name: VERB_STATUS,
     // Readiness and the deployment log are Deployments; the image list is
-    // Content.
+    // Content, as is the broken-reference report.
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["status"],
-    summary: "Report the platform authoring switch, the CLI release, deployments, readiness, and image processing.",
-    note: "Broken references are not included: that read remains"
-      + " session-only on the server, so the result reports it as uncovered"
-      + " rather than pretending an empty list means a clean site.",
+    summary:
+      "Report the platform authoring switch, CLI release, deployments, readiness, image processing, and broken references.",
+    note: "Broken references list pages with missing image IDs or page paths in their latest editable body."
+      + " Content permission is required; a refused or failed read fails status rather than reporting a clean site.",
   },
 ]);
 
@@ -436,7 +445,8 @@ function verbHelp(verb) {
     : "";
   const targetOption = verb.target
     ? `\n  --staging        Deploy the staged site to staging.
-  --production     Promote the completed staging deployment to production.`
+  --production     Promote the completed staging deployment to production.
+  --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
     : "";
   const rawHtmlOption = verb.allowRawHtml
     ? "\n  --allow-raw-html Permit rawHtml nodes. They render verbatim and unsanitized."
@@ -466,7 +476,10 @@ function verbHelp(verb) {
     ? " It refuses only when a previous sign-in exchange recorded a newer published release than this CLI, because "
       + "Taproot accepts only the latest; with nothing recorded it runs."
     : "";
-  const boundary = selfContained
+  const boundary = verb.name === VERB_VALIDATE
+    ? "Validation uses no credential, configuration, network or write. With --init it reads the pulled workspace "
+      + `or selected configuration and writes a new fixture directory, still without credentials or network.${upgradeGate}`
+    : selfContained
     ? "This offline verb uses no credential and reads no configuration, and performs no network request and no "
       + `write.${upgradeGate}`
     : verb.offline
@@ -478,7 +491,14 @@ function verbHelp(verb) {
       + `existing automation unaffected by login and logout.`
     : `The site-scoped credential is taken from ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} when it is set, and otherwise `
       + `from the credential '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores outside the repository.`;
-  const options = selfContained
+  const options = verb.name === VERB_VALIDATE
+    ? `Options:
+  --init           Export a pulled workspace into the new fixture directory.
+  --config <path>  Before the verb; source configuration for --init only.
+  --quiet          Suppress human progress. The JSON result is unchanged.
+  --help           Show this help.
+  --version        Show the package version.`
+    : selfContained
     ? `Options:
   --quiet          Suppress human progress. The JSON result is unchanged.
   --help           Show this help.
@@ -561,7 +581,8 @@ function parseReferenceArguments(arguments_) {
       || topic === "fixture"
       || topic === "redirects"
     )
-    && (subject !== undefined || extra.length > 0)) {
+    && (subject !== undefined || extra.length > 0)
+  ) {
     throw usageError("help.usage", `The '${topic}' topic does not accept a name.`);
   }
   if ((topic === "page" || topic === "component") && (subject === undefined || extra.length > 0)) {
@@ -613,7 +634,12 @@ function referenceResult(parsed) {
     case "media":
     case "preview":
     case "fixture":
-      return { ...result, topic: "workflow", referenceKind: parsed.topic, reference: getWorkflowReference(parsed.topic) };
+      return {
+        ...result,
+        topic: "workflow",
+        referenceKind: parsed.topic,
+        reference: getWorkflowReference(parsed.topic),
+      };
     case "theme":
       return { ...result, topic: "presentation", referenceKind: "theme", reference: getThemeReference() };
     case "appearance":
@@ -699,7 +725,10 @@ function parseArguments(arguments_) {
   // origin the sign-in belongs to — so they accept it. whoami is offline and
   // reads both the store and the configuration, so it accepts it too: the test
   // is "reads nothing local", not "makes no request".
-  if (verb.offline && !verb.readsLocalState && configPath !== undefined) {
+  if (
+    verb.offline && !verb.readsLocalState && configPath !== undefined
+    && !(verb.name === VERB_VALIDATE && rest.includes("--init"))
+  ) {
     throw usageError("cli.config_option", "--config applies only to verbs that read the site configuration.", {
       field: "configPath",
     });
@@ -707,14 +736,21 @@ function parseArguments(arguments_) {
   if (rest.length === 1 && rest[0] === "--help") return { mode: "verb_help", verb };
   if (rest.length === 1 && rest[0] === "--version") return { mode: "version" };
 
+  let init = false;
   let quiet = false;
   let deployTarget;
+  let allowFailedPreview = false;
   let allowRawHtml = false;
   let json = false;
   let keyName;
   const positionals = [];
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
+    if (verb.name === VERB_VALIDATE && argument === "--init") {
+      if (init) throw usageError("cli.duplicate_option", "--init may be supplied only once.");
+      init = true;
+      continue;
+    }
     if (argument === "--quiet") {
       if (quiet) throw usageError("cli.duplicate_option", "--quiet may be supplied only once.");
       quiet = true;
@@ -737,6 +773,13 @@ function parseArguments(arguments_) {
         );
       }
       deployTarget = candidate;
+      continue;
+    }
+    if (verb.target && argument === "--allow-failed-preview") {
+      if (allowFailedPreview) {
+        throw usageError("cli.duplicate_option", "--allow-failed-preview may be supplied only once.");
+      }
+      allowFailedPreview = true;
       continue;
     }
     if (verb.allowRawHtml && argument === "--allow-raw-html") {
@@ -852,8 +895,8 @@ function parseArguments(arguments_) {
     // the server resolves for them, not only the ones the verb's writes name.
     // It reaches the exchange so a content push never holds deploy, and a pull
     // never holds delete (TR00645). Two things count beyond the writes
-    // (TR00691): a read (nav push and deploy each list the site's pages first,
-    // and that list is gated on a Content permission), and a re-authorization
+    // (TR00691): reads (nav push lists pages; deploy checks the redirect map),
+    // each gated on Content, and re-authorization
     // of server-held state (deploy --production re-checks the promoted
     // candidate's stored settings and navigation against a Design permission).
     // `VERB_CAPABILITIES` below is what the tests pin against the routes each
@@ -862,6 +905,8 @@ function parseArguments(arguments_) {
     configPath,
     quiet,
     deployTarget,
+    allowFailedPreview,
+    init,
     allowRawHtml,
     keyName,
     positionals: verb.positionals
@@ -936,6 +981,8 @@ export async function runCli({
       environment,
       configPath: parsed.configPath,
       deployTarget: parsed.deployTarget,
+      allowFailedPreview: parsed.allowFailedPreview,
+      init: parsed.init,
       quiet: parsed.quiet,
       allowRawHtml: parsed.allowRawHtml,
       keyName: parsed.keyName,

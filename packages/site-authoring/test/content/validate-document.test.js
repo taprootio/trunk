@@ -759,7 +759,7 @@ test("rejects marks the renderer never applies", async (testContext) => {
   }
 });
 
-test("holds link hrefs to the renderer's isSafeUrl", async (testContext) => {
+test("validates link hrefs including the stricter authoring contact policy", async (testContext) => {
   const link = (attrs) =>
     doc({ type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "link", attrs }] }] });
   const rejected = [
@@ -773,6 +773,8 @@ test("holds link hrefs to the renderer's isSafeUrl", async (testContext) => {
     { href: "relative\\path" },
     { href: "data:text/html;base64,PHNjcmlwdD4=" },
     { href: "vbscript:msgbox(1)" },
+    { href: "tel://+15551234567" },
+    { href: "mailto://hello@example.test" },
     { href: 42 },
   ];
   for (const attrs of rejected) {

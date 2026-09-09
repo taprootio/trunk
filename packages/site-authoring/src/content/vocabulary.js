@@ -1,3 +1,4 @@
+import { isContactOrWebUrl } from "../contact-url.js";
 import { sanitizeDiagnostic } from "../errors.js";
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 
@@ -17,10 +18,12 @@ import freeFormSectionRegistry from "./free-form-section-registry.json" with { t
  * page that publishes successfully and renders wrong, so this package rejects
  * them before they are sent.
  *
- * The rule for the reimplementations below: match the renderer exactly,
+ * The rule for the reimplementations below: match the renderer,
  * including the parts that look like bugs. A "safer" copy would reject
  * documents the renderer accepts, or accept documents it silently mangles,
- * and either way the CLI would stop being the schema.
+ * and either way the CLI would stop being the schema. The explicit TR00743
+ * compatibility exception is contact URLs: new authoring refuses malformed
+ * authority forms while the renderer preserves previously stored links.
  */
 
 // ---------------------------------------------------------------------------
@@ -227,6 +230,7 @@ export function isSafeUrl(url) {
 
   try {
     const parsed = new URL(cleaned);
+    if (["mailto:", "tel:"].includes(parsed.protocol)) return isContactOrWebUrl(cleaned);
     return ["http:", "https:", "mailto:", "tel:"].includes(parsed.protocol);
   } catch {
     return true;

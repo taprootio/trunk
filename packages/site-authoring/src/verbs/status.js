@@ -1,11 +1,14 @@
 import {
+  getDeploySelection,
   getPublishingReadiness,
+  getSiteBrokenReferences,
   IMAGE_PROCESSING_STATE_COMPLETE,
   IMAGE_PROCESSING_STATE_FAILED,
   listDeployments,
   listSiteImages,
   withRefusalGuidance,
 } from "../api.js";
+import { isBehindLatest } from "../cli-release.js";
 import {
   CLI_UPGRADE_COMMAND,
   CLI_VERSION,
@@ -16,26 +19,17 @@ import {
   REFUSAL_PLATFORM_PAUSED,
   VERB_STATUS,
 } from "../constants.js";
-import { isBehindLatest } from "../cli-release.js";
 import { boundedList, openSession, successResult } from "../session.js";
 
 /**
- * `status` — the platform authoring switch, the CLI release, deployments,
- * publishing readiness, and image processing.
- *
- * Broken references are deliberately absent. `GetSiteBrokenReferences` is
- * session-only under TR00602's read list, and TR00604 adds no server surface,
- * so there is no key-authorized way to read them. The verb says that out loud —
- * on the human channel and as a field in the JSON result — rather than
- * reporting a clean site and implying a coverage it does not have.
+ * `status` — the platform authoring switch, CLI release, deployments,
+ * publishing readiness, image processing, and broken-reference pages.
  */
-
 const MAXIMUM_DEPLOYMENTS = 20;
 const MAXIMUM_FAILED_IMAGES = 50;
 const MAXIMUM_BLOCKERS = 50;
-
-const BROKEN_REFERENCES_NOTE =
-  "GetSiteBrokenReferences is session-only on the shipped contract, so a key-authorized CLI cannot read it.";
+const MAXIMUM_BROKEN_REFERENCE_PAGES = 50;
+const MAXIMUM_MISSING_TARGETS = 50;
 
 const PLATFORM_UNKNOWN_NOTE =
   "Taproot never reported the platform authoring switch on this run: either no sign-in token exchange happened "
@@ -109,14 +103,18 @@ function reportPlatform(platform, onProgress) {
 export async function status(invocation) {
   const { client, siteId, platform, release, onProgress } = await openSession(invocation);
   // Said first, and before any wire read: an operator running `status` because
-  // writes are being refused should not have to wait on three network calls to
+  // writes are being refused should not have to wait on network calls to
   // learn that the platform is paused — and this answer needs none of them.
   const platformReport = reportPlatform(platform, onProgress);
   const cliReleaseReport = reportCliRelease(release, onProgress);
 
   return await withRefusalGuidance(onProgress, "status check", async () => {
     onProgress("Reading publishing readiness.");
-    const readiness = await getPublishingReadiness(client, siteId);
+    const selection = await getDeploySelection(client, siteId);
+    const readiness = await getPublishingReadiness(client, siteId, {
+      ...selection,
+      stagedPageIds: selection.stagedPageIds.length > 100 ? undefined : selection.stagedPageIds,
+    });
     onProgress("Reading the deployment log.");
     const {
       deployments,
@@ -124,6 +122,20 @@ export async function status(invocation) {
     } = await listDeployments(client, siteId, { pageSize: MAXIMUM_DEPLOYMENTS });
     onProgress("Reading image processing state.");
     const { images, summary, truncated } = await listSiteImages(client, siteId);
+    onProgress("Reading broken references.");
+    const brokenReferencePages = await getSiteBrokenReferences(client, siteId);
+    const reportedBrokenPages = boundedList(brokenReferencePages, MAXIMUM_BROKEN_REFERENCE_PAGES);
+    const brokenPages = reportedBrokenPages.items.map((page) => {
+      const images = boundedList(page.missingImageIds, MAXIMUM_MISSING_TARGETS);
+      const paths = boundedList(page.missingPagePaths, MAXIMUM_MISSING_TARGETS);
+      return {
+        ...page,
+        missingImageIds: images.items,
+        missingPagePaths: paths.items,
+        ...(images.truncated ? { missingImageIdsTruncated: true } : {}),
+        ...(paths.truncated ? { missingPagePathsTruncated: true } : {}),
+      };
+    });
 
     const byState = {};
     for (const image of images) {
@@ -142,7 +154,7 @@ export async function status(invocation) {
     const reportedDeployments = boundedList(deployments, MAXIMUM_DEPLOYMENTS);
     const blockers = boundedList(readiness.blockers, MAXIMUM_BLOCKERS);
 
-    onProgress(`Broken references are not reported: ${BROKEN_REFERENCES_NOTE}`);
+    onProgress(`Broken references: ${brokenReferencePages.length} page(s) with missing targets.`);
 
     return successResult(VERB_STATUS, siteId, {
       platform: platformReport,
@@ -175,7 +187,12 @@ export async function status(invocation) {
         ...(failedImages.truncated ? { failedItemsTruncated: true } : {}),
         ...(truncated ? { listTruncated: true } : {}),
       },
-      brokenReferences: { covered: false, reason: BROKEN_REFERENCES_NOTE },
+      brokenReferences: {
+        covered: true,
+        totalPages: brokenReferencePages.length,
+        pages: brokenPages,
+        ...(reportedBrokenPages.truncated ? { pagesTruncated: true } : {}),
+      },
     });
   });
 }

@@ -485,7 +485,7 @@ const GOLDENS = [
       + "## Inverted band\n\n"
       + "A paragraph inside the band.\n\n"
       + "```inline-facts\n"
-      + "[{\"value\":\"4.8 ★ from 109 Google reviews\",\"label\":\"Rating\"},{\"value\":\"112 Main St\",\"label\":\"Address\",\"url\":\"/visit\"},{\"value\":\"(555) 123-4567\",\"label\":\"Phone\",\"url\":\"tel:+15551234567\"},{\"value\":\"6am–8pm\",\"label\":\"Today\"},{\"value\":\"Free parking\"}]\n"
+      + "[{\"value\":\"4.8 ★ from 109 Google reviews\",\"label\":\"Rating\"},{\"value\":\"112 Main St\\nTacoma, WA 98465\",\"label\":\"Address\",\"url\":\"/visit\"},{\"value\":\"(555) 123-4567\",\"label\":\"Phone\",\"url\":\"tel:+15551234567\"},{\"value\":\"6am–8pm\",\"label\":\"Today\"},{\"value\":\"Free parking\"}]\n"
       + "```\n\n"
       + "```inline-facts\n"
       + "[{\"value\":\"(555) 555-0148\",\"url\":\"tel:+15555550148\"},{\"value\":\"Walk-ins welcome\"}]\n"
@@ -868,6 +868,8 @@ test("refuses every construct outside the subset by name", async (testContext) =
     ["an ordered list that does not start at one", "3. item", "content.markdown_list_start", "ordered list start"],
     ["an inline image", "text ![a](b) more", "content.markdown_image", "inline image"],
     ["an unsafe link destination", "[x](javascript:alert(1))", "content.markdown_link", "link"],
+    ["a contact authority", "[Call](tel://+15551234567)", "content.markdown_link", "link"],
+    ["an email authority", "[Email](mailto://hello@example.test)", "content.markdown_link", "link"],
     ["a link title", "[x](https://a.test \"t\")", "content.markdown_link", "link"],
     ["a pointy-bracket destination", "[x](<https://a.test>)", "content.markdown_link", "link"],
     ["nested links", "[a [b](https://x.test) c](https://y.test)", "content.markdown_link", "link"],

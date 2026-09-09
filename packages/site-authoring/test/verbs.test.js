@@ -1,12 +1,11 @@
+import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 
-import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
 import { normalizeImage } from "../src/api.js";
 import {
   CAPABILITY_CONTENT,
@@ -16,11 +15,11 @@ import {
 } from "../src/capabilities.js";
 import { runCli, VERB_CAPABILITIES } from "../src/cli.js";
 import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY } from "../src/constants.js";
-import { saveCredential } from "../src/credentials.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
-import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
+import { saveCredential } from "../src/credentials.js";
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
+import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
 import { failureResult } from "../src/output.js";
 import { REDIRECT_LIMITS } from "../src/redirects-contract.js";
 import { approve } from "../src/verbs/approve.js";
@@ -38,6 +37,7 @@ import { redirectsPush } from "../src/verbs/redirects-push.js";
 import { status } from "../src/verbs/status.js";
 import { themePush } from "../src/verbs/theme-push.js";
 import { readWorkspaceFile, workspaceContentHash, writeWorkspaceFile } from "../src/workspace.js";
+import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
 
 const SITE_ID = "aaaa1111-bbbb-4111-8111-cccc11111111";
 const API_BASE_URL = "https://app.taproot.test/api";
@@ -83,12 +83,14 @@ const TAPROOT_WWW_PAGE_FILES = Object.freeze({
   publishing: "publishing.md",
 });
 const TAPROOT_WWW_PAGE_SOURCES = INSIDE_MONOREPO
-  ? Object.freeze(Object.fromEntries(await Promise.all(
-    TAPROOT_WWW_PAGE_PATHS.map(async (pagePath) => [
-      pagePath,
-      await readFile(new URL(`pages/${TAPROOT_WWW_PAGE_FILES[pagePath]}`, TAPROOT_WWW_FIXTURE_ROOT), "utf8"),
-    ]),
-  )))
+  ? Object.freeze(Object.fromEntries(
+    await Promise.all(
+      TAPROOT_WWW_PAGE_PATHS.map(async (pagePath) => [
+        pagePath,
+        await readFile(new URL(`pages/${TAPROOT_WWW_PAGE_FILES[pagePath]}`, TAPROOT_WWW_FIXTURE_ROOT), "utf8"),
+      ]),
+    ),
+  ))
   : undefined;
 const TAPROOT_WWW_STYLES = INSIDE_MONOREPO
   ? JSON.parse(await readFile(new URL("settings/taproot-styles.json", TAPROOT_WWW_FIXTURE_ROOT), "utf8"))
@@ -216,8 +218,17 @@ function api(routes) {
   // declares its own GET route, which wins because route matching takes the
   // first entry.
   const effectiveRoutes = routes.some((route) => route.method === "GET" && route.pattern === REDIRECT_MAP)
-    ? routes
+    ? [...routes]
     : [...routes, { method: "GET", pattern: REDIRECT_MAP, reply: emptyRedirectMap() }];
+  effectiveRoutes.push({
+    method: "GET",
+    pattern: DEPLOY_REVIEW,
+    reply: {
+      stagedPages: [{ pageId: ABOUT_PAGE_ID }],
+      settingsChanges: [{ settingsType: "SETTING_TYPE_SITE_HEADER", changes: [{ fieldName: "headerLayout" }] }],
+      navigationChanged: true,
+    },
+  });
   const calls = [];
   const queryViolations = [];
   const fetchImpl = async (url, init = {}) => {
@@ -397,11 +408,15 @@ const SETTINGS = /^\/api\/v1\/settings\//u;
 const SETTING = /^\/api\/v1\/setting$/u;
 const FOOTER_SETTINGS = /\/footer-settings$/u;
 const READINESS = /\/publishing\/readiness$/u;
+const DEPLOY_REVIEW = /\/deploy\/review$/u;
+const STAGING_MINT = /\/staging-preview:mint-handoff$/u;
+const STAGING_HANDOFF_URL = `https://${STAGING_HOST}/?__taproot_preview_handoff=${HANDOFF_TOKEN}`;
 const DEPLOY = /\/deploy$/u;
 const DEPLOYMENTS = /\/deployments$/u;
 const STAGING_PREVIEW_STATUS = /\/staging-preview\/status$/u;
 const STAGING_PREVIEW_ROOT = /^\/$/u;
 const SITE_IMAGES = /\/sites\/[^/]+\/images$/u;
+const BROKEN_REFERENCES = /\/sites\/[^/]+\/broken-references$/u;
 const REQUEST_UPLOAD = /\/images\/request-upload$/u;
 const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
 const PRESIGNED_PUT = /^\/upload$/u;
@@ -465,11 +480,14 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: SETTINGS, permission: "site.theme.manage" },
   { method: "POST", pattern: SETTING, permission: "site.theme.manage" },
   { method: "POST", pattern: FOOTER_SETTINGS, permission: "site.theme.manage" },
+  { method: "GET", pattern: DEPLOY_REVIEW, permission: "site.deploy" },
+  { method: "POST", pattern: STAGING_MINT, permission: "site.staging.view" },
   { method: "GET", pattern: READINESS, permission: "site.deploy" },
   { method: "POST", pattern: DEPLOY, permission: "site.deploy" },
   { method: "GET", pattern: DEPLOYMENTS, permission: "site.deployments.view_any" },
   { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
   { method: "GET", pattern: SITE_IMAGES, permission: "site.media.manage" },
+  { method: "GET", pattern: BROKEN_REFERENCES, permission: "site.pages.edit_any" },
   { method: "POST", pattern: REQUEST_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: CONFIRM_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: PREVIEW_MINT, permission: "site.pages.edit_any" },
@@ -606,12 +624,14 @@ function manifestFixture(pages, extra = {}) {
     settingsSkipped: [],
     footer: footerManifestEntry(projectFooterSettingsForWorkspace({})),
     appearance: appearanceManifestEntry({}),
-    pages: pages.map((entry) => entry === null
-      ? null
-      : {
-        workspaceMode: typeof entry?.file === "string" ? "editable" : "metadata-only",
-        ...entry,
-      }),
+    pages: pages.map((entry) =>
+      entry === null
+        ? null
+        : {
+          workspaceMode: typeof entry?.file === "string" ? "editable" : "metadata-only",
+          ...entry,
+        }
+    ),
     ...extra,
   };
 }
@@ -834,17 +854,20 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.equal(manifest.manifestVersion, 6);
   assert.equal(manifest.siteId, SITE_ID);
   assert.equal(manifest.pulledAt, new Date(1_700_000_000_000).toISOString());
-  assert.deepEqual(manifest.pages.map((entry) => [
-    entry.pageId,
-    entry.path,
-    entry.status,
-    entry.file,
-    entry.workspaceMode,
-  ]), [
-    [HOME_PAGE_ID, "", "PAGE_STATUS_APPROVED", "pages/index.pm.json", "editable"],
-    [ABOUT_PAGE_ID, "about", "PAGE_STATUS_PUBLISHED", "pages/about.pm.json", "editable"],
-    [STORY_PAGE_ID, "story", "PAGE_STATUS_PUBLISHED", undefined, "metadata-only"],
-  ]);
+  assert.deepEqual(
+    manifest.pages.map((entry) => [
+      entry.pageId,
+      entry.path,
+      entry.status,
+      entry.file,
+      entry.workspaceMode,
+    ]),
+    [
+      [HOME_PAGE_ID, "", "PAGE_STATUS_APPROVED", "pages/index.pm.json", "editable"],
+      [ABOUT_PAGE_ID, "about", "PAGE_STATUS_PUBLISHED", "pages/about.pm.json", "editable"],
+      [STORY_PAGE_ID, "story", "PAGE_STATUS_PUBLISHED", undefined, "metadata-only"],
+    ],
+  );
   assert.equal(manifest.pages[0].resourceId, resourceIdFor(HOME_PAGE_ID));
   assert.deepEqual(manifest.appearance.imageIds, [IMAGE_ID]);
 
@@ -906,9 +929,10 @@ test("pull preserves stored footer values that footer push must reject for autho
     {
       method: "GET",
       pattern: SETTINGS,
-      reply: (call) => call.pathname.endsWith("SETTING_TYPE_SITE_PUBLISHING_PREFERENCES")
-        ? { sitePublishingPreferences: { footerSettings: storedFooter } }
-        : {},
+      reply: (call) =>
+        call.pathname.endsWith("SETTING_TYPE_SITE_PUBLISHING_PREFERENCES")
+          ? { sitePublishingPreferences: { footerSettings: storedFooter } }
+          : {},
     },
   ]);
 
@@ -926,7 +950,8 @@ test("pull preserves stored footer values that footer push must reject for autho
   const callsAfterPull = wire.calls.length;
   await assert.rejects(
     footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation),
-    (error) => error?.code === "footer.url_invalid"
+    (error) =>
+      error?.code === "footer.url_invalid"
       && error?.field === "footerSettings.bottomLinks[0].externalUrl",
   );
   assert.equal(wire.calls.length, callsAfterPull);
@@ -938,7 +963,8 @@ test("pull preserves stored footer values that footer push must reject for autho
   );
   await assert.rejects(
     footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation),
-    (error) => error?.code === "footer.text_invalid"
+    (error) =>
+      error?.code === "footer.text_invalid"
       && error?.field === "footerSettings.asideBodyContent.paragraphs[0].runs[0].text",
   );
   assert.equal(wire.calls.length, callsAfterPull);
@@ -1008,8 +1034,7 @@ test("agent theme text outside Latin-1 round-trips through pull and push", async
           return { headerSettings: pulledThemeWorkspace["settings/site-header.json"].settings };
         }
         return {
-          sitePublishingPreferences:
-            pulledThemeWorkspace["settings/site-publishing-preferences.json"].settings,
+          sitePublishingPreferences: pulledThemeWorkspace["settings/site-publishing-preferences.json"].settings,
         };
       },
     },
@@ -1050,9 +1075,10 @@ test("pull refuses a malformed non-empty stored theme instead of snapshotting an
     {
       method: "GET",
       pattern: SETTINGS,
-      reply: (call) => call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")
-        ? { styleSettings: { lightTheme: "not-base64", darkTheme: "" } }
-        : {},
+      reply: (call) =>
+        call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")
+          ? { styleSettings: { lightTheme: "not-base64", darkTheme: "" } }
+          : {},
     },
   ]);
 
@@ -1247,7 +1273,7 @@ test("theme push refuses an incomplete pair before the first API call", async (s
 
   await assert.rejects(
     themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
-    (error) => error?.code === "theme.incomplete" && error?.field === "lightTheme.roles",
+    (error) => error?.code === "theme.settings_missing" && error?.field === "lightTheme.roles",
   );
   assert.equal(wire.calls.length, 0);
 });
@@ -2105,7 +2131,10 @@ test("pull refuses, and changes nothing, when the site edited a page this worksp
   // reconciled rather than quietly adopting the site's new document.
   assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
-  assert.equal((await readWorkspaceJson(workspace, ABOUT_BASELINE_FILE)).content[0].content[0].text, "edited on the site");
+  assert.equal(
+    (await readWorkspaceJson(workspace, ABOUT_BASELINE_FILE)).content[0].content[0].text,
+    "edited on the site",
+  );
   assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].baseline, reconciled);
 });
 
@@ -2403,7 +2432,11 @@ test("pull records a page's title and path from the read that supplied its revis
         path: "about-us",
         shortDescription: "Who we are",
         bodyRevision: siteRevision(state),
-        template: { templateType: "TEMPLATE_TYPE_FREE_FORM", templateVersion: "1.0", freeFormData: { body: state.body } },
+        template: {
+          templateType: "TEMPLATE_TYPE_FREE_FORM",
+          templateVersion: "1.0",
+          freeFormData: { body: state.body },
+        },
       }),
     },
     ...trackedRoutes(state),
@@ -2443,7 +2476,11 @@ test("pull records a tracked page's title and path from its read too, stripped l
         path: "/about-us/",
         shortDescription: "Who we are",
         bodyRevision: siteRevision(state),
-        template: { templateType: "TEMPLATE_TYPE_FREE_FORM", templateVersion: "1.0", freeFormData: { body: state.body } },
+        template: {
+          templateType: "TEMPLATE_TYPE_FREE_FORM",
+          templateVersion: "1.0",
+          freeFormData: { body: state.body },
+        },
       }),
     },
     ...trackedRoutes(state),
@@ -3345,12 +3382,26 @@ test("a long page title round-trips through pull and push unchanged", async (sit
   assert.equal(wire.matching("PATCH", PAGE_BY_ID)[0].body.title, longTitle);
 });
 
-test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four canonical drafts update", { skip: MONOREPO_ONLY }, async (site) => {
+test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four canonical drafts update", {
+  skip: MONOREPO_ONLY,
+}, async (site) => {
   const workspace = await fixture(site);
   const ordinaryPages = [
     pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Taproot", status: "PAGE_STATUS_DRAFT", hasDraft: true }),
-    pageSummary({ pageId: ABOUT_PAGE_ID, path: "about", title: "About Taproot", status: "PAGE_STATUS_DRAFT", hasDraft: true }),
-    pageSummary({ pageId: STORY_PAGE_ID, path: "pricing", title: "Pricing", status: "PAGE_STATUS_DRAFT", hasDraft: true }),
+    pageSummary({
+      pageId: ABOUT_PAGE_ID,
+      path: "about",
+      title: "About Taproot",
+      status: "PAGE_STATUS_DRAFT",
+      hasDraft: true,
+    }),
+    pageSummary({
+      pageId: STORY_PAGE_ID,
+      path: "pricing",
+      title: "Pricing",
+      status: "PAGE_STATUS_DRAFT",
+      hasDraft: true,
+    }),
     pageSummary({
       pageId: PUBLISHING_PAGE_ID,
       path: "publishing",
@@ -3422,10 +3473,12 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
   // The complete unchanged pull is executable: the legacy rawHtml projection
   // is verified and skipped while the four ordinary files take their existing
   // fresh live identities. This is the step that failed during TR00621.
-  const unchanged = await pagesPush(invoke(workspace, wire, {
-    verb: "pages push",
-    content: REAL_CONTENT,
-  }).invocation);
+  const unchanged = await pagesPush(
+    invoke(workspace, wire, {
+      verb: "pages push",
+      content: REAL_CONTENT,
+    }).invocation,
+  );
   assert.equal(unchanged.pages.updated, 4);
   assert.equal(unchanged.pages.skippedReadOnly, 1);
   assert.deepEqual(unchanged.pages.readOnlyItems, [{
@@ -3456,10 +3509,12 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
     `${JSON.stringify(styles, undefined, 2)}\n`,
   );
 
-  const dogfood = await pagesPush(invoke(workspace, wire, {
-    verb: "pages push",
-    content: REAL_CONTENT,
-  }).invocation);
+  const dogfood = await pagesPush(
+    invoke(workspace, wire, {
+      verb: "pages push",
+      content: REAL_CONTENT,
+    }).invocation,
+  );
   assert.equal(dogfood.pages.updated, 4);
   assert.equal(dogfood.pages.skippedReadOnly, 1);
   assert.deepEqual(
@@ -3687,8 +3742,7 @@ test("pages push warns about a paused platform before validating, then still ref
     {
       method: "PATCH",
       pattern: PAGE_BY_ID,
-      reply: () =>
-        jsonResponse({ code: 14, details: [{ fieldViolations: [{ field: "SiteAuthoringRollout" }] }] }, 503),
+      reply: () => jsonResponse({ code: 14, details: [{ fieldViolations: [{ field: "SiteAuthoringRollout" }] }] }, 503),
     },
     ...pushRoutes(),
   ]);
@@ -4036,7 +4090,6 @@ test("a targeted push reports the whole-workspace mode when no path narrows it",
   assert.equal(result.pages.unresolved, undefined);
 });
 
-
 async function readOnly404Fixture(site, extra = {}) {
   const body = `${JSON.stringify(paragraphDocument("system 404"), undefined, 2)}\n`;
   const workspace = await fixture(site, {
@@ -4136,9 +4189,21 @@ test("a source with a readable path still claims it when a later front-matter en
   // front-matter fault as "declares no path" would drop it from the duplicate
   // pass and let the other `about` source be sent as though it were alone.
   const cases = [
-    { label: "an unsupported field", block: "---\ntitle: A copy\npath: about\nbogus: x\n---\n\nBody.\n", code: "pages.front_matter_unknown" },
-    { label: "a malformed line", block: "---\ntitle: A copy\npath: about\nnot a pair\n---\n\nBody.\n", code: "pages.front_matter_invalid" },
-    { label: "a duplicated title", block: "---\ntitle: A copy\npath: about\ntitle: Again\n---\n\nBody.\n", code: "pages.front_matter_duplicate" },
+    {
+      label: "an unsupported field",
+      block: "---\ntitle: A copy\npath: about\nbogus: x\n---\n\nBody.\n",
+      code: "pages.front_matter_unknown",
+    },
+    {
+      label: "a malformed line",
+      block: "---\ntitle: A copy\npath: about\nnot a pair\n---\n\nBody.\n",
+      code: "pages.front_matter_invalid",
+    },
+    {
+      label: "a duplicated title",
+      block: "---\ntitle: A copy\npath: about\ntitle: Again\n---\n\nBody.\n",
+      code: "pages.front_matter_duplicate",
+    },
   ];
 
   for (const scenario of cases) {
@@ -4333,7 +4398,8 @@ test("pages push never honors a read-only marker on an ordinary authored page", 
 
   await assert.rejects(
     pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) => error?.code === "workspace.manifest_invalid"
+    (error) =>
+      error?.code === "workspace.manifest_invalid"
       && error?.field === "pages[0].workspaceMode",
   );
   assert.equal(wire.calls.length, 0);
@@ -4359,7 +4425,8 @@ test("pages push verifies a marker-shaped projection against the live system 404
 
   await assert.rejects(
     pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) => error?.code === "workspace.manifest_invalid"
+    (error) =>
+      error?.code === "workspace.manifest_invalid"
       && error?.field === "pages[0].pageId",
   );
   assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
@@ -4805,13 +4872,6 @@ test("a page list the CLI cannot fully enumerate stops every verb that decides f
       files: { ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "A" }]) },
       extra: () => ({ verb: "approve" }),
       run: approve,
-    },
-    {
-      name: "deploy --staging",
-      code: "deploy.live_list_truncated",
-      files: { ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "A" }]) },
-      extra: () => ({ verb: "deploy", deployTarget: "staging" }),
-      run: deploy,
     },
   ];
   for (const scenario of cases) {
@@ -5610,7 +5670,11 @@ test("redirects pull and push read a map larger than the ordinary response bound
   assert.ok(JSON.stringify(wireEntries).length > 1024 * 1024);
   const workspace = await fixture(site, { ".taproot-site-manifest.json": redirectsManifest() });
   const wire = api([
-    { method: "GET", pattern: REDIRECT_MAP, reply: { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: wireEntries } },
+    {
+      method: "GET",
+      pattern: REDIRECT_MAP,
+      reply: { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: wireEntries },
+    },
     {
       method: "PUT",
       pattern: REDIRECT_MAP,
@@ -6138,7 +6202,8 @@ test("approve verifies a marker-shaped projection against the live system 404 id
 
   await assert.rejects(
     approve(invoke(workspace, wire, { verb: "approve" }).invocation),
-    (error) => error?.code === "workspace.manifest_invalid"
+    (error) =>
+      error?.code === "workspace.manifest_invalid"
       && error?.field === "pages[0].pageId",
   );
   assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 0);
@@ -6338,20 +6403,34 @@ function deployRoutes({
       },
     },
     {
-      method: "GET",
-      pattern: STAGING_PREVIEW_STATUS,
-      reply: { siteId: SITE_ID, ready: true, stagingUrl: `https://${STAGING_HOST}` },
+      method: "POST",
+      pattern: STAGING_MINT,
+      reply: {
+        siteId: SITE_ID,
+        stagingUrl: `https://${STAGING_HOST}/`,
+        url: STAGING_HANDOFF_URL,
+        handoffExpiresAt: HANDOFF_EXPIRES_AT,
+      },
     },
     {
       method: "GET",
       pattern: STAGING_PREVIEW_ROOT,
-      reply: stagingProbeResponse ?? new Response("", {
-        status: 302,
-        headers: {
-          location: `${API_BASE_URL}/v1/staging-preview/handoff?siteId=${SITE_ID}`
-            + `&host=${STAGING_HOST}&returnPath=%2F`,
-        },
-      }),
+      reply: (call) =>
+        stagingProbeResponse ?? new Response("", {
+          status: 302,
+          headers: {
+            location: call.query.has("__taproot_preview_handoff")
+              ? `https://${STAGING_HOST}/?__taproot_preview_check=1`
+              : `https://${STAGING_HOST}/`,
+            ...(call.query.has("__taproot_preview_handoff")
+              ? {
+                "set-cookie": `__Host-taproot_staging_preview=${
+                  "B".repeat(43)
+                }; Path=/; Secure; HttpOnly; SameSite=Lax`,
+              }
+              : {}),
+          },
+        }),
     },
   ];
 }
@@ -6380,12 +6459,12 @@ test("deploy --staging checks readiness, sends the candidate, and polls to compl
   assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
   assert.equal(result.environment, "DEPLOYMENT_ENVIRONMENT_STAGING");
   assert.equal(result.nextStep, "deploy --production");
-  assert.deepEqual(result.stagingPreview, {
-    url: `https://${STAGING_HOST}/`,
-    routeCheck: "resolved",
-  });
+  assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
+  assert.equal(result.stagingPreview.routeCheck, "resolved");
+  assert.equal(result.stagingPreview.redirects.verified, true);
+  assert.equal(wire.matching("POST", STAGING_MINT).length, 2);
   assert.ok(progress.some((line) => line.includes("DEPLOYMENT_STATUS_GENERATING")));
-  assert.ok(progress.includes(`Staging URL: https://${STAGING_HOST}/`));
+  assert.ok(progress.every((line) => !line.includes(HANDOFF_TOKEN)));
   const stagingProbe = wire.matching("GET", STAGING_PREVIEW_ROOT)[0];
   assert.equal(stagingProbe.headers.authorization, undefined);
 
@@ -6405,10 +6484,10 @@ test("deploy --staging warns without failing when the configured host does not r
 
   assert.equal(result.ok, true);
   assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
-  assert.equal(result.stagingPreview.url, `https://${STAGING_HOST}/`);
+  assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
   assert.equal(result.stagingPreview.routeCheck, "unresolved");
-  assert.match(result.stagingPreview.warning, /returned HTTP 404/u);
-  assert.ok(progress.some((line) => line.startsWith("Warning: ") && line.includes("HTTP 404")));
+  assert.equal(result.stagingPreview.redirects.verified, false);
+  assert.ok(progress.some((line) => line.startsWith("Warning: ")));
 });
 
 test("deploy --staging refuses an empty candidate before it reaches the API", async (site) => {
@@ -6416,8 +6495,8 @@ test("deploy --staging refuses an empty candidate before it reaches the API", as
   const wire = api([
     {
       method: "GET",
-      pattern: PAGES_LIST,
-      reply: { pages: [pageSummary({ status: "PAGE_STATUS_DRAFT" })], nextPageToken: "" },
+      pattern: DEPLOY_REVIEW,
+      reply: {},
     },
   ]);
   const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
@@ -6674,7 +6753,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.6.3" },
+    cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -6738,7 +6817,8 @@ test("preview page reports all same-authority evictions when a lowered cap requi
   assert.deepEqual(result.evictedPreviews, evicted);
   assert.ok(progress.some((line) =>
     line.includes(`evicted at the stored-preview cap: pageId=${STORY_PAGE_ID}`)
-    && line.includes(`snapshotId=${STAGING_DEPLOYMENT_ID}`)));
+    && line.includes(`snapshotId=${STAGING_DEPLOYMENT_ID}`)
+  ));
   assert.equal(progress.filter((line) => line.includes("evicted at the stored-preview cap:")).length, 3);
 });
 
@@ -6833,9 +6913,11 @@ test("preview page emits the '/' field through the serialized not-found contract
     arguments_: ["preview", "page", "/"],
     environment: { TAPROOT_SITE_KEY: TOKEN, XDG_CONFIG_HOME: site.configHome },
     cwd: workspace.project,
-    stdout: { write: (chunk) => {
-      stdout += chunk;
-    } },
+    stdout: {
+      write: (chunk) => {
+        stdout += chunk;
+      },
+    },
     stderr: { write: () => {} },
     fetch: wire.fetch,
   });
@@ -7016,16 +7098,18 @@ test("preview page maps domain validation fields without erasing credential refu
     const wire = api([{
       method: "POST",
       pattern: PREVIEW_CREATE,
-      reply: () => jsonResponse(
-        violation("AuthoringPreviewAuthorityCapacity", description),
-        400,
-      ),
+      reply: () =>
+        jsonResponse(
+          violation("AuthoringPreviewAuthorityCapacity", description),
+          400,
+        ),
     }]);
     const { invocation } = invoke(workspace, wire, { verb: "preview page", pageId: ABOUT_PAGE_ID });
 
     await assert.rejects(
       previewPage(invocation),
-      (error) => error?.code === "preview.authority_capacity"
+      (error) =>
+        error?.code === "preview.authority_capacity"
         && error.message === description
         && revokes.every((revoke) => error.message.includes(revoke)),
     );
@@ -7037,10 +7121,11 @@ test("preview page maps domain validation fields without erasing credential refu
     const wire = api([{
       method: "POST",
       pattern: PREVIEW_CREATE,
-      reply: () => jsonResponse(
-        violation("AuthoringPreviewCapacity", description),
-        400,
-      ),
+      reply: () =>
+        jsonResponse(
+          violation("AuthoringPreviewCapacity", description),
+          400,
+        ),
     }]);
     const { invocation } = invoke(workspace, wire, { verb: "preview page", pageId: ABOUT_PAGE_ID });
 
@@ -7104,7 +7189,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.6.3" },
+    cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7116,10 +7201,12 @@ test("preview revoke frees an active snapshot without reading workspace content"
 });
 
 test("preview revoke validates programmatic identities before configuration or network access", async () => {
-  for (const scenario of [
-    { previewIds: ["NOT-A-UUID", SNAPSHOT_ID], field: "pageId" },
-    { previewIds: [ABOUT_PAGE_ID, "NOT-A-UUID"], field: "snapshotId" },
-  ]) {
+  for (
+    const scenario of [
+      { previewIds: ["NOT-A-UUID", SNAPSHOT_ID], field: "pageId" },
+      { previewIds: [ABOUT_PAGE_ID, "NOT-A-UUID"], field: "snapshotId" },
+    ]
+  ) {
     await assert.rejects(
       previewRevoke({
         previewIds: scenario.previewIds,
@@ -7288,16 +7375,25 @@ test("a rejected preview handoff never leaks its bearer through failure or progr
     arguments_: ["--config", workspace.configPath, "preview", "page", ABOUT_PAGE_ID, "--json"],
     environment: { TAPROOT_SITE_KEY: TOKEN, GITHUB_OUTPUT: outputPath },
     cwd: workspace.project,
-    stdout: { write: (chunk) => { stdout += chunk; } },
-    stderr: { write: (chunk) => { stderr += chunk; } },
+    stdout: {
+      write: (chunk) => {
+        stdout += chunk;
+      },
+    },
+    stderr: {
+      write: (chunk) => {
+        stderr += chunk;
+      },
+    },
     handlers: {
       ...VERB_HANDLERS,
-      "preview page": (invocation) => previewPage({
-        ...invocation,
-        sleep: timing.sleep,
-        now: timing.now,
-        timeoutSignal: () => new AbortController().signal,
-      }),
+      "preview page": (invocation) =>
+        previewPage({
+          ...invocation,
+          sleep: timing.sleep,
+          now: timing.now,
+          timeoutSignal: () => new AbortController().signal,
+        }),
     },
     fetch: wire.fetch,
   });
@@ -7314,7 +7410,7 @@ test("a rejected preview handoff never leaks its bearer through failure or progr
 // status
 // ---------------------------------------------------------------------------
 
-test("status reports deployments, readiness, and image processing — and names what it cannot cover", async (site) => {
+test("status reports deployments, readiness, image processing and broken-reference pages", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
     {
@@ -7366,6 +7462,18 @@ test("status reports deployments, readiness, and image processing — and names 
         processingImages: 0,
       },
     },
+    {
+      method: "GET",
+      pattern: BROKEN_REFERENCES,
+      reply: {
+        pages: [{
+          pageId: ABOUT_PAGE_ID,
+          pageTitle: "About",
+          missingImageIds: [IMAGE_ID],
+          missingPagePaths: ["/missing"],
+        }],
+      },
+    },
   ]);
   const { invocation, progress } = invoke(workspace, wire, { verb: "status" });
   const result = await status(invocation);
@@ -7377,11 +7485,12 @@ test("status reports deployments, readiness, and image processing — and names 
   assert.equal(result.images.total, 2);
   assert.equal(result.images.failed, 1);
   assert.equal(result.images.failedItems[0].reason, "decode failed");
-  // Broken references are session-only on the shipped contract; the verb says so
-  // rather than reporting a clean site.
-  assert.equal(result.brokenReferences.covered, false);
-  assert.match(result.brokenReferences.reason, /session-only/u);
-  assert.ok(progress.some((line) => /Broken references are not reported/u.test(line)));
+  assert.deepEqual(result.brokenReferences, {
+    covered: true,
+    totalPages: 1,
+    pages: [{ pageId: ABOUT_PAGE_ID, pageTitle: "About", missingImageIds: [IMAGE_ID], missingPagePaths: ["/missing"] }],
+  });
+  assert.ok(progress.some((line) => /Broken references: 1 page/u.test(line)));
 });
 
 test("status says when the deployment log it read is only one page", async (site) => {
@@ -7394,6 +7503,7 @@ test("status says when the deployment log it read is only one page", async (site
       reply: { deployments: [deploymentRecord({ status: "DEPLOYMENT_STATUS_COMPLETED" })], nextPageToken: "more" },
     },
     { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } },
+    { method: "GET", pattern: BROKEN_REFERENCES, reply: {} },
   ]);
   const { invocation } = invoke(workspace, wire, { verb: "status" });
   const result = await status(invocation);
@@ -7401,6 +7511,7 @@ test("status says when the deployment log it read is only one page", async (site
   // log is unbounded and only its recent end is read.
   assert.equal(result.deployments.total, 1);
   assert.equal(result.deployments.listTruncated, true);
+  assert.deepEqual(result.brokenReferences, { covered: true, totalPages: 0, pages: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -8134,6 +8245,7 @@ test("no verb ever emits the credential, upload capability, or page contents", a
         nextPageToken: "",
       },
     },
+    { method: "GET", pattern: BROKEN_REFERENCES, reply: {} },
   ];
 
   const invocations = [
@@ -8314,4 +8426,264 @@ test("the verb table declares every capability the verb's own routes need", asyn
     assert.equal(wire.matching("POST", DEPLOY).length, 0);
     assert.match(progress.join("\n"), /Carried by: delegation\.design\./u);
   });
+});
+
+test("status refuses a denied or malformed broken-reference report instead of claiming a clean site", async (context) => {
+  for (
+    const [name, reply, code] of [
+      ["denied", () => jsonResponse({ code: 7 }, 403), "api.request_rejected"],
+      ["invalid page list", { pages: {} }, "api.broken_references_contract"],
+      [
+        "invalid target list",
+        { pages: [{ pageId: ABOUT_PAGE_ID, missingPagePaths: [null] }] },
+        "api.broken_references_contract",
+      ],
+    ]
+  ) {
+    await context.test(name, async (child) => {
+      const workspace = await fixture(child);
+      const wire = api([
+        { method: "GET", pattern: READINESS, reply: {} },
+        { method: "GET", pattern: DEPLOYMENTS, reply: {} },
+        { method: "GET", pattern: SITE_IMAGES, reply: {} },
+        { method: "GET", pattern: BROKEN_REFERENCES, reply },
+      ]);
+      await assert.rejects(
+        status(invoke(workspace, wire, { verb: "status" }).invocation),
+        (error) => error.code === code,
+      );
+    });
+  }
+});
+
+test("status bounds broken-reference pages and targets and reports every truncation", async (context) => {
+  const workspace = await fixture(context);
+  const pages = Array.from({ length: 51 }, (_, index) => ({
+    pageId: `aaaaaaaa-bbbb-4ccc-8ddd-${String(index).padStart(12, "0")}`,
+    pageTitle: `Page ${index}`,
+    missingImageIds: Array.from({ length: 51 }, () => IMAGE_ID),
+    missingPagePaths: Array.from({ length: 51 }, (_, target) => `/missing-${target}`),
+  }));
+  const wire = api([
+    { method: "GET", pattern: READINESS, reply: {} },
+    { method: "GET", pattern: DEPLOYMENTS, reply: {} },
+    { method: "GET", pattern: SITE_IMAGES, reply: {} },
+    { method: "GET", pattern: BROKEN_REFERENCES, reply: { pages } },
+  ]);
+  const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
+  assert.equal(result.brokenReferences.totalPages, 51);
+  assert.equal(result.brokenReferences.pages.length, 50);
+  assert.equal(result.brokenReferences.pagesTruncated, true);
+  const page = result.brokenReferences.pages[0];
+  assert.equal(page.missingImageIds.length, 50);
+  assert.equal(page.missingPagePaths.length, 50);
+  assert.equal(page.missingImageIdsTruncated, true);
+  assert.equal(page.missingPagePathsTruncated, true);
+});
+
+test("deploy and status select only the release changes shown by the UI", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const selection = { stagedPages: [{ pageId: STORY_PAGE_ID }], settingsChanges: [], navigationChanged: false };
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW, reply: selection },
+    ...deployRoutes({ readiness: { hasSuccessfulStagingDeployment: true } }),
+    { method: "GET", pattern: SITE_IMAGES, reply: {} },
+    { method: "GET", pattern: BROKEN_REFERENCES, reply: {} },
+  ]);
+  await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation);
+  const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
+  const sent = wire.matching("POST", DEPLOY)[0].body;
+  assert.deepEqual(sent.stagedPageIds, [STORY_PAGE_ID]);
+  assert.deepEqual(sent.selectedSettingsTypes, []);
+  assert.equal(sent.includeNavigation, false);
+  assert.equal(result.readiness.hasSuccessfulStagingDeployment, true);
+  for (const call of wire.matching("GET", READINESS)) {
+    assert.deepEqual(call.query.getAll("stagedPageIds"), [STORY_PAGE_ID]);
+    assert.deepEqual(call.query.getAll("selectedSettingsTypes"), []);
+    assert.equal(call.query.get("includeNavigation"), "false");
+  }
+});
+
+test("staging checks record real 301 and 410 responses without following targets or exporting handoffs", async (site) => {
+  const workspace = await fixture(site);
+  const checked = [
+    { path: "/old.html", target: "https://external.example/visit", status: 301 },
+    { path: "/gone", kind: "SITE_REDIRECT_KIND_GONE", status: 410 },
+  ];
+  const wire = api([
+    { method: "GET", pattern: REDIRECT_MAP, reply: { siteId: SITE_ID, revision: REDIRECT_REVISION, entries: checked } },
+    ...deployRoutes(),
+    {
+      method: "GET",
+      pattern: /^\/old\.html$/u,
+      reply: new Response(null, { status: 301, headers: { location: checked[0].target } }),
+    },
+    { method: "GET", pattern: /^\/gone$/u, reply: new Response(null, { status: 410 }) },
+  ]);
+  const outputPath = path.join(workspace.project, "staging-actions-output");
+  await writeFile(outputPath, "");
+  let stdout = "";
+  let stderr = "";
+  // runCli uses the real clock, so mint times follow it in this entry-point check.
+  const fetch = async (url, init) => {
+    if (STAGING_MINT.test(new URL(url).pathname)) {
+      return jsonResponse({
+        siteId: SITE_ID,
+        stagingUrl: `https://${STAGING_HOST}/`,
+        url: STAGING_HANDOFF_URL,
+        handoffExpiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+    }
+    return wire.fetch(url, init);
+  };
+  const exitCode = await runCli({
+    arguments_: ["--config", workspace.configPath, "redirects", "check"],
+    cwd: workspace.project,
+    environment: { TAPROOT_SITE_KEY: TOKEN, GITHUB_OUTPUT: outputPath },
+    fetch,
+    stdout: {
+      write: (chunk) => {
+        stdout += chunk;
+      },
+    },
+    stderr: {
+      write: (chunk) => {
+        stderr += chunk;
+      },
+    },
+  });
+  assert.equal(exitCode, 0, stderr);
+  const result = JSON.parse(stdout);
+  assert.equal(result.stagingPreview.redirects.verified, true);
+  assert.deepEqual(result.stagingPreview.redirects.items.map((row) => [row.path, row.status, row.location]), [
+    ["/old.html", 301, checked[0].target],
+    ["/gone", 410, ""],
+  ]);
+  assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
+  assert.ok(!stderr.includes(HANDOFF_TOKEN));
+  assert.ok(!(await readFile(outputPath, "utf8")).includes(HANDOFF_TOKEN));
+  for (const call of wire.calls.filter((call) => call.pathname === "/old.html" || call.pathname === "/gone")) {
+    assert.equal(call.headers.authorization, undefined);
+    assert.match(call.headers.cookie, /^__Host-taproot_staging_preview=/u);
+  }
+  assert.ok(wire.calls.every((call) => call.pathname !== "/visit"));
+});
+
+test("redirect checks refuse gate bounces as proof and report a map revision changed during checks", async (site) => {
+  const workspace = await fixture(site);
+  let reads = 0;
+  const wire = api([
+    {
+      method: "GET",
+      pattern: REDIRECT_MAP,
+      reply: () => ({
+        siteId: SITE_ID,
+        revision: reads++ === 0 ? REDIRECT_REVISION : NEXT_REDIRECT_REVISION,
+        entries: [{ path: "/old", target: "/new", status: 301 }],
+      }),
+    },
+    ...deployRoutes(),
+    {
+      method: "GET",
+      pattern: /^\/old$/u,
+      reply: new Response(null, { status: 302, headers: { location: STAGING_HANDOFF_URL } }),
+    },
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "redirects check" });
+  const result = await VERB_HANDLERS["redirects check"](invocation);
+  assert.equal(result.stagingPreview.redirects.verified, false);
+  assert.equal(result.stagingPreview.redirects.revisionUnchanged, false);
+  assert.equal(result.stagingPreview.redirects.items[0].location, "[withheld]");
+  assert.ok(progress.every((line) => !line.includes(HANDOFF_TOKEN)));
+});
+
+test("phase timings retain retries, omit unobserved durations and keep legacy evidence unknown", async () => {
+  const { normalizeDeployment } = await import("../src/api.js");
+  const record = deploymentRecord({
+    phaseHistory: {
+      phases: [
+        { enteredAt: "2026-09-08T00:00:00Z" },
+        { status: "DEPLOYMENT_STATUS_GENERATING", enteredAt: "2026-09-08T00:00:01Z" },
+        { status: "DEPLOYMENT_STATUS_DEPLOYING", enteredAt: "2026-09-08T00:00:02Z" },
+        { status: "DEPLOYMENT_STATUS_GENERATING", enteredAt: "2026-09-08T00:10:01Z" },
+        { status: "DEPLOYMENT_STATUS_COMPLETED", enteredAt: "2026-09-08T00:10:04Z" },
+      ],
+    },
+  });
+  const result = normalizeDeployment(record);
+  assert.deepEqual(result.phaseTimings.phases.map((phase) => phase.durationMilliseconds), [
+    1000,
+    1000,
+    599000,
+    3000,
+    undefined,
+  ]);
+  assert.equal(result.phaseTimings.phases[3].status, "DEPLOYMENT_STATUS_GENERATING");
+  assert.deepEqual(normalizeDeployment(deploymentRecord()).phaseTimings, { known: false });
+  record.phaseHistory.phases[1].enteredAt = "2026-09-07T00:00:00Z";
+  assert.throws(() => normalizeDeployment(record), (error) => error.code === "api.deployment_phase_contract");
+});
+
+test("preview failure reports typed diagnostic context without renderer content", async (site) => {
+  const workspace = await fixture(site);
+  const diagnostic = {
+    errorClass: "preview.revision_mismatch",
+    pageId: ABOUT_PAGE_ID,
+    nodeType: "inlineFacts",
+    attribute: "value",
+  };
+  const wire = api([
+    {
+      method: "POST",
+      pattern: PREVIEW_CREATE,
+      reply: { preview: previewRecord(), storedPreviewCap: 10, storedPreviewCount: 1 },
+    },
+    {
+      method: "GET",
+      pattern: PREVIEW_STATUS,
+      reply: previewRecord({
+        status: "AUTHORING_PREVIEW_STATUS_FAILED",
+        failureCode: "preview.render_failed",
+        failureDiagnostic: diagnostic,
+      }),
+    },
+  ]);
+  await assert.rejects(
+    previewPage(invoke(workspace, wire, { verb: "preview page", pageId: ABOUT_PAGE_ID }).invocation),
+    (error) => {
+      assert.equal(error.code, "preview.render_failed");
+      assert.deepEqual(failureResult(error).error.diagnostic, diagnostic);
+      assert.ok(error.message.includes("preview.revision_mismatch"));
+      return true;
+    },
+  );
+});
+
+test("deploy names a failed candidate preview and sends its override only when explicit", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api(deployRoutes({
+    deployReply: (call) =>
+      call.body.allowFailedPreview
+        ? { deployment: deploymentRecord({ status: "DEPLOYMENT_STATUS_COMPLETED" }) }
+        : jsonResponse(
+          violation("AuthoringPreviewFailed", `Snapshot ${SNAPSHOT_ID} failed for page ${ABOUT_PAGE_ID}.`),
+          400,
+        ),
+  }));
+  await assert.rejects(
+    deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation),
+    (error) => {
+      assert.equal(error.code, "deploy.preview_failed");
+      assert.ok(error.message.includes(SNAPSHOT_ID));
+      assert.ok(error.message.includes("--allow-failed-preview"));
+      return true;
+    },
+  );
+  await deploy(
+    invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", allowFailedPreview: true }).invocation,
+  );
+  assert.equal(wire.matching("POST", DEPLOY)[0].body.allowFailedPreview, undefined);
+  assert.equal(wire.matching("POST", DEPLOY)[1].body.allowFailedPreview, true);
 });

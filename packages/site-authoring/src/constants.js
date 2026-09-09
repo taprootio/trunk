@@ -1,5 +1,5 @@
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.6.3";
+export const CLI_VERSION = "0.7.0";
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";
@@ -82,6 +82,7 @@ export const VERB_LOGIN = "login";
 export const VERB_LOGOUT = "logout";
 export const VERB_PAGES_PUSH = "pages push";
 export const VERB_NAV_PUSH = "nav push";
+export const VERB_REDIRECTS_CHECK = "redirects check";
 export const VERB_REDIRECTS_PULL = "redirects pull";
 export const VERB_REDIRECTS_PUSH = "redirects push";
 export const VERB_THEME_PUSH = "theme push";

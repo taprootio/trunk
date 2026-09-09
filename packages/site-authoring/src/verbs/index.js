@@ -11,6 +11,7 @@ import {
   VERB_PREVIEW_PAGE,
   VERB_PREVIEW_REVOKE,
   VERB_PULL,
+  VERB_REDIRECTS_CHECK,
   VERB_REDIRECTS_PULL,
   VERB_REDIRECTS_PUSH,
   VERB_SITES,
@@ -29,9 +30,10 @@ import { logout } from "./logout.js";
 import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
 import { pagesPush } from "./pages-push.js";
-import { pull } from "./pull.js";
 import { previewPage } from "./preview-page.js";
 import { previewRevoke } from "./preview-revoke.js";
+import { pull } from "./pull.js";
+import { redirectsCheck } from "./redirects-check.js";
 import { redirectsPull } from "./redirects-pull.js";
 import { redirectsPush } from "./redirects-push.js";
 import { sites } from "./sites.js";
@@ -114,6 +116,7 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_PULL]: pull,
   [VERB_PAGES_PUSH]: pagesPush,
   [VERB_NAV_PUSH]: navPush,
+  [VERB_REDIRECTS_CHECK]: redirectsCheck,
   [VERB_REDIRECTS_PULL]: redirectsPull,
   [VERB_REDIRECTS_PUSH]: redirectsPush,
   [VERB_THEME_PUSH]: themePush,

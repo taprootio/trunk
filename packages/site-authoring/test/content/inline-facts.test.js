@@ -97,6 +97,8 @@ test("allows safe native actions and refuses executable or ambiguous URLs", asyn
     "",
     "   ",
     "javascript:alert(1)",
+    "tel://+15551234567",
+    "mailto://hello@example.test",
     "data:text/html,bad",
     "//evil.example/path",
     "/\\evil.example/path",
@@ -132,4 +134,52 @@ test("inlineFacts is portable at the document root and directly inside a section
   assert.ok(unlistedAttribute.errors.some((error) =>
     error.code === "content.attr_unknown" && error.path === "/content/0/attrs/layout"
   ));
+});
+
+test("refuses unsupported controls and break markup while preserving supported fact spacing", () => {
+  for (
+    const separator of [
+      "\u0085",
+      "\u2028",
+      "\u2029",
+      "\ufeff",
+      "<br>",
+      "<BR />",
+      "\u0000",
+    ]
+  ) {
+    for (const field of ["value", "label"]) {
+      const result = validateDocument({
+        type: "doc",
+        content: [{
+          type: "inlineFacts",
+          attrs: { items: [{ value: "Address", [field]: `Main St${separator}Tacoma` }] },
+        }],
+      });
+      assert.ok(
+        result.errors.some((error) =>
+          error.code === "content.attr_invalid"
+          && error.path === `/content/0/attrs/items/0/${field}`
+        ),
+        JSON.stringify({ separator, field, errors: result.errors }),
+      );
+    }
+  }
+  for (const separator of [
+    " ", "\t", "\n", "\r\n", "\u00a0", "\u1680",
+    ...Array.from({ length: 11 }, (_, index) => String.fromCodePoint(0x2000 + index)),
+    "\u202f", "\u205f", "\u3000",
+  ]) {
+    for (const field of ["value", "label"]) {
+      const text = `Main St${separator}Tacoma`;
+      const items = [{ value: "Address", [field]: text, url: "/visit" }];
+      const result = normalizeInlineFactsItems(items);
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.items[0][field], text);
+      assert.deepEqual(validateDocument({
+        type: "doc",
+        content: [{ type: "inlineFacts", attrs: { items } }],
+      }).errors, []);
+    }
+  }
 });

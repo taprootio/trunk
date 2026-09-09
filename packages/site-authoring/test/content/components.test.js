@@ -10,6 +10,41 @@ import {
 import { validateDocument } from "../../src/content/validate-document.js";
 import { CONTENT_LIMITS } from "../../src/content/vocabulary.js";
 
+test("all page action fields share the contact URL authoring policy", () => {
+  const blocks = (url) => [
+    ["cta", { buttonUrl: url }],
+    ["hero-section", { title: "Hello", primaryAction: { label: "Contact", url } }],
+    ["feature-grid", { items: [{ title: "Contact", url }] }],
+    ["card-grid", { cards: [{ title: "Contact", linkUrl: url }] }],
+  ];
+  for (
+    const [url, accepted] of [
+      ["tel:+15551234567", true],
+      ["mailto:hello@example.test", true],
+      ["#contact", true],
+      ["?contact=true", true],
+      ["contact", true],
+      ["tel://+15551234567", false],
+      ["mailto://hello@example.test", false],
+      ["TEL://+15551234567", false],
+      ["tel:", false],
+      ["mailto:", false],
+      ["tel:+1555\u0085", false],
+    ]
+  ) {
+    for (const [type, data] of blocks(url)) {
+      const result = validateDocument({
+        type: "doc",
+        content: [{
+          type: "componentBlock",
+          attrs: { componentType: type, componentData: JSON.stringify(data) },
+        }],
+      });
+      assert.equal(result.errors.length === 0, accepted, JSON.stringify({ type, url, errors: result.errors }));
+    }
+  }
+});
+
 // `componentData` is a JSON string nothing on the server inspects. A wrong
 // enum value publishes as a component silently rendered with the wrong layout;
 // a wrong field name publishes as a component silently rendered with none of

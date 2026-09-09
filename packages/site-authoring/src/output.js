@@ -14,6 +14,7 @@ import {
 } from "./constants.js";
 import {
   hasAsciiControl,
+  normalizePreviewDiagnostic,
   normalizePreviewRecovery,
   sanitizeDiagnostic,
   SiteAuthoringError,
@@ -35,6 +36,7 @@ export function failureResult(error) {
     error: { code: error.code },
   };
   if (error.field) result.error.field = error.field;
+  if (error.details?.length) result.error.details = error.details;
   if (error.status) result.error.status = error.status;
   if (Array.isArray(error.alternatives) && error.alternatives.length > 0) {
     result.error.alternatives = error.alternatives;
@@ -51,6 +53,8 @@ export function failureResult(error) {
   if (Array.isArray(error.differences)) {
     result.error.differences = error.differences;
   }
+  const previewDiagnostic = normalizePreviewDiagnostic(error.previewDiagnostic);
+  if (previewDiagnostic) result.error.diagnostic = previewDiagnostic;
   const previewRecovery = normalizePreviewRecovery(error.previewRecovery);
   if (previewRecovery) result.error.preview = previewRecovery;
   const refusal = typeof error.refusalKind === "function" ? error.refusalKind() : undefined;
@@ -134,7 +138,11 @@ export async function writeGithubActionsOutput(outputPath, result) {
       "GITHUB_OUTPUT must be a regular file, not a link or directory.",
     );
   }
-  const json = requireBoundedJson(result);
+  // Browser handoffs are bearer capabilities, never workflow outputs.
+  const safeResult = structuredClone(result);
+  if (safeResult.verb === "preview page") delete safeResult.url;
+  if (safeResult.stagingPreview) delete safeResult.stagingPreview.url;
+  const json = requireBoundedJson(safeResult);
   const delimiter = githubDelimiter(json);
   const lines = [
     `${GITHUB_OUTPUT_RESULT_KEY}<<${delimiter}`,
@@ -158,7 +166,9 @@ export function humanFailure(error) {
   const refusal = typeof kind === "string" && kind !== REFUSAL_UNCLASSIFIED
     ? ` refusal=${sanitizeDiagnostic(kind, "unknown")}`
     : "";
-  return `${CLI_BINARY_NAME} failed [${error.code}]${field}${status}${refusal}: ${sanitizeDiagnostic(error.message)}`;
+  const details = error.details?.map((item) => `${item.field}: ${item.message}`).join("\n");
+  return `${CLI_BINARY_NAME} failed [${error.code}]${field}${status}${refusal}: ${sanitizeDiagnostic(error.message)}`
+    + (details ? `\n${details}` : "");
 }
 
 export function serializeResult(result) {

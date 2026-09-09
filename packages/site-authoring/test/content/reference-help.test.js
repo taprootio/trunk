@@ -49,7 +49,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 19);
+  assert.equal(REFERENCE_VERSION, 20);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -366,6 +366,9 @@ test("inline-facts reference is executable and documents the canonical SHY row",
   assert.equal(facts.attrs.items.maxItems, 6);
   assert.equal(facts.attrs.items.itemAdditionalProperties, false);
   assert.deepEqual(facts.attrs.items.itemFieldOrder, ["value", "label", "url"]);
+  assert.match(facts.valuePolicy, /LF\/CRLF line breaks/u);
+  assert.match(facts.valuePolicy, /literal <br> tags are rejected/u);
+  assert.match(facts.urlPolicy, /refuse tel:\/\/ and mailto:\/\/ authority forms/u);
   assert.match(facts.urlPolicy, /non-protocol-relative/u);
   assert.match(facts.urlPolicy, /backslashes, and ASCII controls are rejected/u);
   assert.deepEqual(

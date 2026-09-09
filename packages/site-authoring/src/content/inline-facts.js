@@ -79,6 +79,12 @@ export function normalizeInlineFactsItems(
           CODES.attrInvalid,
           `Inline fact ${name} must contain at most ${field.maxScalars} Unicode scalar values.`,
         );
+      } else if (!new RegExp(field.pattern, "u").test(entry)) {
+        report(
+          `${itemPath}/${name}`,
+          CODES.attrInvalid,
+          `Inline fact ${name} allows Unicode spaces, tabs, and LF/CRLF line breaks; other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal <br> tags are not supported.`,
+        );
       }
     }
 

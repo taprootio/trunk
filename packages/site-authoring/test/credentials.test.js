@@ -14,12 +14,14 @@ import {
   LIMITS,
   REFUSAL_CLI_OUTDATED,
 } from "../src/constants.js";
-import { SiteAuthoringError } from "../src/errors.js";
 import { readCredentialStore, saveCredential } from "../src/credentials.js";
+import { SiteAuthoringError } from "../src/errors.js";
 import { warnIfExternalWritesPaused } from "../src/session.js";
 import { login } from "../src/verbs/login.js";
 import { logout } from "../src/verbs/logout.js";
+import { sites } from "../src/verbs/sites.js";
 import { status } from "../src/verbs/status.js";
+import { use } from "../src/verbs/use.js";
 import { whoami } from "../src/verbs/whoami.js";
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,7 @@ function api(routes) {
       const call = {
         method,
         pathname: target.pathname,
+        search: target.searchParams,
         body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
         headers: init.headers,
       };
@@ -269,7 +272,7 @@ test("login stores an approved credential and never emits the secret or the devi
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.6.3" },
+    cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
     verb: "login",
     accountId: ACCOUNT_ID,
     keyId: KEY_ID,
@@ -543,7 +546,9 @@ test("a browser that will not open leaves the operator the URL, not just a code"
   // Stranding someone with a code and nowhere to type it is the one outcome
   // this path must not have.
   await login(invocation);
-  assert.ok(progress.some((line) => line.includes(`Could not open a browser. Open this URL yourself: ${VERIFICATION_URL}`)));
+  assert.ok(
+    progress.some((line) => line.includes(`Could not open a browser. Open this URL yourself: ${VERIFICATION_URL}`)),
+  );
 });
 
 /**
@@ -586,8 +591,10 @@ test("a claim that died in flight keeps polling and does arm the orphan warning"
   const wire = api([startRoute(), claimThatThrows("ECONNRESET")]);
   const { invocation } = invoke(site, wire, { verb: "login" });
 
-  await assert.rejects(login(invocation), (error) =>
-    error?.code === "login.timeout" && /MAY have been issued/u.test(error.message));
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.code === "login.timeout" && /MAY have been issued/u.test(error.message),
+  );
   assert.ok(wire.calls.filter((call) => call.pathname === CLAIM_PATH).length > 1);
   assert.equal(await storeContents(site), undefined);
 });
@@ -612,8 +619,10 @@ test("a claim that reset once and then never arrived still arms the orphan warni
   }]);
   const { invocation } = invoke(site, wire, { verb: "login" });
 
-  await assert.rejects(login(invocation), (error) =>
-    error?.code === "login.timeout" && /MAY have been issued/u.test(error.message));
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.code === "login.timeout" && /MAY have been issued/u.test(error.message),
+  );
   assert.equal(await storeContents(site), undefined);
 });
 
@@ -638,8 +647,10 @@ test("a claim answered 2xx unreadably and then never delivered still arms the or
   }]);
   const { invocation } = invoke(site, wire, { verb: "login" });
 
-  await assert.rejects(login(invocation), (error) =>
-    error?.code === "login.timeout" && /MAY have been issued/u.test(error.message));
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.code === "login.timeout" && /MAY have been issued/u.test(error.message),
+  );
   assert.equal(await storeContents(site), undefined);
 });
 
@@ -818,8 +829,10 @@ test("cancelling during backoff after only undelivered claim failures does not n
 
   // No request ever reached Taproot, so no credential can exist. Sending the
   // operator to Settings to revoke one would be a lie in the costly direction.
-  await assert.rejects(login(invocation), (error) =>
-    error?.code === "site.cancelled" && !/MAY have been issued/u.test(error.message));
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.code === "site.cancelled" && !/MAY have been issued/u.test(error.message),
+  );
   assert.equal(await storeContents(site), undefined);
 });
 
@@ -829,8 +842,10 @@ test("cancelling during backoff after a reset claim still names the possible orp
 
   // The positive control: the reset attempt may have minted, and the same
   // backoff cancellation must say so.
-  await assert.rejects(login(invocation), (error) =>
-    error?.code === "site.cancelled" && /MAY have been issued/u.test(error.message));
+  await assert.rejects(
+    login(invocation),
+    (error) => error?.code === "site.cancelled" && /MAY have been issued/u.test(error.message),
+  );
   assert.equal(await storeContents(site), undefined);
 });
 
@@ -1188,13 +1203,19 @@ test("logout with nothing stored succeeds and reports removed: false", async (te
 function statusRoutes(exchange = exchangeRoute()) {
   return [
     exchange,
+    { method: "GET", pathname: /\/deploy\/review$/u, reply: {} },
     {
       method: "GET",
       pathname: READINESS,
       reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
     },
     { method: "GET", pathname: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
-    { method: "GET", pathname: SITE_IMAGES, reply: { images: [], totalImages: 0, processingImages: 0, nextPageToken: "" } },
+    {
+      method: "GET",
+      pathname: SITE_IMAGES,
+      reply: { images: [], totalImages: 0, processingImages: 0, nextPageToken: "" },
+    },
+    { method: "GET", pathname: /\/broken-references$/u, reply: {} },
   ];
 }
 
@@ -1328,9 +1349,11 @@ test("status reports a paused platform on both channels, naming the setting and 
   // The human channel names the switch and its home. Matched against the
   // exported constants rather than prose, so rewording the sentence is free
   // and dropping the setting key is not.
-  assert.ok(progress.some((line) =>
-    line.includes(EXTERNAL_WRITES_SETTING_KEY) && line.includes(EXTERNAL_WRITES_SETTING_LOCATION)
-  ));
+  assert.ok(
+    progress.some((line) =>
+      line.includes(EXTERNAL_WRITES_SETTING_KEY) && line.includes(EXTERNAL_WRITES_SETTING_LOCATION)
+    ),
+  );
 });
 
 test("status reports an enabled platform without naming a remedy", async (testContext) => {
@@ -1620,10 +1643,16 @@ test("the offline verbs refuse once a newer release has been recorded", async (t
   // out what they have and how to fix it.
   await testContext.test("--version and --help still answer", async () => {
     const version = sink();
-    assert.equal(await runCli({ arguments_: ["--version"], environment: site.environment, stdout: version, stderr: sink() }), 0);
+    assert.equal(
+      await runCli({ arguments_: ["--version"], environment: site.environment, stdout: version, stderr: sink() }),
+      0,
+    );
     assert.equal(version.read().trim(), CLI_VERSION);
     const help = sink();
-    assert.equal(await runCli({ arguments_: ["--help"], environment: site.environment, stdout: help, stderr: sink() }), 0);
+    assert.equal(
+      await runCli({ arguments_: ["--help"], environment: site.environment, stdout: help, stderr: sink() }),
+      0,
+    );
     assert.match(help.read(), /CliUpgradeRequired/u);
     // `env` too: it is how an outdated operator finds the store the recording
     // lives in, so it stays outside the gate by design.
@@ -1790,8 +1819,7 @@ test("login refuses a store with no room for the credential before minting one",
   // these and the shape under test is a store that reads back fine and simply
   // has no room left.
   const credentials = [];
-  const size = () =>
-    Buffer.byteLength(`${JSON.stringify({ schemaVersion: 2, credentials }, undefined, 2)}\n`, "utf8");
+  const size = () => Buffer.byteLength(`${JSON.stringify({ schemaVersion: 2, credentials }, undefined, 2)}\n`, "utf8");
   for (let index = 0; size() < LIMITS.credentialsBytes - 1_400; index++) {
     credentials.push({
       apiOrigin: `https://${String(index).padStart(4, "0")}${"x".repeat(200)}.test`,
@@ -1907,4 +1935,42 @@ test("the store location follows the injected environment, not the process", asy
     (await readCredentialStore({ XDG_CONFIG_HOME: "relative/path", HOME: home })).path,
     path.join(home, ".config", "taproot-site", "credentials.json"),
   );
+});
+
+test("sites and use send the CLI version and preserve selection when listing is refused", async (context) => {
+  for (const verb of ["sites", "use"]) {
+    await context.test(verb, async (child) => {
+      const site = await fixture(child);
+      await seedCredential(site);
+      const before = await readFile(site.configPath, "utf8");
+      const message =
+        "CLI 0.2.0 is outdated; latest is 9.9.9. Upgrade with: npm install -g @taprootio/site-authoring@latest.";
+      const wire = api([{
+        method: "GET",
+        pathname: "/api/v1/site-authoring/authorable-sites",
+        reply: (call) => {
+          assert.equal(call.search.get("cliVersion"), CLI_VERSION);
+          assert.equal(call.headers.authorization, `Bearer ${STORED_KEY}`);
+          return jsonResponse({
+            code: 3,
+            message,
+            details: [{
+              "@type": "type.googleapis.com/google.rpc.BadRequest.FieldViolation",
+              field: "CliUpgradeRequired",
+              description: message,
+            }],
+          }, 400);
+        },
+      }]);
+      const { invocation, progress } = invoke(site, wire, { verb, siteSelector: OTHER_SITE_ID });
+      await assert.rejects((verb === "sites" ? sites : use)(invocation), (error) => {
+        assert.equal(error.refusalKind(), "cli_outdated");
+        assert.equal(error.message, message);
+        return true;
+      });
+      assert.equal(wire.calls.length, 1);
+      assert.equal(await readFile(site.configPath, "utf8"), before);
+      assert.ok(progress.some((line) => line.includes(message)));
+    });
+  }
 });

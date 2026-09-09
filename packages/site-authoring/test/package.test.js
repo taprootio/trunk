@@ -125,6 +125,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // The one home for the offline fixture contract: validate enforces it and
     // 'help fixture' states it from the same constants (TR00647).
     "src/fixture-contract.js",
+    "src/fixture-init.js",
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-workspace.js",
@@ -140,6 +141,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/session.js",
     "src/settings-catalog.js",
     "src/settings.js",
+    "src/staging-check.js",
     "src/theme-validation.js",
     "src/transport.js",
     "src/verbs/approve.js",
@@ -155,6 +157,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/preview-page.js",
     "src/verbs/preview-revoke.js",
     "src/verbs/pull.js",
+    "src/verbs/redirects-check.js",
     "src/verbs/redirects-pull.js",
     "src/verbs/redirects-push.js",
     "src/verbs/sites.js",
