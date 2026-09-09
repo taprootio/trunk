@@ -1,0 +1,42 @@
+{
+  "name": "@taprootio/docs-publisher",
+  "version": "1.1.0",
+  "description": "Reliable Taproot Docs release and deployment publisher",
+  "type": "module",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taprootio/trunk.git",
+    "directory": "packages/docs-publisher"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@taprootio/docs-artifact": "1.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "bin": {
+    "taproot": "./bin/taproot.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "prepack": "npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
