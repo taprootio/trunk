@@ -16,7 +16,7 @@ function successResult() {
   return {
     schemaVersion: 1,
     ok: true,
-    publisher: { name: "@taprootio/docs-publisher", version: "1.1.0" },
+    publisher: { name: "@taprootio/docs-publisher", version: "1.2.0" },
     compatibility: {
       configVersion: 1,
       artifactPackageVersion: "1.1.0",
@@ -122,7 +122,7 @@ test("exposes help and version at the binary and product-command levels", async 
   for (const arguments_ of [["--version"], ["docs", "publish", "--version"]]) {
     const stdout = sink();
     assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
-    assert.equal(stdout.read(), "1.1.0\n");
+    assert.equal(stdout.read(), "1.2.0\n");
   }
 });
 
@@ -145,4 +145,54 @@ test("strips terminal controls from stable fields and human diagnostics", async 
     "taproot docs publish failed [artifact.invalid] field=pathspoof: invalidsecond-line\n",
   );
   assert.doesNotMatch(stderr.read().slice(0, -1), /[\r\n]/u);
+});
+
+
+test("superseded GitHub main pushes exit successfully without deployment outputs", async (testContext) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "taproot-docs-superseded-"));
+  testContext.after(() => rm(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, "github-output");
+  await writeFile(outputPath, "");
+  const stdout = sink();
+  const published = successResult();
+  const result = {
+    schemaVersion: published.schemaVersion,
+    ok: true,
+    outcome: "superseded",
+    publisher: published.publisher,
+    siteId: published.siteId,
+    mode: published.mode,
+    release: published.release,
+    currentRevision: "f".repeat(40),
+  };
+  const exitCode = await runCli({
+    arguments_: ["docs", "publish", "--require-github-main-head", "--quiet"],
+    environment: { GITHUB_OUTPUT: outputPath },
+    stdout,
+    stderr: sink(),
+    publish: async (options) => {
+      assert.equal(options.requireGitHubMainHead, true);
+      return result;
+    },
+  });
+  assert.equal(exitCode, 0);
+  assert.deepEqual(JSON.parse(stdout.read()), result);
+  const output = await readFile(outputPath, "utf8");
+  assert.match(output, /taproot_docs_outcome=superseded\n/u);
+  assert.match(output, /taproot_docs_release_id=/u);
+  assert.doesNotMatch(output, /taproot_docs_(?:staging|production|output_release)_/u);
+});
+
+test("rejects a duplicate GitHub main-head flag before invoking the publisher", async () => {
+  const stdout = sink();
+  let calls = 0;
+  const exitCode = await runCli({
+    arguments_: ["docs", "publish", "--require-github-main-head", "--require-github-main-head"],
+    stdout,
+    stderr: sink(),
+    publish: async () => { calls += 1; return successResult(); },
+  });
+  assert.equal(exitCode, 2);
+  assert.equal(calls, 0);
+  assert.equal(JSON.parse(stdout.read()).error.code, "cli.duplicate_option");
 });

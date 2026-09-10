@@ -11,7 +11,7 @@ import {
   writeGithubActionsOutput,
 } from "./output.js";
 
-const HELP = `Usage: taproot docs publish [--config <path>] [--quiet]
+const HELP = `Usage: taproot docs publish [--config <path>] [--quiet] [--require-github-main-head]
 
 Publishes one exact Taproot Docs artifact through validation, staging, and
 atomic production promotion. The site-scoped credential is read only from
@@ -20,6 +20,7 @@ ${PUBLISH_KEY_ENVIRONMENT_VARIABLE}.
 Options:
   --config <path>  Use an explicit publisher config instead of parent discovery.
   --quiet          Suppress human progress; JSON output is unchanged.
+  --require-github-main-head  Stage only if this GitHub main push is still current.
   --help           Show this help.
   --version        Show the package version.
 `;
@@ -38,8 +39,14 @@ function parseArguments(arguments_) {
   }
   let configPath;
   let quiet = false;
+  let requireGitHubMainHead = false;
   for (let index = 2; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
+    if (argument === "--require-github-main-head") {
+      if (requireGitHubMainHead) throw new PublisherError("cli.duplicate_option", "--require-github-main-head may be supplied only once.", { exitCode: 2 });
+      requireGitHubMainHead = true;
+      continue;
+    }
     if (argument === "--quiet") {
       if (quiet) throw new PublisherError("cli.duplicate_option", "--quiet may be supplied only once.", { exitCode: 2 });
       quiet = true;
@@ -63,7 +70,7 @@ function parseArguments(arguments_) {
     }
     throw new PublisherError("cli.unknown_option", "The command contains an unknown option.", { exitCode: 2 });
   }
-  return { mode: "publish", configPath, quiet };
+  return { mode: "publish", configPath, quiet, requireGitHubMainHead };
 }
 
 export async function runCli({
@@ -90,6 +97,7 @@ export async function runCli({
       configPath: parsed.configPath,
       environment,
       quiet: parsed.quiet,
+      requireGitHubMainHead: parsed.requireGitHubMainHead,
       onProgress: (message) => stderr.write(`${message}\n`),
     });
     if (environment.GITHUB_OUTPUT) await writeGithubActionsOutput(environment.GITHUB_OUTPUT, result);

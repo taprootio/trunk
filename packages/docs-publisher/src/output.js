@@ -88,8 +88,13 @@ export async function writeGithubActionsOutput(outputPath, result) {
   ];
   if (result.ok) {
     lines.push(
+      `taproot_docs_outcome=${result.outcome === "superseded" ? "superseded" : "published"}`,
       `taproot_docs_publication_mode=${result.mode}`,
       `taproot_docs_release_id=${result.release.id}`,
+    );
+  }
+  if (result.ok && result.outcome !== "superseded") {
+    lines.push(
       `taproot_docs_staging_deployment_id=${result.staging.deploymentId}`,
       `taproot_docs_production_deployment_id=${result.production.deploymentId}`,
       `taproot_docs_output_release_id=${result.production.outputReleaseId}`,

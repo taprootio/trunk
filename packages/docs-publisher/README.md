@@ -21,7 +21,7 @@ does not create a catch-all Trunk package.
 First-party repositories pin the exact released CLI:
 
 ```bash
-npm install --save-dev --save-exact @taprootio/docs-publisher@1.1.0
+npm install --save-dev --save-exact @taprootio/docs-publisher@1.2.0
 ```
 
 Then build the configured site and publish its exact artifact:
@@ -49,6 +49,60 @@ Keep `@taprootio/docs-publisher` in the repository lockfile at the exact
 reviewed version and run the command only after that same job has built the
 configured artifact directory. The command writes its structured result to the
 runner-provided `GITHUB_OUTPUT` automatically.
+
+## GitHub main publishing guard
+
+Version 1.2.0 adds an opt-in guard for merge-to-main workflows:
+
+```yaml
+permissions:
+  contents: read
+concurrency:
+  group: taproot-docs-production-<exact-site-id>
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: taproot-docs-production
+    steps:
+      # Pinned checkout, frozen install, build and validation steps go here.
+      - name: Publish current main
+        run: npx --no-install taproot docs publish --require-github-main-head --quiet
+        env:
+          TAPROOT_DOCS_PUBLISH_KEY: ${{ secrets.TAPROOT_DOCS_PUBLISH_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+The excerpt shows the required guard settings, not a complete workflow. Trigger
+only on `push` to `main`, pin actions by commit SHA, and exclude fork and
+Dependabot runs from the publishing job. A pull-request build must never reach
+this job or receive its Environment credential.
+
+The guard requires GitHub's normal Actions variables to describe a push on
+`refs/heads/main` at `https://github.com`, with its API at `https://api.github.com`.
+The event SHA, numeric repository id, locator and ref must match the artifact's
+immutable source provenance before any release request. `GITHUB_TOKEN` is used
+only for a read of that numeric repository's `main` ref at the fixed GitHub API;
+the Docs key remains confined to the configured Taproot API.
+
+After Taproot finishes validating the release, immediately before requesting
+staging, the publisher reads the current `main` SHA. If it differs, the command
+exits successfully with `ok: true`, `outcome: "superseded"`, the validated
+`release`, and `currentRevision`. It requests no staging or production deployment.
+GitHub outputs include `taproot_docs_outcome=superseded` and the release id, with
+no deployment ids or pointer version. A completed publication instead emits
+`taproot_docs_outcome=published` and the existing deployment outputs.
+
+Failed, redirected, malformed, oversized or timed-out GitHub reads fail closed.
+The check is not an atomic operation across GitHub and Taproot: a push can arrive
+after the read. Site-specific concurrency with cancellation disabled remains
+necessary so the following current run finishes after its predecessor. A stale
+run that starts later still skips itself at the guard. The workflow must not
+replace this check with an earlier shell preflight before upload/validation.
+
+Programmatic callers opt in with `publishDocs({ requireGitHubMainHead: true })`
+and handle the `DocsPublishSuccess | DocsPublishSuperseded` result. Existing
+callers that omit the option retain their publication behavior and success type.
 
 ## Project configuration
 
@@ -94,7 +148,7 @@ The v1 handshake is explicit and fail-closed:
 
 | Surface                     | `mode: "managed"`                      | `mode: "prebuilt"`                       |
 | --------------------------- | -------------------------------------- | ---------------------------------------- |
-| Publisher package           | `@taprootio/docs-publisher@1.1.0`      | `@taprootio/docs-publisher@1.1.0`        |
+| Publisher package           | `@taprootio/docs-publisher@1.2.0`      | `@taprootio/docs-publisher@1.2.0`        |
 | Publisher config            | `configVersion: 1`                     | `configVersion: 1`                       |
 | Artifact package dependency | exact `@taprootio/docs-artifact@1.1.0` | exact `@taprootio/docs-artifact@1.1.0`   |
 | Artifact manifest           | `taproot-docs-manifest.json`           | `taproot-docs-prebuilt-manifest.json`    |
@@ -179,7 +233,7 @@ nonzero. Success requires all of these exact identities to be terminal:
 ## Output contract
 
 Human progress goes to stderr. Stdout contains exactly one compact JSON object.
-Successful output is schema version 1 and includes publisher/artifact
+Completed-publication output is schema version 1 and includes publisher/artifact
 compatibility versions, the resolved publication `mode`, site id, artifact
 hash/length and upload/reuse flags, the immutable release id, both deployment
 ids, the shared output release id, and staging/production pointer versions.
@@ -193,12 +247,17 @@ these scalar outputs:
 
 | Output                                    | Value                                     |
 | ----------------------------------------- | ----------------------------------------- |
+| `taproot_docs_outcome`                  | `published` or `superseded`                |
 | `taproot_docs_publication_mode`           | `managed` or `prebuilt`                   |
 | `taproot_docs_release_id`                 | immutable source release id               |
 | `taproot_docs_staging_deployment_id`      | staging deployment id                     |
 | `taproot_docs_production_deployment_id`   | production deployment id                  |
 | `taproot_docs_output_release_id`          | shared immutable output release id        |
 | `taproot_docs_production_pointer_version` | acknowledged production pointer version   |
+
+A superseded success contains the release/source and current main revisions but
+no artifact compatibility or deployment fields. Its scalar outputs stop at outcome,
+mode and release id; failure results carry only the JSON output.
 
 Tokens, Authorization values, signed upload URLs/headers, artifact contents, and
 unrelated environment variables are never included in progress, diagnostics,

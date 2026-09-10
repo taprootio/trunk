@@ -22,6 +22,7 @@ import {
   UNSTAMPED_WIRE_MODES,
 } from "./constants.js";
 import { PublisherError } from "./errors.js";
+import { createGitHubMainHeadGuard } from "./github-main-head.js";
 import { ApiError, DocsApiClient } from "./transport.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -599,6 +600,7 @@ export async function publishPreparedArtifact({
   client,
   onProgress = () => {},
   now = Date.now,
+  beforeStage,
 }) {
   const mode = resolvePublicationMode(config, snapshot, archive);
   const body = releaseBody(config.siteId, mode, snapshot.manifest, archive);
@@ -626,6 +628,23 @@ export async function publishPreparedArtifact({
     onProgress,
     now,
   );
+
+  if (beforeStage) {
+    const head = await beforeStage();
+    if (head.superseded) {
+      onProgress("The source revision has been superseded on main; no deployment was requested.");
+      return Object.freeze({
+        schemaVersion: PUBLISH_RESULT_SCHEMA_VERSION,
+        ok: true,
+        outcome: "superseded",
+        publisher: { name: PUBLISHER_NAME, version: PUBLISHER_VERSION },
+        siteId: config.siteId,
+        mode,
+        release: { id: validated.id, status: validated.status, sourceRevision: validated.sourceRevision },
+        currentRevision: head.currentRevision,
+      });
+    }
+  }
 
   onProgress("Creating or resolving the exact staging deployment.");
   const stageExpected = {
@@ -706,6 +725,9 @@ export async function publishPreparedArtifact({
 }
 
 export async function publishDocs(options = {}) {
+  if (options.requireGitHubMainHead !== undefined && typeof options.requireGitHubMainHead !== "boolean") {
+    throw new PublisherError("config.github_main_head", "requireGitHubMainHead must be a boolean.");
+  }
   const environment = options.environment ?? process.env;
   const token = environment[PUBLISH_KEY_ENVIRONMENT_VARIABLE];
   if (typeof token !== "string" || token.length === 0) {
@@ -723,6 +745,9 @@ export async function publishDocs(options = {}) {
       : "Validating the managed Docs artifact.",
   );
   const snapshot = await snapshotDocsArtifact(config.artifactDirectory, config.mode);
+  const beforeStage = options.requireGitHubMainHead
+    ? createGitHubMainHeadGuard({ environment, source: snapshot.manifest.source, fetch: options.fetch, signal: options.signal })
+    : undefined;
   const archive = createReleaseArchive(snapshot);
   const client = new DocsApiClient({
     apiBaseUrl: config.apiBaseUrl,
@@ -730,5 +755,5 @@ export async function publishDocs(options = {}) {
     fetch: options.fetch,
     signal: options.signal,
   });
-  return await publishPreparedArtifact({ config, snapshot, archive, client, onProgress });
+  return await publishPreparedArtifact({ config, snapshot, archive, client, onProgress, beforeStage });
 }

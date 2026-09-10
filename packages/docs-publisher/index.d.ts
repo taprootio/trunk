@@ -12,7 +12,8 @@ export interface DocsPublisherConfig {
 export interface DocsPublishSuccess {
   schemaVersion: 1;
   ok: true;
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.1.0" };
+  outcome?: "published";
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.2.0" };
   compatibility: {
     configVersion: 1;
     artifactPackageVersion: "1.1.0";
@@ -27,6 +28,18 @@ export interface DocsPublishSuccess {
   production: { deploymentId: string; outputReleaseId: string; pointerVersion: number; status: string };
 }
 
+/** The validated source was superseded on main. No deployment was requested. */
+export interface DocsPublishSuperseded {
+  schemaVersion: 1;
+  ok: true;
+  outcome: "superseded";
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.2.0" };
+  siteId: string;
+  mode: DocsPublicationMode;
+  release: { id: string; status: string; sourceRevision: string };
+  currentRevision: string;
+}
+
 export interface PublishOptions {
   cwd?: string;
   configPath?: string;
@@ -34,6 +47,8 @@ export interface PublishOptions {
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
   quiet?: boolean;
+  /** Require a matching GitHub main push and re-check its head immediately before staging. */
+  requireGitHubMainHead?: boolean;
   onProgress?: (message: string) => void;
 }
 
@@ -44,4 +59,5 @@ export class PublisherError extends Error {
   readonly exitCode: number;
 }
 
-export function publishDocs(options?: PublishOptions): Promise<DocsPublishSuccess>;
+export function publishDocs(options?: PublishOptions & { requireGitHubMainHead?: false }): Promise<DocsPublishSuccess>;
+export function publishDocs(options: PublishOptions): Promise<DocsPublishSuccess | DocsPublishSuperseded>;

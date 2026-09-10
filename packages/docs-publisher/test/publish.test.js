@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { loadConformanceCases } from "@taprootio/docs-artifact/conformance";
 
 import { ARTIFACT_PACKAGE_VERSION, CONFIG_VERSION, LIMITS, PUBLISHER_VERSION } from "../src/constants.js";
 import { PublisherError } from "../src/errors.js";
-import { publishPreparedArtifact } from "../src/publish.js";
+import { publishDocs, publishPreparedArtifact } from "../src/publish.js";
 import { ApiError, DocsApiClient } from "../src/transport.js";
 
 const MANAGED_WIRE_MODE = "DOCS_PUBLICATION_MODE_MANAGED";
@@ -1045,4 +1049,102 @@ test("parent cancellation at the poll deadline remains cancellation", async () =
     (error) => error?.code === "publisher.cancelled",
   );
   assert.equal(controller.signal.aborted, true);
+});
+
+test("the public GitHub guard observes main after release validation and before staging", async (testContext) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "taproot-docs-main-head-"));
+  testContext.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = (await loadConformanceCases()).find((entry) => entry.name === "valid-minimal");
+  assert.ok(fixture);
+  const artifact = JSON.parse(fixture.manifest);
+  artifact.source = {
+    provider: "github",
+    repositoryId: "1162327960",
+    repository: "taprootio/test",
+    repositoryUrl: "https://github.com/taprootio/test",
+    revision: "a".repeat(40),
+    ref: "refs/heads/main",
+  };
+  const artifactRoot = path.join(root, "artifact");
+  await mkdir(artifactRoot);
+  await writeFile(path.join(artifactRoot, "taproot-docs-manifest.json"), JSON.stringify(artifact));
+  for (const file of fixture.files) {
+    await mkdir(path.dirname(path.join(artifactRoot, file.path)), { recursive: true });
+    await writeFile(path.join(artifactRoot, file.path), file.content);
+  }
+  await writeFile(path.join(root, "taproot-docs-publisher.json"), JSON.stringify({
+    configVersion: 1, siteId: SITE_ID, artifactDirectory: "artifact", mode: "managed",
+  }));
+  const environment = {
+    TAPROOT_DOCS_PUBLISH_KEY: "docs-test-secret",
+    GITHUB_TOKEN: "github-test-secret",
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "push",
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_API_URL: "https://api.github.com",
+    GITHUB_REPOSITORY: artifact.source.repository,
+    GITHUB_REPOSITORY_ID: artifact.source.repositoryId,
+    GITHUB_REF: artifact.source.ref,
+    GITHUB_SHA: artifact.source.revision,
+  };
+  for (const scenario of ["fresh", "stale", "unreadable"]) {
+    await testContext.test(scenario, async () => {
+      let head = artifact.source.revision;
+      const sequence = [];
+      const client = withReleaseEcho(successClient({ reused: true }), {
+        sourceRepositoryId: artifact.source.repositoryId,
+      });
+      const fetch = async (url, options) => {
+        const request = new URL(url);
+        const headers = new Headers(options.headers);
+        if (request.origin === "https://api.github.com") {
+          assert.equal(headers.get("authorization"), "Bearer github-test-secret");
+          assert.equal(request.pathname, "/repositories/1162327960/git/ref/heads/main");
+          sequence.push("head");
+          if (scenario === "unreadable") return new Response("denied", { status: 403 });
+          return Response.json({ ref: "refs/heads/main", object: { type: "commit", sha: head } });
+        }
+        assert.equal(request.origin, "https://app.taproot.io");
+        assert.equal(headers.get("authorization"), "Bearer docs-test-secret");
+        const apiPath = request.pathname.replace(/^\/api\//u, "");
+        const response = await client.request(apiPath, {
+          method: options.method,
+          body: options.body ? JSON.parse(options.body) : undefined,
+        });
+        if (apiPath.endsWith(`/docs/releases/${RELEASE_ID}`)) {
+          sequence.push("validated");
+          if (scenario === "stale") head = "b".repeat(40);
+        }
+        if (apiPath.endsWith("/docs/deployments:stage")) sequence.push("stage");
+        if (apiPath.endsWith("/docs/deployments:promote")) sequence.push("promote");
+        return Response.json(response);
+      };
+      const publish = () => publishDocs({ cwd: root, environment, fetch, requireGitHubMainHead: true });
+      if (scenario === "unreadable") {
+        await assert.rejects(publish(), (error) => error instanceof PublisherError);
+        assert.deepEqual(sequence, ["validated", "head"]);
+      } else {
+        const result = await publish();
+        if (scenario === "stale") {
+          assert.equal(result.outcome, "superseded");
+          assert.equal(result.currentRevision, head);
+          assert.equal(result.release.sourceRevision, artifact.source.revision);
+          assert.equal(result.staging, undefined);
+          assert.equal(result.production, undefined);
+          assert.deepEqual(sequence, ["validated", "head"]);
+        } else {
+          assert.equal(result.production.deploymentId, PRODUCTION_ID);
+          assert.deepEqual(sequence, ["validated", "head", "stage", "promote"]);
+        }
+      }
+    });
+  }
+  let requests = 0;
+  await assert.rejects(publishDocs({
+    cwd: root,
+    environment: { ...environment, GITHUB_SHA: "c".repeat(40) },
+    requireGitHubMainHead: true,
+    fetch: async () => { requests += 1; throw new Error("must not request"); },
+  }), (error) => error instanceof PublisherError);
+  assert.equal(requests, 0);
 });

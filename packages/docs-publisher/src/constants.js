@@ -1,5 +1,5 @@
 export const PUBLISHER_NAME = "@taprootio/docs-publisher";
-export const PUBLISHER_VERSION = "1.1.0";
+export const PUBLISHER_VERSION = "1.2.0";
 export const PUBLISH_RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-docs-publisher.json";
 export const CONFIG_VERSION = 1;
