@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.7.1" },
     verb,
   };
 }
@@ -575,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.7.0\n");
+    assert.equal(versionStdout.read(), "0.7.1\n");
   }
 });
 
@@ -679,7 +679,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 4\.11\.0 complete site-theme contract/u,
+      match: /^Espalier 4\.12\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -793,7 +793,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.7.0" },
+          cli: { name: "@taprootio/site-authoring", version: "0.7.1" },
           verb: "help",
           referenceVersion: 20,
           topic: scenario.topic,
