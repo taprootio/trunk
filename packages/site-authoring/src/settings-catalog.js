@@ -115,6 +115,7 @@ export const SETTINGS_GROUPS = Object.freeze([
       { name: "commentsMode", wireType: "enum", zero: "SITE_COMMENTS_MODE_UNSPECIFIED" },
       ...stringFields("tiptapImagePlacement"),
       { name: "allowSearch", wireType: "boolean" },
+      { name: "showFollowButton", wireType: "boolean" },
       { name: "albumSeamless", wireType: "boolean" },
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },
