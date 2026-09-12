@@ -17,6 +17,8 @@ jobs:
   packages:
     name: Public integration packages
     runs-on: ubuntu-latest
+    outputs:
+      integration_reference_present: ${{ steps.integration-reference.outputs.present }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -60,6 +62,38 @@ jobs:
           fi
           echo "present=false" >> "$GITHUB_OUTPUT"
 
+      - name: Detect the integration SDK bootstrap boundary
+        id: integration-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f packages/integration-sdk/package.json; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git cat-file -e origin/main:packages/integration-sdk/package.json 2>/dev/null; then
+            echo "The independently owned integration SDK subtree may not be removed after bootstrap." >&2
+            exit 1
+          fi
+          echo "present=false" >> "$GITHUB_OUTPUT"
+
+      - name: Detect the integration reference template bootstrap boundary
+        id: integration-reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f templates/integration-reference/package.json; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git cat-file -e origin/main:templates/integration-reference/package.json 2>/dev/null; then
+            echo "The independently owned integration reference template subtree may not be removed after bootstrap." >&2
+            exit 1
+          fi
+          echo "present=false" >> "$GITHUB_OUTPUT"
+
       - name: Install exact package dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
 
@@ -75,3 +109,166 @@ jobs:
       - name: Test the site-authoring CLI after its allowlisted bootstrap sync
         if: steps.site-authoring.outputs.present == 'true'
         run: npm run test:site-authoring
+
+      - name: Test the integration SDK after its allowlisted bootstrap sync
+        if: steps.integration-sdk.outputs.present == 'true'
+        run: npm run test:integration-sdk
+
+  # The template follows the SDK release, so it gets its own job and database
+  # only after its bootstrap guard proves the public tree contains it. This
+  # also keeps the first SDK release independent of a registry package that
+  # does not exist until its publish workflow completes.
+  integration-reference:
+    name: Public integration reference template
+    needs: packages
+    if: needs.packages.outputs.integration_reference_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: taproot_integration_reference_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taproot_integration_reference_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # database.integration.test.js discovers this opt-in URL. The service
+      # port is ephemeral, so concurrent runner jobs cannot collide.
+      REFERENCE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/taproot_integration_reference_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Upgrade npm to the reviewed release version
+        run: npm install --global npm@12.0.2
+
+      - name: Test the template in an isolated packed consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$(mktemp -d)"
+          trap 'rm -rf "$workspace"' EXIT
+          consumer="$workspace/consumer"
+          cp -R templates/integration-reference "$consumer"
+          cp "$consumer/package.json" "$workspace/package.json.before"
+          cp "$consumer/package-lock.json" "$workspace/package-lock.json.before"
+
+          # `--ignore-scripts` ensures this is the public tarball shape, not a
+          # second execution of the SDK's source-tree test hook.
+          (cd packages/integration-sdk && npm pack --ignore-scripts --json --pack-destination "$workspace") \
+            > "$workspace/sdk-pack.json"
+
+          SDK_PACK_JSON="$workspace/sdk-pack.json" \
+          TEMPLATE_PACKAGE_JSON="$consumer/package.json" \
+          TEMPLATE_PACKAGE_LOCK="$consumer/package-lock.json" \
+          WORKSPACE="$workspace" \
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          import { npmPackResult } from "./scripts/npm-release-guard.mjs";
+          import { selectSdkInstallSource } from "./scripts/integration-sdk-integrity.mjs";
+
+          const readJson = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
+          const pack = npmPackResult(readJson(process.env.SDK_PACK_JSON));
+          const template = readJson(process.env.TEMPLATE_PACKAGE_JSON);
+          const lock = readJson(process.env.TEMPLATE_PACKAGE_LOCK);
+          const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+          if (!pack?.name || !exactVersion.test(pack.version) || !pack.integrity || !pack.filename) {
+            throw new Error("The local SDK pack must report a named, versioned tarball with an integrity digest.");
+          }
+          if (pack.filename.includes("/") || pack.filename.includes("\\")) {
+            throw new Error("The local SDK tarball filename must remain within the temporary consumer workspace.");
+          }
+          const templatePin = template.dependencies?.[pack.name];
+          if (!exactVersion.test(templatePin)) {
+            throw new Error("The reference template must declare an exact SDK version.");
+          }
+          const rootPin = lock.packages?.[""]?.dependencies?.[pack.name];
+          const installedPin = lock.packages?.[`node_modules/${pack.name}`];
+          if (rootPin !== templatePin || installedPin?.version !== templatePin || typeof installedPin?.integrity !== "string") {
+            throw new Error("The reference template lock must pin its exact SDK dependency.");
+          }
+          if (templatePin === pack.version) {
+            const installSource = await selectSdkInstallSource(pack, installedPin);
+            writeFileSync(join(process.env.WORKSPACE, "sdk-tarball-path"), join(process.env.WORKSPACE, pack.filename));
+            writeFileSync(join(process.env.WORKSPACE, "sdk-install-source"), `${installSource}\n`);
+            writeFileSync(join(process.env.WORKSPACE, "compare-sdk-files"), installSource === "registry" ? "yes" : "no");
+          } else {
+            // Template releases may intentionally remain on an older SDK. Its
+            // immutable registry lock, rather than the newer sibling source,
+            // is then the consumer contract under test.
+            let registry;
+            try {
+              registry = new URL(installedPin.resolved);
+            } catch {
+              throw new Error("The older SDK lock must resolve to the npm registry.");
+            }
+            if (registry.origin !== "https://registry.npmjs.org") {
+              throw new Error("The older SDK lock must resolve to the npm registry.");
+            }
+            writeFileSync(join(process.env.WORKSPACE, "sdk-install-source"), "registry\n");
+          }
+          NODE
+
+          install_source="$(<"$workspace/sdk-install-source")"
+          if [[ "$install_source" == "packed" ]]; then
+            sdk_tarball="$(<"$workspace/sdk-tarball-path")"
+            test -f "$sdk_tarball"
+            # The tarball is a test-only installation input. `--no-save` and
+            # `--package-lock=false` preserve the template's public manifest
+            # and lock while allowing the first SDK release to run before npm
+            # contains that exact version.
+            npm install --ignore-scripts --no-save --package-lock=false --no-audit --no-fund "$sdk_tarball" --prefix "$consumer"
+          elif [[ "$install_source" == "registry" ]]; then
+            (cd "$consumer" && npm ci --ignore-scripts --no-audit --no-fund)
+            if [[ -f "$workspace/compare-sdk-files" && "$(<"$workspace/compare-sdk-files")" == "yes" ]]; then
+              packed_consumer="$workspace/packed-consumer"
+              cp -R templates/integration-reference "$packed_consumer"
+              sdk_tarball="$(<"$workspace/sdk-tarball-path")"
+              npm install --ignore-scripts --no-save --package-lock=false --no-audit --no-fund "$sdk_tarball" --prefix "$packed_consumer"
+              PACKED_SDK="$packed_consumer/node_modules/@taprootio/integration-sdk" \
+              REGISTRY_SDK="$consumer/node_modules/@taprootio/integration-sdk" \
+              node --input-type=module -e 'import { assertEquivalentSdkFiles } from "./scripts/integration-sdk-integrity.mjs"; assertEquivalentSdkFiles(process.env.PACKED_SDK, process.env.REGISTRY_SDK);'
+            fi
+          else
+            echo "Unexpected SDK installation source: $install_source" >&2
+            exit 1
+          fi
+          cmp --silent "$workspace/package.json.before" "$consumer/package.json"
+          cmp --silent "$workspace/package-lock.json.before" "$consumer/package-lock.json"
+
+          (
+            cd "$consumer"
+            CONSUMER_SDK_NAME="@taprootio/integration-sdk" node --input-type=module <<'NODE'
+          import { readFileSync, realpathSync } from "node:fs";
+          import { resolve } from "node:path";
+          import { pathToFileURL } from "node:url";
+
+          const name = process.env.CONSUMER_SDK_NAME;
+          const expectedVersion = JSON.parse(readFileSync("package.json", "utf8")).dependencies[name];
+          const installedRoot = realpathSync(resolve("node_modules", name));
+          const resolved = import.meta.resolve(name);
+          if (JSON.parse(readFileSync(resolve(installedRoot, "package.json"), "utf8")).version !== expectedVersion) {
+            throw new Error("The installed SDK must match the template's exact production dependency pin.");
+          }
+          if (!resolved.startsWith(`${pathToFileURL(installedRoot).href}/`)) {
+            throw new Error("The template must resolve the SDK from the unpacked tarball, not a source checkout.");
+          }
+          await import(name);
+          NODE
+          )
+
+          (cd "$consumer" && npm test)
+          cmp --silent "$workspace/package.json.before" "$consumer/package.json"
+          cmp --silent "$workspace/package-lock.json.before" "$consumer/package-lock.json"

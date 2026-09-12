@@ -1,0 +1,71 @@
+name: Publish Integration SDK
+
+on:
+  push:
+    tags:
+      - "integration-sdk-v*"
+
+concurrency:
+  group: integration-sdk-npm
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @taprootio/integration-sdk
+    runs-on: ubuntu-latest
+    environment: npm-integration-sdk-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Require the release commit to belong to main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Setup Node for npm trusted publishing
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@12.0.2
+
+      - name: Require release identity
+        working-directory: packages/integration-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          repository_url="$(node -p "require('./package.json').repository.url")"
+          repository_directory="$(node -p "require('./package.json').repository.directory")"
+          test "$GITHUB_REF_NAME" = "integration-sdk-v${package_version}"
+          test "$repository_url" = "https://github.com/taprootio/trunk.git"
+          test "$repository_directory" = "packages/integration-sdk"
+
+      - name: Test the public SDK package
+        working-directory: packages/integration-sdk
+        run: npm test
+
+      - name: Enforce release order and detect an identical completed npm publish
+        id: registry
+        working-directory: packages/integration-sdk
+        run: node ../../scripts/npm-release.mjs inspect .github/workflows/publish-integration-sdk.yml
+
+      - name: Publish immutable public package with provenance
+        if: steps.registry.outputs.should_publish == 'true'
+        working-directory: packages/integration-sdk
+        env:
+          # Keep this mapping after deleting NPM_TOKEN: an empty value lets npm
+          # obtain its OIDC trusted-publishing credential at publication time.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node ../../scripts/npm-release.mjs publish
