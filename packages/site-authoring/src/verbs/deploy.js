@@ -10,7 +10,7 @@ import {
   waitForDeployment,
   withRefusalGuidance,
 } from "../api.js";
-import { DEPLOY_TARGET_PRODUCTION, DEPLOY_TARGET_STAGING, VERB_DEPLOY } from "../constants.js";
+import { DEPLOY_TARGET_PRODUCTION, DEPLOY_TARGET_STAGING, SURFACE_DOCS_PRESENTATION, VERB_DEPLOY } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { checkStagingRedirects } from "../staging-check.js";
@@ -167,7 +167,12 @@ export async function deploy(invocation) {
     );
   }
   const session = await openSession(invocation);
-  const { client, config, siteId, now, onProgress } = session;
+  const { client, config, siteId, surface, now, onProgress } = session;
+  // A managed Docs site deploys its settings and nothing else (TR00790): the
+  // Docs shell takes pages, navigation, and redirects from the artifact, so
+  // the staging redirect inspection that follows a standard deployment has
+  // nothing to inspect and the handoff it mints is refused there.
+  const presentationOnly = surface === SURFACE_DOCS_PRESENTATION;
   // One advisory line before this verb does any work, and only when the
   // exchange said the platform is paused. It changes nothing else: the write
   // still runs and its refusal still classifies as platform_paused (TR00692).
@@ -203,26 +208,49 @@ export async function deploy(invocation) {
         now,
       });
       await recordDeployment(config, manifest, "production", completed);
-      onProgress(REDIRECT_PROPAGATION_NOTE);
+      if (!presentationOnly) onProgress(REDIRECT_PROPAGATION_NOTE);
       return successResult(VERB_DEPLOY, siteId, {
         target,
         environment: DEPLOYMENT_ENVIRONMENT_PRODUCTION,
+        ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
         promotedStagingDeploymentId: stagingDeploymentId,
         deployment: completed,
         readiness: reportReadiness(readiness),
       });
     }
 
+    // An explicit page or navigation selection on a managed Docs site is
+    // refused before the review is read: the caller asked for something the
+    // site cannot take. The review's own defaults are a different matter,
+    // handled below.
+    if (
+      presentationOnly
+      && ((selection.stagedPageIds?.length ?? 0) > 0 || selection.includeNavigation === true)
+    ) {
+      throw usageError(
+        "deploy.presentation_only",
+        "A managed Docs site deploys settings only: its pages and navigation come from the Docs artifact, so a "
+          + "candidate naming pages or navigation cannot be staged from here.",
+        "Candidate",
+      );
+    }
     onProgress("Reading the changed release set shown on the Deployments page.");
     const defaults = await getDeploySelection(client, siteId);
-    const stagedPageIds = selection.stagedPageIds ?? defaults.stagedPageIds;
+    // The review is site-type-blind, and a Docs site's settings-only
+    // production manifest makes any draft navigation row read as a change
+    // forever. The Deployments page zeroes pages and navigation for a Docs
+    // site rather than refusing on them, and this does the same (TR00790).
+    const stagedPageIds = presentationOnly ? [] : selection.stagedPageIds ?? defaults.stagedPageIds;
     const selectedSettingsTypes = selection.selectedSettingsTypes ?? defaults.selectedSettingsTypes;
-    const includeNavigation = selection.includeNavigation ?? defaults.includeNavigation;
+    const includeNavigation = presentationOnly ? false : selection.includeNavigation ?? defaults.includeNavigation;
     if (stagedPageIds.length === 0 && selectedSettingsTypes.length === 0 && !includeNavigation) {
       throw new SiteAuthoringError(
         "deploy.empty_selection",
-        "A staging deployment needs at least one approved page, settings group, or navigation change. "
-          + "Run 'taproot-site approve' or change staged settings/navigation first.",
+        presentationOnly
+          ? "A staging deployment on a managed Docs site needs at least one settings change; it stages settings "
+            + "only. Change a theme, brand, header, or footer setting first."
+          : "A staging deployment needs at least one approved page, settings group, or navigation change. "
+            + "Run 'taproot-site approve' or change staged settings/navigation first.",
         { field: "Candidate" },
       );
     }
@@ -269,6 +297,22 @@ export async function deploy(invocation) {
       now,
     });
     await recordDeployment(config, manifest, "staging", completed);
+    if (presentationOnly) {
+      onProgress("Review the staged presentation on the site's staging host, then promote it.");
+      return successResult(VERB_DEPLOY, siteId, {
+        target,
+        environment: DEPLOYMENT_ENVIRONMENT_STAGING,
+        authoringSurface: SURFACE_DOCS_PRESENTATION,
+        selection: {
+          stagedPageCount: 0,
+          selectedSettingsTypes,
+          includeNavigation: false,
+        },
+        deployment: completed,
+        readiness: reportReadiness(readiness),
+        nextStep: "deploy --production",
+      });
+    }
     const stagingPreview = await inspectStagingPreview(client, siteId, onProgress, now);
     onProgress(REDIRECT_PROPAGATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {

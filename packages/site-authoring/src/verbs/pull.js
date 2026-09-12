@@ -10,7 +10,12 @@ import {
   TEMPLATE_TYPE_FREE_FORM,
   withRefusalGuidance,
 } from "../api.js";
-import { REFUSAL_CAPABILITY_MISSING, REFUSAL_UNCLASSIFIED, VERB_PULL } from "../constants.js";
+import {
+  REFUSAL_CAPABILITY_MISSING,
+  REFUSAL_UNCLASSIFIED,
+  SURFACE_DOCS_PRESENTATION,
+  VERB_PULL,
+} from "../constants.js";
 import { sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
@@ -560,16 +565,31 @@ async function requireWorkspaceBelongsToSite(workspaceDir, siteId) {
 }
 
 export async function pull(invocation) {
-  const { client, config, siteId, now, onProgress } = await openSession(invocation);
+  const { client, config, siteId, surface, now, onProgress } = await openSession(invocation);
   await ensureWorkspaceRoot(config);
 
   await requireWorkspaceBelongsToSite(config.workspaceDir, siteId);
 
   const registry = await readSourceRegistry(config.workspaceDir, siteId);
 
+  // A managed Docs site has no pages, navigation, or redirects of its own to
+  // snapshot (TR00790): the Docs shell takes those from the artifact, and the
+  // reads would be refused. What it has is the four settings documents, which
+  // are the whole of what this workspace holds for it.
+  const presentationOnly = surface === SURFACE_DOCS_PRESENTATION;
+
   return await withRefusalGuidance(onProgress, "pull", async () => {
-    onProgress("Listing the site's pages.");
-    const { pages, truncated } = await listSitePages(client, siteId, { onProgress });
+    let pages = [];
+    let truncated = false;
+    if (presentationOnly) {
+      onProgress(
+        "This is a managed Docs site: pulling its settings only; pages, navigation, and redirects are not "
+          + "authored here.",
+      );
+    } else {
+      onProgress("Listing the site's pages.");
+      ({ pages, truncated } = await listSitePages(client, siteId, { onProgress }));
+    }
     const live = pages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
     const freeForm = live.filter((summary) => summary.templateType === TEMPLATE_TYPE_FREE_FORM);
     const tracked = await resolveTrackedSources(config.workspaceDir, freeForm, registry, onProgress);
@@ -581,22 +601,24 @@ export async function pull(invocation) {
     // predates the map answers the route with 404; that pull then records no
     // redirect baseline, and `redirects push` asks for a pull against a site
     // that has one rather than guessing.
-    onProgress("Reading the redirect map.");
     let redirectMap;
-    try {
-      redirectMap = await getSiteRedirectMap(client, siteId);
-    } catch (error) {
-      if (
-        error instanceof ApiError
-        && error.refusalKind() === REFUSAL_UNCLASSIFIED
-        && error.httpStatus === 404
-      ) {
-        onProgress(
-          `This Taproot does not serve a redirect map yet; ${REDIRECTS_FILE_NAME} is not written and the manifest `
-            + "records no redirect baseline.",
-        );
-      } else {
-        throw error;
+    if (!presentationOnly) {
+      onProgress("Reading the redirect map.");
+      try {
+        redirectMap = await getSiteRedirectMap(client, siteId);
+      } catch (error) {
+        if (
+          error instanceof ApiError
+          && error.refusalKind() === REFUSAL_UNCLASSIFIED
+          && error.httpStatus === 404
+        ) {
+          onProgress(
+            `This Taproot does not serve a redirect map yet; ${REDIRECTS_FILE_NAME} is not written and the manifest `
+              + "records no redirect baseline.",
+          );
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -988,9 +1010,12 @@ export async function pull(invocation) {
       manifestPages.push(entry);
     }
 
-    onProgress("Reading the navigation tree.");
-    const navItems = await getNavigation(client, siteId);
-    await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, { siteId, navItems });
+    let navItems;
+    if (!presentationOnly) {
+      onProgress("Reading the navigation tree.");
+      navItems = await getNavigation(client, siteId);
+      await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, { siteId, navItems });
+    }
 
     if (redirectMap !== undefined) {
       await writeWorkspaceJson(
@@ -1008,8 +1033,12 @@ export async function pull(invocation) {
       manifestVersion: MANIFEST_VERSION,
       siteId,
       pulledAt: new Date(now()).toISOString(),
+      // Recorded so an offline reader of this workspace — validate, a later
+      // push — knows the absence of pages and navigation is the site's shape,
+      // not a partial pull.
+      ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
       pagesTruncated: truncated,
-      navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length },
+      ...(navItems === undefined ? {} : { navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length } }),
       ...(redirectMap === undefined ? {} : { redirects: redirectsManifestEntry(redirectMap) }),
       settings: pulledSettings,
       settingsSkipped: skippedSettings,
@@ -1046,6 +1075,7 @@ export async function pull(invocation) {
     );
     return successResult(VERB_PULL, siteId, {
       manifestFile: MANIFEST_FILE_NAME,
+      ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
       pages: {
         total: manifestPages.length,
         bodies,
@@ -1059,7 +1089,7 @@ export async function pull(invocation) {
         items: reported.items,
         ...(reported.truncated ? { itemsTruncated: true } : {}),
       },
-      navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length },
+      ...(navItems === undefined ? {} : { navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length } }),
       // Absent, not zeroed, when the site served no map: an agent reading
       // `entries: 0` would take the site for one with no redirects.
       ...(redirectMap === undefined ? {} : {

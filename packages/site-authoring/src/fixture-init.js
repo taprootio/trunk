@@ -42,6 +42,11 @@ export async function initializeFixture(invocation, validate) {
   if (source.manifestVersion !== MANIFEST_VERSION || source.pagesTruncated || source.settingsSkipped?.length) {
     refuse("A complete current pull is required before fixture initialization. Run 'taproot-site pull'.");
   }
+  // A managed Docs site's workspace holds settings only (TR00790); the fixture
+  // contract binds pages and navigation, which that site never has.
+  if (source.authoringSurface !== undefined) {
+    refuse("Offline fixtures describe standard sites; a Docs site's workspace holds its settings only.");
+  }
   if (typeof invocation.fixturePath !== "string" || !invocation.fixturePath.trim()) {
     refuse("Choose a new fixture directory.");
   }

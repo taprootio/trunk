@@ -142,6 +142,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/settings-catalog.js",
     "src/settings.js",
     "src/staging-check.js",
+    "src/surface.js",
     "src/theme-validation.js",
     "src/transport.js",
     "src/verbs/approve.js",

@@ -15,6 +15,7 @@ import { credentialApiOrigin, findCredential } from "../credentials.js";
 import { SITE_AUTHORING_CAPABILITIES } from "../capabilities.js";
 import { openAnonymousSession, successResult } from "../session.js";
 import { environmentNameFor } from "../settings.js";
+import { describeSurface } from "../surface.js";
 
 /**
  * What the last exchange recorded about the platform authoring switch, dated
@@ -109,7 +110,11 @@ export async function whoami(invocation) {
   }
   onProgress(
     config?.siteId
-      ? `Site: ${config.siteId}`
+      ? `Site: ${config.siteId}${
+        config.authoringSurface === undefined
+          ? ""
+          : ` (${config.authoringSurface}: ${describeSurface(config.authoringSurface)})`
+      }`
       : `No site selected. Run '${CLI_BINARY_NAME} ${VERB_USE} <site>'.`,
   );
   // What the last exchange actually produced, when there has been one. That is
@@ -156,6 +161,9 @@ export async function whoami(invocation) {
       credentialPath,
     }),
     ...(config?.configPath === undefined ? {} : { configPath: config.configPath }),
+    // As `use` recorded it (TR00790); absent from a configuration written
+    // before the field existed, and never a live read.
+    ...(config?.authoringSurface === undefined ? {} : { authoringSurface: config.authoringSurface }),
     // Named for what each is. `capabilities` alone would conflate the ceiling
     // with the grant, which are different numbers and differently trustworthy.
     capabilityCeiling: SITE_AUTHORING_CAPABILITIES,

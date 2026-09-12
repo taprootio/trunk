@@ -49,6 +49,7 @@ export const NODE_TYPES = Object.freeze([
   "horizontalRule",
   "taprootImage",
   "componentBlock",
+  "integrationPlacement",
   "section",
   freeFormSectionRegistry.inlineFacts.nodeType,
   "rawHtml",
@@ -353,6 +354,7 @@ function hasMeaningfulContent(node, depth = 0) {
   if (
     node.type === "taprootImage"
     || node.type === "componentBlock"
+    || node.type === "integrationPlacement"
     || node.type === freeFormSectionRegistry.inlineFacts.nodeType
   ) return true;
   if (!Array.isArray(node.content)) return false;

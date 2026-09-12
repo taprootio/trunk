@@ -21,6 +21,7 @@ import {
 // would turn a successful mint into an orphaned key.
 import { KEY_PREFIX } from "./credentials.js";
 import { isCanonicalUuid, normalizePreviewDiagnostic, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import { docsPublicationModeFromWire, siteKindFromWire, surfaceFromWire } from "./surface.js";
 import {
   DEFAULT_REDIRECT_STATUS,
   GONE_STATUS,
@@ -1740,11 +1741,12 @@ export async function startCliAuthorization(client, { keyName }, requestOptions 
  * a contract error that hides a live credential.
  */
 /**
- * The sites the sign-in credential's account may author (TR00645).
+ * The sign-in credential's account sites, each with the authoring surface it
+ * accepts (TR00645, TR00790).
  *
- * The server has already filtered these to sites an exchange would accept, so
- * anything listed here is a site `use` can select and the next command can
- * author — a picker that offered otherwise would be worse than no picker.
+ * Every STANDARD and DOCS site on the account is listed, including a Docs site
+ * that accepts no verb: `use` can select any of them, and the surface is what
+ * tells the next command whether it applies before a request is made.
  */
 export async function listAuthorableSites(client, requestOptions = {}) {
   const response = requireObject(
@@ -1759,6 +1761,11 @@ export async function listAuthorableSites(client, requestOptions = {}) {
       siteId: requireCanonicalUuid(value.siteId, "sites.contract", "siteId"),
       name: typeof value.name === "string" ? value.name : "",
       primaryDomain: typeof value.primaryDomain === "string" ? value.primaryDomain : "",
+      // The verbs the site accepts (TR00790). Read fail-closed: a value this
+      // CLI does not recognize is a site it cannot claim to author.
+      siteType: siteKindFromWire(value.siteType),
+      docsPublicationMode: docsPublicationModeFromWire(value.docsPublicationMode),
+      authoringSurface: surfaceFromWire(value.authoringSurface),
     };
   });
 }
@@ -1798,6 +1805,10 @@ export async function exchangeSiteAuthoringToken(client, { siteId, capabilities 
     capabilities: Array.isArray(response.capabilities)
       ? response.capabilities.filter((entry) => typeof entry === "string")
       : [],
+    // What the site accepts at the moment of exchange (TR00790). Advisory in
+    // the same sense as the platform switch: the server re-resolves it on
+    // every write, and this lets a verb refuse before the request instead.
+    authoringSurface: surfaceFromWire(response.authoringSurface),
     // The sign-in's refreshed deadline. Not a secret, and absent on a server
     // that predates the sliding window.
     ...(typeof response.signInExpiresAt === "string" && response.signInExpiresAt.length > 0

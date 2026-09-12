@@ -1,5 +1,5 @@
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.7.2";
+export const CLI_VERSION = "0.8.0";
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";
@@ -97,6 +97,15 @@ export const VERB_SITES = "sites";
 export const VERB_USE = "use";
 export const VERB_WHOAMI = "whoami";
 export const VERB_ENV = "env";
+
+// Which authoring verbs a site accepts (TR00790), as `use` records it in the
+// configuration and as the exchange reports it. Spelled for humans rather
+// than copied from the wire enum, because the configuration is a file people
+// read and edit.
+export const SURFACE_STANDARD = "standard";
+export const SURFACE_DOCS_PRESENTATION = "docs-presentation";
+export const SURFACE_NONE = "none";
+export const AUTHORING_SURFACES = Object.freeze([SURFACE_STANDARD, SURFACE_DOCS_PRESENTATION, SURFACE_NONE]);
 
 export const DEPLOY_TARGET_STAGING = "staging";
 export const DEPLOY_TARGET_PRODUCTION = "production";

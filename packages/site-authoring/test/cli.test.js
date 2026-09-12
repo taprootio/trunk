@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.7.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.0" },
     verb,
   };
 }
@@ -457,7 +457,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   assert.match(stdout.read(), /^  logout\s+Discard the stored Taproot sign-in/mu);
   // The three verbs TR00645 added, which are what make a site selectable
   // without hand-writing one into JSON.
-  assert.match(stdout.read(), /^  sites\s+List the sites this sign-in may author/mu);
+  assert.match(stdout.read(), /^  sites\s+List this account's sites and the authoring verbs each accepts/mu);
   assert.match(stdout.read(), /^  use\s+Choose the site the next command writes to/mu);
   assert.match(stdout.read(), /^  whoami\s+Report the Taproot, account, site/mu);
   // The configuration contract is documented at the top level (TR00635), so
@@ -575,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.7.2\n");
+    assert.equal(versionStdout.read(), "0.8.0\n");
   }
 });
 
@@ -793,13 +793,20 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.7.2" },
+          cli: { name: "@taprootio/site-authoring", version: "0.8.0" },
           verb: "help",
-          referenceVersion: 20,
+          referenceVersion: 21,
           topic: scenario.topic,
         },
       );
       assert.ok(result[scenario.field]);
+      if (scenario.topic === "page") {
+        const placement = result.page.document.integrationPlacementNode;
+        assert.equal(placement.type, "integrationPlacement");
+        assert.deepEqual(Object.keys(placement.attrs).sort(),
+          ["componentId", "config", "configurationRevision", "installationId", "placementId"]);
+        assert.match(placement.attrs.configurationRevision, /Server-assigned/);
+      }
     });
   }
 });

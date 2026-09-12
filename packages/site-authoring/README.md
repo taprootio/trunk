@@ -144,14 +144,35 @@ capabilities the command needs — a content push never holds deploy. The
 sign-in expires 24 hours after its last successful exchange, and never past
 any expiry the approving owner chose.
 
-`sites` lists what the sign-in may author; `use <name or id>` records the
-choice as `siteId` in `taproot-site.json`, creating the file in the current
-directory when there is none. `whoami` answers from local state alone: which
-Taproot, which account, which site, what the last exchange granted, and when
-the sign-in expires. `logout` discards the stored sign-in locally and revokes
-nothing; the credential stays valid until an owner revokes it under
-Account → Settings → API keys. The secret itself is never displayed, logged,
-or placed in any result: credentials are named by id and display prefix only.
+`sites` lists every standard and Docs site on the account with the authoring
+verbs each accepts; `use <name or id>` records the choice as `siteId` in
+`taproot-site.json`, together with the site's `authoringSurface`, creating
+the file in the current directory when there is none. `whoami` answers from
+local state alone: which Taproot, which account, which site and surface, what
+the last exchange granted, and when the sign-in expires.
+
+Which verbs apply depends on the site:
+
+- A **standard** site takes every verb.
+- A **managed Docs** site (`docs-presentation`) takes design and theming only:
+  `pull` snapshots its four settings documents, `theme push`, `footer push`,
+  and `media upload` author them, and `deploy` stages and promotes them.
+  Its pages, navigation, and redirects come from the Docs artifact, so
+  `pages push`, `nav push`, the `redirects` verbs, `approve`, and the
+  `preview` verbs refuse with `surface.presentation_only` before any request.
+- A **prebuilt Docs** site (`none`) serves its artifact unchanged and takes no
+  verb; each refuses with `surface.none`.
+
+The recorded surface is a convenience, not the authority: Taproot re-resolves
+it on every write. After a Docs site becomes prebuilt, its sign-in exchange
+answers Not found like any site the account can no longer author, and the
+CLI adds a hint to run `use` again because the recording says the site was
+authorable before.
+
+`logout` discards the stored sign-in locally and revokes nothing; the
+credential stays valid until an owner revokes it under Account → Settings →
+API keys. The secret itself is never displayed, logged, or placed in any
+result: credentials are named by id and display prefix only.
 
 ### `TAPROOT_SITE_KEY` overrides the sign-in
 
@@ -184,15 +205,17 @@ explicitly and bypasses discovery. `login`, `logout`, `sites`, `use`,
 {
   "configVersion": 1,
   "siteId": "11111111-1111-4111-8111-111111111111",
+  "authoringSurface": "standard",
   "workspaceDir": "site"
 }
 ```
 
-| Field           | Rule                                                                                                                                          |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `configVersion` | Must be `1`.                                                                                                                                  |
-| `siteId`        | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.     |
-| `workspaceDir`  | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory. |
+| Field              | Rule                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configVersion`    | Must be `1`.                                                                                                                                                                                            |
+| `siteId`           | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.                                                               |
+| `authoringSurface` | Optional. `standard`, `docs-presentation`, or `none`: the verbs the site accepts, as `use` recorded them. A present but unknown value is refused; Taproot re-resolves the surface on every write.        |
+| `workspaceDir`     | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory.                                                           |
 
 The file is a small, closed JSON object. Unknown fields, duplicate keys, links
 in the path, and unsupported versions are refused before any credential is

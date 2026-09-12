@@ -7,11 +7,13 @@ import {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
   DEFAULT_WORKSPACE_DIR,
+  SURFACE_STANDARD,
   VERB_SITES,
   VERB_USE,
 } from "../constants.js";
 import { isCanonicalUuid, sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
 import { openAccountSession, successResult } from "../session.js";
+import { describeSiteKind, describeSurface } from "../surface.js";
 
 /**
  * `taproot-site use <site>` — choose the site the next command writes to.
@@ -88,6 +90,11 @@ export async function use(invocation) {
         {
           configVersion: CONFIG_VERSION,
           siteId: site.siteId,
+          // What the site accepts, as Taproot reported it just now (TR00790).
+          // Recorded so a verb the site cannot take is refused offline, in
+          // words; every write re-checks it on the server, so this is a
+          // convenience that can go stale, never an authority.
+          ...(site.authoringSurface === undefined ? {} : { authoringSurface: site.authoringSurface }),
           workspaceDir,
           // No endpoint. Which Taproot this is talking to lives with the
           // credential, per machine — writing it here would pin a project to
@@ -116,13 +123,25 @@ export async function use(invocation) {
     });
 
     // Sanitized for the same reason the listing is: the name is authored
-      // by a person and this line is what confirms the selection.
-      onProgress(`Now authoring ${sanitizeDiagnostic(site.name, site.siteId)} (${site.siteId}).`);
+    // by a person and this line is what confirms the selection.
+    onProgress(
+      `Now authoring ${sanitizeDiagnostic(site.name, site.siteId)} (${site.siteId}) [${describeSiteKind(site)}].`,
+    );
+    if (site.authoringSurface !== undefined && site.authoringSurface !== SURFACE_STANDARD) {
+      onProgress(`Authoring surface ${site.authoringSurface}: ${describeSurface(site.authoringSurface)}.`);
+    }
     onProgress(`Recorded in ${configPath}.`);
 
     return successResult(VERB_USE, site.siteId, {
       accountId: signIn.accountId,
-      site: { siteId: site.siteId, name: site.name, primaryDomain: site.primaryDomain },
+      site: {
+        siteId: site.siteId,
+        name: site.name,
+        primaryDomain: site.primaryDomain,
+        siteType: site.siteType,
+        ...(site.docsPublicationMode === undefined ? {} : { docsPublicationMode: site.docsPublicationMode }),
+        ...(site.authoringSurface === undefined ? {} : { authoringSurface: site.authoringSurface }),
+      },
       configPath: configPath,
     });
   });

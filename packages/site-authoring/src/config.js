@@ -3,6 +3,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  AUTHORING_SURFACES,
   CLI_BINARY_NAME,
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
@@ -13,10 +14,12 @@ import {
 } from "./constants.js";
 import { hasAsciiControl, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import { parseJsonWithDuplicateGuard } from "./json-guard.js";
+import { isKnownSurface } from "./surface.js";
 
 const CONFIG_KEYS = new Set([
   "configVersion",
   "siteId",
+  "authoringSurface",
   "workspaceDir",
 ]);
 const WINDOWS_DEVICE_BASENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu;
@@ -398,6 +401,17 @@ export async function loadSiteConfig({ cwd = process.cwd(), configPath } = {}) {
   if (parsed.siteId !== undefined && !isCanonicalUuid(parsed.siteId)) {
     throw new SiteAuthoringError("config.site_id", "siteId must be a canonical lowercase UUID.", { field: "siteId" });
   }
+  // The surface `use` recorded (TR00790). Optional, because a configuration
+  // written before the field existed still names a site; a verb then learns
+  // the surface from its exchange instead. Present-but-unknown is refused:
+  // a surface this CLI cannot read is not one it can gate on.
+  if (parsed.authoringSurface !== undefined && !isKnownSurface(parsed.authoringSurface)) {
+    throw new SiteAuthoringError(
+      "config.authoring_surface",
+      `authoringSurface must be one of: ${AUTHORING_SURFACES.join(", ")}.`,
+      { field: "authoringSurface" },
+    );
+  }
   const workspaceDirectoryText = validateWorkspaceDirectoryText(parsed.workspaceDir);
   const configDirectory = path.dirname(canonicalConfigPath);
   const { workspaceDir, workspaceExists } = await resolveWorkspaceDirectory(configDirectory, workspaceDirectoryText);
@@ -406,6 +420,7 @@ export async function loadSiteConfig({ cwd = process.cwd(), configPath } = {}) {
     configPath: canonicalConfigPath,
     configDirectory,
     siteId: parsed.siteId,
+    authoringSurface: parsed.authoringSurface,
     workspaceDir,
     workspaceExists,
   });

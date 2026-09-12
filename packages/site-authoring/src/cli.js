@@ -1,4 +1,5 @@
 import { CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS, CAPABILITY_DESIGN } from "./capabilities.js";
+import { capabilitiesForSurface } from "./surface.js";
 import {
   CLI_BINARY_NAME,
   CLI_NAME,
@@ -11,6 +12,8 @@ import {
   LOGIN_KEY_NAME_MAXIMUM,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   RESULT_SCHEMA_VERSION,
+  SURFACE_DOCS_PRESENTATION,
+  SURFACE_STANDARD,
   VERB_APPROVE,
   VERB_DEPLOY,
   VERB_ENV,
@@ -135,11 +138,13 @@ const VERBS = Object.freeze([
   {
     name: VERB_SITES,
     tokens: ["sites"],
-    summary: "List the sites this sign-in may author.",
+    summary: "List this account's sites and the authoring verbs each accepts.",
     configFree: true,
     note: "Runs on the stored sign-in rather than a site credential, and is one of exactly two things that credential "
-      + "can do. The list is already filtered to sites an exchange would accept, so anything shown here is a site "
-      + "'use' can select and the next command can author.",
+      + "can do. Every standard and Docs site on the account is listed with its kind and authoring surface: a "
+      + "standard site takes every verb; a managed Docs site takes design and theming only (pull, theme push, "
+      + "footer push, media upload, deploy, status), because its pages, navigation, and redirects come from the "
+      + "Docs artifact; a prebuilt Docs site takes no verb at all. 'use' can select any of them.",
   },
   {
     name: VERB_USE,
@@ -148,8 +153,9 @@ const VERBS = Object.freeze([
     configFree: true,
     positionals: "siteSelector",
     note: "Accepts a site id, an exact name, or an unambiguous case-insensitive name, and records the choice as "
-      + "siteId in taproot-site.json — creating that file in the current directory when there is not one yet. "
-      + "Two sites sharing a name is refused rather than guessed: pass the site id instead.",
+      + "siteId in taproot-site.json — creating that file in the current directory when there is not one yet — "
+      + "together with the site's authoringSurface, which is what lets a later verb refuse offline when the site "
+      + "cannot take it. Two sites sharing a name is refused rather than guessed: pass the site id instead.",
   },
   {
     name: VERB_WHOAMI,
@@ -185,6 +191,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_PULL,
+    surface: SURFACE_DOCS_PRESENTATION,
     // Pages and the four settings groups, and every one of those gates on
     // site.theme.manage — so a read-only snapshot still needs Design.
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
@@ -205,6 +212,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_PAGES_PUSH,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["pages", "push"],
     summary: "Create and update pages from the local workspace.",
@@ -231,6 +239,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_NAV_PUSH,
+    surface: SURFACE_STANDARD,
     // Content is for the read, not the write: every PAGE nav item is checked
     // against the live page list before the tree is replaced, and that list is
     // gated on site.pages.edit_any (TR00691).
@@ -240,6 +249,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_REDIRECTS_CHECK,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["redirects", "check"],
     summary: "Check the current redirect map through the authenticated staging edge.",
@@ -248,6 +258,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_REDIRECTS_PULL,
+    surface: SURFACE_STANDARD,
     // A redirect is a content path, and both halves of the map — read and
     // replace — are gated on site.pages.edit_any, which only Content carries.
     capabilities: [CAPABILITY_CONTENT],
@@ -260,6 +271,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_REDIRECTS_PUSH,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["redirects", "push"],
     summary: "Validate redirects.json and replace the whole redirect map.",
@@ -270,6 +282,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_THEME_PUSH,
+    surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_DESIGN],
     tokens: ["theme", "push"],
     summary: "Validate and push the workspace's complete theme and appearance settings.",
@@ -278,6 +291,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_FOOTER_PUSH,
+    surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_DESIGN],
     tokens: ["footer", "push"],
     summary: "Validate and replace the workspace's complete footer document.",
@@ -286,7 +300,14 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_MEDIA_UPLOAD,
+    surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_CONTENT],
+    // On a managed Docs site Content is not on offer, and narrowing the
+    // request above by intersection would leave nothing — which the exchange
+    // reads as "the whole surface envelope", Deployments included. Design
+    // carries site.media.manage too, so that is what this verb asks for there
+    // (TR00790).
+    surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DESIGN] },
     tokens: ["media", "upload"],
     summary: "Upload media and wait for processing to finish.",
     positionals: "paths",
@@ -295,6 +316,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_APPROVE,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["approve"],
     summary: "Publish drafts. This stages the site; it does not deploy it.",
@@ -305,6 +327,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_DEPLOY,
+    surface: SURFACE_DOCS_PRESENTATION,
     // Deployments is the only capability this verb *writes* with; the other two
     // are for reads and re-reads the server makes on its behalf (TR00691).
     // Content: staging redirect checks read the current redirect map;
@@ -322,6 +345,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_PREVIEW_PAGE,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["preview", "page"],
     summary: "Render one persisted draft and mint a short-lived staging handoff.",
@@ -339,6 +363,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_PREVIEW_REVOKE,
+    surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["preview", "revoke"],
     summary: "Revoke an active authoring preview and schedule its artifacts for cleanup.",
@@ -348,6 +373,7 @@ const VERBS = Object.freeze([
   },
   {
     name: VERB_STATUS,
+    surface: SURFACE_DOCS_PRESENTATION,
     // Readiness and the deployment log are Deployments; the image list is
     // Content, as is the broken-reference report.
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
@@ -375,6 +401,30 @@ export const VERB_CAPABILITIES = Object.freeze(Object.fromEntries(
     .filter((verb) => verb.capabilities !== undefined)
     .map((verb) => [verb.name, Object.freeze([...verb.capabilities])]),
 ));
+
+/**
+ * The shipped verb table's surface declarations, keyed by verb name (TR00790):
+ * `standard` for verbs only a STANDARD site takes, `docs-presentation` for
+ * verbs a managed Docs site takes too. A verb with no entry is not a site verb.
+ */
+export const VERB_SURFACES = Object.freeze(Object.fromEntries(
+  VERBS
+    .filter((verb) => verb.surface !== undefined)
+    .map((verb) => [verb.name, verb.surface]),
+));
+
+/**
+ * The capabilities each site verb's exchange asks for on a given surface
+ * (TR00790): the verb's declared set narrowed to what the surface offers, or
+ * the verb's own per-surface declaration where narrowing alone would be wrong.
+ * Exported so the tests can pin that no verb ever asks for nothing — an empty
+ * request means "everything the surface offers" on the wire.
+ */
+export function verbCapabilitiesForSurface(verbName, surface) {
+  const verb = VERBS.find((candidate) => candidate.name === verbName);
+  if (verb?.capabilities === undefined) return undefined;
+  return verb.surfaceCapabilities?.[surface] ?? capabilitiesForSurface(surface, verb.capabilities);
+}
 
 const COMMON_OPTIONS = `Options:
   --config <path>  Place before a config-reading verb; bypass parent discovery.
@@ -419,6 +469,12 @@ Configuration:
   pass --config <path> before the verb. It is a closed JSON object:
     configVersion  must be 1
     siteId         optional; the canonical lowercase site UUID that 'use' writes
+    authoringSurface  optional; 'standard', 'docs-presentation', or 'none' — the
+                   verbs the site accepts, as 'use' recorded them. A verb the
+                   surface cannot take is refused before any request
+                   (surface.presentation_only, surface.none); Taproot re-checks
+                   on every write, so run 'use' again after a Docs site changes
+                   publication mode.
     workspaceDir   a relative POSIX path beneath the configuration directory
                    that pull writes into; every existing segment must be a real
                    directory
@@ -902,6 +958,11 @@ function parseArguments(arguments_) {
     // `VERB_CAPABILITIES` below is what the tests pin against the routes each
     // verb actually calls.
     capabilities: verb.capabilities,
+    // The narrowest site surface the verb applies to (TR00790). `openSession`
+    // refuses a verb its site cannot take before any request; `VERB_SURFACES`
+    // below is what the tests pin.
+    surface: verb.surface,
+    surfaceCapabilities: verb.surfaceCapabilities,
     configPath,
     quiet,
     deployTarget,
@@ -987,6 +1048,8 @@ export async function runCli({
       allowRawHtml: parsed.allowRawHtml,
       keyName: parsed.keyName,
       capabilities: parsed.capabilities,
+      surface: parsed.surface,
+      surfaceCapabilities: parsed.surfaceCapabilities,
       // Positionals land under the verb's own seam name (paths for media
       // upload, pagePaths for approve) and only when some were given, so a
       // bare invocation keeps each verb's documented default behavior.

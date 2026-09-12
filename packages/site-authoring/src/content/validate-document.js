@@ -277,6 +277,7 @@ const BLOCKS = Object.freeze([
   "horizontalRule",
   "taprootImage",
   "componentBlock",
+  "integrationPlacement",
   "rawHtml",
 ]);
 const SECTION_BLOCKS = Object.freeze([
@@ -382,6 +383,22 @@ const NODE_RULES = Object.freeze({
   horizontalRule: rule({}),
   taprootImage: rule({ attrs: IMAGE_ATTRS, rejectedAttrs: IMAGE_TRANSIENT_ATTRS, imageDelivery: true }),
   componentBlock: rule({ attrs: COMPONENT_ATTRS, component: true }),
+  integrationPlacement: rule({
+    attrs: Object.freeze({
+      placementId: spec((value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
+        ? null : "a UUID belonging only to this host page", { required: true }),
+      installationId: spec((value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
+        ? null : "an installed integration UUID", { required: true }),
+      componentId: spec((value) => typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/u.test(value)
+        ? null : "a bounded declared component identifier", { required: true }),
+      config: spec((value) => {
+        if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 16384) return "bounded configuration JSON";
+        try { JSON.parse(value); return null; } catch { return "valid configuration JSON"; }
+      }, { required: true }),
+      configurationRevision: spec((value) => value == null || Number.isSafeInteger(value) && value > 0
+        ? null : "a positive server-assigned configuration revision"),
+    }),
+  }),
   section: rule({
     attrs: SECTION_ATTRS,
     children: SECTION_BLOCKS,

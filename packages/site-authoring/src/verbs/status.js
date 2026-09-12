@@ -17,6 +17,7 @@ import {
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   REFUSAL_CLI_OUTDATED,
   REFUSAL_PLATFORM_PAUSED,
+  SURFACE_DOCS_PRESENTATION,
   VERB_STATUS,
 } from "../constants.js";
 import { boundedList, openSession, successResult } from "../session.js";
@@ -100,8 +101,20 @@ function reportPlatform(platform, onProgress) {
   return { externalWritesEnabled: enabled };
 }
 
+/**
+ * What a managed Docs site's status leaves out (TR00790), said the same way
+ * the platform switch says "unknown": by shape. The image library and the
+ * broken-reference report are page-authoring reads a Docs site refuses, so
+ * they are reported as not covered rather than as empty — an automation
+ * reading `failed: 0` off a report that was never made would be reading a lie.
+ */
+const DOCS_SITE_NOT_COVERED_NOTE =
+  "This is a managed Docs site: its pages come from the Docs artifact, so the image library and broken-reference "
+  + "reads do not apply and were not made.";
+
 export async function status(invocation) {
-  const { client, siteId, platform, release, onProgress } = await openSession(invocation);
+  const { client, siteId, surface, platform, release, onProgress } = await openSession(invocation);
+  const presentationOnly = surface === SURFACE_DOCS_PRESENTATION;
   // Said first, and before any wire read: an operator running `status` because
   // writes are being refused should not have to wait on network calls to
   // learn that the platform is paused — and this answer needs none of them.
@@ -110,7 +123,15 @@ export async function status(invocation) {
 
   return await withRefusalGuidance(onProgress, "status check", async () => {
     onProgress("Reading publishing readiness.");
-    const selection = await getDeploySelection(client, siteId);
+    const reviewed = await getDeploySelection(client, siteId);
+    // The review is site-type-blind: a managed Docs site's settings-only
+    // production manifest makes any draft navigation row read as changed
+    // forever. Readiness is asked about the candidate `deploy` would actually
+    // send there — settings only — so hasCandidateChanges answers for it
+    // (TR00790).
+    const selection = presentationOnly
+      ? { ...reviewed, stagedPageIds: [], includeNavigation: false }
+      : reviewed;
     const readiness = await getPublishingReadiness(client, siteId, {
       ...selection,
       stagedPageIds: selection.stagedPageIds.length > 100 ? undefined : selection.stagedPageIds,
@@ -120,10 +141,19 @@ export async function status(invocation) {
       deployments,
       truncated: deploymentsTruncated,
     } = await listDeployments(client, siteId, { pageSize: MAXIMUM_DEPLOYMENTS });
-    onProgress("Reading image processing state.");
-    const { images, summary, truncated } = await listSiteImages(client, siteId);
-    onProgress("Reading broken references.");
-    const brokenReferencePages = await getSiteBrokenReferences(client, siteId);
+    if (presentationOnly) {
+      onProgress(DOCS_SITE_NOT_COVERED_NOTE);
+    }
+    let images = [];
+    let summary = { totalImages: 0, processingImages: 0 };
+    let truncated = false;
+    let brokenReferencePages = [];
+    if (!presentationOnly) {
+      onProgress("Reading image processing state.");
+      ({ images, summary, truncated } = await listSiteImages(client, siteId));
+      onProgress("Reading broken references.");
+      brokenReferencePages = await getSiteBrokenReferences(client, siteId);
+    }
     const reportedBrokenPages = boundedList(brokenReferencePages, MAXIMUM_BROKEN_REFERENCE_PAGES);
     const brokenPages = reportedBrokenPages.items.map((page) => {
       const images = boundedList(page.missingImageIds, MAXIMUM_MISSING_TARGETS);
@@ -154,11 +184,14 @@ export async function status(invocation) {
     const reportedDeployments = boundedList(deployments, MAXIMUM_DEPLOYMENTS);
     const blockers = boundedList(readiness.blockers, MAXIMUM_BLOCKERS);
 
-    onProgress(`Broken references: ${brokenReferencePages.length} page(s) with missing targets.`);
+    if (!presentationOnly) {
+      onProgress(`Broken references: ${brokenReferencePages.length} page(s) with missing targets.`);
+    }
 
     return successResult(VERB_STATUS, siteId, {
       platform: platformReport,
       cliRelease: cliReleaseReport,
+      ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
       readiness: {
         state: readiness.state,
         approvedPageCount: readiness.approvedPageCount,
@@ -177,7 +210,8 @@ export async function status(invocation) {
         ...(reportedDeployments.truncated ? { itemsTruncated: true } : {}),
         ...(deploymentsTruncated ? { listTruncated: true } : {}),
       },
-      images: {
+      images: presentationOnly ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE } : {
+        covered: true,
         total: summary.totalImages,
         processing: summary.processingImages,
         complete: byState[IMAGE_PROCESSING_STATE_COMPLETE] ?? 0,
@@ -187,7 +221,7 @@ export async function status(invocation) {
         ...(failedImages.truncated ? { failedItemsTruncated: true } : {}),
         ...(truncated ? { listTruncated: true } : {}),
       },
-      brokenReferences: {
+      brokenReferences: presentationOnly ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE } : {
         covered: true,
         totalPages: brokenReferencePages.length,
         pages: brokenPages,

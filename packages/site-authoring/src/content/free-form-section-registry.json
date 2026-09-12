@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -480,6 +480,11 @@
       "label": "Section",
       "measure": "wide",
       "placement": "explicit-band"
+    },
+    "integrationPlacement": {
+      "label": "Integration component",
+      "measure": "wide",
+      "placement": "flow"
     }
   },
   "components": {
@@ -522,6 +527,44 @@
       "label": "Image Banner",
       "measure": "wide",
       "rootPlacement": "root-band"
+    }
+  },
+  "integrationPlacement": {
+    "nodeType": "integrationPlacement",
+    "label": "Integration component",
+    "help": "An installed component whose configuration and sanitized fragment are selected as immutable page revisions.",
+    "attrs": {
+      "placementId": {
+        "type": "uuid",
+        "required": true
+      },
+      "installationId": {
+        "type": "uuid",
+        "required": true
+      },
+      "componentId": {
+        "type": "identifier",
+        "required": true,
+        "maximumLength": 64
+      },
+      "config": {
+        "type": "json-string",
+        "required": true,
+        "maximumBytes": 16384
+      },
+      "configurationRevision": {
+        "type": "integer",
+        "required": false,
+        "nullable": true,
+        "minimum": 1,
+        "maximum": 9007199254740991,
+        "serverAssigned": true
+      }
+    },
+    "placement": {
+      "root": true,
+      "section": true,
+      "measure": "wide"
     }
   }
 }

@@ -13,7 +13,7 @@ import {
   CAPABILITY_DESIGN,
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
-import { runCli, VERB_CAPABILITIES } from "../src/cli.js";
+import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } from "../src/cli.js";
 import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
@@ -111,7 +111,7 @@ function png(width, height) {
   return bytes;
 }
 
-async function fixture(testContext, files = {}) {
+async function fixture(testContext, files = {}, { config = {} } = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), "taproot-site-verbs-"));
   testContext.after(() => rm(base, { recursive: true, force: true }));
   const root = await realpath(base);
@@ -121,7 +121,7 @@ async function fixture(testContext, files = {}) {
   await mkdir(workspaceDir, { recursive: true });
   await writeFile(
     path.join(project, "taproot-site.json"),
-    `${JSON.stringify({ configVersion: 1, siteId: SITE_ID, workspaceDir: "site" })}\n`,
+    `${JSON.stringify({ configVersion: 1, siteId: SITE_ID, workspaceDir: "site", ...config })}\n`,
   );
   // The endpoint is machine state since TR00645, so the fixture sets it the way
   // an operator does — `env local` — rather than by a config field that no
@@ -6754,7 +6754,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.7.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7190,7 +7190,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.7.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -8687,4 +8687,275 @@ test("deploy names a failed candidate preview and sends its override only when e
   );
   assert.equal(wire.matching("POST", DEPLOY)[0].body.allowFailedPreview, undefined);
   assert.equal(wire.matching("POST", DEPLOY)[1].body.allowFailedPreview, true);
+});
+
+// ── The Docs-presentation surface (TR00790) ──────────────────────────────────
+//
+// A managed Docs site takes the design verbs and nothing else: its pages,
+// navigation, and redirects come from the artifact the Docs shell renders. The
+// configuration `use` writes records that, and every site verb reads it before
+// touching the wire.
+
+function docsSettingsRoutes() {
+  return [{
+    method: "GET",
+    pattern: SETTINGS,
+    reply: (call) => {
+      if (call.pathname.endsWith("SETTING_TYPE_SITE_HEADER")) {
+        return { settingsType: "SETTING_TYPE_SITE_HEADER", headerSettings: { headerLayout: "centered-brand" } };
+      }
+      if (call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")) {
+        return { styleSettings: { lightLogoId: IMAGE_ID } };
+      }
+      if (call.pathname.endsWith("SETTING_TYPE_SITE_PUBLISHING_PREFERENCES")) {
+        return { sitePublishingPreferences: { footerSettings: authorableFooter() } };
+      }
+      return {};
+    },
+  }];
+}
+
+test("pull on a managed Docs site snapshots settings only and records the surface in the manifest", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api(docsSettingsRoutes());
+  const { invocation, progress } = invoke(workspace, wire, { verb: "pull", surface: "docs-presentation" });
+  const result = await pull(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.authoringSurface, "docs-presentation");
+  assert.equal(result.pages.total, 0);
+  assert.equal(result.navigation, undefined);
+  assert.equal(result.redirects, undefined);
+  assert.deepEqual(result.settings.pulled, [
+    "SETTING_TYPE_TAPROOT_STYLES",
+    "SETTING_TYPE_BRAND",
+    "SETTING_TYPE_SITE_HEADER",
+    "SETTING_TYPE_SITE_PUBLISHING_PREFERENCES",
+  ]);
+  // No page, navigation, or redirect read was made: those are the reads a
+  // Docs site refuses, and the wire has no route for them.
+  assert.equal(wire.matching("GET", PAGES_LIST).length, 0);
+  assert.equal(wire.matching("GET", NAVIGATION).length, 0);
+  assert.equal(wire.matching("GET", REDIRECT_MAP).length, 0);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.authoringSurface, "docs-presentation");
+  assert.equal(manifest.navigation, undefined);
+  assert.deepEqual(manifest.pages, []);
+  await assert.rejects(readWorkspaceJson(workspace, "nav.json"));
+  assert.ok(progress.some((line) => /managed Docs site/u.test(line)));
+});
+
+test("status on a managed Docs site reports the reads it cannot make as not covered", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api([
+    // The review names pages and navigation the site cannot deploy; readiness
+    // is asked about the settings-only candidate deploy would send instead.
+    {
+      method: "GET",
+      pattern: DEPLOY_REVIEW,
+      reply: {
+        stagedPages: [{ pageId: STORY_PAGE_ID }],
+        settingsChanges: [{ settingsType: "SETTING_TYPE_BRAND", changes: [{ path: "faviconId" }] }],
+        navigationChanged: true,
+      },
+    },
+    { method: "GET", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
+    { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
+  ]);
+  const result = await status(invoke(workspace, wire, { verb: "status", surface: "docs-presentation" }).invocation);
+
+  assert.equal(result.authoringSurface, "docs-presentation");
+  assert.equal(result.readiness.state, "PAGE_PUBLISHING_READINESS_STATE_READY");
+  assert.equal(result.images.covered, false);
+  assert.equal(result.images.total, undefined);
+  assert.equal(result.brokenReferences.covered, false);
+  assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
+  assert.equal(wire.matching("GET", BROKEN_REFERENCES).length, 0);
+  const readinessCall = wire.matching("GET", READINESS)[0];
+  assert.deepEqual(readinessCall.query.getAll("stagedPageIds"), []);
+  assert.equal(readinessCall.query.get("includeNavigation"), "false");
+  assert.deepEqual(readinessCall.query.getAll("selectedSettingsTypes"), ["SETTING_TYPE_BRAND"]);
+});
+
+test("deploy --staging on a managed Docs site stages settings and skips the staging redirect inspection", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api([
+    {
+      method: "GET",
+      pattern: DEPLOY_REVIEW,
+      reply: {
+        stagedPages: [],
+        settingsChanges: [{ settingsType: "SETTING_TYPE_TAPROOT_STYLES", changes: [{ path: "lightTheme" }] }],
+        navigationChanged: false,
+      },
+    },
+    ...deployRoutes(),
+  ]);
+  const result = await deploy(
+    invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", surface: "docs-presentation" }).invocation,
+  );
+
+  assert.equal(result.authoringSurface, "docs-presentation");
+  assert.deepEqual(result.selection, {
+    stagedPageCount: 0,
+    selectedSettingsTypes: ["SETTING_TYPE_TAPROOT_STYLES"],
+    includeNavigation: false,
+  });
+  assert.equal(result.nextStep, "deploy --production");
+  assert.equal(result.stagingPreview, undefined);
+  assert.equal(wire.matching("POST", STAGING_MINT).length, 0);
+  const sent = wire.matching("POST", DEPLOY)[0].body;
+  assert.deepEqual(sent.stagedPageIds, []);
+  assert.equal(sent.includeNavigation, false);
+});
+
+test("deploy --staging on a managed Docs site refuses an explicit page or navigation selection before any read", async (context) => {
+  for (const [name, extra] of [["pages", { stagedPageIds: [STORY_PAGE_ID] }], ["navigation", { includeNavigation: true }]]) {
+    await context.test(name, async (child) => {
+      const workspace = await fixture(child, {}, { config: { authoringSurface: "docs-presentation" } });
+      const wire = api([]);
+      await assert.rejects(
+        deploy(
+          invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", surface: "docs-presentation", ...extra })
+            .invocation,
+        ),
+        (error) => {
+          assert.equal(error.code, "deploy.presentation_only");
+          assert.equal(error.exitCode, 2);
+          return true;
+        },
+      );
+      assert.equal(wire.calls.length, 0);
+    });
+  }
+});
+
+test("deploy --staging on a managed Docs site with no settings change names the settings-only remedy", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW, reply: { stagedPages: [], settingsChanges: [], navigationChanged: true } },
+  ]);
+  await assert.rejects(
+    deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", surface: "docs-presentation" }).invocation),
+    (error) => {
+      assert.equal(error.code, "deploy.empty_selection");
+      assert.match(error.message, /stages settings only/u);
+      assert.doesNotMatch(error.message, /approve/u);
+      return true;
+    },
+  );
+  assert.equal(wire.matching("POST", DEPLOY).length, 0);
+});
+
+test("deploy --staging on a managed Docs site ignores the review's page and navigation defaults, like the Deployments page", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  // A Docs site's settings-only production manifest makes any draft
+  // navigation row read as changed forever; the review is site-type-blind.
+  const wire = api([
+    {
+      method: "GET",
+      pattern: DEPLOY_REVIEW,
+      reply: {
+        stagedPages: [{ pageId: STORY_PAGE_ID }],
+        settingsChanges: [{ settingsType: "SETTING_TYPE_BRAND", changes: [{ path: "faviconId" }] }],
+        navigationChanged: true,
+      },
+    },
+    ...deployRoutes(),
+  ]);
+  const result = await deploy(
+    invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", surface: "docs-presentation" }).invocation,
+  );
+
+  assert.deepEqual(result.selection, {
+    stagedPageCount: 0,
+    selectedSettingsTypes: ["SETTING_TYPE_BRAND"],
+    includeNavigation: false,
+  });
+  const sent = wire.matching("POST", DEPLOY)[0].body;
+  assert.deepEqual(sent.stagedPageIds, []);
+  assert.equal(sent.includeNavigation, false);
+  assert.deepEqual(sent.selectedSettingsTypes, ["SETTING_TYPE_BRAND"]);
+});
+
+test("a content verb on a managed Docs site is refused offline, before any request", async (context) => {
+  const cases = [
+    { name: "pages push", run: pagesPush, extra: { verb: "pages push" } },
+    { name: "nav push", run: navPush, extra: { verb: "nav push" } },
+    { name: "approve", run: approve, extra: { verb: "approve" } },
+  ];
+  for (const { name, run, extra } of cases) {
+    await context.test(name, async (child) => {
+      const workspace = await fixture(child, {}, { config: { authoringSurface: "docs-presentation" } });
+      const wire = api([]);
+      await assert.rejects(run(invoke(workspace, wire, { ...extra, surface: "standard" }).invocation), (error) => {
+        assert.equal(error.code, "surface.presentation_only");
+        assert.equal(error.exitCode, 2);
+        assert.match(error.message, new RegExp(`'${name}' does not apply to a managed Docs site`, "u"));
+        return true;
+      });
+      assert.equal(wire.calls.length, 0);
+    });
+  }
+});
+
+test("every site verb on a prebuilt Docs site is refused offline with surface.none", async (context) => {
+  for (const [name, run] of [["pull", pull], ["theme push", themePush], ["status", status]]) {
+    await context.test(name, async (child) => {
+      const workspace = await fixture(child, {}, { config: { authoringSurface: "none" } });
+      const wire = api([]);
+      await assert.rejects(
+        run(invoke(workspace, wire, { verb: name, surface: VERB_SURFACES[name] }).invocation),
+        (error) => {
+          assert.equal(error.code, "surface.none");
+          assert.equal(error.status, "none");
+          return true;
+        },
+      );
+      assert.equal(wire.calls.length, 0);
+    });
+  }
+});
+
+test("the verb table declares a surface for exactly the site verbs, and pages-side verbs need a standard site", () => {
+  assert.deepEqual(new Set(Object.keys(VERB_SURFACES)), new Set(Object.keys(VERB_CAPABILITIES)));
+  for (const verb of ["pages push", "nav push", "redirects check", "redirects pull", "redirects push", "approve", "preview page", "preview revoke"]) {
+    assert.equal(VERB_SURFACES[verb], "standard", verb);
+  }
+  for (const verb of ["pull", "theme push", "footer push", "media upload", "deploy", "status"]) {
+    assert.equal(VERB_SURFACES[verb], "docs-presentation", verb);
+  }
+});
+
+test("the CLI passes each verb's surface through to its handler", async () => {
+  let received;
+  const exitCode = await runCli({
+    arguments_: ["pages", "push"],
+    environment: { TAPROOT_SITE_KEY: TOKEN },
+    handlers: {
+      "pages push": async (invocation) => {
+        received = invocation.surface;
+        return { ok: true, verb: "pages push" };
+      },
+    },
+    stdout: { write: () => {} },
+    stderr: { write: () => {} },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(received, "standard");
+});
+
+test("no site verb asks its surface for nothing, because an empty request means the whole envelope", () => {
+  for (const [verb, surface] of Object.entries(VERB_SURFACES)) {
+    const request = verbCapabilitiesForSurface(verb, surface);
+    assert.ok(request.length > 0, `${verb} on ${surface}`);
+    // Every capability asked for is one the surface offers.
+    if (surface === "docs-presentation") {
+      assert.ok(!request.includes(CAPABILITY_CONTENT), verb);
+    }
+  }
+  // The one verb that needed its own declaration: Content is what it holds on
+  // a standard site, Design is what carries site.media.manage on a Docs site.
+  assert.deepEqual(verbCapabilitiesForSurface("media upload", "standard"), [CAPABILITY_CONTENT]);
+  assert.deepEqual(verbCapabilitiesForSurface("media upload", "docs-presentation"), [CAPABILITY_DESIGN]);
 });

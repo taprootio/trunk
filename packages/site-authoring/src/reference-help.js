@@ -51,7 +51,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 20;
+export const REFERENCE_VERSION = 21;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
@@ -945,6 +945,17 @@ const FREE_FORM_REFERENCE = Object.freeze({
       additionalProperties: false,
       attrs: Object.freeze(sectionAttributeReference()),
       content: "one or more ordinary non-section block nodes; sections may not nest",
+    }),
+    integrationPlacementNode: Object.freeze({
+      type: "integrationPlacement",
+      attrs: Object.freeze({
+        placementId: "New UUID for a new or copied placement; retain identity when moving within the same page.",
+        installationId: "UUID of the eligible installation consented for this site.",
+        componentId: "Component identifier from the installation's consented manifest.",
+        config: "JSON string validated against the component's bounded configuration schema.",
+        configurationRevision: "Server-assigned revision. Preserve when unchanged; omit after editing config or copying.",
+      }),
+      authority: "The caller needs permission to edit the host page; installation management alone is insufficient.",
     }),
     tableNode: TABLE_REFERENCE,
     inlineFactsNode: INLINE_FACTS_REFERENCE,

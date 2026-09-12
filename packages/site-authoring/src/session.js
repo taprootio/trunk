@@ -22,8 +22,9 @@ import {
 } from "./credentials.js";
 import { SiteAuthoringError } from "./errors.js";
 import { exchangeSiteAuthoringToken, withRefusalGuidance } from "./api.js";
-import { SiteApiClient } from "./transport.js";
+import { ApiError, SiteApiClient } from "./transport.js";
 import { readStoredApiBaseUrl } from "./settings.js";
+import { capabilitiesForSurface, surfaceAllows, surfaceRefusal } from "./surface.js";
 
 /**
  * The two things every verb does at its edges: open a credentialed session, and
@@ -73,6 +74,46 @@ function keyMissingError() {
     `No Taproot sign-in is available. Run '${CLI_BINARY_NAME} ${VERB_LOGIN}' to authorize this CLI, `
       + `or set ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} to a site-scoped Taproot site authoring key.`,
   );
+}
+
+/**
+ * Refuses a verb the recorded surface cannot take, before any credential is
+ * used (TR00790). Offline on purpose: the answer is in the configuration `use`
+ * wrote, and an agent that runs `pages push` against a Docs site should be
+ * told in words, now, rather than after an exchange and a refused request.
+ * The exchange's own answer is checked again afterwards, because the
+ * recording can be stale.
+ */
+function requireRecordedSurface(invocation, config) {
+  if (invocation.surface === undefined || config.authoringSurface === undefined) return;
+  if (!surfaceAllows(config.authoringSurface, invocation.surface)) {
+    throw surfaceRefusal(invocation.verb ?? "This verb", config.authoringSurface, { source: "config" });
+  }
+}
+
+/**
+ * The verb's capability request, narrowed to the recorded surface (TR00790).
+ *
+ * A verb may declare its own set for a surface (`surfaceCapabilities`) where
+ * plain intersection would be wrong; otherwise the declared set is
+ * intersected with what the surface offers. Either way a request that started
+ * non-empty must not end empty: on the wire an empty list means "everything
+ * the surface offers", so sending one would hand a narrow verb a wide
+ * credential. That case is a verb-table defect and is refused as one.
+ */
+function narrowedCapabilities(invocation, surface) {
+  const requested = invocation.capabilities ?? [];
+  if (surface === undefined) return requested;
+  const narrowed = invocation.surfaceCapabilities?.[surface] ?? capabilitiesForSurface(surface, requested);
+  if (requested.length > 0 && narrowed.length === 0) {
+    throw new SiteAuthoringError(
+      "surface.capabilities_unavailable",
+      `'${invocation.verb ?? "This verb"}' declares no capability the ${surface} surface offers, so no credential `
+        + "can be minted for it there.",
+      { field: "authoringSurface", status: surface, exitCode: 2 },
+    );
+  }
+  return narrowed;
 }
 
 function siteMissingError() {
@@ -189,6 +230,7 @@ export async function openSession(invocation = {}) {
     const apiBaseUrl = await resolveApiBaseUrl(environment);
     const config = await loadConfig(invocation);
     if (!config.siteId) throw siteMissingError();
+    requireRecordedSurface(invocation, config);
     const client = invocation.client
       ?? new SiteApiClient(buildClientOptions(invocation, apiBaseUrl, environmentToken));
     // No exchange happens on this path, and nothing else on the contract reads
@@ -199,6 +241,7 @@ export async function openSession(invocation = {}) {
       config,
       client,
       siteId: config.siteId,
+      surface: config.authoringSurface,
       platform: UNKNOWN_PLATFORM,
       release: UNKNOWN_CLI_RELEASE,
       now,
@@ -214,6 +257,7 @@ export async function openSession(invocation = {}) {
     return apiBaseUrl;
   });
   if (!config.siteId) throw siteMissingError();
+  requireRecordedSurface(invocation, config);
 
   // The server is the authority on expiry, so an expired sign-in is still sent
   // — the clock here may simply be wrong. What is worth saying out loud is that
@@ -233,6 +277,7 @@ export async function openSession(invocation = {}) {
       config,
       client: invocation.client,
       siteId: config.siteId,
+      surface: config.authoringSurface,
       platform: UNKNOWN_PLATFORM,
       release: UNKNOWN_CLI_RELEASE,
       now,
@@ -247,15 +292,42 @@ export async function openSession(invocation = {}) {
   // as a field name and nothing else. That matters most for `cli_outdated`,
   // whose whole remedy is a command the operator has to be handed (TR00703),
   // but it is true of every classified refusal the exchange can raise.
-  const exchanged = await withRefusalGuidance(
-    onProgress,
-    "sign-in token exchange",
-    async () =>
-      await exchangeSiteAuthoringToken(accountClient, {
-        siteId: config.siteId,
-        capabilities: invocation.capabilities ?? [],
-      }),
-  );
+  let exchanged;
+  try {
+    exchanged = await withRefusalGuidance(
+      onProgress,
+      "sign-in token exchange",
+      async () =>
+        await exchangeSiteAuthoringToken(accountClient, {
+          siteId: config.siteId,
+          // Narrowed to what the recorded surface offers (TR00790): a managed
+          // Docs site's exchange refuses Content by name, and a verb that only
+          // reads with it — deploy, pull — still runs there without it.
+          capabilities: narrowedCapabilities(invocation, config.authoringSurface),
+        }),
+    );
+  } catch (error) {
+    // A site the exchange no longer offers answers Not found, and one way a
+    // site that was offered stops being offered is a Docs source becoming
+    // prebuilt after `use` recorded it (TR00790). The server deliberately says
+    // nothing more — the answer is the same for a site that never existed —
+    // so the recording is what makes the hint possible, and the hint is what
+    // turns "not found" into the command that fixes it.
+    if (error instanceof ApiError && error.httpStatus === 404 && config.authoringSurface !== undefined) {
+      onProgress(
+        `The site recorded in the configuration (${config.authoringSurface}) is no longer available to author. `
+          + "If it is a Docs site, its publication mode may have changed; run "
+          + `'${CLI_BINARY_NAME} ${VERB_USE} <site>' again to see what it accepts now.`,
+      );
+    }
+    throw error;
+  }
+  // The live answer outranks the recording. A site whose Docs source moved
+  // since `use` ran is refused here, before any request the server would
+  // refuse anyway, and the message says to record the new surface.
+  if (invocation.surface !== undefined && !surfaceAllows(exchanged.authoringSurface, invocation.surface)) {
+    throw surfaceRefusal(invocation.verb ?? "This verb", exchanged.authoringSurface, { source: "exchange" });
+  }
   // Two non-secret facts the store should now carry: the sign-in's slid
   // deadline, and what this exchange actually produced — the latter is the only
   // thing that lets `whoami` answer offline with the real grant rather than the
@@ -306,6 +378,7 @@ export async function openSession(invocation = {}) {
     config,
     client,
     siteId: config.siteId,
+    surface: exchanged.authoringSurface,
     exchanged: {
       keyId: exchanged.keyId,
       keyPrefix: exchanged.keyPrefix,

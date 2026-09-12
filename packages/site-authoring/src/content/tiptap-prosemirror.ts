@@ -47,7 +47,20 @@ export interface ProseMirrorDocument extends ProseMirrorNode {
   content?: ProseMirrorNode[];
 }
 
+/** Sanitized immutable page input supplied by Taproot, never trusted from node attributes. */
+export interface SelectedIntegrationPlacement {
+  placementId: string;
+  installationId: string;
+  componentId: string;
+  status: string;
+  fragmentRevision: number;
+  html: string;
+  frozen: boolean;
+}
+
 export interface RenderProseMirrorOptions {
+  integrationPlacements?: readonly SelectedIntegrationPlacement[];
+  integrationPreview?: boolean;
   /** Normalize free-form root flow into full-bleed Espalier sections. */
   freeFormSections?: boolean;
   imageDefaults?: {
@@ -185,6 +198,8 @@ function renderNode(
       return renderInlineFacts(node, options, placement);
     case "componentBlock":
       return renderComponentBlock(node);
+    case "integrationPlacement":
+      return renderIntegrationPlacement(node, options);
     case "section":
       return renderSection(
         node.content ?? [],
@@ -198,6 +213,29 @@ function renderNode(
     default:
       return renderNodes(node.content ?? [], options, "nested");
   }
+}
+
+function renderIntegrationPlacement(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
+  const placementId = stringAttr(node.attrs?.placementId);
+  const installationId = stringAttr(node.attrs?.installationId);
+  const componentId = stringAttr(node.attrs?.componentId);
+  const selected = options.integrationPlacements?.find((item) =>
+    item.placementId === placementId && item.installationId === installationId && item.componentId === componentId
+  );
+  if (!selected || selected.status === "removed" || selected.status === "deleted") {
+    return options.integrationPreview && !selected
+      ? "<p role=\"status\">Save this page to request content from the integration.</p>"
+      : "";
+  }
+  if (!selected.fragmentRevision || !selected.html) {
+    return options.integrationPreview && !selected.frozen
+      ? "<p role=\"status\">Content pending from the integration.</p>"
+      : "";
+  }
+  return renderElement("taproot-integration-placement", {
+    "data-placement-id": selected.placementId,
+    "data-component": selected.componentId,
+  }, selected.html);
 }
 
 function renderTextNode(node: ProseMirrorNode): string {

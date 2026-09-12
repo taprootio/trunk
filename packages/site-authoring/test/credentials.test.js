@@ -21,6 +21,7 @@ import { login } from "../src/verbs/login.js";
 import { logout } from "../src/verbs/logout.js";
 import { sites } from "../src/verbs/sites.js";
 import { status } from "../src/verbs/status.js";
+import { mediaUpload } from "../src/verbs/media-upload.js";
 import { use } from "../src/verbs/use.js";
 import { whoami } from "../src/verbs/whoami.js";
 
@@ -272,7 +273,7 @@ test("login stores an approved credential and never emits the secret or the devi
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.7.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.0" },
     verb: "login",
     accountId: ACCOUNT_ID,
     keyId: KEY_ID,
@@ -1973,4 +1974,211 @@ test("sites and use send the CLI version and preserve selection when listing is 
       assert.ok(progress.some((line) => line.includes(message)));
     });
   }
+});
+
+// ── Sites, kinds, and the authoring surface (TR00790) ───────────────────────
+
+const MANAGED_DOCS_SITE_ID = "cccc3333-dddd-4333-8333-eeee33333333";
+const PREBUILT_DOCS_SITE_ID = "dddd4444-eeee-4444-8444-ffff44444444";
+
+function authorableSitesRoute() {
+  return {
+    method: "GET",
+    pathname: "/api/v1/site-authoring/authorable-sites",
+    reply: {
+      sites: [
+        { siteId: SITE_ID, name: "Blog", primaryDomain: "blog.example.test", siteType: "SITE_TYPE_STANDARD",
+          authoringSurface: "SITE_AUTHORING_SURFACE_STANDARD" },
+        { siteId: MANAGED_DOCS_SITE_ID, name: "WTFM docs", siteType: "SITE_TYPE_DOCS",
+          docsPublicationMode: "DOCS_PUBLICATION_MODE_MANAGED",
+          authoringSurface: "SITE_AUTHORING_SURFACE_DOCS_PRESENTATION" },
+        { siteId: PREBUILT_DOCS_SITE_ID, name: "Espalier docs", siteType: "SITE_TYPE_DOCS",
+          docsPublicationMode: "DOCS_PUBLICATION_MODE_PREBUILT",
+          authoringSurface: "SITE_AUTHORING_SURFACE_NONE" },
+      ],
+    },
+  };
+}
+
+test("sites lists every kind with its surface, and says which sites take no verb", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api([authorableSitesRoute()]);
+  const { invocation, progress } = invoke(site, wire, { verb: "sites" });
+  const result = await sites(invocation);
+
+  assert.equal(result.sites.total, 3);
+  assert.deepEqual(result.sites.items.map((item) => [item.siteType, item.docsPublicationMode, item.authoringSurface]), [
+    ["standard", undefined, "standard"],
+    ["docs", "managed", "docs-presentation"],
+    ["docs", "prebuilt", "none"],
+  ]);
+  assert.ok(progress.some((line) => line.includes(`${SITE_ID}  Blog  [standard]  blog.example.test`)));
+  assert.ok(progress.some((line) => line.includes(`${MANAGED_DOCS_SITE_ID}  WTFM docs  [docs, managed]`)));
+  assert.ok(progress.some((line) => line.startsWith("    docs-presentation: design and theming only")));
+  assert.ok(progress.some((line) => line.startsWith("    none: no authoring verb")));
+});
+
+test("use records the selected site's surface in the configuration", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api([authorableSitesRoute()]);
+  const { invocation, progress } = invoke(site, wire, { verb: "use", siteSelector: "wtfm docs" });
+  const result = await use(invocation);
+
+  assert.equal(result.siteId, MANAGED_DOCS_SITE_ID);
+  assert.deepEqual(result.site, {
+    siteId: MANAGED_DOCS_SITE_ID,
+    name: "WTFM docs",
+    primaryDomain: "",
+    siteType: "docs",
+    docsPublicationMode: "managed",
+    authoringSurface: "docs-presentation",
+  });
+  const written = JSON.parse(await readFile(site.configPath, "utf8"));
+  assert.equal(written.authoringSurface, "docs-presentation");
+  assert.equal(written.siteId, MANAGED_DOCS_SITE_ID);
+  assert.ok(progress.some((line) => line.includes("Authoring surface docs-presentation")));
+
+  // whoami reads the recording back, offline.
+  const offline = api([]);
+  const whoamiRun = invoke(site, offline, { verb: "whoami" });
+  const reported = await whoami(whoamiRun.invocation);
+  assert.equal(offline.calls.length, 0);
+  assert.equal(reported.authoringSurface, "docs-presentation");
+  assert.ok(whoamiRun.progress.some((line) => line.includes(`Site: ${MANAGED_DOCS_SITE_ID} (docs-presentation`)));
+});
+
+test("a Docs-presentation exchange asks only for the capabilities the surface offers", async (testContext) => {
+  const site = await fixture(testContext, { siteId: MANAGED_DOCS_SITE_ID });
+  await writeFile(
+    site.configPath,
+    `${JSON.stringify({ configVersion: 1, siteId: MANAGED_DOCS_SITE_ID, authoringSurface: "docs-presentation", workspaceDir: "site" })}\n`,
+  );
+  await seedCredential(site);
+  const wire = api([
+    exchangeRoute({
+      reply: {
+        ...exchangeRoute().reply,
+        siteId: MANAGED_DOCS_SITE_ID,
+        capabilities: ["delegation.deployments", "delegation.design"],
+        authoringSurface: "SITE_AUTHORING_SURFACE_DOCS_PRESENTATION",
+      },
+    }),
+    { method: "GET", pathname: /\/deploy\/review$/u, reply: {} },
+    {
+      method: "GET",
+      pathname: READINESS,
+      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
+    },
+    { method: "GET", pathname: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
+  ]);
+  const { invocation } = invoke(site, wire, {
+    verb: "status",
+    surface: "docs-presentation",
+    capabilities: ["delegation.content", "delegation.deployments"],
+  });
+  const result = await status(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.authoringSurface, "docs-presentation");
+  const exchange = wire.calls.find((call) => call.pathname === EXCHANGE_PATH);
+  // Content was dropped before the request: the site's exchange refuses it by
+  // name, and a status run does not need it there.
+  assert.deepEqual(exchange.body.capabilities, ["delegation.deployments"]);
+});
+
+test("a recorded site the exchange no longer offers gets the run-use-again hint on top of Not found", async (testContext) => {
+  const site = await fixture(testContext, { siteId: MANAGED_DOCS_SITE_ID });
+  await writeFile(
+    site.configPath,
+    `${JSON.stringify({ configVersion: 1, siteId: MANAGED_DOCS_SITE_ID, authoringSurface: "docs-presentation", workspaceDir: "site" })}\n`,
+  );
+  await seedCredential(site);
+  // What the server answers once a managed Docs source has become prebuilt:
+  // the same Not found every site the account cannot author gets.
+  const wire = api([
+    exchangeRoute({ reply: jsonResponse({ code: 5, message: "That site is not available for authoring." }, 404) }),
+  ]);
+  const { invocation, progress } = invoke(site, wire, { verb: "status", surface: "docs-presentation" });
+
+  await assert.rejects(status(invocation), (error) => error.httpStatus === 404);
+  assert.ok(progress.some((line) => line.includes("publication mode may have changed") && line.includes("use <site>")));
+  assert.equal(wire.calls.length, 1);
+  assert.equal(wire.calls[0].pathname, EXCHANGE_PATH);
+});
+
+test("the same Not found without a recorded surface carries no Docs hint", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api([
+    exchangeRoute({ reply: jsonResponse({ code: 5, message: "That site is not available for authoring." }, 404) }),
+  ]);
+  const { invocation, progress } = invoke(site, wire, { verb: "status", surface: "docs-presentation" });
+
+  await assert.rejects(status(invocation), (error) => error.httpStatus === 404);
+  assert.ok(!progress.some((line) => line.includes("publication mode may have changed")));
+});
+
+test("a configuration naming an unknown surface is refused rather than read as one", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  await writeFile(
+    site.configPath,
+    `${JSON.stringify({ configVersion: 1, siteId: SITE_ID, authoringSurface: "everything", workspaceDir: "site" })}\n`,
+  );
+  const wire = api([]);
+  await assert.rejects(
+    status(invoke(site, wire, { verb: "status", surface: "docs-presentation" }).invocation),
+    (error) => error.code === "config.authoring_surface",
+  );
+  assert.equal(wire.calls.length, 0);
+});
+
+test("media upload on a Docs-presentation site exchanges for Design alone, never the whole envelope", async (testContext) => {
+  const site = await fixture(testContext, { siteId: MANAGED_DOCS_SITE_ID });
+  await writeFile(
+    site.configPath,
+    `${JSON.stringify({ configVersion: 1, siteId: MANAGED_DOCS_SITE_ID, authoringSurface: "docs-presentation", workspaceDir: "site" })}\n`,
+  );
+  await mkdir(path.join(site.project, "site", "media"), { recursive: true });
+  await seedCredential(site);
+  const wire = api([
+    exchangeRoute({
+      reply: {
+        ...exchangeRoute().reply,
+        siteId: MANAGED_DOCS_SITE_ID,
+        capabilities: ["delegation.design"],
+        authoringSurface: "SITE_AUTHORING_SURFACE_DOCS_PRESENTATION",
+      },
+    }),
+  ]);
+  const { invocation } = invoke(site, wire, {
+    verb: "media upload",
+    surface: "docs-presentation",
+    capabilities: ["delegation.content"],
+    surfaceCapabilities: { "docs-presentation": ["delegation.design"] },
+  });
+  // The exchange is the first thing the verb does; an empty media directory
+  // then ends the run before any upload, which is all this test needs.
+  await assert.rejects(mediaUpload(invocation), (error) => error.code === "media.none_found");
+
+  const exchange = wire.calls.find((call) => call.pathname === EXCHANGE_PATH);
+  assert.deepEqual(exchange.body.capabilities, ["delegation.design"]);
+  assert.equal(wire.calls.length, 1);
+});
+
+test("a verb whose request narrows to nothing is refused rather than minting the whole envelope", async (testContext) => {
+  const site = await fixture(testContext, { siteId: MANAGED_DOCS_SITE_ID });
+  await writeFile(
+    site.configPath,
+    `${JSON.stringify({ configVersion: 1, siteId: MANAGED_DOCS_SITE_ID, authoringSurface: "docs-presentation", workspaceDir: "site" })}\n`,
+  );
+  await seedCredential(site);
+  const wire = api([]);
+  await assert.rejects(
+    status(invoke(site, wire, { verb: "status", surface: "docs-presentation", capabilities: ["delegation.content"] }).invocation),
+    (error) => error.code === "surface.capabilities_unavailable",
+  );
+  assert.equal(wire.calls.length, 0);
 });
