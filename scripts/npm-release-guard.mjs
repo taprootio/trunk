@@ -106,7 +106,7 @@ export function assertNpmIntegrity(integrity, label = "npm package integrity") {
   return integrity;
 }
 
-export function npmPackIntegrity(packResult) {
+export function npmPackResult(packResult) {
   let packs = [];
   if (Array.isArray(packResult)) {
     packs = packResult;
@@ -123,7 +123,12 @@ export function npmPackIntegrity(packResult) {
   ) {
     fail("npm pack output must contain exactly one package with an integrity value");
   }
-  return assertNpmIntegrity(packs[0].integrity, "npm pack integrity");
+  assertNpmIntegrity(packs[0].integrity, "npm pack integrity");
+  return packs[0];
+}
+
+export function npmPackIntegrity(packResult) {
+  return npmPackResult(packResult).integrity;
 }
 
 function decodeStatement(attestationBundle) {

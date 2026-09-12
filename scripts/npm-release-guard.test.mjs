@@ -1,6 +1,8 @@
+import { createServer } from "node:http";
+import { assertEquivalentSdkFiles, selectSdkInstallSource } from "./integration-sdk-integrity.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +15,7 @@ import {
   assertNpmProvenance,
   compareSemVer,
   npmPackIntegrity,
+  npmPackResult,
   parseSemVer,
 } from "./npm-release-guard.mjs";
 
@@ -126,6 +129,8 @@ test("the release-order guard rejects malformed versions response shapes", () =>
 test("npm pack integrity accepts npm 11 and npm 12 response shapes", () => {
   const pack = { name: expected.packageName, integrity };
   assert.equal(npmPackIntegrity([pack]), pack.integrity);
+  assert.deepEqual(npmPackResult([pack]), pack);
+  assert.deepEqual(npmPackResult({ "@taprootio/integration-sdk": pack }), pack);
   assert.equal(npmPackIntegrity({ [expected.packageName]: pack }), pack.integrity);
 });
 
@@ -212,4 +217,60 @@ test("an existing package succeeds only with verified provenance for this Trunk 
     () => assertNpmProvenance({ audit: { ...auditWith(provenanceStatement()), missing: [{}] }, ...expected }),
     /invalid or missing registry signature or attestation/u,
   );
+});
+
+
+test("SDK lock selection accepts verified registry compression differences and rejects drift", async (t) => {
+  const pack = { name: "@taprootio/integration-sdk", version: "0.1.0", integrity: "sha512-local" };
+  const pin = { version: pack.version, integrity: "sha512-registry", resolved: "https://registry.npmjs.org/@taprootio/integration-sdk/-/integration-sdk-0.1.0.tgz" };
+  let metadata = { name: pack.name, version: pack.version, dist: { integrity: pin.integrity, tarball: pin.resolved } };
+  let status = 200;
+  const server = createServer((_request, response) => {
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(metadata));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const transport = (url, options) => {
+    assert.equal(url, "https://registry.npmjs.org/%40taprootio%2Fintegration-sdk/0.1.0");
+    assert.equal(options.redirect, "error");
+    return fetch(`http://127.0.0.1:${server.address().port}`, options);
+  };
+  assert.equal(await selectSdkInstallSource(pack, { ...pin, integrity: pack.integrity }, () => { throw Error("No registry needed for matching pre-release pack"); }), "packed");
+  assert.equal(await selectSdkInstallSource(pack, pin, transport), "registry");
+  for (const changed of [
+    { ...metadata, name: "other" }, { ...metadata, version: "0.2.0" },
+    { ...metadata, dist: { ...metadata.dist, integrity: "sha512-other" } },
+    { ...metadata, dist: { ...metadata.dist, tarball: "https://example.test/package.tgz" } },
+  ]) {
+    const valid = metadata;
+    metadata = changed;
+    await assert.rejects(selectSdkInstallSource(pack, pin, transport), /registry identity differs/u);
+    metadata = valid;
+  }
+  status = 404;
+  await assert.rejects(selectSdkInstallSource(pack, pin, transport), /no verified registry release/u);
+  status = 200;
+  metadata = { oversized: "x".repeat(256 * 1024) };
+  await assert.rejects(selectSdkInstallSource(pack, pin, transport), /byte limit/u);
+  await assert.rejects(selectSdkInstallSource(pack, { ...pin, resolved: "https://attacker.test/a.tgz" }, transport), /public npm registry/u);
+});
+
+test("registry SDK content comparison rejects changed, added, missing or linked files", (t) => {
+  const temporary = mkdtempSync(join(tmpdir(), "sdk-content-"));
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  const local = join(temporary, "local");
+  const published = join(temporary, "registry");
+  for (const dir of [local, published]) { mkdirSync(dir); writeFileSync(join(dir, "index.js"), "export const value = 1;\n"); }
+  assert.doesNotThrow(() => assertEquivalentSdkFiles(local, published));
+  writeFileSync(join(published, "index.js"), "export const value = 2;\n");
+  assert.throws(() => assertEquivalentSdkFiles(local, published), /contents differ/u);
+  writeFileSync(join(published, "index.js"), "export const value = 1;\n");
+  writeFileSync(join(published, "extra.js"), "extra");
+  assert.throws(() => assertEquivalentSdkFiles(local, published), /contents differ/u);
+  rmSync(join(published, "extra.js"));
+  rmSync(join(published, "index.js"));
+  assert.throws(() => assertEquivalentSdkFiles(local, published), /contents differ/u);
+  symlinkSync(join(local, "index.js"), join(published, "index.js"));
+  assert.throws(() => assertEquivalentSdkFiles(local, published), /symbolic links/u);
 });

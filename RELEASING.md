@@ -1,11 +1,14 @@
 # Trunk release operations
 
 This runbook covers the private Taproot → public Trunk → public npm boundary.
-The current packages are `@taprootio/docs-artifact`,
-`@taprootio/docs-publisher`, and `@taprootio/site-authoring`. They have
-independent identities, manifests, tag prefixes, tests, sync Environments,
-npm Environments, and publish workflows. Every later integration must preserve
-the same isolation.
+The current npm packages are `@taprootio/docs-artifact`,
+`@taprootio/docs-publisher`, `@taprootio/site-authoring`, and
+`@taprootio/integration-sdk`. The independently versioned reference template
+lives at `templates/integration-reference/` and is source-only: it has a
+private package manifest for testing but no npm publish workflow. Every release
+tree has an independent identity, manifest, tag prefix, test command, and sync
+Environment; npm packages additionally have an npm Environment and a trusted
+publisher workflow.
 
 ## Release ordering
 
@@ -13,8 +16,9 @@ the same isolation.
    Taproot `main`. A pull request that changes a package's allowlisted files
    without raising its version fails the private CI.
 2. That merge starts the private release workflow for every already-released
-   package whose `docs-artifact-v<version>`, `docs-publisher-v<version>`, or
-   `site-authoring-v<version>` tag does not exist in this repository yet. A
+   release source whose `docs-artifact-v<version>`, `docs-publisher-v<version>`,
+   `site-authoring-v<version>`, `integration-sdk-v<version>`, or
+   `integration-reference-v<version>` tag does not exist in this repository yet. A
    package's first release is still created by hand with a private tag on
    the exact `main` commit once its bootstrap below is complete; that manual
    tag remains available for every package and runs the same verification.
@@ -22,16 +26,16 @@ the same isolation.
    reserve creation for maintainers; the public commit here names the private
    source commit instead.
 3. The private workflow verifies that the commit belongs to `main` and that
-   the release names the declared version and pins, tests the package (first
+   the release names the declared version and pins, tests the release source (first
    waiting for every declared pin to be on npm, so a dependent released in
    the same run as its sibling does not race that sibling's publish), stages
    its allowlisted public tree, and mints a short-lived GitHub App
    installation token.
-4. The sync replaces only the selected owned package subtree, commits it to
+4. The sync replaces only the selected owned package or template subtree, commits it to
    Trunk `main`, then pushes the branch and identical package tag in one atomic
    ref transaction. An existing tag is accepted only when that package subtree
    and the reviewed release scaffold have identical bytes.
-5. The matching public workflow verifies that the public tag belongs to `main`,
+5. For an npm package, the matching public workflow verifies that the public tag belongs to `main`,
    reruns package tests, rejects a version older than anything already on npm,
    and publishes from a GitHub-hosted runner with npm provenance. Both dependent
    packages validate exact dependency versions through the shared release guard;
@@ -40,7 +44,7 @@ the same isolation.
 
 The public workflows call shared release scripts inside their existing jobs.
 Registry lookup, release ordering, integrity comparison, verified provenance, and
-publication therefore have one implementation. Each package still owns its
+publication therefore have one implementation. Each npm package still owns its
 workflow filename, tag trigger, Environment, permissions, concurrency identity,
 package directory, required dependency names, and test commands. The npm token
 is exposed only to the publish step; registry and test steps do not receive it.
@@ -87,7 +91,8 @@ tarball-integrity check.
    Trunk `main` only after the staged files have been reviewed.
 3. Add a `main` branch ruleset that requires reviewed pull requests and the
    public `Public integration packages` check. Add separate tag rulesets
-   targeting `docs-artifact-v*`, `docs-publisher-v*`, and `site-authoring-v*`,
+   targeting `docs-artifact-v*`, `docs-publisher-v*`, `site-authoring-v*`,
+   `integration-sdk-v*`, and `integration-reference-v*`,
    each with **Restrict creations**, **Restrict updates**, and **Restrict
    deletions** enabled. Grant bypass only to the release App described below,
    so an ordinary Trunk writer cannot create a tag that invokes any npm trusted
@@ -97,9 +102,12 @@ tarball-integrity check.
    **Repository contents: Read and write**. Install it only on `taprootio/trunk`.
 5. In private `taprootio/taproot`, keep `trunk-docs-artifact-sync` restricted to
    protected `docs-artifact-v*` tags, `trunk-docs-publisher-sync` restricted to
-   protected `docs-publisher-v*` tags, and create `trunk-site-authoring-sync`
-   restricted to protected `site-authoring-v*` tags; allow the protected
-   `main` branch on all three as well. The release-on-merge workflow calls the
+   protected `docs-publisher-v*` tags, `trunk-site-authoring-sync` restricted
+   to protected `site-authoring-v*` tags, `trunk-integration-sdk-sync`
+   restricted to protected `integration-sdk-v*` tags, and
+   `trunk-integration-reference-sync` restricted to protected
+   `integration-reference-v*` tags; allow the protected `main` branch on all
+   five. The release-on-merge workflow calls the
    sync from `main`, and GitHub checks an Environment's deployment rules
    against the calling run's ref, so a tag-only Environment turns that run
    away before it can read the key. Each Environment uses the Environment
@@ -110,16 +118,19 @@ tarball-integrity check.
    App token. The workflow stores no installation token;
    `actions/create-github-app-token` mints one per run.
 6. In private `taprootio/taproot`, add matching `docs-artifact-v*`,
-   `docs-publisher-v*`, and `site-authoring-v*` tag rulesets with **Restrict
-   creations**, **Restrict updates**, and **Restrict deletions** enabled. Grant
-   bypass only to trusted release maintainers. This prevents arbitrary tags from
-   unlocking a sync Environment and prevents delete-and-retag recovery against
-   different source.
+   `docs-publisher-v*`, `site-authoring-v*`, `integration-sdk-v*`, and
+   `integration-reference-v*` tag rulesets with **Restrict creations**,
+   **Restrict updates**, and **Restrict deletions** enabled. Grant bypass only
+   to trusted release maintainers. This prevents arbitrary tags from unlocking
+   a sync Environment and prevents delete-and-retag recovery against different
+   source.
 7. In public Trunk, keep `npm-docs-artifact-publish` restricted to protected
    `docs-artifact-v*` tags, `npm-docs-publisher-publish` restricted to protected
-   `docs-publisher-v*` tags, and create `npm-site-authoring-publish` restricted
-   to protected `site-authoring-v*` tags. Add required reviewers if release
-   policy calls for a human deployment approval.
+   `docs-publisher-v*` tags, `npm-site-authoring-publish` restricted to
+   protected `site-authoring-v*` tags, and `npm-integration-sdk-publish`
+   restricted to protected `integration-sdk-v*` tags. Add required reviewers
+   if release policy calls for a human deployment approval. The source-only
+   reference template deliberately has no npm Environment.
 
 GitHub App contents permission is repository-scoped rather than path-scoped.
 The audited sync implementation stages and commits only the package path
@@ -299,6 +310,114 @@ first:
 5. Delete `NPM_TOKEN` from that Environment and revoke the one-time token.
    Record the non-secret public commit/tag, package version, and provenance URL.
 
+### Integration SDK and reference template bootstrap
+
+Bootstrap the SDK before the reference template. The template installs the
+exact SDK from npm in a clean consumer directory; it must never install from a
+sibling path, use a `file:` dependency, or be exported before that published
+version exists.
+
+1. On the reviewed private `main` candidate, derive the SDK release identity
+   from `release/trunk/integration-sdk-release-manifest.json`. Review the
+   staged public source before any npm action:
+
+   ```bash
+   node scripts/stage-trunk-release.mjs <empty-directory> \
+     release/trunk/integration-sdk-release-manifest.json
+   ```
+
+   The result contains only the reviewed public scaffold and
+   `packages/integration-sdk/`. Merge the scaffold-only public Trunk change
+   first, including `publish-integration-sdk.yml`, the SDK CI bootstrap guard,
+   the workspace test command, and this runbook. Do not copy the SDK subtree,
+   `templates/integration-reference/`, private task records, or private git
+   history into that public-scaffold change. Verify every `repositoryFiles`
+   byte against the private candidate after both sides merge.
+2. Before tagging, configure the protected private `integration-sdk-v*` tag
+   ruleset and `trunk-integration-sdk-sync` Environment (protected `main` and
+   that tag pattern; only `TRUNK_RELEASE_APP_PRIVATE_KEY` in the Environment),
+   then the public `integration-sdk-v*` tag ruleset and
+   `npm-integration-sdk-publish` Environment. npm cannot configure trusted
+   publishing until this new package exists, so do not try to create that
+   registry setting yet. Read back the non-secret GitHub configuration before
+   proceeding.
+3. Under separate authorization, create a one-time granular npm token with no
+   authority beyond initial creation/publish of `@taprootio/integration-sdk`.
+   Put it only in the public `npm-integration-sdk-publish` Environment as
+   `NPM_TOKEN`. From a freshly fetched, reviewed private `main` commit, derive
+   and verify the exact tag before creating it:
+
+   ```bash
+   source_commit="$(git rev-parse HEAD)"
+   release_manifest=release/trunk/integration-sdk-release-manifest.json
+   release_tag="$(node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const m = JSON.parse(readFileSync(process.argv[1], "utf8"));
+     const p = JSON.parse(readFileSync(`${m.packageSource}/package.json`, "utf8"));
+     console.log(`${m.tagPrefix}${p.version}`);
+   ' "$release_manifest")"
+   git merge-base --is-ancestor "$source_commit" origin/main
+   node scripts/verify-trunk-release-identity.mjs "$release_tag" "$release_manifest"
+   git tag "$release_tag" "$source_commit"
+   git push origin "refs/tags/$release_tag"
+   ```
+
+   The private sync creates the inspectable public commit and identical public
+   tag before the public workflow publishes to npm with provenance. Do not
+   publish locally or publish npm first.
+4. Require the public workflow, npm integrity, provenance, and clean
+   installation proof to succeed. Record the private source SHA, public commit
+   and tag, npm version/integrity, attestations URL, and public workflow URL.
+   Now configure npm trusted publishing for organization `taprootio`, repository
+   `trunk`, workflow `publish-integration-sdk.yml`, Environment
+   `npm-integration-sdk-publish`, and direct `npm publish`; read back those
+   non-secret coordinates. Delete `NPM_TOKEN` and revoke the one-time token. A
+   same-version retry can verify bytes and provenance but cannot prove a later
+   token-free OIDC publish; retain a separately reviewed follow-up for that
+   proof.
+5. Only after `@taprootio/integration-sdk@<version>` is available from npm,
+   prepare the source-only reference template with:
+
+   ```bash
+   node scripts/stage-trunk-release.mjs <empty-directory> \
+     release/trunk/integration-reference-release-manifest.json
+   ```
+
+   Review that stage as the exact public source for
+   `templates/integration-reference/`. It must contain the template's license,
+   environment example, App Platform specification, migrations, application
+   source, bundled static fallback, tests, and public instructions. The lockfile
+   pins the exact SDK tarball integrity rehearsed locally. Before export verify
+   npm's `dist.integrity` and run `npm ci`. Compression can differ across
+   Node/npm/zlib versions even when unpacked files agree. If registry integrity
+   differs, re-lock the exact SDK from npm, advance the template version and
+   its release identity, and review that new template before tagging it.
+   Never overwrite an existing immutable template tag. The clean-consumer
+   gates accept that registry lock only after checking registry metadata and
+   comparing every installed SDK file with the locally packed candidate;
+   different source contents require an SDK version bump. A missing registry
+   version with a mismatched local digest fails closed; use the reviewed release
+   runtime to prepare its pre-publication lock. Include no secrets, customer data,
+   article drafts, internal fixtures, or Taproot source. The template's
+   `package.json` remains `private: true`; no npm package or trusted publisher
+   is created for it.
+6. Configure the protected private `integration-reference-v*` tag ruleset and
+   `trunk-integration-reference-sync` Environment with the same narrow App-key
+   boundary. Tag the reviewed private `main` commit as
+   `integration-reference-v<version>` only after the reference manifest's exact
+   SDK pin is available. Derive the tag with the same command above, changing
+   only `release_manifest=release/trunk/integration-reference-release-manifest.json`;
+   run `node scripts/wait-for-npm-versions.mjs "$release_manifest"` before
+   creating the tag. The sync waits for that pin again, installs it from npm,
+   runs the template test command, replaces only
+   `templates/integration-reference/`, and atomically commits and tags Trunk.
+   Record the public source tag and commit; there is no npm publication step.
+
+For a later release, change one owned subtree and its matching manifest only.
+An SDK bump that changes public bytes gets a new SDK tag and npm provenance. A
+template-only change gets a new template version/tag after its pinned SDK is
+available. Neither release rewrites the other's tree.
+
 Record only the App id, variable/secret names, Environment name, npm trusted
 publisher coordinates, public commit/tag, package version, and provenance URL.
 Never copy token or private-key values into an issue, task, log, or repository.
@@ -348,3 +467,9 @@ license, tests, and a publish workflow with its own npm Environment/trusted
 publisher entry. Extend the private exporter so one release stages and commits
 only that package path. Do not create an `@taprootio/trunk` umbrella package and
 do not let a package release replace the whole public working tree.
+
+A public source-only template follows the same allowlist, unique tag, protected
+sync Environment, immutable-byte, and sibling-preservation rules, but belongs
+under `templates/`, declares `private: true`, and has neither a package
+publication nor npm trust coordinates. Its manifest may pin released packages;
+the private sync waits for those exact versions before testing it.
