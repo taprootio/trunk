@@ -138,10 +138,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      # database.integration.test.js discovers this opt-in URL. The service
-      # port is ephemeral, so concurrent runner jobs cannot collide.
-      REFERENCE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/taproot_integration_reference_test
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -155,6 +151,12 @@ jobs:
 
       - name: Test the template in an isolated packed consumer
         shell: bash
+        # database.integration.test.js discovers this opt-in URL. The service
+        # port is ephemeral, so concurrent runner jobs cannot collide. It is a
+        # step-level variable because the `job` context is not available to a
+        # job-level `env`; GitHub rejects the whole workflow file otherwise.
+        env:
+          REFERENCE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/taproot_integration_reference_test
         run: |
           set -euo pipefail
           workspace="$(mktemp -d)"
