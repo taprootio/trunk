@@ -50,6 +50,7 @@ jobs:
           test "$repository_url" = "https://github.com/taprootio/trunk.git"
           test "$repository_directory" = "packages/docs-publisher"
           node ../../scripts/npm-release.mjs exact-dependency @taprootio/docs-artifact
+          node ../../scripts/npm-release.mjs exact-dependency saxes
 
       - name: Install the exact public artifact contract and test the publisher
         working-directory: packages/docs-publisher
