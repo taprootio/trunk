@@ -1,27 +1,31 @@
 export type DocsPublicationMode = "managed" | "prebuilt";
 
 export interface DocsPublisherConfig {
-  configVersion: 1;
+  /** Version 1 remains supported; version 2 enables prebuilt discovery authority. */
+  configVersion: 1 | 2;
   siteId: string;
   artifactDirectory: string;
   /** Explicit publication mode. Absent selects "managed". */
   mode?: DocsPublicationMode;
+  /** Version 2 prebuilt-only canonical HTTPS production origin. */
+  productionOrigin?: string;
   apiBaseUrl?: string;
 }
 
 export interface DocsPublishSuccess {
-  schemaVersion: 1;
+  schemaVersion: 2;
   ok: true;
   outcome?: "published";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.2.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.3.0" };
   compatibility: {
-    configVersion: 1;
+    configVersion: 1 | 2;
     artifactPackageVersion: "1.1.0";
     artifactSchemaVersion: 1;
     archiveFormat: "taproot-docs-tar-gzip-v1" | "taproot-docs-prebuilt-tar-gzip-v1";
   };
   siteId: string;
   mode: DocsPublicationMode;
+  readiness: { warnings: Array<{ code: string; field: string }> };
   artifact: { contentHash: string; byteLength: number; uploaded: boolean; reused: boolean };
   release: { id: string; status: string; sourceRevision: string };
   staging: { deploymentId: string; outputReleaseId: string; pointerVersion: number; status: string };
@@ -30,10 +34,10 @@ export interface DocsPublishSuccess {
 
 /** The validated source was superseded on main. No deployment was requested. */
 export interface DocsPublishSuperseded {
-  schemaVersion: 1;
+  schemaVersion: 2;
   ok: true;
   outcome: "superseded";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.2.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.3.0" };
   siteId: string;
   mode: DocsPublicationMode;
   release: { id: string; status: string; sourceRevision: string };
@@ -56,6 +60,7 @@ export class PublisherError extends Error {
   readonly code: string;
   readonly field?: string;
   readonly status?: string;
+  readonly diagnostics?: ReadonlyArray<{ code: string; field: string }>;
   readonly exitCode: number;
 }
 

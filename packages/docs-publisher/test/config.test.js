@@ -50,6 +50,34 @@ test("resolves the closed publication mode and defaults an absent one to managed
   }
 });
 
+test("accepts a version-two prebuilt production origin and preserves version-one consumers", async (testContext) => {
+  const root = await fixture(testContext, {
+    configVersion: 2,
+    mode: "prebuilt",
+    productionOrigin: "https://docs.example.test",
+  });
+  const result = await loadPublisherConfig({ cwd: path.join(root, "project") });
+  assert.equal(result.configVersion, 2);
+  assert.equal(result.productionOrigin, "https://docs.example.test");
+});
+
+test("keeps production origin additive and canonical", async (testContext) => {
+  for (const [scenario, config, code] of [
+    ["version one", { mode: "prebuilt", productionOrigin: "https://docs.example.test" }, "config.production_origin_version"],
+    ["managed mode", { configVersion: 2, productionOrigin: "https://docs.example.test" }, "config.production_origin_mode"],
+    ["path", { configVersion: 2, mode: "prebuilt", productionOrigin: "https://docs.example.test/guide" }, "config.production_origin"],
+    ["insecure", { configVersion: 2, mode: "prebuilt", productionOrigin: "http://docs.example.test" }, "config.production_origin"],
+  ]) {
+    await testContext.test(scenario, async (caseContext) => {
+      const root = await fixture(caseContext, config);
+      await assert.rejects(
+        loadPublisherConfig({ cwd: path.join(root, "project") }),
+        (error) => error?.code === code,
+      );
+    });
+  }
+});
+
 test("rejects every publication mode outside the closed selection", async (testContext) => {
   for (
     const mode of [

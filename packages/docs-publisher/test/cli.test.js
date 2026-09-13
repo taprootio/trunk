@@ -14,17 +14,18 @@ function sink() {
 
 function successResult() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ok: true,
-    publisher: { name: "@taprootio/docs-publisher", version: "1.2.0" },
+    publisher: { name: "@taprootio/docs-publisher", version: "1.3.0" },
     compatibility: {
-      configVersion: 1,
+      configVersion: 2,
       artifactPackageVersion: "1.1.0",
       artifactSchemaVersion: 1,
       archiveFormat: "taproot-docs-prebuilt-tar-gzip-v1",
     },
     siteId: "11111111-1111-4111-8111-111111111111",
     mode: "prebuilt",
+    readiness: { warnings: [] },
     artifact: { contentHash: `sha256:${"a".repeat(64)}`, byteLength: 10, uploaded: true, reused: false },
     release: {
       id: "22222222-2222-4222-8222-222222222222",
@@ -122,7 +123,7 @@ test("exposes help and version at the binary and product-command levels", async 
   for (const arguments_ of [["--version"], ["docs", "publish", "--version"]]) {
     const stdout = sink();
     assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
-    assert.equal(stdout.read(), "1.2.0\n");
+    assert.equal(stdout.read(), "1.3.0\n");
   }
 });
 

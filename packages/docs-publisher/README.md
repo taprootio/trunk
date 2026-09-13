@@ -21,7 +21,7 @@ does not create a catch-all Trunk package.
 First-party repositories pin the exact released CLI:
 
 ```bash
-npm install --save-dev --save-exact @taprootio/docs-publisher@1.2.0
+npm install --save-dev --save-exact @taprootio/docs-publisher@1.3.0
 ```
 
 Then build the configured site and publish its exact artifact:
@@ -52,7 +52,8 @@ runner-provided `GITHUB_OUTPUT` automatically.
 
 ## GitHub main publishing guard
 
-Version 1.2.0 adds an opt-in guard for merge-to-main workflows:
+Version 1.2.0 added an opt-in guard for merge-to-main workflows, retained by
+this release:
 
 ```yaml
 permissions:
@@ -123,12 +124,20 @@ project sets it explicitly and points `artifactDirectory` at the built site:
 
 ```json
 {
-  "configVersion": 1,
+  "configVersion": 2,
   "siteId": "11111111-1111-4111-8111-111111111111",
   "artifactDirectory": "public",
-  "mode": "prebuilt"
+  "mode": "prebuilt",
+  "productionOrigin": "https://docs.example.com"
 }
 ```
+
+`productionOrigin` is optional and is accepted only by `configVersion: 2`
+prebuilt configurations. It is one canonical HTTPS origin: no path, port,
+query, fragment, credentials, or trailing slash. It gives the local command an
+early production-host check; it never becomes release input. Taproot resolves
+the verified production hostname itself when it validates the immutable upload,
+so omitting this recommendation cannot bypass production checks.
 
 The artifact directory is relative to, and must resolve beneath, the real
 configuration directory. Parent discovery is deliberately bounded and rejects
@@ -142,14 +151,49 @@ Production defaults to `https://app.taproot.io/api`. Local development may add
 origins are also accepted. Arbitrary origins are rejected so a changed project
 config cannot redirect the bearer key to another host.
 
+## Prebuilt discovery readiness
+
+Before packaging a prebuilt snapshot, version 1.3 inspects only the declared,
+already-read bytes of `sitemap.xml`, `robots.txt`, and `index.html`. It never
+fetches an icon, canonical URL, sitemap URL, redirect, or any other declared
+URL, and it does not execute page content. Each textual file has a 1 MiB
+inspection bound. XML inspection caps nesting at 64, inherited namespace
+bindings at 128, tokens at 75,000, and URLs at 25,000; the bounded result also
+passes full XML syntax validation. HTML inspection caps tokens at 10,000,
+ignores inert examples, and retains at most 100 diagnostics per severity. A
+homepage that exceeds either its 1 MiB text or 10,000-tag inspection bound is a
+publish-blocking validation error, not a readiness warning. SVG icon signatures
+strip only an initial 8 KiB XML prolog (declarations, comments, and an SVG
+DOCTYPE) before requiring the SVG root; a longer prolog is also publish-blocking.
+Local icons must have an image media type and a recognized format signature
+(PNG, JPEG, GIF, WebP, ICO, SVG, or AVIF); this is not a full image decode.
+
+Missing `sitemap.xml`, `robots.txt`, homepage, canonical declaration, and icon
+are readiness warnings. A valid declared local icon satisfies the icon
+recommendation even when `/favicon.ico` is absent. A malformed XML sitemap,
+nonstandard sitemap root namespace, encoded or non-page sitemap route, sitemap
+redirect, broken declared local icon, homepage `noindex`, or crawler-wide
+`Disallow: /` is an error. With `productionOrigin`, sitemap URLs and the
+homepage canonical must be absolute and use that exact origin. Sitemap extensions and their
+namespaces remain valid.
+
+The server repeats the error checks against the frozen archive and its own
+verified production origin. Staging therefore validates content intended for
+production without requiring the staging host to be indexable or canonical.
+The command emits warning codes and paths in `readiness.warnings`; an error
+returns bounded diagnostic codes and paths in the failure JSON.
+
 ## Compatibility contract
 
-The v1 handshake is explicit and fail-closed:
+Versions 1 and 2 of the configuration remain accepted. Version 2 is additive;
+consumer repositories must first pin the released 1.3.0 package, then make the
+same reviewed consumer change that changes a prebuilt config to version 2 and
+adds `productionOrigin`. A version 1.2.0 consumer rejects that new closed key.
 
 | Surface                     | `mode: "managed"`                      | `mode: "prebuilt"`                       |
 | --------------------------- | -------------------------------------- | ---------------------------------------- |
-| Publisher package           | `@taprootio/docs-publisher@1.2.0`      | `@taprootio/docs-publisher@1.2.0`        |
-| Publisher config            | `configVersion: 1`                     | `configVersion: 1`                       |
+| Publisher package           | `@taprootio/docs-publisher@1.3.0`      | `@taprootio/docs-publisher@1.3.0`        |
+| Publisher config            | `configVersion: 1` or `2`              | `configVersion: 1` or `2`                |
 | Artifact package dependency | exact `@taprootio/docs-artifact@1.1.0` | exact `@taprootio/docs-artifact@1.1.0`   |
 | Artifact manifest           | `taproot-docs-manifest.json`           | `taproot-docs-prebuilt-manifest.json`    |
 | Artifact schema             | `schemaVersion: 1`                     | `schemaVersion: 1`                       |
@@ -233,13 +277,15 @@ nonzero. Success requires all of these exact identities to be terminal:
 ## Output contract
 
 Human progress goes to stderr. Stdout contains exactly one compact JSON object.
-Completed-publication output is schema version 1 and includes publisher/artifact
+Completed-publication output is schema version 2 and includes publisher/artifact
 compatibility versions, the resolved publication `mode`, site id, artifact
 hash/length and upload/reuse flags, the immutable release id, both deployment
 ids, the shared output release id, and staging/production pointer versions.
 `compatibility.archiveFormat` names the container that mode actually uploaded.
-Failure output is also schema version 1 and contains a stable error code plus an
-optional stable field/status; the process exits nonzero.
+It also includes `readiness.warnings`, a bounded list of stable prebuilt
+discovery `{ code, field }` records. Failure output is also schema version 2
+and contains a stable error code, optional field/status, and optional bounded
+`error.diagnostics` records; the process exits nonzero.
 
 When `GITHUB_OUTPUT` names the existing Actions output file, the command appends
 the same JSON through a random delimiter block named `taproot_docs_result` and

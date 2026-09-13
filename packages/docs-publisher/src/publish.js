@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createReleaseArchive } from "./archive.js";
 import { snapshotDocsArtifact } from "./artifact.js";
 import { loadPublisherConfig } from "./config.js";
+import { inspectPrebuiltDiscovery } from "./prebuilt-discovery.js";
 import {
   ARCHIVE_FORMAT_NAMES,
   ARCHIVE_FORMAT_WIRE_VALUES,
@@ -99,6 +100,30 @@ function safeInteger(value, code, field) {
 
 function isTimestamp(value) {
   return typeof value === "string" && UTC_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function releaseValidationDiagnostics(release) {
+  // The worker emits a deliberately small, code/path-only JSON record. Treat
+  // everything received over the API as untrusted anyway: do not relay prose,
+  // do not parse an unbounded blob, and do not make a failed parse obscure the
+  // release's stable terminal status.
+  if (typeof release.failureDetails !== "string" || Buffer.byteLength(release.failureDetails, "utf8") > 8_192) {
+    return [];
+  }
+  try {
+    const errors = JSON.parse(release.failureDetails)?.errors;
+    if (!Array.isArray(errors)) return [];
+    return errors.slice(0, 100).flatMap((error) => (
+      error && typeof error === "object"
+      && typeof error.code === "string" && /^[a-z0-9_.-]{1,100}$/u.test(error.code)
+      && typeof error.path === "string" && error.path.length > 0 && error.path.length <= 1_000
+      && !/[\u0000-\u001f\u007f-\u009f]/u.test(error.path)
+        ? [{ code: error.code, path: error.path }]
+        : []
+    ));
+  } catch {
+    return [];
+  }
 }
 
 function intentKey(phase, values) {
@@ -418,12 +443,14 @@ async function waitForValidatedRelease(client, siteId, release, expected, onProg
         return { done: true, value: current };
       }
       if (RELEASE_FAILURES.has(current.status) || (current.status === RELEASE_RETAINED && !current.validatedAt)) {
+        const diagnostics = releaseValidationDiagnostics(current);
         throw new PublisherError(
           "release.validation_failed",
           "Taproot rejected or retired the exact Docs release during validation.",
           {
-            field: typeof current.failureCode === "string" && current.failureCode ? current.failureCode : undefined,
+            field: diagnostics[0]?.path ?? (typeof current.failureCode === "string" && current.failureCode ? current.failureCode : undefined),
             status: current.status,
+            diagnostics,
           },
         );
       }
@@ -601,6 +628,7 @@ export async function publishPreparedArtifact({
   onProgress = () => {},
   now = Date.now,
   beforeStage,
+  readinessWarnings = [],
 }) {
   const mode = resolvePublicationMode(config, snapshot, archive);
   const body = releaseBody(config.siteId, mode, snapshot.manifest, archive);
@@ -695,13 +723,14 @@ export async function publishPreparedArtifact({
     ok: true,
     publisher: { name: PUBLISHER_NAME, version: PUBLISHER_VERSION },
     compatibility: {
-      configVersion: CONFIG_VERSION,
+      configVersion: config.configVersion ?? CONFIG_VERSION,
       artifactPackageVersion: ARTIFACT_PACKAGE_VERSION,
       artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
       archiveFormat: ARCHIVE_FORMAT_NAMES[mode],
     },
     siteId: config.siteId,
     mode,
+    readiness: { warnings: readinessWarnings.map((warning) => ({ code: warning.code, field: warning.path })) },
     artifact: {
       contentHash: archive.contentHash,
       byteLength: archive.byteLength,
@@ -745,6 +774,22 @@ export async function publishDocs(options = {}) {
       : "Validating the managed Docs artifact.",
   );
   const snapshot = await snapshotDocsArtifact(config.artifactDirectory, config.mode);
+  let readinessWarnings = [];
+  if (config.mode === MODE_PREBUILT) {
+    const discovery = inspectPrebuiltDiscovery(snapshot, { productionOrigin: config.productionOrigin });
+    for (const warning of discovery.warnings) {
+      onProgress(`Prebuilt discovery warning [${warning.code}] field=${warning.path}.`);
+    }
+    if (discovery.errors.length > 0) {
+      const first = discovery.errors[0];
+      throw new PublisherError(
+        "discovery.invalid",
+        `Prebuilt discovery validation failed at ${first.path}.`,
+        { field: first.path, diagnostics: discovery.errors },
+      );
+    }
+    readinessWarnings = discovery.warnings;
+  }
   const beforeStage = options.requireGitHubMainHead
     ? createGitHubMainHeadGuard({ environment, source: snapshot.manifest.source, fetch: options.fetch, signal: options.signal })
     : undefined;
@@ -755,5 +800,5 @@ export async function publishDocs(options = {}) {
     fetch: options.fetch,
     signal: options.signal,
   });
-  return await publishPreparedArtifact({ config, snapshot, archive, client, onProgress, beforeStage });
+  return await publishPreparedArtifact({ config, snapshot, archive, client, onProgress, beforeStage, readinessWarnings });
 }

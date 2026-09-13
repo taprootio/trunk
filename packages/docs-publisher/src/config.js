@@ -11,6 +11,7 @@ import {
   LIMITS,
   MODE_MANAGED,
   MODE_PREBUILT,
+  SUPPORTED_CONFIG_VERSIONS,
 } from "./constants.js";
 import { PublisherError } from "./errors.js";
 
@@ -19,6 +20,7 @@ const CONFIG_KEYS = new Set([
   "artifactDirectory",
   "configVersion",
   "mode",
+  "productionOrigin",
   "siteId",
 ]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -289,6 +291,26 @@ function validateApiBaseUrl(value) {
   return url.toString().replace(/\/+$/u, "");
 }
 
+function validateProductionOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new PublisherError("config.production_origin", "productionOrigin must be a canonical HTTPS origin.", {
+      field: "productionOrigin",
+    });
+  }
+  if (
+    url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.port !== ""
+    || url.pathname !== "/" || url.search !== "" || url.hash !== "" || value !== url.origin
+  ) {
+    throw new PublisherError("config.production_origin", "productionOrigin must be a canonical HTTPS origin.", {
+      field: "productionOrigin",
+    });
+  }
+  return url.origin;
+}
+
 function validateArtifactDirectoryText(value) {
   if (
     typeof value !== "string"
@@ -375,10 +397,10 @@ export async function loadPublisherConfig({ cwd = process.cwd(), configPath } = 
       field: unknown[0],
     });
   }
-  if (parsed.configVersion !== CONFIG_VERSION) {
+  if (!SUPPORTED_CONFIG_VERSIONS.includes(parsed.configVersion)) {
     throw new PublisherError(
       "config.unsupported_version",
-      `configVersion must be ${CONFIG_VERSION}.`,
+      `configVersion must be one of ${SUPPORTED_CONFIG_VERSIONS.join(", ")}.`,
       { field: "configVersion" },
     );
   }
@@ -397,6 +419,20 @@ export async function loadPublisherConfig({ cwd = process.cwd(), configPath } = 
   const artifactDirectoryText = validateArtifactDirectoryText(parsed.artifactDirectory);
   if (parsed.apiBaseUrl !== undefined && typeof parsed.apiBaseUrl !== "string") {
     throw new PublisherError("config.api_base_url", "apiBaseUrl must be a string.", { field: "apiBaseUrl" });
+  }
+  if (parsed.productionOrigin !== undefined && parsed.configVersion !== CONFIG_VERSION) {
+    throw new PublisherError(
+      "config.production_origin_version",
+      `productionOrigin requires configVersion ${CONFIG_VERSION}.`,
+      { field: "productionOrigin" },
+    );
+  }
+  if (parsed.productionOrigin !== undefined && parsed.mode !== MODE_PREBUILT) {
+    throw new PublisherError(
+      "config.production_origin_mode",
+      "productionOrigin is available only for prebuilt Docs artifacts.",
+      { field: "productionOrigin" },
+    );
   }
 
   const configDirectory = path.dirname(canonicalConfigPath);
@@ -417,12 +453,13 @@ export async function loadPublisherConfig({ cwd = process.cwd(), configPath } = 
     );
   }
   return Object.freeze({
-    configVersion: CONFIG_VERSION,
+    configVersion: parsed.configVersion,
     configPath: canonicalConfigPath,
     configDirectory,
     siteId: parsed.siteId,
     mode: parsed.mode ?? DEFAULT_PUBLICATION_MODE,
     artifactDirectory,
     apiBaseUrl: validateApiBaseUrl(parsed.apiBaseUrl ?? DEFAULT_API_BASE_URL),
+    productionOrigin: parsed.productionOrigin === undefined ? undefined : validateProductionOrigin(parsed.productionOrigin),
   });
 }

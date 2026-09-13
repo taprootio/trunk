@@ -17,6 +17,14 @@ export class PublisherError extends Error {
       : "publisher.failed";
     this.field = typeof options.field === "string" ? sanitizeDiagnostic(options.field, "") : undefined;
     this.status = typeof options.status === "string" ? sanitizeDiagnostic(options.status, "") : undefined;
+    this.diagnostics = Array.isArray(options.diagnostics)
+      ? Object.freeze(options.diagnostics.slice(0, 100).flatMap((diagnostic) => {
+        if (!diagnostic || typeof diagnostic !== "object") return [];
+        const code = typeof diagnostic.code === "string" ? sanitizeDiagnostic(diagnostic.code, "") : "";
+        const field = typeof diagnostic.path === "string" ? sanitizeDiagnostic(diagnostic.path, "") : "";
+        return code && field ? [{ code, field }] : [];
+      }))
+      : undefined;
     this.exitCode = Number.isSafeInteger(options.exitCode) && options.exitCode >= 1 && options.exitCode <= 255
       ? options.exitCode
       : 1;

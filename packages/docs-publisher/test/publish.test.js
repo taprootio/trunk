@@ -279,8 +279,9 @@ test("the success result carries the publisher's exact compatibility contract", 
     archiveFormat: "taproot-docs-prebuilt-tar-gzip-v1",
   });
   assert.deepEqual(result.publisher, { name: "@taprootio/docs-publisher", version: PUBLISHER_VERSION });
-  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.schemaVersion, 2);
   assert.equal(result.mode, "prebuilt");
+  assert.deepEqual(result.readiness, { warnings: [] });
   assert.equal(result.siteId, SITE_ID);
   assert.equal(result.release.id, RELEASE_ID);
   assert.equal(result.staging.deploymentId, STAGING_ID);

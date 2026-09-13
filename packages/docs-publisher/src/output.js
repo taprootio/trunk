@@ -14,6 +14,7 @@ export function failureResult(error) {
   };
   if (error.field) result.error.field = error.field;
   if (error.status) result.error.status = error.status;
+  if (error.diagnostics?.length) result.error.diagnostics = error.diagnostics;
   return result;
 }
 
