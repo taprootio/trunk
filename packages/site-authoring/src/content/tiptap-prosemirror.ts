@@ -624,6 +624,13 @@ function renderSection(
   const surface = attrs.surface === "raised" || attrs.surface === "elevated"
     ? attrs.surface
     : definitions.surface.default;
+  const entrance = typeof attrs.entrance === "string" && definitions.entrance.values.includes(attrs.entrance as never)
+    ? attrs.entrance
+    : definitions.entrance.default;
+  const entranceStagger = typeof attrs.entranceStagger === "string"
+      && definitions.entranceStagger.values.includes(attrs.entranceStagger as never)
+    ? attrs.entranceStagger
+    : definitions.entranceStagger.default;
   const contextValue = kind === "explicit" ? stringAttr(attrs.context) : undefined;
   const context = contextValue
       && countUnicodeScalars(contextValue) <= definitions.context.maximumLength
@@ -672,6 +679,8 @@ function renderSection(
       "data-taproot-section": kind,
       "data-content-padding": contentPadding,
       "data-surface": surface,
+      "data-entrance": entrance,
+      "data-entrance-stagger": entranceStagger,
       context,
       style: sectionStyle,
     },

@@ -131,6 +131,9 @@ const COMPLETE = {
       },
     }],
     columns: 2,
+    presentation: "featured",
+    imageAspect: "square",
+    interaction: "caption-reveal",
     borderWidth: 0,
   },
   "image-banner": {
@@ -149,6 +152,7 @@ const COMPLETE = {
     textShadow: "strong",
     texture: "linen",
     textureScale: "coarse",
+    imageMotion: "drift-end",
   },
 };
 
@@ -202,6 +206,45 @@ test("accepts every image banner text shadow strength and rejects an unknown one
 test("defaults the image banner text shadow to none", () => {
   assert.equal(getComponentDefinition("image-banner").defaultData.textShadow, "none");
   assert.deepEqual(validate("image-banner", { image: COMPLETE["image-banner"].image }), []);
+});
+
+test("holds creative component options to their published vocabularies", async (testContext) => {
+  const cases = [
+    ["image-banner", "imageMotion", ["none", "slow-zoom", "drift-start", "drift-end"], "orbit"],
+    ["card-grid", "presentation", ["cards", "editorial", "featured", "poster"], "gallery"],
+    ["card-grid", "imageAspect", ["auto", "landscape", "square", "portrait"], "cinematic"],
+    ["card-grid", "interaction", ["none", "lift", "zoom", "caption-reveal"], "tilt"],
+  ];
+
+  for (const [componentType, field, accepted, rejected] of cases) {
+    await testContext.test(`${componentType}.${field}`, () => {
+      for (const value of accepted) {
+        assert.deepEqual(validate(componentType, { ...COMPLETE[componentType], [field]: value }), []);
+      }
+      const errors = validate(componentType, { ...COMPLETE[componentType], [field]: rejected });
+      assert.deepEqual(errors.map((error) => error.path), [`/attrs/componentData/${field}`]);
+    });
+  }
+});
+
+test("defaults creative component options", () => {
+  const cardGrid = getComponentDefinition("card-grid").defaultData;
+  assert.equal(cardGrid.presentation, "cards");
+  assert.equal(cardGrid.imageAspect, "landscape");
+  assert.equal(cardGrid.interaction, "lift");
+  assert.equal(getComponentDefinition("image-banner").defaultData.imageMotion, "none");
+});
+
+test("requires a visible title when a card is linked", () => {
+  for (const title of ["", " \t", undefined]) {
+    const card = { description: "Image-led card", linkUrl: "/work" };
+    if (title !== undefined) card.title = title;
+    const errors = validate("card-grid", { cards: [card] });
+    assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
+    assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/cards/0/title"]);
+  }
+  assert.deepEqual(validate("card-grid", { cards: [{ description: "Static image", linkUrl: "" }] }), []);
+  assert.deepEqual(validate("card-grid", { cards: [{ title: "Field notes", linkUrl: "/notes" }] }), []);
 });
 
 test("holds the CTA variant to the narrowed primary|danger vocabulary", async (testContext) => {
@@ -478,7 +521,7 @@ test("refuses component values the renderer would silently discard", async (test
     }), []);
     assert.deepEqual(validate("cta", { buttonUrl: "https://example.test/start" }), []);
     assert.deepEqual(validate("feature-grid", { items: [{ url: "/features" }] }), []);
-    assert.deepEqual(validate("card-grid", { cards: [{ linkUrl: "#details" }] }), []);
+    assert.deepEqual(validate("card-grid", { cards: [{ title: "Details", linkUrl: "#details" }] }), []);
     assert.deepEqual(validate("image-banner", { texture: "fine-linen" }), []);
     assert.deepEqual(validate("spacer", { dividerWidth: 1 }), []);
     assert.deepEqual(validate("testimonial", { interval: 2000 }), []);

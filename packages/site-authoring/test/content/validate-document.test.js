@@ -145,7 +145,13 @@ test("holds explicit sections to their closed attributes and non-nesting content
     assertValid(doc({ type: "section", content: [paragraph("defaults")] }));
     assertValid(doc({
       type: "section",
-      attrs: { context: "inverted_2", contentPadding: "none", surface: "raised" },
+      attrs: {
+        context: "inverted_2",
+        contentPadding: "none",
+        surface: "raised",
+        entrance: "slide-start",
+        entranceStagger: "relaxed",
+      },
       content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Band" }] }],
     }));
   });
@@ -182,6 +188,18 @@ test("holds explicit sections to their closed attributes and non-nesting content
         { type: "section", attrs: { surface: "floating" }, content: [paragraph("x")] },
         "content.attr_invalid",
         "/content/0/attrs/surface",
+      ],
+      [
+        "an invalid entrance",
+        { type: "section", attrs: { entrance: "spin" }, content: [paragraph("x")] },
+        "content.attr_invalid",
+        "/content/0/attrs/entrance",
+      ],
+      [
+        "an invalid entrance stagger",
+        { type: "section", attrs: { entranceStagger: "dramatic" }, content: [paragraph("x")] },
+        "content.attr_invalid",
+        "/content/0/attrs/entranceStagger",
       ],
     ]
   ) {

@@ -79,15 +79,33 @@ upgrade available to anyone the deploy refuses.
 
 `taproot-site --help` lists every verb and the configuration contract.
 `taproot-site help` is the offline reference family agents read before
-authoring: page types, components, navigation, media, previews, themes,
+authoring: page types, composable design blueprints, components, navigation, media, previews, themes,
 appearance, the footer, and the offline fixture contract, each with `--json`
 for stable machine-readable output.
 
 ```bash
 taproot-site help
+taproot-site help designs
+taproot-site help design professional-portfolio
 taproot-site help page free-form
 taproot-site help component hero-section --json
 ```
+
+Design help separates three choices that agents should make deliberately:
+site purpose, visual language, and interaction intensity. The six blueprints
+cover professional portfolios, bold consumer brands, editorial publications,
+local services, cultural events, and community directories. Each describes a
+content model, representative pages, navigation shape, theme direction,
+component recipes, a motion ceiling, media guidance, integration boundaries,
+and accessibility cautions. They are composable starting points—not templates
+or permission to copy another site's protected assets or trade dress. Use
+`--json` when an agent needs the stable recipe structure.
+
+Before pushing appearance, use `taproot-site help appearance` and preview both
+schemes. A light logo must remain distinct on the rendered light header and a
+dark logo on the rendered dark header at desktop and compact/mobile widths;
+transparent canvas pixels do not count as contrast. Supply separate
+scheme-specific assets when one visible mark cannot satisfy both surfaces.
 
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
 with no credential, no network, and no write: a directory laid out like a

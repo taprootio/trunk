@@ -21,10 +21,13 @@ import {
 import {
   formatReferenceResult,
   getComponentReference,
+  getDesignBlueprint,
   getPageTypeReference,
   getWorkflowReference,
   listComponentTypeReferences,
+  listDesignBlueprints,
   listPageTypeReferences,
+  DESIGN_TYPES,
   PAGE_TYPES,
   REFERENCE_VERSION,
 } from "../../src/reference-help.js";
@@ -49,7 +52,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 21);
+  assert.equal(REFERENCE_VERSION, 23);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -58,6 +61,49 @@ test("the free-form and component indexes are derived from the executable regist
   assert.deepEqual(getPageTypeReference("free-form").components.map((component) => component.type), COMPONENT_TYPES);
   assert.equal(getPageTypeReference("article"), undefined);
   assert.equal(getComponentReference("hero"), undefined);
+});
+
+test("every design blueprint is structured, discoverable, and references executable authoring controls", () => {
+  const summaries = listDesignBlueprints();
+  assert.deepEqual(summaries.map((design) => design.type), DESIGN_TYPES);
+
+  for (const type of DESIGN_TYPES) {
+    const design = getDesignBlueprint(type);
+    assert.equal(design.type, type);
+    assert.ok(design.representativePages.length >= 4);
+    assert.ok(design.recipes.length >= 2);
+    assert.ok(design.accessibilityCautions.length >= 2);
+    assert.match(design.integrationBoundaries, /does not|includes no|offers no/u);
+
+    for (const recipe of design.recipes) {
+      assert.ok(FREE_FORM_SECTION_REGISTRY.section.attrs.entrance.values.includes(recipe.section.entrance));
+      assert.ok(
+        FREE_FORM_SECTION_REGISTRY.section.attrs.entranceStagger.values.includes(recipe.section.entranceStagger),
+      );
+      for (const component of recipe.components) {
+        const reference = getComponentReference(component.type);
+        assert.ok(reference, `${type} references known component ${component.type}`);
+        const propertyNames = new Set(reference.properties.map((property) => property.name));
+        for (const propertyName of Object.keys(component.properties)) {
+          assert.ok(propertyNames.has(propertyName), `${type}.${component.type}.${propertyName} is executable`);
+        }
+        assert.deepEqual(
+          validateDocument(componentDocument(component.type, {
+            ...reference.editorInitialData,
+            ...component.properties,
+          })).errors,
+          [],
+          `${type}.${component.type} recipe validates when applied to its editor defaults`,
+        );
+      }
+    }
+
+    const human = formatReferenceResult({ topic: "design", design });
+    assert.match(human, /Site purpose:/u);
+    assert.match(human, /Motion ceiling:/u);
+    assert.match(human, /Accessibility cautions:/u);
+  }
+  assert.equal(getDesignBlueprint("award-winning-clone"), undefined);
 });
 
 test("every component reference exposes its validator schema and validates its editor initial data and examples", async (context) => {
@@ -122,6 +168,8 @@ test("the free-form reference exposes the production document vocabulary and aut
     context: null,
     contentPadding: "standard",
     surface: "none",
+    entrance: "none",
+    entranceStagger: "none",
     background: null,
     decoration: null,
   });

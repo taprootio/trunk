@@ -656,7 +656,7 @@ function sectionHeaderAttrs(text, line) {
     );
   }
 
-  for (const name of ["contentPadding", "surface"]) {
+  for (const name of ["contentPadding", "surface", "entrance", "entranceStagger"]) {
     const definition = definitions[name];
     const value = parsed[name];
     if (value !== undefined && (typeof value !== "string" || !definition.values.includes(value))) {
@@ -691,6 +691,8 @@ function sectionHeaderAttrs(text, line) {
     ...(typeof context === "string" ? { context } : {}),
     contentPadding: parsed.contentPadding ?? definitions.contentPadding.default,
     surface: parsed.surface ?? definitions.surface.default,
+    ...(parsed.entrance === undefined ? {} : { entrance: parsed.entrance }),
+    ...(parsed.entranceStagger === undefined ? {} : { entranceStagger: parsed.entranceStagger }),
     ...(normalizedBackground.background ? { background: normalizedBackground.background } : {}),
     ...(normalizedDecoration.decoration ? { decoration: normalizedDecoration.decoration } : {}),
   };

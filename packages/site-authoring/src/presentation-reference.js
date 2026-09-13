@@ -334,6 +334,11 @@ export function getAppearanceReference() {
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
       "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting.",
+    logoContrastContract:
+      "Evaluate lightLogoId against the rendered light-scheme header and darkLogoId against the rendered dark-scheme "
+      + "header at desktop and compact/mobile widths. Transparent pixels provide no contrast: inspect the visible mark, "
+      + "not its canvas bounds. When one asset does not remain distinct in both schemes, supply scheme-specific logo "
+      + "assets rather than relying on a shadow, outline, or header color that has not been previewed.",
     headerWidthContract:
       "headerWidth 'contained' keeps the brand and the header buttons at the page content edges; "
       + "'wide' moves them to the viewport edges. Pages with root-band components (image-banner) span the viewport, "
@@ -596,6 +601,7 @@ export function formatPresentationReference(reference) {
       + "\n\nRead-only server projections:\n"
       + reference.readOnlyProjections.map((field) => "  " + field.file + " :: " + field.path).join("\n")
       + "\n\nImages: " + reference.imageReferences + "\nLogos: " + reference.logoContract
+      + "\nLogo contrast: " + reference.logoContrastContract
       + "\nHeader width: " + reference.headerWidthContract
       + "\nMobile menu and menu font: " + reference.menuContract
       + "\nFooter: " + reference.footerBoundary

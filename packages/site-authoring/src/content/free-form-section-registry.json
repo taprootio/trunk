@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -36,6 +36,33 @@
           "none",
           "raised",
           "elevated"
+        ]
+      },
+      "entrance": {
+        "label": "Entrance",
+        "help": "Optional CSS-only reveal for the section content. Unsupported browsers render the content statically and reduced-motion preferences disable the effect.",
+        "type": "enum",
+        "required": false,
+        "default": "none",
+        "values": [
+          "none",
+          "fade",
+          "rise",
+          "scale",
+          "slide-start",
+          "slide-end"
+        ]
+      },
+      "entranceStagger": {
+        "label": "Entrance stagger",
+        "help": "Optional bounded delay between the section's direct content blocks. It has no effect when entrance is none and becomes static under reduced-motion preferences.",
+        "type": "enum",
+        "required": false,
+        "default": "none",
+        "values": [
+          "none",
+          "tight",
+          "relaxed"
         ]
       },
       "background": {

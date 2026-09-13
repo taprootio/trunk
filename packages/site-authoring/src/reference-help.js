@@ -51,8 +51,290 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 21;
+export const REFERENCE_VERSION = 23;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
+
+function deepFreeze(value) {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+export const DESIGN_TYPES = Object.freeze([
+  "professional-portfolio",
+  "bold-consumer-brand",
+  "editorial-publication",
+  "local-service",
+  "cultural-events",
+  "community-directory",
+]);
+
+const DESIGN_BLUEPRINTS = deepFreeze([
+  {
+    type: "professional-portfolio",
+    displayName: "Professional portfolio",
+    summary: "A focused body of selected work, credibility, and a clear route to start a conversation.",
+    sitePurpose: "Present an individual or small practice's work and make its expertise easy to evaluate.",
+    visualLanguage: "Quiet editorial spacing, confident typography, and a restrained image rhythm that lets work lead.",
+    interactionIntensity: "Low: direct reading and deliberate links, with modest affordances only where they clarify a destination.",
+    contentModel: { primary: ["selected projects", "case studies", "profile and approach"], supporting: ["services", "testimonials", "contact details"] },
+    representativePages: [
+      { title: "Home", purpose: "State the practice and foreground a small selection of work." },
+      { title: "Work", purpose: "Browse projects by discipline, sector, or outcome." },
+      { title: "Case study", purpose: "Explain the brief, process, collaboration, and result for one project." },
+      { title: "About", purpose: "Introduce the practitioner, perspective, and capabilities." },
+      { title: "Contact", purpose: "Offer one obvious, accessible way to begin an enquiry." },
+    ],
+    navigationShape: "A compact primary set: Work, About, Services, Contact; case studies remain one level below Work.",
+    themeDirection: "A calm light/dark pair with generous contrast, one measured accent, and roomy display/body type scale.",
+    recipes: [
+      {
+        name: "Selected-work opening",
+        purpose: "Introduce the practice, then make the first few destinations tangible.",
+        section: { entrance: "rise", entranceStagger: "tight" },
+        components: [
+          { type: "hero-section", properties: { titleSize: "display", alignment: "start", mediaArrangement: "split", mediaWidth: "wide" } },
+          { type: "card-grid", properties: { columns: 2, presentation: "editorial", imageAspect: "landscape", interaction: "lift" } },
+        ],
+      },
+      {
+        name: "Capability proof",
+        purpose: "Pair concise service language with independently readable client evidence.",
+        section: { entrance: "fade", entranceStagger: "relaxed" },
+        components: [
+          { type: "feature-grid", properties: { columns: 3, iconSize: "small", borderWidth: 0 } },
+          { type: "testimonial", properties: { columns: 2, carousel: false, borderWidth: 0 } },
+        ],
+      },
+    ],
+    motionCeiling: "One entrance family per section; no autoplaying carousels, parallax, or motion that competes with the work.",
+    mediaBrief: "Use original project imagery, credited photography, and outcome-oriented captions; keep decorative media clearly optional.",
+    integrationBoundaries: "Link to an external booking, portfolio-hosting, or contact service when needed. This blueprint does not provide custom code or built-in commerce, search, scheduling, or synchronization.",
+    accessibilityCautions: ["Make each card title identify its destination without relying on its image.", "Keep case-study headings logical and give meaningful work images useful alt text."],
+  },
+  {
+    type: "bold-consumer-brand",
+    displayName: "Bold consumer brand",
+    summary: "A product- and campaign-led presence that builds recognition while keeping the next step unmistakable.",
+    sitePurpose: "Introduce a consumer offering, its point of view, and paths people can take to learn or buy elsewhere.",
+    visualLanguage: "Large type, high-contrast fields, assertive image crops, and a small, consistent set of branded shapes.",
+    interactionIntensity: "Medium: purposeful hover and reveal feedback, never required to understand the product or complete a task.",
+    contentModel: { primary: ["product or collection stories", "brand promise", "campaign landing pages"], supporting: ["stockist links", "press", "frequently asked questions"] },
+    representativePages: [
+      { title: "Home", purpose: "Lead with a proposition, featured collection, and one primary action." },
+      { title: "Products", purpose: "Orient visitors to product families without claiming a built-in shop." },
+      { title: "Story", purpose: "Explain origins, materials, values, or makers." },
+      { title: "Stockists", purpose: "Link people to approved places to purchase or visit." },
+    ],
+    navigationShape: "A short, campaign-aware primary nav; collection and story pages use local in-page links instead of deep menus.",
+    themeDirection: "A distinctive accent against neutral surfaces, strong semantic contrast, and display typography balanced by practical body text.",
+    recipes: [
+      {
+        name: "Campaign landing",
+        purpose: "Make a single product story legible before offering supporting choices.",
+        section: { entrance: "scale", entranceStagger: "none" },
+        components: [
+          { type: "image-banner", properties: { ratio: "3/1", heightMode: "viewport", contentPosition: "bottom-start", scrim: "bottom", imageMotion: "slow-zoom" } },
+          { type: "cta", properties: { variant: "primary", imagePosition: "right", borderWidth: 0 } },
+        ],
+      },
+      {
+        name: "Collection browse",
+        purpose: "Offer product families as clear destinations with visible labels before interaction.",
+        section: { entrance: "rise", entranceStagger: "tight" },
+        components: [
+          { type: "card-grid", properties: { columns: 3, presentation: "featured", imageAspect: "square", interaction: "zoom" } },
+          { type: "feature-grid", properties: { columns: 3, iconSize: "medium", borderWidth: 0 } },
+        ],
+      },
+    ],
+    motionCeiling: "Use one slow image movement or short hover response per view; never conceal names, price context, or actions behind motion.",
+    mediaBrief: "Commission or license product, material, and in-use photography; document crop-safe banner areas and supply alt text for informative images.",
+    integrationBoundaries: "Use outbound links for retail, commerce, search, or booking providers. This blueprint includes none of those systems and no custom code.",
+    accessibilityCautions: ["Preserve text contrast over imagery with a tested scrim and do not make text depend on hover.", "Respect reduced-motion preferences and give every campaign action a visible text label."],
+  },
+  {
+    type: "editorial-publication",
+    displayName: "Editorial publication",
+    summary: "A reading-first publication that organizes recurring coverage, authorship, and archives without turning discovery into noise.",
+    sitePurpose: "Publish a coherent body of reporting, criticism, essays, or institutional editorial work.",
+    visualLanguage: "Measured typographic hierarchy, generous reading measure, structured metadata, and images that support rather than interrupt reading.",
+    interactionIntensity: "Low: browsing aids and clear links, with no kinetic treatment that interrupts sustained reading.",
+    contentModel: { primary: ["articles", "series or sections", "author bylines"], supporting: ["issue introductions", "archive pathways", "about and submission information"] },
+    representativePages: [
+      { title: "Home", purpose: "Feature current coverage and point to durable sections." },
+      { title: "Section", purpose: "Collect related work with short editorial framing." },
+      { title: "Article", purpose: "Support long-form reading with attribution and related destinations." },
+      { title: "Archive", purpose: "Provide chronological or thematic browse paths without promising built-in search." },
+      { title: "About", purpose: "Explain editorial purpose, contributors, and contact routes." },
+    ],
+    navigationShape: "Sections at the top level, with Archive and About as utilities; article-level navigation stays contextual and modest.",
+    themeDirection: "Reading-optimized light and dark contexts, durable link contrast, restrained accents, and distinct display and body faces.",
+    recipes: [
+      {
+        name: "Lead story and desk",
+        purpose: "Set a lead story beside a calm selection of current work.",
+        section: { entrance: "fade", entranceStagger: "tight" },
+        components: [
+          { type: "image-banner", properties: { ratio: "2/1", heightMode: "ratio", contentPosition: "bottom-start", scrim: "bottom", imageMotion: "none" } },
+          { type: "latest-posts", properties: { count: 6, columns: 3, highlightFirst: false, showDescription: true, showDate: true } },
+        ],
+      },
+      {
+        name: "Section archive",
+        purpose: "Make recurring coverage browsable without a fabricated search interface.",
+        section: { entrance: "none", entranceStagger: "none" },
+        components: [{ type: "card-grid", properties: { columns: 3, presentation: "editorial", imageAspect: "landscape", interaction: "none" } }],
+      },
+    ],
+    motionCeiling: "No motion within article reading; entrances may be brief and nonessential on index pages only.",
+    mediaBrief: "Use licensed or commissioned lead images with accurate captions and credits; optimize portraits and illustrations for editorial role, not decoration.",
+    integrationBoundaries: "Link to an external newsletter, membership, submission, or search provider where appropriate. This blueprint does not add custom code or built-in commerce, search, scheduling, or event synchronization.",
+    accessibilityCautions: ["Maintain readable line length, heading order, and visible links in both theme modes.", "Do not encode section, author, or date only by color, position, or image treatment."],
+  },
+  {
+    type: "local-service",
+    displayName: "Local service",
+    summary: "A practical local presence that explains services, establishes trust, and points visitors to an appropriate external next step.",
+    sitePurpose: "Help nearby people understand a service business, its coverage, and how to make contact or arrange service.",
+    visualLanguage: "Warm, legible, place-aware imagery with plain-language hierarchy and reassuring, lightly structured surfaces.",
+    interactionIntensity: "Low: fast orientation, stable calls to action, and no flourishes that delay contact information.",
+    contentModel: { primary: ["services", "service areas", "trust signals"], supporting: ["team", "frequently asked questions", "contact and external booking links"] },
+    representativePages: [
+      { title: "Home", purpose: "State who the business serves, where, and how to get help." },
+      { title: "Services", purpose: "Explain services, scope, and suitable next steps." },
+      { title: "Service area", purpose: "Clarify locations, travel expectations, or local context." },
+      { title: "About", purpose: "Introduce people, qualifications, and operating principles." },
+      { title: "Contact", purpose: "Surface phone, email, hours, and external scheduling or enquiry destinations." },
+    ],
+    navigationShape: "Service-led primary nav with a persistent Contact action; service-area detail stays shallow and predictable.",
+    themeDirection: "High-clarity neutral surfaces, a trustworthy accent, comfortable body text, and a light/dark pair tested for contact content.",
+    recipes: [
+      {
+        name: "Service reassurance",
+        purpose: "State the offer, locality, and first action before presenting proof points.",
+        section: { entrance: "rise", entranceStagger: "tight" },
+        components: [
+          { type: "hero-section", properties: { titleSize: "display", alignment: "start", mediaArrangement: "split", mediaWidth: "equal" } },
+          { type: "feature-grid", properties: { columns: 3, iconSize: "medium", borderWidth: 1 } },
+        ],
+      },
+      {
+        name: "Service finder",
+        purpose: "Direct people to the right service without pretending to provide a booking engine.",
+        section: { entrance: "fade", entranceStagger: "relaxed" },
+        components: [
+          { type: "card-grid", properties: { columns: 3, presentation: "cards", imageAspect: "landscape", interaction: "lift" } },
+          { type: "cta", properties: { variant: "primary", imagePosition: "left", borderWidth: 0 } },
+        ],
+      },
+    ],
+    motionCeiling: "Keep motion nearly absent; service, phone, hours, and access information remain immediately available.",
+    mediaBrief: "Prioritize real people, local context, and service-in-progress photography; avoid generic imagery that could misrepresent the service or area.",
+    integrationBoundaries: "Use direct links to an external scheduler, map, payments, or service portal if the business has one. This blueprint does not include those capabilities, custom code, or synchronization.",
+    accessibilityCautions: ["Expose contact information as real text and use tel/mailto only where destination is clear.", "Do not rely on a map image alone to communicate service area or physical access information."],
+  },
+  {
+    type: "cultural-events",
+    displayName: "Cultural events",
+    summary: "A program-led cultural presence that foregrounds what is happening, why it matters, and where people can learn more or reserve elsewhere.",
+    sitePurpose: "Present a venue, festival, institution, or program with clear event context and durable cultural framing.",
+    visualLanguage: "Expressive but disciplined poster energy, flexible image crops, and strong date/place typography.",
+    interactionIntensity: "Medium: responsive cards and subtle image movement add vitality while core event information stays static and complete.",
+    contentModel: { primary: ["program highlights", "event or exhibition pages", "artist or participant context"], supporting: ["visit information", "institutional story", "external ticket links"] },
+    representativePages: [
+      { title: "Home", purpose: "Introduce the current season, program, or headline event." },
+      { title: "Program", purpose: "Collect upcoming and recurring activity as labelled destinations." },
+      { title: "Event", purpose: "Explain dates, venue, access, participants, and external reservation options." },
+      { title: "Visit", purpose: "Share access, location, and practical preparation information." },
+      { title: "About", purpose: "Frame the organization's mission and cultural context." },
+    ],
+    navigationShape: "Program and Visit remain top-level; event pages are reached from program groupings rather than a deep date-only hierarchy.",
+    themeDirection: "A flexible, high-contrast light/dark pair that supports poster-like color while reserving reliable semantic colors for text, links, and status.",
+    recipes: [
+      {
+        name: "Season opening",
+        purpose: "Give a headline program visual presence with readable event context.",
+        section: { entrance: "slide-start", entranceStagger: "none" },
+        components: [
+          { type: "image-banner", properties: { ratio: "2/1", heightMode: "ratio", contentPosition: "bottom-end", scrim: "radial", imageMotion: "drift-end" } },
+          { type: "cta", properties: { variant: "primary", imagePosition: "top", borderWidth: 1 } },
+        ],
+      },
+      {
+        name: "Program cards",
+        purpose: "Make event destinations readable by name, date, and place before visual interaction.",
+        section: { entrance: "rise", entranceStagger: "tight" },
+        components: [
+          { type: "card-grid", properties: { columns: 3, presentation: "poster", imageAspect: "portrait", interaction: "caption-reveal" } },
+          { type: "feature-grid", properties: { columns: 3, iconSize: "small", borderWidth: 0 } },
+        ],
+      },
+    ],
+    motionCeiling: "Use one restrained banner drift or card reveal at a time; dates, venue, access, and reservation links never depend on it.",
+    mediaBrief: "Use commissioned or cleared event imagery, poster art, and artist-approved materials with credits, rights notes, and legible crops.",
+    integrationBoundaries: "Point to an external ticketing, calendar, reservation, or streaming service where needed. This blueprint offers no built-in commerce, scheduling, event synchronization, search, or custom code.",
+    accessibilityCautions: ["Put event date, time, venue, and access information in text, not only poster imagery.", "Ensure caption-reveal content is also available without hover, and reduce decorative motion when requested."],
+  },
+  {
+    type: "community-directory",
+    displayName: "Community directory",
+    summary: "A trustworthy guide to people, places, and resources, designed for clear browsing rather than an implied live database.",
+    sitePurpose: "Help a defined community discover organizations, resources, and ways to participate.",
+    visualLanguage: "Friendly utility, distinct category cues, calm card rhythm, and readable metadata over decorative spectacle.",
+    interactionIntensity: "Low to medium: useful card feedback and filters represented as navigation, not as a claim of built-in search.",
+    contentModel: { primary: ["directory entries", "category landing pages", "resource guides"], supporting: ["community story", "contribution guidance", "contact and external services"] },
+    representativePages: [
+      { title: "Home", purpose: "Explain who the directory is for and highlight useful routes in." },
+      { title: "Categories", purpose: "Offer a stable, readable way to browse resource groups." },
+      { title: "Directory entry", purpose: "Describe one organization, service, or place with clear ownership and contact context." },
+      { title: "Guides", purpose: "Publish curated orientation for common community needs." },
+      { title: "Contribute", purpose: "Explain how people can suggest updates through a contact route." },
+    ],
+    navigationShape: "Category-led browsing with Guides and Contribute as utilities; keep entry pages shallow and avoid pretending categories are live filters.",
+    themeDirection: "Accessible category accents against dependable neutral layers, a high-legibility type scale, and dark-mode states tested for links and card boundaries.",
+    recipes: [
+      {
+        name: "Directory orientation",
+        purpose: "Give newcomers a clear explanation and several approachable browse routes.",
+        section: { entrance: "fade", entranceStagger: "tight" },
+        components: [
+          { type: "hero-section", properties: { titleSize: "normal", alignment: "center", mediaArrangement: "stacked", mediaWidth: "narrow" } },
+          { type: "feature-grid", properties: { columns: 3, iconSize: "large", borderWidth: 1 } },
+        ],
+      },
+      {
+        name: "Resource categories",
+        purpose: "Present curated categories as explicit destinations, with enough text to distinguish them.",
+        section: { entrance: "slide-end", entranceStagger: "relaxed" },
+        components: [
+          { type: "card-grid", properties: { columns: 3, presentation: "cards", imageAspect: "auto", interaction: "lift" } },
+          { type: "cta", properties: { variant: "primary", imagePosition: "right", borderWidth: 0 } },
+        ],
+      },
+    ],
+    motionCeiling: "Limit feedback to short card affordances; never represent category navigation as a live filter or conceal names in animation.",
+    mediaBrief: "Use community-supplied or properly licensed images only with permission, contextual captions, and alternatives for entries without photography.",
+    integrationBoundaries: "Link out to external maps, forms, search, calendars, or member systems if the community operates them. This blueprint includes no custom code, built-in search, commerce, scheduling, or synchronization.",
+    accessibilityCautions: ["Do not use color alone to identify a category or resource type.", "Keep each entry's name, purpose, contact route, and eligibility information available as semantic text."],
+  },
+]);
+
+export function listDesignBlueprints() {
+  return DESIGN_BLUEPRINTS.map((blueprint) => Object.freeze({
+    type: blueprint.type,
+    displayName: blueprint.displayName,
+    summary: blueprint.summary,
+    sitePurpose: blueprint.sitePurpose,
+    visualLanguage: blueprint.visualLanguage,
+    interactionIntensity: blueprint.interactionIntensity,
+    helpCommand: `${CLI_BINARY_NAME} help design ${blueprint.type}`,
+  }));
+}
+
+export function getDesignBlueprint(type) {
+  return DESIGN_BLUEPRINTS.find((blueprint) => blueprint.type === type);
+}
 export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
   Object.freeze({
@@ -69,6 +351,12 @@ export const REFERENCE_TOPICS = Object.freeze([
     name: "component",
     usage: `${CLI_BINARY_NAME} help component <component-type>`,
     summary: "Describe one component schema and show a valid example.",
+  }),
+  Object.freeze({ name: "designs", usage: `${CLI_BINARY_NAME} help designs`, summary: "List composable design blueprints." }),
+  Object.freeze({
+    name: "design",
+    usage: `${CLI_BINARY_NAME} help design <design-type>`,
+    summary: "Describe one composable design blueprint.",
   }),
   Object.freeze({ name: "nav", usage: `${CLI_BINARY_NAME} help nav`, summary: "Describe nav.json item shapes." }),
   Object.freeze({
@@ -1132,6 +1420,14 @@ function formatPlacement(row) {
   }; ${row.contentPadding}; ${row.well}; measure ${row.measure}`;
 }
 
+function formatDesignRecipe(recipe) {
+  return `  ${recipe.name}: ${recipe.purpose}\n    section entrance ${recipe.section.entrance}; stagger ${recipe.section.entranceStagger}\n${
+    recipe.components.map((component) =>
+      `    ${component.type}: ${Object.entries(component.properties).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(", ")}`
+    ).join("\n")
+  }`;
+}
+
 export function formatReferenceResult(result) {
   switch (result.topic) {
     case "topics":
@@ -1150,6 +1446,22 @@ export function formatReferenceResult(result) {
           `  ${component.type.padEnd(16)} ${component.summary}\n${" ".repeat(19)}Help: ${component.helpCommand}`
         ).join("\n")
       }\n`;
+    case "design-types":
+      return `Composable design blueprints:\nThese are starting points, not templates or instructions to copy protected assets or trade dress. Site purpose, visual language, and interaction intensity are intentionally orthogonal decisions.\n\n${
+        result.designs.map((design) =>
+          `  ${design.type.padEnd(24)} ${design.summary}\n${" ".repeat(27)}Purpose: ${design.sitePurpose}\n${" ".repeat(27)}Visual language: ${design.visualLanguage}\n${" ".repeat(27)}Interaction intensity: ${design.interactionIntensity}\n${" ".repeat(27)}Help: ${design.helpCommand}`
+        ).join("\n")
+      }\n`;
+    case "design": {
+      const design = result.design;
+      return `${design.displayName} (${design.type})\n${design.summary}\n\nThese are composable starting points, not templates or instructions to copy protected assets or trade dress.\n\nSite purpose: ${design.sitePurpose}\nVisual language: ${design.visualLanguage}\nInteraction intensity: ${design.interactionIntensity}\n\nContent model:\n  Primary: ${design.contentModel.primary.join("; ")}\n  Supporting: ${design.contentModel.supporting.join("; ")}\n\nRepresentative pages:\n${
+        design.representativePages.map((page) => `  ${page.title}: ${page.purpose}`).join("\n")
+      }\n\nNavigation shape: ${design.navigationShape}\nTheme direction: ${design.themeDirection}\n\nComponent and section recipes:\n${
+        design.recipes.map(formatDesignRecipe).join("\n")
+      }\n\nMotion ceiling: ${design.motionCeiling}\nMedia brief: ${design.mediaBrief}\nIntegration boundaries: ${design.integrationBoundaries}\n\nAccessibility cautions:\n${
+        design.accessibilityCautions.map((caution) => `  - ${caution}`).join("\n")
+      }\n\nUse --json for the stable structured recipes.\n`;
+    }
     case "page": {
       const page = result.page;
       const markdownFormat = page.workspace.formats.find((format) => format.extension === ".md");

@@ -227,6 +227,8 @@ const SECTION_ATTRS = Object.freeze({
   }),
   contentPadding: optionalEnum(FREE_FORM_SECTION_REGISTRY.section.attrs.contentPadding.values),
   surface: optionalEnum(FREE_FORM_SECTION_REGISTRY.section.attrs.surface.values),
+  entrance: optionalEnum(FREE_FORM_SECTION_REGISTRY.section.attrs.entrance.values),
+  entranceStagger: optionalEnum(FREE_FORM_SECTION_REGISTRY.section.attrs.entranceStagger.values),
   // Nested field diagnostics are owned by
   // `normalizeFreeFormSectionBackground` below.
   background: spec(() => null),

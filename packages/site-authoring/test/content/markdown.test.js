@@ -423,6 +423,25 @@ const GOLDENS = [
     },
   },
   {
+    name: "a section with a CSS-only entrance and relaxed content stagger",
+    markdown: ":::section {\"entrance\":\"rise\",\"entranceStagger\":\"relaxed\"}\n"
+      + "A measured reveal.\n"
+      + ":::",
+    doc: {
+      type: "doc",
+      content: [{
+        type: "section",
+        attrs: {
+          contentPadding: "standard",
+          surface: "none",
+          entrance: "rise",
+          entranceStagger: "relaxed",
+        },
+        content: [paragraph(text("A measured reveal."))],
+      }],
+    },
+  },
+  {
     name: "an image, whose delivery keys are present and empty",
     markdown: "![A caption](hero.png)",
     doc: {

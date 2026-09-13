@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.1" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.2" },
     verb,
   };
 }
@@ -575,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.8.1\n");
+    assert.equal(versionStdout.read(), "0.8.2\n");
   }
 });
 
@@ -689,6 +689,10 @@ test("serves page and component reference help without configuration, credential
         "lightLogoId",
         "darkLogoId",
         "no separate compact-logo",
+        "Logo contrast: Evaluate lightLogoId against the rendered light-scheme header",
+        "Transparent pixels provide no contrast",
+        "desktop and compact/mobile widths",
+        "supply scheme-specific logo assets",
         "Header width: headerWidth 'contained'",
         "pair headerWidth 'wide' with headerLayout 'centered-menu'",
         "Mobile menu and menu font: navDrawerStyle 'full-screen' (the published default)",
@@ -767,6 +771,8 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "page", "free-form", "--json"], topic: "page", field: "page" },
     { arguments_: ["help", "components", "--json"], topic: "component-types", field: "components" },
     { arguments_: ["help", "component", "image-banner", "--json"], topic: "component", field: "component" },
+    { arguments_: ["help", "designs", "--json"], topic: "design-types", field: "designs" },
+    { arguments_: ["help", "design", "professional-portfolio", "--json"], topic: "design", field: "design" },
     { arguments_: ["help", "nav", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "redirects", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "media", "--json"], topic: "workflow", field: "reference" },
@@ -793,9 +799,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.8.1" },
+          cli: { name: "@taprootio/site-authoring", version: "0.8.2" },
           verb: "help",
-          referenceVersion: 21,
+          referenceVersion: 23,
           topic: scenario.topic,
         },
       );
@@ -835,6 +841,20 @@ test("preview reference documents the homepage spelling in human and JSON forms"
   assert.ok(verbHelpOut.read().includes("The homepage is recorded with an empty path, so address it as '/'."));
 });
 
+test("appearance reference requires scheme-specific header-logo contrast checks", async () => {
+  const stdout = sink();
+  assert.equal(
+    await runCli({ arguments_: ["help", "appearance", "--json"], environment: {}, stdout, stderr: sink() }),
+    0,
+  );
+  const result = JSON.parse(stdout.read());
+  assert.match(result.reference.logoContrastContract, /lightLogoId against the rendered light-scheme header/u);
+  assert.match(result.reference.logoContrastContract, /darkLogoId against the rendered dark-scheme header/u);
+  assert.match(result.reference.logoContrastContract, /desktop and compact\/mobile widths/u);
+  assert.match(result.reference.logoContrastContract, /Transparent pixels provide no contrast/u);
+  assert.match(result.reference.logoContrastContract, /supply scheme-specific logo assets/u);
+});
+
 test("reference help reports stable usage errors with valid alternatives", async (context) => {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "taproot-site-reference-output-"));
   context.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
@@ -849,6 +869,8 @@ test("reference help reports stable usage errors with valid alternatives", async
         "page",
         "components",
         "component",
+        "designs",
+        "design",
         "nav",
         "redirects",
         "media",
@@ -876,6 +898,18 @@ test("reference help reports stable usage errors with valid alternatives", async
         "latest-posts",
         "card-grid",
         "image-banner",
+      ],
+    },
+    {
+      arguments_: ["help", "design", "award-winning-clone", "--json"],
+      code: "help.design_type_unknown",
+      alternatives: [
+        "professional-portfolio",
+        "bold-consumer-brand",
+        "editorial-publication",
+        "local-service",
+        "cultural-events",
+        "community-directory",
       ],
     },
   ];

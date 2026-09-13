@@ -226,6 +226,9 @@ const CARD_GRID = Object.freeze({
     { kind: "value", value: Object.freeze([]) },
   ),
   columns: num({ values: Object.freeze([2, 3]) }),
+  presentation: enumOf("cards", "editorial", "featured", "poster"),
+  imageAspect: enumOf("auto", "landscape", "square", "portrait"),
+  interaction: enumOf("none", "lift", "zoom", "caption-reveal"),
   borderWidth: num({
     integer: true,
     minimum: 0,
@@ -257,6 +260,7 @@ const IMAGE_BANNER = Object.freeze({
   // A built-in or application-registered Espalier texture name.
   texture: textureName(),
   textureScale: enumOf("fine", "medium", "coarse"),
+  imageMotion: enumOf("none", "slow-zoom", "drift-start", "drift-end"),
 });
 
 const SPACER = Object.freeze({
@@ -444,6 +448,9 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     {
       cards: [{ image: null, title: "", description: "", linkUrl: "" }],
       columns: 3,
+      presentation: "cards",
+      imageAspect: "landscape",
+      interaction: "lift",
       borderWidth: 0,
     },
     [
@@ -467,6 +474,9 @@ const COMPONENT_DEFINITIONS = Object.freeze({
         },
       ],
       columns: 2,
+      presentation: "featured",
+      imageAspect: "landscape",
+      interaction: "lift",
       borderWidth: 1,
     },
   ),
@@ -490,6 +500,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       textShadow: "none",
       texture: "none",
       textureScale: "medium",
+      imageMotion: "none",
     },
     [
       "Set altText to describe meaningful banner imagery; leave it empty only when the image is decorative.",
@@ -505,6 +516,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       scrim: "bottom",
       scrimStrength: "medium",
       texture: "paper",
+      imageMotion: "slow-zoom",
     },
   ),
 });
@@ -829,6 +841,23 @@ export function validateComponentBlock(componentType, componentData, basePath) {
   const fields = isComponentType(componentType) ? COMPONENT_SHAPES[componentType] : undefined;
   if (!fields) return errors;
   validateFields(fields, parsed, dataPath, errors);
+  if (componentType === "card-grid" && Array.isArray(parsed.cards)) {
+    for (const [index, card] of parsed.cards.entries()) {
+      if (
+        isPlainObject(card)
+        && typeof card.linkUrl === "string"
+        && card.linkUrl.trim().length > 0
+        && isSafeUrl(card.linkUrl)
+        && (typeof card.title !== "string" || card.title.trim().length === 0)
+      ) {
+        errors.push(contentError(
+          `${dataPath}/cards/${index}/title`,
+          CODES.componentData,
+          "A linked card must have a visible title.",
+        ));
+      }
+    }
+  }
   return errors;
 }
 

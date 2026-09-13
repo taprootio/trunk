@@ -49,12 +49,15 @@ import {
   formatReferenceResult,
   getAppearanceReference,
   getComponentReference,
+  getDesignBlueprint,
   getFooterReference,
   getPageTypeReference,
   getThemeReference,
   getWorkflowReference,
   listComponentTypeReferences,
+  listDesignBlueprints,
   listPageTypeReferences,
+  DESIGN_TYPES,
   PAGE_TYPES,
   REFERENCE_TOPICS,
   REFERENCE_VERSION,
@@ -628,6 +631,7 @@ function parseReferenceArguments(arguments_) {
     (
       topic === "pages"
       || topic === "components"
+      || topic === "designs"
       || topic === "nav"
       || topic === "media"
       || topic === "preview"
@@ -641,7 +645,7 @@ function parseReferenceArguments(arguments_) {
   ) {
     throw usageError("help.usage", `The '${topic}' topic does not accept a name.`);
   }
-  if ((topic === "page" || topic === "component") && (subject === undefined || extra.length > 0)) {
+  if ((topic === "page" || topic === "component" || topic === "design") && (subject === undefined || extra.length > 0)) {
     throw usageError("help.usage", `The '${topic}' topic requires exactly one name.`);
   }
   return { mode: "reference", topic, subject, json };
@@ -662,6 +666,8 @@ function referenceResult(parsed) {
       return { ...result, topic: "page-types", pageTypes: listPageTypeReferences() };
     case "components":
       return { ...result, topic: "component-types", components: listComponentTypeReferences() };
+    case "designs":
+      return { ...result, topic: "design-types", designs: listDesignBlueprints() };
     case "page": {
       const page = getPageTypeReference(parsed.subject);
       if (!page) {
@@ -684,6 +690,17 @@ function referenceResult(parsed) {
         );
       }
       return { ...result, topic: "component", component };
+    }
+    case "design": {
+      const design = getDesignBlueprint(parsed.subject);
+      if (!design) {
+        throw usageError(
+          "help.design_type_unknown",
+          `Unknown design type. Expected one of: ${DESIGN_TYPES.join(", ")}.`,
+          { alternatives: DESIGN_TYPES },
+        );
+      }
+      return { ...result, topic: "design", design };
     }
     case "nav":
     case "redirects":
