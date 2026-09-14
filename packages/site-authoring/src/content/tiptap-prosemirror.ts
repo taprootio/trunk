@@ -183,22 +183,39 @@ function renderFreeFormRootNodes(
 ): string {
   const rendered: string[] = [];
   let flow: ProseMirrorNode[] = [];
+  let compactFollowing = false;
   const flushFlow = () => {
     if (flow.length === 0) return;
-    rendered.push(renderSection(flow, {}, "implicit", options, "root"));
+    rendered.push(renderSection(flow, {}, "implicit", options, "root", compactFollowing));
+    compactFollowing = false;
     flow = [];
   };
 
   for (const node of nodes) {
     if (node.type === freeFormSectionRegistry.section.nodeType || isRootBandComponent(node)) {
       flushFlow();
-      rendered.push(renderNode(node, options, "root"));
+      rendered.push(renderNode(node, options, "root", compactFollowing));
+      compactFollowing = joinsFollowingSection(node);
       continue;
     }
     flow.push(node);
   }
   flushFlow();
   return rendered.join("");
+}
+
+function joinsFollowingSection(node: ProseMirrorNode): boolean {
+  if (node.type === "section") {
+    return node.attrs?.contentPadding === "none" && node.content?.length === 1
+      && joinsFollowingSection(node.content[0]);
+  }
+  if (node.type !== "componentBlock" || node.attrs?.componentType !== "image-banner") return false;
+  try {
+    const data = JSON.parse(stringAttr(node.attrs?.componentData) ?? "{}");
+    return data?.followingSpacing === "compact";
+  } catch {
+    return false;
+  }
 }
 
 function isRootBandComponent(node: ProseMirrorNode): boolean {
@@ -215,6 +232,7 @@ function renderNode(
   node: ProseMirrorNode,
   options: RenderProseMirrorOptions,
   placement: RenderPlacement,
+  compactFollowing = false,
 ): string {
   switch (node.type) {
     case "doc":
@@ -272,6 +290,7 @@ function renderNode(
         "explicit",
         options,
         placement === "root" ? "section" : "nested",
+        compactFollowing,
       );
     case "rawHtml": {
       const html = stringAttr(node.attrs?.html) ?? "";
@@ -685,6 +704,7 @@ function renderSection(
   kind: "explicit" | "implicit",
   options: RenderProseMirrorOptions,
   contentPlacement: RenderPlacement,
+  compactFollowing = false,
 ): string {
   const definitions = freeFormSectionRegistry.section.attrs;
   const contentPadding = attrs.contentPadding === "none" ? "none" : definitions.contentPadding.default;
@@ -748,6 +768,7 @@ function renderSection(
     {
       "data-taproot-section": kind,
       "data-content-padding": contentPadding,
+      "data-following-spacing": compactFollowing && contentPadding === "standard" ? "compact" : undefined,
       "data-surface": surface,
       "data-entrance": entrance,
       "data-entrance-stagger": entranceStagger,

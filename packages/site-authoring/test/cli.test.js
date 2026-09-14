@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.3" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
     verb,
   };
 }
@@ -575,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.8.3\n");
+    assert.equal(versionStdout.read(), "0.8.4\n");
   }
 });
 
@@ -679,7 +679,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 4\.13\.0 complete site-theme contract/u,
+      match: /^Espalier 4\.14\.1 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -799,9 +799,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.8.3" },
+          cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
           verb: "help",
-          referenceVersion: 23,
+          referenceVersion: 24,
           topic: scenario.topic,
         },
       );
@@ -853,6 +853,9 @@ test("appearance reference requires scheme-specific header-logo contrast checks"
   assert.match(result.reference.logoContrastContract, /desktop and compact\/mobile widths/u);
   assert.match(result.reference.logoContrastContract, /Transparent pixels provide no contrast/u);
   assert.match(result.reference.logoContrastContract, /supply scheme-specific logo assets/u);
+  assert.match(result.reference.logoContract, /genuine alpha/u);
+  assert.match(result.reference.faviconContract, /brand\.faviconId/u);
+  assert.match(result.reference.faviconContract, /16 and 32 pixels/u);
 });
 
 test("reference help reports stable usage errors with valid alternatives", async (context) => {

@@ -52,7 +52,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 23);
+  assert.equal(REFERENCE_VERSION, 24);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 

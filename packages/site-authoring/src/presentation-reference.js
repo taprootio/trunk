@@ -333,7 +333,17 @@ export function getAppearanceReference() {
     imageReferences:
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
-      "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting.",
+      "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting. "
+      + "Prefer transparent PNG or WebP artwork with genuine alpha so the header background shows through, including "
+      + "inside letter counters. Avoid baked-in background rectangles unless the brand intentionally uses a badge. "
+      + "Keep padding tight and verify the delivered image preserves transparency. Logo style and coloration are "
+      + "project-specific: choose monochrome, an accent, or multiple colors to suit the brand, not a universal recipe. "
+      + "Keep the lettering readable and test the visible artwork against each header scheme.",
+    faviconContract:
+      "Include a favicon when designing a site: upload a square, simplified brand mark and set brand.faviconId "
+      + "in settings/brand.json, then run theme push; faviconUrl is a read-only projection. Do not shrink a full wordmark into a favicon. "
+      + "Inspect at 16 and 32 pixels in light and dark browser tabs; a deliberate contrasting badge can help a favicon "
+      + "remain recognizable independently of the header theme. Verify the published icon loads, not just the setting.",
     logoContrastContract:
       "Evaluate lightLogoId against the rendered light-scheme header and darkLogoId against the rendered dark-scheme "
       + "header at desktop and compact/mobile widths. Transparent pixels provide no contrast: inspect the visible mark, "
@@ -602,6 +612,7 @@ export function formatPresentationReference(reference) {
       + reference.readOnlyProjections.map((field) => "  " + field.file + " :: " + field.path).join("\n")
       + "\n\nImages: " + reference.imageReferences + "\nLogos: " + reference.logoContract
       + "\nLogo contrast: " + reference.logoContrastContract
+      + "\nFavicon: " + reference.faviconContract
       + "\nHeader width: " + reference.headerWidthContract
       + "\nMobile menu and menu font: " + reference.menuContract
       + "\nFooter: " + reference.footerBoundary

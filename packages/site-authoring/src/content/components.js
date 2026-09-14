@@ -252,6 +252,8 @@ const IMAGE_BANNER = Object.freeze({
   // the site header; `viewport` fills exactly that space (TR00413).
   heightMode: enumOf("ratio", "viewport"),
   contentPosition: enumOf("bottom-start", "bottom", "bottom-end", "center", "top-start", "top", "top-end"),
+  contentGutter: enumOf("frame", "page"),
+  followingSpacing: enumOf("standard", "compact"),
   scrim: enumOf("auto", "none", "flat", "top", "bottom", "left", "right", "radial"),
   scrimStrength: enumOf("soft", "medium", "strong"),
   bannerScheme: enumOf("auto", "light", "dark"),
@@ -260,7 +262,7 @@ const IMAGE_BANNER = Object.freeze({
   // A built-in or application-registered Espalier texture name.
   texture: textureName(),
   textureScale: enumOf("fine", "medium", "coarse"),
-  imageMotion: enumOf("none", "slow-zoom", "drift-start", "drift-end"),
+  imageMotion: enumOf("none", "slow-zoom", "drift-start", "drift-end", "parallax-subtle", "parallax"),
 });
 
 const SPACER = Object.freeze({
@@ -371,6 +373,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Identify the speaker with authorName; use authorTitle when it gives useful context.",
       "Author images need descriptive alt text unless they are purely decorative.",
       "Keep carousel intervals long enough for the full quotation to be read.",
+      "Set carousel:true for directional previous/next arrows, dot navigation and a play/pause control. Navigation or keyboard focus pauses rotation; reduced-motion users get manual navigation without sliding or automatic rotation.",
+      "Use real attributed reviews, or clearly label fictional demo reviews. Never imply invented testimonials are genuine customer endorsements.",
     ],
     {
       items: [{
@@ -494,6 +498,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       compactRatio: "3/2",
       heightMode: "ratio",
       contentPosition: "center",
+      contentGutter: "frame",
+      followingSpacing: "standard",
       scrim: "auto",
       scrimStrength: "medium",
       bannerScheme: "auto",
@@ -505,6 +511,16 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     [
       "Set altText to describe meaningful banner imagery; leave it empty only when the image is decorative.",
       "Choose a scrim and scheme that keep overlay text readable across the image.",
+      "For a full-bleed photograph with text aligned to the surrounding page well, set contentGutter to page. followingSpacing: compact reduces the top padding of an immediately following section so a bottom banner heading reads with its supporting paragraph. Use a banner-only contentPadding: none section followed by a standard text section; keep their theme contexts consistent. Defaults preserve frame-edge text and standard section spacing.",
+      "Compose around the actual photograph: identify the meaningful subject and a quiet area for copy. Do not cover faces, product details, or high-detail edges. A focal point controls cropping, not text placement; inspect wide and compact crops separately. Keep the subject's face, ears, and other identifying details inside the compact frame, including at both ends of parallax travel. Adjust focus toward the subject rather than reusing a generic center; reduce motion or choose a roomier crop if preserving the subject requires it.",
+      "Use contentPosition to place copy in that quiet area, not automatically in the center. Keep one dominant message and nearby supporting copy/actions; if the photo has no safe text area, use a split hero or a separate text section instead of forcing an overlay.",
+      "Use the rule of thirds as a composition guide: consider the subject near one third and a compact text group in quiet space on the opposite side. Golden-ratio proportions are optional alternatives, not a proven engagement formula. Neither guide overrides legibility, the actual subject, or the compact crop. Current contentPosition values are edge/center anchors, not exact third or golden-ratio coordinates; do not invent unsupported positioning properties.",
+      "Check contrast behind the actual letters at both motion endpoints and both themes: WCAG AA requires 4.5:1 for ordinary text and 3:1 for qualifying large text. A text shadow alone is not a contrast guarantee. Keep text and actions stationary; recheck at mobile widths and enlarged text.",
+      "Prefer parallax-subtle or parallax when motion is useful: motion follows the reader's scrolling and stops when they stop. Infinite ambient loops are an explicit art-direction choice, not the default recommendation.",
+      "imageMotion is optional and defaults to none. slow-zoom is a cinematic 18% zoom over 6 seconds, alternating; drift-start and drift-end travel horizontally over 8 seconds with a 14% safety crop.",
+      "These retuned ambient presets affect existing published banners when their shared runtime updates, without a per-site republish. Preview existing sites before rolling out the runtime.",
+      "parallax-subtle and parallax are scroll-linked image motion, not autoplay: scroll to see them. Published pages prefer CSS view timelines and use a platform-owned JavaScript fallback in unsupported browsers, including Firefox; authors need no custom code. Both paths respect reduced motion. They travel vertically by +/-4% and +/-8% of image height with 12% and 22% overscan. Keep focal subjects away from edges; overlay text remains stationary in its frame.",
+      "All image motion is disabled for prefers-reduced-motion. Without native view timelines and JavaScript, parallax remains static. Choose one motion per banner; never put essential text in the raster image.",
     ],
     {
       image: null,
@@ -516,7 +532,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       scrim: "bottom",
       scrimStrength: "medium",
       texture: "paper",
-      imageMotion: "slow-zoom",
+      imageMotion: "parallax-subtle",
     },
   ),
 });

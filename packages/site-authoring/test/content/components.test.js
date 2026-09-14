@@ -210,7 +210,7 @@ test("defaults the image banner text shadow to none", () => {
 
 test("holds creative component options to their published vocabularies", async (testContext) => {
   const cases = [
-    ["image-banner", "imageMotion", ["none", "slow-zoom", "drift-start", "drift-end"], "orbit"],
+    ["image-banner", "imageMotion", ["none", "slow-zoom", "drift-start", "drift-end", "parallax-subtle", "parallax"], "orbit"],
     ["card-grid", "presentation", ["cards", "editorial", "featured", "poster"], "gallery"],
     ["card-grid", "imageAspect", ["auto", "landscape", "square", "portrait"], "cinematic"],
     ["card-grid", "interaction", ["none", "lift", "zoom", "caption-reveal"], "tilt"],

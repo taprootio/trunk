@@ -51,7 +51,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 23;
+export const REFERENCE_VERSION = 24;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 
 function deepFreeze(value) {
@@ -134,7 +134,7 @@ const DESIGN_BLUEPRINTS = deepFreeze([
         purpose: "Make a single product story legible before offering supporting choices.",
         section: { entrance: "scale", entranceStagger: "none" },
         components: [
-          { type: "image-banner", properties: { ratio: "3/1", heightMode: "viewport", contentPosition: "bottom-start", scrim: "bottom", imageMotion: "slow-zoom" } },
+          { type: "image-banner", properties: { ratio: "3/1", heightMode: "viewport", contentPosition: "bottom-start", scrim: "bottom", imageMotion: "parallax" } },
           { type: "cta", properties: { variant: "primary", imagePosition: "right", borderWidth: 0 } },
         ],
       },
@@ -148,7 +148,7 @@ const DESIGN_BLUEPRINTS = deepFreeze([
         ],
       },
     ],
-    motionCeiling: "Use one slow image movement or short hover response per view; never conceal names, price context, or actions behind motion.",
+    motionCeiling: "Prefer one optional image parallax per view (imageMotion: parallax-subtle or parallax). Published pages use CSS view timelines where supported and a platform-owned scroll-linked JavaScript fallback otherwise; no custom code is needed. Movement stops when scrolling stops, pauses offscreen, and is disabled for reduced motion. Without JavaScript or native timelines the image stays static. Cinematic zoom is an explicit ambient-loop alternative. Never conceal names, price context, or actions behind motion.",
     mediaBrief: "Commission or license product, material, and in-use photography; document crop-safe banner areas and supply alt text for informative images.",
     integrationBoundaries: "Use outbound links for retail, commerce, search, or booking providers. This blueprint includes none of those systems and no custom code.",
     accessibilityCautions: ["Preserve text contrast over imagery with a tested scrim and do not make text depend on hover.", "Respect reduced-motion preferences and give every campaign action a visible text label."],
@@ -511,6 +511,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
     details: Object.freeze([
       "Paths are relative to the configured workspace root, not the shell's current directory.",
       "PNG, JPEG, GIF, and WebP are accepted; retina names such as logo@2x.png and logo@3x.png are supported.",
+      "For header logos prefer genuine transparent PNG/WebP, check contrast in both themes, and include a simplified square favicon. See help appearance for branding guidance.",
       "Each result item includes media: { imageId, src, urls, width, height, alt }.",
       "The same src/urls delivery fields are saved in .taproot-site-media.json for page and component authoring.",
     ]),
