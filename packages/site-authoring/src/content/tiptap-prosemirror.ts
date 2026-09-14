@@ -68,6 +68,16 @@ export interface RenderProseMirrorOptions {
     /** The page shell emits this default once so rich-text formats inherit it. */
     maxHeightVh?: TiptapImageMaxHeightVh | number | null;
   };
+  /** Generator-only render hooks for structured nodes that need page context. */
+  nodeRenderers?: {
+    componentBlock?: (node: ProseMirrorNode) => string | undefined;
+    taprootImage?: (node: ProseMirrorNode) => string | undefined;
+    rawHtml?: (html: string, node: ProseMirrorNode) => string | undefined;
+  };
+  /** Records visible document-order content after each node is rendered. */
+  onRenderedNode?: (node: ProseMirrorNode, html: string) => void;
+  /** Claims the page's one LCP slot before rendering a section photo. */
+  claimSectionBackgroundImage?: () => boolean;
 }
 
 export function createEmptyProseMirrorDocument(): ProseMirrorDocument {
@@ -97,9 +107,60 @@ export function renderRichTextBodyToHtml(
   body: unknown,
   options: RenderProseMirrorOptions = {},
 ): string {
-  if (typeof body === "string") return body;
   if (!isProseMirrorDocument(body)) return "";
   return renderProseMirrorDocumentToHtml(body, options);
+}
+
+/**
+ * Extracts the reader-visible text from a ProseMirror document for metadata
+ * that only accepts plain text, such as Schema.org recipe instructions.
+ */
+export function extractRichTextBodyText(body: unknown): string {
+  if (!isProseMirrorDocument(body)) return "";
+  const parts: string[] = [];
+  collectText(body, parts);
+  return parts.join("").replace(/\s+/gu, " ").trim();
+}
+
+function collectText(node: ProseMirrorNode, parts: string[]): void {
+  if (node.type === "text") {
+    if (node.text) parts.push(node.text);
+    return;
+  }
+
+  // rawHtml is an intentional, already-sanitized node in the JSON document
+  // contract. It is not the retired outer HTML-body transport. Preserve its
+  // reader-visible text when a consumer (for example Recipe JSON-LD) needs a
+  // plain-text representation of the document.
+  if (node.type === "rawHtml") {
+    const html = stringAttr(node.attrs?.html);
+    if (html) parts.push(plainTextFromRawHtml(html));
+    return;
+  }
+
+  for (const child of node.content ?? []) {
+    collectText(child, parts);
+  }
+
+  if (node.type === "hardBreak" || isTextBlock(node.type)) {
+    parts.push(" ");
+  }
+}
+
+function isTextBlock(type: string): boolean {
+  return type === "paragraph"
+    || type === "heading"
+    || type === "listItem"
+    || type === "blockquote"
+    || type === "codeBlock"
+    || type === "tableCell"
+    || type === "tableHeader";
+}
+
+function plainTextFromRawHtml(html: string): string {
+  return html
+    .replace(/<(?:br\s*\/?|\/(?:p|div|li|h[1-6]|blockquote|pre|tr|table|section|article))\s*[^>]*>/giu, " ")
+    .replace(/<[^>]*>/gu, "");
 }
 
 type RenderPlacement = "root" | "section" | "nested";
@@ -109,7 +170,11 @@ function renderNodes(
   options: RenderProseMirrorOptions,
   placement: RenderPlacement,
 ): string {
-  return nodes.map((node) => renderNode(node, options, placement)).join("");
+  return nodes.map((node) => {
+    const html = renderNode(node, options, placement);
+    options.onRenderedNode?.(node, html);
+    return html;
+  }).join("");
 }
 
 function renderFreeFormRootNodes(
@@ -193,11 +258,11 @@ function renderNode(
     case "table":
       return placement === "root" || placement === "section" ? renderTable(node, options) : "";
     case "taprootImage":
-      return renderTaprootImage(node, options);
+      return options.nodeRenderers?.taprootImage?.(node) ?? renderTaprootImage(node, options);
     case "inlineFacts":
       return renderInlineFacts(node, options, placement);
     case "componentBlock":
-      return renderComponentBlock(node);
+      return options.nodeRenderers?.componentBlock?.(node) ?? renderComponentBlock(node);
     case "integrationPlacement":
       return renderIntegrationPlacement(node, options);
     case "section":
@@ -208,8 +273,10 @@ function renderNode(
         options,
         placement === "root" ? "section" : "nested",
       );
-    case "rawHtml":
-      return stringAttr(node.attrs?.html) ?? "";
+    case "rawHtml": {
+      const html = stringAttr(node.attrs?.html) ?? "";
+      return options.nodeRenderers?.rawHtml?.(html, node) ?? html;
+    }
     default:
       return renderNodes(node.content ?? [], options, "nested");
   }
@@ -650,6 +717,9 @@ function renderSection(
     if (decorationStyle) sectionStyleParts.push(...decorationStyle);
   }
   const background = kind === "explicit" ? normalizeSectionBackground(attrs.background) : undefined;
+  const backgroundPicture = background
+    ? renderSectionBackgroundPicture(background, options.claimSectionBackgroundImage?.() === true)
+    : "";
   if (background) {
     sectionStyleParts.push(
       `--esp-section-background: color-mix(in oklab, var(--esp-color-background) ${background.scrimOpacityPercent}%, transparent)`,
@@ -695,7 +765,7 @@ function renderSection(
       style:
         `--taproot-section-focus: ${background.focus}; --taproot-section-portrait-focus: ${background.portraitFocus}`,
     },
-    `${renderSectionBackgroundPicture(background)}${section}`,
+    `${backgroundPicture}${section}`,
   );
 }
 
@@ -845,7 +915,7 @@ function normalizeSectionFocus(
   return `${x * 100}% ${y * 100}%`;
 }
 
-function renderSectionBackgroundPicture(background: NormalizedSectionBackground): string {
+function renderSectionBackgroundPicture(background: NormalizedSectionBackground, hero: boolean): string {
   const portraitSource = background.portraitImage
     ? renderVoidElement("source", {
       media: "(max-width: 48rem)",
@@ -862,7 +932,8 @@ function renderSectionBackgroundPicture(background: NormalizedSectionBackground)
     height: background.image.height,
     alt: "",
     decoding: "async",
-    loading: "lazy",
+    loading: hero ? undefined : "lazy",
+    fetchpriority: hero ? "high" : undefined,
   });
   return renderElement(
     "picture",
@@ -1032,19 +1103,50 @@ function renderComponentBlock(node: ProseMirrorNode): string {
   );
 }
 
-function renderTaprootImage(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
+export interface ResolvedTiptapImage {
+  src: string;
+  urls: Array<{ minWidth: number; url: string; type?: string }>;
+  width: number;
+  height: number;
+  alt: string;
+  imageId: string;
+  preserveStoredSrc: boolean;
+  extraAttributes: Record<string, string | number | undefined>;
+}
+
+export function resolveTiptapImage(
+  node: ProseMirrorNode,
+  imageDefaults: RenderProseMirrorOptions["imageDefaults"],
+): ResolvedTiptapImage {
   const attrs = node.attrs ?? {};
-  const resolved = resolveImagePresentation(attrs, options.imageDefaults);
-  const imageAttrs: Record<string, string | number | boolean | null | undefined> = {
-    "low-res": stringAttr(attrs.src),
-    "original-width": numberAttr(attrs.width),
-    "original-height": numberAttr(attrs.height),
-    "data-image-id": stringAttr(attrs.imageId),
-    "data-crop": jsonAttr(attrs.crop),
-    caption: stringAttr(attrs.alt),
-    ...resolved,
+  const crop = jsonAttr(attrs.crop);
+  const resolved = resolveImagePresentation(attrs, imageDefaults);
+  return {
+    src: stringAttr(attrs.src) ?? "",
+    urls: validResponsiveImageUrls(attrs.urls),
+    width: numberAttr(attrs.width) ?? 0,
+    height: numberAttr(attrs.height) ?? 0,
+    alt: stringAttr(attrs.alt) ?? "",
+    imageId: stringAttr(attrs.imageId) ?? "",
+    preserveStoredSrc: Boolean(crop && crop !== "null"),
+    extraAttributes: {
+      ...(crop ? { "data-crop": crop } : {}),
+      ...resolved,
+    },
   };
-  const optionsHtml = validResponsiveImageUrls(attrs.urls)
+}
+
+function renderTaprootImage(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
+  const image = resolveTiptapImage(node, options.imageDefaults);
+  const imageAttrs: Record<string, string | number | boolean | null | undefined> = {
+    "low-res": image.src,
+    "original-width": image.width,
+    "original-height": image.height,
+    "data-image-id": image.imageId,
+    caption: image.alt,
+    ...image.extraAttributes,
+  };
+  const optionsHtml = image.urls
     .map((url) =>
       renderVoidElement("esp-image-option", {
         width: url.minWidth,

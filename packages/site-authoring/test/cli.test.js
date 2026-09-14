@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.3" },
     verb,
   };
 }
@@ -575,7 +575,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.8.2\n");
+    assert.equal(versionStdout.read(), "0.8.3\n");
   }
 });
 
@@ -799,7 +799,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.8.2" },
+          cli: { name: "@taprootio/site-authoring", version: "0.8.3" },
           verb: "help",
           referenceVersion: 23,
           topic: scenario.topic,
