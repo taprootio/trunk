@@ -1,14 +1,53 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { gunzipSync } from "node:zlib";
 
+import {
+  DocsArtifactValidationError as ArchiveDocsArtifactValidationError,
+} from "@taprootio/docs-artifact/prebuilt/archive";
+import {
+  DocsArtifactValidationError as PrebuiltDocsArtifactValidationError,
+} from "@taprootio/docs-artifact/prebuilt";
 import { createDeterministicPrebuiltArchive } from "../src/prebuilt-archive.js";
 import { loadPrebuiltConformanceCases } from "../src/prebuilt-conformance.js";
 import { serializePrebuiltManifest, validatePrebuiltArtifact } from "../src/prebuilt.js";
 
 const TAR_BLOCK_BYTES = 512;
 const DEFLATE_STORED_BLOCK_BYTES = 65_535;
+const PREBUILT_ENTRY_POINTS = [
+  { declaration: "prebuilt.d.ts", specifier: "@taprootio/docs-artifact/prebuilt" },
+  { declaration: "prebuilt-archive.d.ts", specifier: "@taprootio/docs-artifact/prebuilt/archive" },
+  { declaration: "prebuilt-node.d.ts", specifier: "@taprootio/docs-artifact/prebuilt/node" },
+  { declaration: "prebuilt-conformance.d.ts", specifier: "@taprootio/docs-artifact/prebuilt/conformance" },
+];
+
+function declaredRuntimeExports(declaration) {
+  const names = new Set();
+  for (const match of declaration.matchAll(/export\s+(?:class|const|function)\s+(\w+)/gu)) names.add(match[1]);
+  for (const match of declaration.matchAll(/export\s*\{([^}]+)\}\s*from/gu)) {
+    for (const exported of match[1].split(",")) {
+      const declarationExport = exported.trim();
+      if (declarationExport.startsWith("type ")) continue;
+      const name = declarationExport.split(/\s+as\s+/u).at(-1);
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
+test("prebuilt public subpaths match their declared runtime exports", async () => {
+  assert.strictEqual(ArchiveDocsArtifactValidationError, PrebuiltDocsArtifactValidationError);
+
+  for (const entryPoint of PREBUILT_ENTRY_POINTS) {
+    const [declaration, runtime] = await Promise.all([
+      readFile(new URL(`../${entryPoint.declaration}`, import.meta.url), "utf8"),
+      import(entryPoint.specifier),
+    ]);
+    assert.deepEqual(Object.keys(runtime).sort(), declaredRuntimeExports(declaration), entryPoint.specifier);
+  }
+});
 
 function fieldText(header, start, length) {
   const field = header.subarray(start, start + length);

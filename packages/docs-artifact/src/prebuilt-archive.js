@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { PREBUILT_ARCHIVE_FORMAT, PREBUILT_LIMITS, PREBUILT_MANIFEST_FILE_NAME } from "./prebuilt-constants.js";
 import { serializePrebuiltManifest } from "./prebuilt-manifest-validator.js";
 
+export { DocsArtifactValidationError } from "./errors.js";
+
 const TAR_BLOCK_BYTES = 512;
 const DEFLATE_STORED_BLOCK_BYTES = 65_535;
 const GZIP_HEADER = Uint8Array.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff]);

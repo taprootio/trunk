@@ -1,6 +1,6 @@
 {
   "name": "@taprootio/docs-artifact",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Canonical managed and prebuilt Taproot Docs artifact contracts",
   "type": "module",
   "license": "ISC",
