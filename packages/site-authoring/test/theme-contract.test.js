@@ -13,6 +13,7 @@ import {
   MAXIMUM_THEME_WARNING_SCALARS,
   REQUIRED_THEME_PROPERTIES,
   REQUIRED_THEME_PATHS,
+  shadowedRoleMappingWarnings,
   validateAndEncodeThemePair,
 } from "../src/theme-validation.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
@@ -381,4 +382,39 @@ test("appearance colors admit only bounded colors and field-approved tokens", ()
   assert.equal(isSupportedAppearanceColor("--esp-color-text", tokens), false);
   assert.equal(isSupportedAppearanceColor("oklch(1.1 0.1 330)", tokens), false);
   assert.equal(isSupportedAppearanceColor("oklch(0.8 0.5 330)", tokens), false);
+});
+
+test("a pin that repeats the default warns only for tokens the declared roles would have moved", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const withRoles = (theme) => ({
+    ...theme,
+    anchors: { ...theme.anchors, teal: { color: "#0f766e" } },
+    roles: { accent: "anchor:teal", action: "anchor:teal" },
+  });
+  // The seeded shape: every default mapping cached. Only the tokens these two
+  // roles compile are shadowed; a token no role targets is not reported.
+  const cached = withRoles(defaults.light.theme);
+  const warnings = shadowedRoleMappingWarnings(cached, "light");
+  const tokens = warnings.map((warning) => /semanticMappings\.([a-zA-Z0-9]+)/u.exec(warning)[1]);
+  assert.ok(tokens.includes("link") && tokens.includes("actionBackground"), tokens.join(","));
+  assert.ok(!tokens.includes("border") && !tokens.includes("shadow"), tokens.join(","));
+  assert.ok(tokens.length < Object.keys(cached.semanticMappings).length);
+  assert.match(warnings[0], /repeats the Espalier default/u);
+  // A default-valued pin the marker names is deliberate and never reported.
+  const deliberate = { ...cached, explicitMappingTokens: ["link"] };
+  assert.ok(!shadowedRoleMappingWarnings(deliberate, "light").some((warning) => /\.link /u.test(warning)));
+  // Pins only: an authored pin that differs from the default is intentional.
+  const pinsOnly = withRoles({
+    ...defaults.light.theme,
+    semanticMappings: { headings: { source: "anchor:teal", lightness: "ink" } },
+    explicitMappingTokens: ["headings"],
+  });
+  assert.deepEqual(shadowedRoleMappingWarnings(pinsOnly, "light"), []);
+  // Without roles there is nothing for a default-valued pin to shadow.
+  assert.deepEqual(shadowedRoleMappingWarnings(defaults.light.theme, "light"), []);
+  // The warning reaches the push/validate result beside Espalier's own, for both schemes.
+  const result = validateAndEncodeThemePair(cached, withRoles(defaults.dark.theme));
+  assert.ok(result.warnings.some((warning) => /^light: semanticMappings\.link repeats/u.test(warning)));
+  assert.ok(result.warnings.some((warning) => /^dark: semanticMappings\.link repeats/u.test(warning)));
+  assert.equal(result.warningCount >= result.warnings.length, true);
 });

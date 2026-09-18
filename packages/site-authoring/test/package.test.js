@@ -121,6 +121,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // the credential store that lives outside every repository, and the verbs
     // that manage it and the site selection it enables.
     "src/credentials.js",
+    "src/delivery-browser.js",
+    "src/delivery-check.js",
     "src/errors.js",
     // The one home for the offline fixture contract: validate enforces it and
     // 'help fixture' states it from the same constants (TR00647).
@@ -143,9 +145,11 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/settings.js",
     "src/staging-check.js",
     "src/surface.js",
+    "src/theme-projection.js",
     "src/theme-validation.js",
     "src/transport.js",
     "src/verbs/approve.js",
+    "src/verbs/delivery-check.js",
     "src/verbs/deploy.js",
     "src/verbs/env.js",
     "src/verbs/footer-push.js",
@@ -162,6 +166,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/redirects-pull.js",
     "src/verbs/redirects-push.js",
     "src/verbs/sites.js",
+    "src/verbs/staging-review.js",
     "src/verbs/status.js",
     "src/verbs/theme-push.js",
     "src/verbs/use.js",

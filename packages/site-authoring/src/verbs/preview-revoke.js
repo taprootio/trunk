@@ -1,7 +1,7 @@
 import {
   AUTHORING_PREVIEW_STATUS_REVOKED,
   revokeAuthoringPreview,
-  translateAuthoringPreviewApiError,
+  translateAuthoringPreviewRevokeApiError,
   withRefusalGuidance,
 } from "../api.js";
 import { VERB_PREVIEW_REVOKE } from "../constants.js";
@@ -56,6 +56,6 @@ export async function previewRevoke(invocation) {
       });
     });
   } catch (error) {
-    throw translateAuthoringPreviewApiError(error);
+    throw translateAuthoringPreviewRevokeApiError(error);
   }
 }

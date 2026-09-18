@@ -29,6 +29,17 @@ npm install --global @taprootio/site-authoring
 taproot-site --help
 ```
 
+Or run the current release without installing it:
+
+```bash
+npx --yes @taprootio/site-authoring@latest --version
+```
+
+Always name `@latest` with `npx`: an unversioned `npx @taprootio/site-authoring`
+reuses whatever copy npx cached, which is how a design pass ran an old release.
+`--version` prints what is running; `status` reports the latest known release
+as `cliRelease`, and every online verb refuses an outdated CLI (below).
+
 Node 22 or later. The package has one runtime dependency,
 `@taprootio/espalier`, pinned to an exact version: the CLI validates themes
 against one Espalier theme contract, and a floating range would let an install
@@ -257,6 +268,39 @@ distribution, and every other host is refused before a bearer can be built.
 Sign-ins are stored per origin, so switching away and back finds the one that
 was already there.
 
+## Design walkthrough
+
+`taproot-site help walkthrough` is the self-contained version of this pass;
+each step names the reference it relies on.
+
+1. **Select a supported site.** `login`, then `sites` and
+   `use <site-name-or-id>`. A standard site takes every verb; a managed Docs
+   site takes presentation only (`pull`, `theme push`, `footer push`,
+   `media upload`, `deploy`, `status`) because its pages, navigation and
+   redirects come from the Docs artifact; a prebuilt Docs site takes no verb.
+2. **Pull and keep the baseline.** `pull` writes both schemes' complete
+   effective themes, the appearance files and the footer. Edit that pull;
+   never build a theme from memory or an example.
+3. **Edit both schemes and the appearance.** `help theme` lists every field,
+   the role slots, how anchor references resolve and what wins when a pin and
+   a role disagree; `help appearance` covers the default scheme, header, logos
+   and favicon.
+4. **Prepare media locally.** Raster files only (PNG, JPEG, GIF, WebP),
+   relative to the workspace root; make the transparent logo, its `@2x` copy,
+   a dark-scheme logo when needed and a square favicon with your own tools,
+   upload them with `media upload`, then assign `lightLogoId`, `darkLogoId`
+   and `brand.faviconId` from the returned ids. There is no recolor, crop or
+   SVG upload command.
+5. **Validate, then push.** `validate` runs offline; `theme push` writes the
+   footer colours, the appearance scalars and then both themes in that order,
+   not atomically, and a failure names `completedWrites` — pull, reconcile,
+   push again.
+6. **Review on staging in both schemes.** `deploy --staging` returns a
+   single-use handoff in `stagingPreview.url`, on a managed Docs site too;
+   open it once and use the site's theme toggle. No page draft is needed;
+   `preview page` renders one draft and is a different tool.
+7. **Promote only after review.** `deploy --production`.
+
 ## The authoring loop
 
 ```bash
@@ -292,7 +336,12 @@ moved since this workspace last reconciled with it, naming both revisions;
 `media upload [path...]` uploads raster files and records component-ready
 delivery fields. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
-settings, and the closed footer document. `redirects pull` writes the site's
+settings, and the closed footer document. `pull` writes each scheme's
+complete effective theme — the stored theme resolved over the same defaults
+every consumer renders — so a fresh workspace validates as pulled, and it
+keeps only authored `semanticMappings` pins (listed in
+`explicitMappingTokens`) because a pinned token shadows its role.
+`redirects pull` writes the site's
 redirect map to `redirects.json` with a baseline, and `redirects push`
 validates the file offline and replaces the whole map; `help redirects`
 states the entry shape (`path`, `kind` redirect or gone, `target`, `status`
@@ -304,7 +353,10 @@ result. **Each handoff is single-use.** Opening the URL consumes it; a reused,
 shared, or bookmarked preview URL answers `Not found`, which is the handoff
 being spent rather than the preview being broken. Run `preview page` again
 for another. The handoff also expires two minutes after it is minted;
-`preview revoke <page-id> <snapshot-id>` releases a preview early.
+`preview revoke <page-id> <snapshot-id>` releases a preview early. It
+addresses the snapshot, so it still works after `approve` has consumed the
+draft; revoking an already revoked snapshot succeeds again, and an unknown or
+cleaned-up snapshot answers `preview.not_found`.
 
 `approve [page-path...]` publishes drafts into the approved candidate pool.
 It stages; nothing reaches an audience until `deploy --staging` publishes the
@@ -406,7 +458,12 @@ with the exact fact field path. A label is optional and stays outside the value'
 ### Staging verification and deployment evidence
 
 `deploy --staging` selects the same changed pages, settings groups and navigation
-as the Deployments page. `status` checks that exact current candidate, so a
+as the Deployments page, and returns a single-use staging review handoff in
+`stagingPreview.url` — on a managed Docs site too, where it stages settings
+only: open the URL once, then use the site's theme toggle to review both
+schemes before promoting. When no handoff can be minted, `stagingPreview.reason`
+and `stagingPreview.recovery` say why and what to do next; `staging review`
+mints another on any surface. `status` checks that exact current candidate, so a
 completed CLI stage counts as successful until that candidate changes.
 
 A retained failed preview of selected page content refuses deployment as
@@ -440,6 +497,31 @@ server-observed phase transitions, including repeated phases on retry. Durations
 are calculated only between recorded transitions. `truncated` marks missing
 older history; `known: false` marks legacy rows. CLI polling never invents phase
 timestamps. Progress reports the same recorded timestamps and durations.
+
+### Verify what visitors receive
+
+A completed deployment job is not a verified delivery. `delivery check
+(--staging | --production --url https://<published-domain>/)` reads the target
+the way a visitor does and reports each dimension separately: the latest
+completed deployment for the target, HTTP delivery of the authored routes and
+the favicon, images, module preloads and site bundle they declare (status and
+content type, no redirects followed), internal link targets, accidental
+local-only references, and the declared runtime — the major pointer's stream,
+entry and capability modules, and whether the pointer lags the fallback copy
+the site shipped with. The browser dimension (a fresh and a returning load
+compared against the pointer's entry, every document request in the browser,
+popups included, held to the site origin before it is sent, and cache reuse
+on the returning load observed rather than assumed)
+runs only when Playwright resolves from the CLI's own install (install
+`@taprootio/site-authoring` and `playwright` together globally and run the
+installed `taproot-site` command; a copy run through `npx` cannot see a
+global Playwright) and is reported as `unchecked` with that recovery
+otherwise. `--wait <seconds>` re-checks
+failures once for edge propagation; `--no-browser` skips the browser; `--url`
+is a production option, since staging always checks the acknowledged host
+with an authorized preview session. Only same-origin assets and the declared
+runtime are fetched, and the check is read-only and bounded; `help delivery`
+states the limits and verdicts.
 
 ### Export a pulled workspace as an offline fixture
 

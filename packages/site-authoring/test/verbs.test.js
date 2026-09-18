@@ -14,15 +14,16 @@ import {
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
 import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } from "../src/cli.js";
-import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY } from "../src/constants.js";
+import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
-import { failureResult } from "../src/output.js";
+import { failureResult, writeGithubActionsOutput } from "../src/output.js";
 import { REDIRECT_LIMITS } from "../src/redirects-contract.js";
 import { approve } from "../src/verbs/approve.js";
+import { deliveryCheck } from "../src/verbs/delivery-check.js";
 import { deploy } from "../src/verbs/deploy.js";
 import { footerPush } from "../src/verbs/footer-push.js";
 import { VERB_HANDLERS } from "../src/verbs/index.js";
@@ -30,12 +31,15 @@ import { mediaUpload } from "../src/verbs/media-upload.js";
 import { navPush } from "../src/verbs/nav-push.js";
 import { pagesPush } from "../src/verbs/pages-push.js";
 import { previewPage } from "../src/verbs/preview-page.js";
+import { projectPulledTheme } from "../src/theme-projection.js";
+import { missingThemeFields } from "../src/theme-validation.js";
 import { previewRevoke } from "../src/verbs/preview-revoke.js";
 import { pull } from "../src/verbs/pull.js";
 import { redirectsPull } from "../src/verbs/redirects-pull.js";
 import { redirectsPush } from "../src/verbs/redirects-push.js";
+import { stagingReview } from "../src/verbs/staging-review.js";
 import { status } from "../src/verbs/status.js";
-import { themePush } from "../src/verbs/theme-push.js";
+import { themePush, validateThemeWorkspace } from "../src/verbs/theme-push.js";
 import { readWorkspaceFile, workspaceContentHash, writeWorkspaceFile } from "../src/workspace.js";
 import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
 
@@ -886,9 +890,15 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.equal(publishing.settings.albumBorderWidth, 0);
   // TR00605 owns readable theme documents and the structured footer snapshot;
   // memberships remains plan-derived state rather than authored configuration.
+  // A theme the site never set is still written complete: the effective
+  // defaults every consumer renders, with no mapping pins (TR00775).
   const styles = await readWorkspaceJson(workspace, "settings/taproot-styles.json");
-  assert.deepEqual(styles.settings.lightTheme, {});
-  assert.deepEqual(styles.settings.darkTheme, {});
+  for (const scheme of ["light", "dark"]) {
+    const theme = styles.settings[`${scheme}Theme`];
+    assert.deepEqual(missingThemeFields(theme, scheme), []);
+    assert.deepEqual(theme.semanticMappings, {});
+    assert.deepEqual(theme.explicitMappingTokens, []);
+  }
   assert.deepEqual(
     publishing.settings.footerSettings,
     projectFooterSettingsForWorkspace(pulledFooterResponse),
@@ -1062,6 +1072,81 @@ test("agent theme text outside Latin-1 round-trips through pull and push", async
   }
 });
 
+test("pull projects a pre-menu-font stored theme to the complete effective pair that validates, holds across a second pull, and pushes pins only", async (site) => {
+  const workspace = await fixture(site);
+  // The SHY Wellness shape: a seeded complete theme stored before the
+  // per-scheme menu font existed, with the defaults' cached mappings and
+  // one hand-added pin, still managed by Taproot (no external provenance).
+  const stored = (scheme) => {
+    const theme = structuredClone(DEFAULT_SITE_THEME[scheme].theme);
+    delete theme.fontMenu;
+    delete theme.fontWeightMenu;
+    theme.seedColor = "#3b5b3b";
+    theme.semanticMappings.headings = { source: "complementary", lightness: "ink" };
+    return theme;
+  };
+  const pulledThemeWorkspace = themeWorkspace();
+  const styleSettings = {
+    ...pulledThemeWorkspace["settings/taproot-styles.json"].settings,
+    lightTheme: encodeTheme(stored("light")),
+    darkTheme: encodeTheme(stored("dark")),
+  };
+  const routes = () => [
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    {
+      method: "GET",
+      pattern: SETTINGS,
+      reply: (call) => {
+        if (call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")) return { styleSettings };
+        if (call.pathname.endsWith("SETTING_TYPE_BRAND")) {
+          return { brandSettings: pulledThemeWorkspace["settings/brand.json"].settings };
+        }
+        if (call.pathname.endsWith("SETTING_TYPE_SITE_HEADER")) {
+          return { headerSettings: pulledThemeWorkspace["settings/site-header.json"].settings };
+        }
+        return {
+          sitePublishingPreferences: pulledThemeWorkspace["settings/site-publishing-preferences.json"].settings,
+        };
+      },
+    },
+  ];
+
+  await pull(invoke(workspace, api(routes()), { verb: "pull" }).invocation);
+  const first = await readWorkspaceJson(workspace, "settings/taproot-styles.json");
+  for (const scheme of ["light", "dark"]) {
+    const theme = first.settings[`${scheme}Theme`];
+    assert.deepEqual(missingThemeFields(theme, scheme), []);
+    assert.equal(typeof theme.fontMenu, "string");
+    assert.equal(typeof theme.fontWeightMenu, "string");
+    assert.equal(theme.seedColor, "#3b5b3b");
+    // Only the authored pin survives; the twenty-two cached defaults do not.
+    assert.deepEqual(Object.keys(theme.semanticMappings), ["headings"]);
+    assert.deepEqual(theme.explicitMappingTokens, ["headings"]);
+  }
+  // The untouched workspace validates offline without hand-completing anything.
+  await validateThemeWorkspace(workspace.workspaceDir, SITE_ID, new Set());
+
+  // A second pull against the same sparse server projection retains the fields.
+  await pull(invoke(workspace, api(routes()), { verb: "pull" }).invocation);
+  assert.deepEqual(await readWorkspaceJson(workspace, "settings/taproot-styles.json"), first);
+
+  // What push stores is the complete theme with its pin marker, so roles
+  // compile at render time for every other token.
+  const pushWire = api([
+    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
+    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
+    { method: "POST", pattern: SETTING, reply: {} },
+  ]);
+  await themePush(invoke(workspace, pushWire, { verb: "theme push" }).invocation);
+  for (const write of pushWire.matching("POST", SETTING).slice(-2)) {
+    const pushed = parseTheme(write.body.value);
+    assert.equal(pushed.fontMenu, first.settings.lightTheme.fontMenu);
+    assert.deepEqual(pushed.explicitMappingTokens, ["headings"]);
+    assert.deepEqual(Object.keys(pushed.semanticMappings), ["headings"]);
+  }
+});
+
 test("pull refuses a malformed non-empty stored theme instead of snapshotting an empty theme", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
@@ -1105,8 +1190,10 @@ test("the settings catalog materializes only real enum members", async (site) =>
   // cannot be read back.
   const snapshots = {
     "settings/taproot-styles.json": {
-      lightTheme: {},
-      darkTheme: {},
+      // Themes are projected to the complete effective defaults (TR00775);
+      // the other zeros stay the wire's own.
+      lightTheme: projectPulledTheme({}, "light"),
+      darkTheme: projectPulledTheme({}, "dark"),
       defaultScheme: "",
       lightCanvasImageOpacity: 0,
       darkLogoId: "",
@@ -6754,7 +6841,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7190,7 +7277,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7219,6 +7306,54 @@ test("preview revoke validates programmatic identities before configuration or n
       }),
       (error) => error?.code === "preview.identity_invalid" && error?.field === scenario.field,
     );
+  }
+});
+
+test("preview revoke reports a missing or unavailable snapshot as preview.not_found, never as a draft outcome", async (testContext) => {
+  for (
+    const [name, reply, field] of [
+      ["NotFound status", () => jsonResponse({ code: 5, message: "AuthoringPreview 'x' not found." }, 404), undefined],
+      ["in-transaction unavailability", () => jsonResponse(violation("AuthoringPreview", "unavailable"), 400), "snapshotId"],
+    ]
+  ) {
+    await testContext.test(name, async (site) => {
+      const workspace = await fixture(site);
+      const wire = api([{ method: "DELETE", pattern: PREVIEW_STATUS, reply }]);
+      const { invocation } = invoke(workspace, wire, {
+        verb: "preview revoke",
+        previewIds: [ABOUT_PAGE_ID, SNAPSHOT_ID],
+      });
+      await assert.rejects(previewRevoke(invocation), (error) => {
+        assert.equal(error.code, "preview.not_found");
+        assert.equal(error.field, field);
+        assert.doesNotMatch(error.message, /draft/u);
+        return true;
+      });
+    });
+  }
+});
+
+test("preview revoke keeps the draft, authorization and unclassified refusals distinct from a missing snapshot", async (testContext) => {
+  for (
+    const [name, reply, code, refusal] of [
+      ["no persisted draft on create-only paths", () => jsonResponse(violation("AuthoringPreviewDraft"), 400), "preview.no_draft", undefined],
+      ["rejected credential", () => jsonResponse({ code: 16, message: "unauthenticated" }, 401), "api.request_rejected", "credential_rejected"],
+      ["server failure", () => jsonResponse({ code: 13, message: "internal" }, 500), "api.request_rejected", "unclassified"],
+    ]
+  ) {
+    await testContext.test(name, async (site) => {
+      const workspace = await fixture(site);
+      const wire = api([{ method: "DELETE", pattern: PREVIEW_STATUS, reply }]);
+      const { invocation } = invoke(workspace, wire, {
+        verb: "preview revoke",
+        previewIds: [ABOUT_PAGE_ID, SNAPSHOT_ID],
+      });
+      await assert.rejects(previewRevoke(invocation), (error) => {
+        assert.equal(error.code, code);
+        if (refusal !== undefined) assert.equal(error.refusalKind(), refusal);
+        return true;
+      });
+    });
   }
 });
 
@@ -8777,6 +8912,314 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
   assert.deepEqual(readinessCall.query.getAll("selectedSettingsTypes"), ["SETTING_TYPE_BRAND"]);
 });
 
+// ── delivery check (TR00824) ───────────────────────────────────────────────
+
+const PUBLIC_ORIGIN = "https://www.example.com";
+const RUNTIME_POINTER = /\/taproot\/5\/latest\.json$/u;
+const RUNTIME_FALLBACK = /\/taproot-runtime-fallback\/5\.0\.35\/manifest\.json$/u;
+const RUNTIME_ENTRY = /\/taproot\/5\/taproot-shared-runtime-abc\.esm\.js$/u;
+
+function deliveredHtml(links = []) {
+  const bootstrap = JSON.stringify({
+    runtimeMajorVersion: "5",
+    runtimeManifestUrl: `${PUBLIC_ORIGIN}/taproot/5/latest.json`,
+    fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
+    siteBundleUrl: "/public/main.root-abc.js",
+    runtimeCapabilities: [],
+  });
+  return `<!doctype html><html><head><link rel="icon" href="/favicon.ico"><script type="application/json" id="taproot-runtime-bootstrap">${bootstrap}</script></head><body><esp-root>${
+    links.map((href) => `<a href="${href}">x</a>`).join("")
+  }</esp-root></body></html>`;
+}
+
+function deliveryRoutes({ pointerVersion = "5.0.35", environment = "DEPLOYMENT_ENVIRONMENT_PRODUCTION", completed = true } = {}) {
+  const html = (body) => new Response(body, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+  const asset = (type, body = "x") => new Response(body, { status: 200, headers: { "content-type": type } });
+  return [
+    {
+      method: "GET",
+      pattern: DEPLOYMENTS,
+      reply: {
+        deployments: completed
+          ? [deploymentRecord({ environment, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-20T00:01:00Z" })]
+          : [deploymentRecord({ environment, status: "DEPLOYMENT_STATUS_FAILED" })],
+        nextPageToken: "",
+      },
+    },
+    { method: "GET", pattern: RUNTIME_POINTER, reply: () => asset("application/json", JSON.stringify({ version: pointerVersion, majorVersion: "5", entry: "taproot-shared-runtime-abc.esm.js", capabilities: {} })) },
+    { method: "GET", pattern: RUNTIME_FALLBACK, reply: () => asset("application/json", JSON.stringify({ version: "5.0.35", majorVersion: "5", entry: "x.js", capabilities: {} })) },
+    { method: "GET", pattern: RUNTIME_ENTRY, reply: () => asset("text/javascript", "export {};") },
+    { method: "GET", pattern: /^\/public\/main\.root-abc\.js$/u, reply: () => asset("text/javascript", "export {};") },
+    { method: "GET", pattern: /^\/favicon\.ico$/u, reply: () => asset("image/x-icon") },
+    { method: "GET", pattern: /^\/about\/$/u, reply: () => html(deliveredHtml(["/"])) },
+    { method: "GET", pattern: /^\/$/u, reply: () => html(deliveredHtml(["/about/"])) },
+  ];
+}
+
+test("delivery check --production verifies the public origin it is given and reports every dimension", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }], {
+      deployments: { production: { id: DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-20T00:01:00Z" } },
+    }),
+  });
+  const wire = api(deliveryRoutes());
+  const { invocation, progress } = invoke(workspace, wire, {
+    verb: "delivery check",
+    deployTarget: "production",
+    deliveryUrl: `${PUBLIC_ORIGIN}/`,
+    browser: false,
+  });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.verb, "delivery check");
+  assert.equal(result.environment, "DEPLOYMENT_ENVIRONMENT_PRODUCTION");
+  assert.equal(result.verdict, "delivered");
+  assert.deepEqual(result.deployment, { id: DEPLOYMENT_ID, completedAt: "2026-08-20T00:01:00Z", recordedInWorkspace: true });
+  assert.equal(result.target.url, `${PUBLIC_ORIGIN}/`);
+  assert.equal(result.target.resolvedFrom, "option");
+  assert.equal(result.target.stagingAuthorized, false);
+  assert.deepEqual(result.routes.items.map((item) => item.path), ["/", "/about/"]);
+  assert.equal(result.runtime.compatible, true);
+  assert.equal(result.browser.status, "unchecked");
+  assert.equal(result.browser.reason, "disabled");
+  assert.ok(result.doesNotProve.some((line) => /returning browser/u.test(line)));
+  // Read-only: the platform API saw only the deployment log; the public origin saw only GETs.
+  assert.deepEqual(wire.calls.filter((call) => call.pathname.startsWith("/api/")).map((call) => `${call.method} ${call.pathname}`), [
+    `GET /api/v1/sites/${SITE_ID}/deployments`,
+  ]);
+  assert.ok(wire.calls.every((call) => call.method === "GET"));
+  assert.ok(progress.some((line) => /Delivery verified over HTTP/u.test(line)));
+});
+
+test("delivery check reports a stale runtime pointer and a differing workspace record without changing the verdict semantics", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([], {
+      deployments: { production: { id: STAGING_DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-19T00:00:00Z" } },
+    }),
+  });
+  const wire = api(deliveryRoutes({ pointerVersion: "5.0.15" }));
+  const { invocation, progress } = invoke(workspace, wire, {
+    verb: "delivery check",
+    deployTarget: "production",
+    deliveryUrl: `${PUBLIC_ORIGIN}/`,
+    browser: false,
+  });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.verdict, "degraded");
+  assert.equal(result.runtime.pointerBehindFallback, true);
+  assert.equal(result.deployment.recordedInWorkspace, false);
+  assert.equal(result.deployment.workspaceRecordedId, STAGING_DEPLOYMENT_ID);
+  assert.ok(result.failures.some((line) => /behind the fallback/u.test(line)));
+  assert.ok(progress.some((line) => /latest completed production deployment is/u.test(line)));
+});
+
+test("delivery check refuses without a completed deployment, and production without --url, before touching the target", async (testContext) => {
+  await testContext.test("no completed deployment", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(deliveryRoutes({ completed: false }));
+    await assert.rejects(
+      deliveryCheck(invoke(workspace, wire, { verb: "delivery check", deployTarget: "production", deliveryUrl: `${PUBLIC_ORIGIN}/`, browser: false }).invocation),
+      (error) => error?.code === "delivery.no_completed_deployment",
+    );
+    assert.ok(wire.calls.every((call) => call.pathname.startsWith("/api/")));
+  });
+  await testContext.test("staging refuses --url", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(deliveryRoutes({ environment: "DEPLOYMENT_ENVIRONMENT_STAGING" }));
+    await assert.rejects(
+      deliveryCheck(invoke(workspace, wire, { verb: "delivery check", deployTarget: "staging", deliveryUrl: `${PUBLIC_ORIGIN}/`, browser: false }).invocation),
+      (error) => error?.code === "delivery.url_not_for_staging" && error?.exitCode === 2,
+    );
+    assert.ok(wire.calls.every((call) => call.pathname.startsWith("/api/")));
+  });
+  await testContext.test("production needs --url", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(deliveryRoutes());
+    await assert.rejects(
+      deliveryCheck(invoke(workspace, wire, { verb: "delivery check", deployTarget: "production", browser: false }).invocation),
+      (error) => error?.code === "delivery.production_url_required" && error?.exitCode === 2,
+    );
+    assert.ok(wire.calls.every((call) => call.pathname.startsWith("/api/")));
+  });
+});
+
+test("delivery check --staging follows the handoff's host when the acknowledged host moved after the status read", async (site) => {
+  const workspace = await fixture(site);
+  const movedHost = `moved-${STAGING_HOST}`;
+  const cookieValue = "C".repeat(43);
+  const routes = deliveryRoutes({ environment: "DEPLOYMENT_ENVIRONMENT_STAGING" }).filter((route) => route.pattern.source !== "^\\/$");
+  const wire = api([
+    { method: "GET", pattern: STAGING_PREVIEW_STATUS, reply: { siteId: SITE_ID, ready: true, stagingUrl: `https://${STAGING_HOST}/` } },
+    {
+      method: "POST",
+      pattern: STAGING_MINT,
+      reply: {
+        siteId: SITE_ID,
+        stagingUrl: `https://${movedHost}/`,
+        url: `https://${movedHost}/?__taproot_preview_handoff=${HANDOFF_TOKEN}`,
+        handoffExpiresAt: HANDOFF_EXPIRES_AT,
+      },
+    },
+    {
+      method: "GET",
+      pattern: STAGING_PREVIEW_ROOT,
+      reply: (call) => {
+        if (call.query.has("__taproot_preview_handoff")) {
+          return new Response("", {
+            status: 302,
+            headers: {
+              location: `https://${movedHost}/?__taproot_preview_check=1`,
+              "set-cookie": `__Host-taproot_staging_preview=${cookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+            },
+          });
+        }
+        if (call.query.has("__taproot_preview_check")) return new Response("", { status: 302, headers: { location: `https://${movedHost}/` } });
+        return new Response(deliveredHtml([]), { status: 200, headers: { "content-type": "text/html" } });
+      },
+    },
+    ...routes,
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "delivery check", deployTarget: "staging", browser: false });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.target.url, `https://${movedHost}/`);
+  assert.ok(progress.some((line) => /staging host changed/u.test(line)));
+});
+
+test("delivery check --staging keeps a handoff-bearing browser redirect out of the result and GITHUB_OUTPUT, inside the output bound", async (site) => {
+  const workspace = await fixture(site);
+  const cookieValue = "D".repeat(43);
+  const leaked = `https://${STAGING_HOST}/?__taproot_preview_handoff=${HANDOFF_TOKEN}`;
+  const routes = deliveryRoutes({ environment: "DEPLOYMENT_ENVIRONMENT_STAGING" }).filter((route) => route.pattern.source !== "^\\/$");
+  const wire = api([
+    { method: "GET", pattern: STAGING_PREVIEW_STATUS, reply: { siteId: SITE_ID, ready: true, stagingUrl: `https://${STAGING_HOST}/` } },
+    { method: "POST", pattern: STAGING_MINT, reply: { siteId: SITE_ID, stagingUrl: `https://${STAGING_HOST}/`, url: STAGING_HANDOFF_URL, handoffExpiresAt: HANDOFF_EXPIRES_AT } },
+    {
+      method: "GET",
+      pattern: STAGING_PREVIEW_ROOT,
+      reply: (call) => {
+        if (call.query.has("__taproot_preview_handoff")) {
+          return new Response("", {
+            status: 302,
+            headers: {
+              location: `https://${STAGING_HOST}/?__taproot_preview_check=1`,
+              "set-cookie": `__Host-taproot_staging_preview=${cookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+            },
+          });
+        }
+        if (call.query.has("__taproot_preview_check")) return new Response("", { status: 302, headers: { location: `https://${STAGING_HOST}/` } });
+        return new Response(deliveredHtml([]), { status: 200, headers: { "content-type": "text/html" } });
+      },
+    },
+    ...routes,
+  ]);
+  // A browser whose every navigation lands on a same-origin URL that carries the handoff token.
+  const listeners = new Map();
+  const fakePlaywright = {
+    chromium: {
+      launch: async () => ({
+        newBrowserCDPSession: async () => ({ send: async () => undefined, on: (event, listener) => listeners.set(event, listener) }),
+        newContext: async () => ({
+          addCookies: async () => undefined,
+          newCDPSession: async () => ({ send: async () => undefined, on: (event, listener) => listeners.set(event, listener) }),
+          newPage: async () => ({
+            goto: async () => {
+              listeners.get("Fetch.requestPaused")?.({ requestId: "r", request: { url: leaked } });
+              const first = { url: () => `https://${STAGING_HOST}/` };
+              return { request: () => ({ url: () => leaked, redirectedFrom: () => first }) };
+            },
+            url: () => leaked,
+            waitForFunction: async () => undefined,
+            evaluate: async () => ({ rootDefined: true, themeReady: true, loadingHeld: false, runtimeEntries: [leaked], capabilitiesDefined: 0 }),
+          }),
+          close: async () => undefined,
+        }),
+        close: async () => undefined,
+      }),
+    },
+  };
+  const { invocation, progress } = invoke(workspace, wire, { verb: "delivery check", deployTarget: "staging", importPlaywright: async () => fakePlaywright });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.browser.status, "checked");
+  assert.equal(result.browser.fresh.finalUrl, "[withheld]");
+  assert.equal(result.browser.fresh.loadedEntry, "[withheld]");
+  assert.equal(result.browser.returning.finalUrl, "[withheld]");
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes(HANDOFF_TOKEN));
+  assert.ok(!serialized.includes(cookieValue));
+  assert.ok(!progress.some((line) => line.includes(HANDOFF_TOKEN) || line.includes(cookieValue)));
+  assert.ok(Buffer.byteLength(serialized, "utf8") <= LIMITS.githubOutputBytes);
+  const outputPath = path.join(workspace.project, "github-output.txt");
+  await writeFile(outputPath, "");
+  await writeGithubActionsOutput(outputPath, result);
+  const written = await readFile(outputPath, "utf8");
+  assert.ok(written.includes("[withheld]"));
+  assert.ok(!written.includes(HANDOFF_TOKEN));
+  assert.ok(!written.includes(cookieValue));
+});
+
+test("staging review mints a fresh handoff on the presentation surface and reports it only in the result", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api([{
+    method: "POST",
+    pattern: STAGING_MINT,
+    reply: { siteId: SITE_ID, stagingUrl: `https://${STAGING_HOST}/`, url: STAGING_HANDOFF_URL, handoffExpiresAt: HANDOFF_EXPIRES_AT },
+  }]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "staging review", surface: "docs-presentation" });
+  const result = await stagingReview(invocation);
+  assert.equal(result.verb, "staging review");
+  assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
+  assert.match(result.stagingPreview.review, /light and dark/u);
+  assert.ok(!progress.some((line) => line.includes(HANDOFF_TOKEN)));
+  assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
+});
+
+test("delivery check --staging resolves the acknowledged host, authorizes one preview session, and never reports the cookie", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const cookieValue = "B".repeat(43);
+  const routes = deliveryRoutes({ environment: "DEPLOYMENT_ENVIRONMENT_STAGING" }).filter((route) => !/^\/\$$/u.test(String(route.pattern)) && route.pattern.source !== "^\\/$");
+  const wire = api([
+    { method: "GET", pattern: STAGING_PREVIEW_STATUS, reply: { siteId: SITE_ID, ready: true, stagingUrl: `https://${STAGING_HOST}/` } },
+    {
+      method: "POST",
+      pattern: STAGING_MINT,
+      reply: { siteId: SITE_ID, stagingUrl: `https://${STAGING_HOST}/`, url: STAGING_HANDOFF_URL, handoffExpiresAt: HANDOFF_EXPIRES_AT },
+    },
+    {
+      method: "GET",
+      pattern: STAGING_PREVIEW_ROOT,
+      reply: (call) => {
+        if (call.query.has("__taproot_preview_handoff")) {
+          return new Response("", {
+            status: 302,
+            headers: {
+              location: `https://${STAGING_HOST}/?__taproot_preview_check=1`,
+              "set-cookie": `__Host-taproot_staging_preview=${cookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+            },
+          });
+        }
+        if (call.query.has("__taproot_preview_check")) {
+          return new Response("", { status: 302, headers: { location: `https://${STAGING_HOST}/` } });
+        }
+        // The gated page: served only with the preview cookie.
+        return call.headers?.cookie === `__Host-taproot_staging_preview=${cookieValue}`
+          ? new Response(deliveredHtml(["/about/"]), { status: 200, headers: { "content-type": "text/html" } })
+          : new Response("denied", { status: 403, headers: { "content-type": "text/html" } });
+      },
+    },
+    ...routes,
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "delivery check", deployTarget: "staging", browser: false });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.verdict, "delivered", JSON.stringify(result.failures));
+  assert.equal(result.target.url, `https://${STAGING_HOST}/`);
+  assert.equal(result.target.resolvedFrom, "staging-status");
+  assert.equal(result.target.stagingAuthorized, true);
+  assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
+  assert.ok(!JSON.stringify(result).includes(cookieValue));
+  assert.ok(!JSON.stringify(result).includes(HANDOFF_TOKEN));
+});
+
 test("deploy --staging on a managed Docs site stages settings and skips the staging redirect inspection", async (site) => {
   const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
   const wire = api([
@@ -8802,11 +9245,66 @@ test("deploy --staging on a managed Docs site stages settings and skips the stag
     includeNavigation: false,
   });
   assert.equal(result.nextStep, "deploy --production");
-  assert.equal(result.stagingPreview, undefined);
-  assert.equal(wire.matching("POST", STAGING_MINT).length, 0);
+  // A settings-only stage still returns a usable review handoff (TR00800),
+  // minted once after completion and never before the deployment.
+  assert.equal(result.stagingPreview.stagingUrl, `https://${STAGING_HOST}/`);
+  assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
+  assert.equal(result.stagingPreview.handoffExpiresAt, HANDOFF_EXPIRES_AT);
+  assert.match(result.stagingPreview.review, /light and dark/u);
+  assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
+  assert.ok(wire.calls.findIndex((call) => STAGING_MINT.test(call.pathname)) > wire.calls.findIndex((call) => DEPLOY.test(call.pathname)));
+  assert.equal(wire.matching("GET", STAGING_PREVIEW_ROOT).length, 0);
   const sent = wire.matching("POST", DEPLOY)[0].body;
   assert.deepEqual(sent.stagedPageIds, []);
   assert.equal(sent.includeNavigation, false);
+});
+
+test("deploy --staging on a managed Docs site reports a stable reason when no review handoff can be minted", async (testContext) => {
+  for (
+    const [name, reply, reason] of [
+      ["no acknowledged staging host", () => jsonResponse(violation("Host", "Staging preview is unavailable."), 400), "staging.host_unavailable"],
+      ["denied authority", () => jsonResponse({ code: 16, message: "unauthenticated" }, 401), "staging.authority_denied"],
+      [
+        "missing capability",
+        () => jsonResponse(capabilityDenialBody("site.staging.view", ["site.settings.manage"], ["site.staging.view"]), 403),
+        "staging.authority_denied",
+      ],
+      ["source became prebuilt", () => jsonResponse(violation("SiteId", "refused"), 400), "staging.surface_refused"],
+      ["server failure", () => jsonResponse({ code: 13, message: "internal" }, 500), "staging.handoff_unavailable"],
+    ]
+  ) {
+    await testContext.test(name, async (site) => {
+      const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+      const wire = api([
+        {
+          method: "GET",
+          pattern: DEPLOY_REVIEW,
+          reply: {
+            stagedPages: [],
+            settingsChanges: [{ settingsType: "SETTING_TYPE_TAPROOT_STYLES", changes: [{ path: "lightTheme" }] }],
+            navigationChanged: false,
+          },
+        },
+        { method: "POST", pattern: STAGING_MINT, reply },
+        ...deployRoutes().filter((route) => route.pattern !== STAGING_MINT),
+      ]);
+      const { invocation, progress } = invoke(workspace, wire, {
+        verb: "deploy",
+        deployTarget: "staging",
+        surface: "docs-presentation",
+      });
+      const result = await deploy(invocation);
+      assert.equal(result.ok, true);
+      assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
+      assert.equal(result.stagingPreview.url, "");
+      assert.equal(result.stagingPreview.reason, reason);
+      assert.match(result.stagingPreview.recovery, /taproot-site/u);
+      assert.doesNotMatch(result.stagingPreview.recovery, /production/u);
+      assert.equal(result.nextStep, "staging review");
+      assert.doesNotMatch(result.stagingPreview.recovery, /redirects check/u);
+      assert.ok(progress.some((line) => line.includes(reason)));
+    });
+  }
 });
 
 test("deploy --staging on a managed Docs site refuses an explicit page or navigation selection before any read", async (context) => {

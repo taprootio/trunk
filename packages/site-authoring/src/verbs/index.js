@@ -1,5 +1,6 @@
 import {
   VERB_APPROVE,
+  VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
   VERB_ENV,
   VERB_FOOTER_PUSH,
@@ -15,6 +16,7 @@ import {
   VERB_REDIRECTS_PULL,
   VERB_REDIRECTS_PUSH,
   VERB_SITES,
+  VERB_STAGING_REVIEW,
   VERB_STATUS,
   VERB_THEME_PUSH,
   VERB_USE,
@@ -22,6 +24,7 @@ import {
   VERB_WHOAMI,
 } from "../constants.js";
 import { approve } from "./approve.js";
+import { deliveryCheck } from "./delivery-check.js";
 import { deploy } from "./deploy.js";
 import { env } from "./env.js";
 import { footerPush } from "./footer-push.js";
@@ -37,6 +40,7 @@ import { redirectsCheck } from "./redirects-check.js";
 import { redirectsPull } from "./redirects-pull.js";
 import { redirectsPush } from "./redirects-push.js";
 import { sites } from "./sites.js";
+import { stagingReview } from "./staging-review.js";
 import { status } from "./status.js";
 import { themePush } from "./theme-push.js";
 import { use } from "./use.js";
@@ -131,4 +135,6 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_WHOAMI]: whoami,
   [VERB_ENV]: env,
   [VERB_STATUS]: status,
+  [VERB_DELIVERY_CHECK]: deliveryCheck,
+  [VERB_STAGING_REVIEW]: stagingReview,
 });

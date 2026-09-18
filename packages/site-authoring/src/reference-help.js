@@ -375,6 +375,16 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Describe authoring preview creation, waiting, and recovery.",
   }),
   Object.freeze({
+    name: "delivery",
+    usage: `${CLI_BINARY_NAME} help delivery`,
+    summary: "Verify visitor-facing delivery after a deployment: routes, assets, runtime, browser.",
+  }),
+  Object.freeze({
+    name: "walkthrough",
+    usage: `${CLI_BINARY_NAME} help walkthrough`,
+    summary: "Design a site end to end: select, pull, edit both schemes, validate, push, review staging, promote.",
+  }),
+  Object.freeze({
     name: "theme",
     usage: `${CLI_BINARY_NAME} help theme`,
     summary: "Design and validate a complete Espalier light/dark theme pair.",
@@ -397,6 +407,105 @@ export const REFERENCE_TOPICS = Object.freeze([
 ]);
 
 const WORKFLOW_REFERENCES = Object.freeze({
+  delivery: Object.freeze({
+    title: "Delivery verification",
+    summary: "delivery check reads a completed deployment's target the way a visitor does and reports HTTP delivery, runtime compatibility and (optionally) browser behaviour as separate dimensions.",
+    usage: `${CLI_BINARY_NAME} delivery check (--staging | --production [--url <origin>]) [--wait <seconds>] [--no-browser]`,
+    details: Object.freeze([
+      "A completed deployment job proves Taproot wrote what it meant to write, not that a visitor receives it. The "
+      + "check verifies the latest completed deployment for the target, and notes when the workspace recorded a "
+      + "different one.",
+      "Routes come from the workspace manifest's pages plus '/', bounded to 20; each must answer 200 text/html "
+      + "without redirecting. Internal link targets found in those pages are checked too (bounded to 40).",
+      "Assets are what the home page declares: favicon links, module preloads, the site bundle, and up to six "
+      + "images. A 200 is not enough: the content type must match the kind, so an HTML error page served as an "
+      + "image fails.",
+      "Runtime: the page's bootstrap declares the major stream, the mutable major pointer, the immutable fallback "
+      + "copy and the capability modules. The pointer's major must match, its entry must load as JavaScript, every "
+      + "declared capability must be resolvable, and a pointer behind the fallback's version is reported as a "
+      + "stale runtime pointer that returning browsers may still be on.",
+      "Browser: a fresh and a returning (same-context, cached) load are compared against the pointer's entry when "
+      + "Playwright resolves from the CLI's own install: npm install --global @taprootio/site-authoring@latest "
+      + "playwright && npx playwright install chromium, then rerun through the installed taproot-site command (a "
+      + "copy run through npx lives in npm's cache and cannot see a global Playwright). A DevTools "
+      + "session on the browser fails any document request that would leave the site origin before it is sent "
+      + "(redirect hops, frames, script-driven navigations and popups included), so a target that strays is "
+      + "reported with offOriginNavigation and is not loaded again; without that session nothing is loaded and "
+      + "the dimension is unchecked. Whether "
+      + "the returning load really reused the cached runtime entry (memory or disk) is observed through the same "
+      + "session and reported as browser.returningCache, unchecked where it cannot be observed. Every URL the "
+      + "probe reports passes the same credential withholding as redirect Locations. Without Playwright the "
+      + "dimension is reported as unchecked, never as passed; a cache-busted HTTP fetch cannot stand in for it.",
+      "Bounds: four concurrent requests, two attempts per request, 15 seconds each; --wait re-checks failures once "
+      + "after at most 120 seconds. The report stays truthful after retry exhaustion: attempts and failures are "
+      + "listed with observed and expected values and the final URL. Twenty local-only references and forty "
+      + "failure lines are kept across the whole run, and the whole report is trimmed (successful items first, "
+      + "then failed items, failure lines, local-only references, capability detail, and finally the runtime "
+      + "detail down to its verdict counts, each with totals and truncation flags) so it always fits the output bound.",
+      "Read-only and bounded: the staging cookie goes only to the staging origin, only same-origin assets and the "
+      + "runtime the page's bootstrap declares are fetched (an authored reference to any other host is content, "
+      + "not delivery), local-only references (localhost, *.test, *.local) are reported rather than fetched, a "
+      + "redirect Location that could reflect a credential is withheld, bodies are read up to a fixed bound, "
+      + "member-only content is not exercised, and nothing is purged, republished or rolled back.",
+      "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible, but an asset, "
+      + "link, pointer or browser load did not match), failed (a route or the runtime did not deliver).",
+    ]),
+    example: Object.freeze({
+      command: `${CLI_BINARY_NAME} delivery check --production --url https://www.example.com/ --wait 30`,
+    }),
+  }),
+  walkthrough: Object.freeze({
+    title: "Design walkthrough",
+    summary: "One pass from selecting a site to promoting a reviewed presentation, with the reference each step relies on.",
+    usage: `${CLI_BINARY_NAME} help walkthrough`,
+    details: Object.freeze([
+      `Run the current release: npm install --global @taprootio/site-authoring, or npx --yes @taprootio/site-authoring@latest <verb>. `
+      + "Always name @latest with npx: an unversioned npx reuses whatever it cached, and Taproot accepts only the latest "
+      + "release. --version prints what is running; status reports the latest known release as cliRelease.",
+      `Select the site: ${CLI_BINARY_NAME} login, then ${CLI_BINARY_NAME} sites and ${CLI_BINARY_NAME} use <site-name-or-id>. `
+      + "sites reports each site's kind and authoring surface. A standard site takes every verb. A managed Docs site "
+      + "takes presentation only — pull, theme push, footer push, media upload, deploy, status — because its pages, "
+      + "navigation and redirects come from the Docs artifact; a prebuilt Docs site takes no verb at all.",
+      `Pull the baseline: ${CLI_BINARY_NAME} pull writes settings/taproot-styles.json with both schemes' complete effective `
+      + "themes (the stored theme resolved over the same defaults every consumer renders) beside brand.json, "
+      + "site-header.json and site-publishing-preferences.json. Keep that pull as the baseline you edit; never build "
+      + "a theme from memory or from an example. semanticMappings holds only authored pins, listed in explicitMappingTokens.",
+      "Edit both schemes: settings.lightTheme and settings.darkTheme are separate documents. Declare anchors, then roles "
+      + "(help theme lists the role slots and how anchor references resolve), tune typography per scheme, and keep "
+      + "contexts and intents paired across schemes. Set appearance scalars (default scheme, header, logos, favicon) "
+      + "in the appearance files: help appearance.",
+      "Prepare media locally: PNG, JPEG, GIF and WebP raster files only, addressed relative to the workspace root. Make "
+      + "the variants yourself with any image tool (a transparent logo, a @2x copy, a square favicon); there is no "
+      + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
+      + "(and brand.faviconId) from the returned image ids so each scheme carries the artwork that reads on its header.",
+      `Validate offline: ${CLI_BINARY_NAME} validate checks the complete pair, the appearance files and the footer against `
+      + "the contracts the site enforces, and warns when a semanticMappings pin repeats the default on a token your "
+      + "roles would have moved (the pin would keep the role from rendering).",
+      `Push: ${CLI_BINARY_NAME} theme push writes the footer scheme colours, the appearance scalars, then the light and dark `
+      + "themes in that order, not atomically. A failure reports completedWrites: pull, compare the remote result "
+      + "with the workspace, reconcile, and push again. footer push owns footer prose, links and imagery.",
+      `Review on staging: ${CLI_BINARY_NAME} deploy --staging stages the presentation and returns a single-use review handoff `
+      + "in stagingPreview.url (on a managed Docs site too). Open it once, then use the site's theme toggle to check "
+      + "both schemes: text, headings, links and hover, actions and focus, the header logos, the favicon. When no "
+      + "handoff could be minted, stagingPreview.reason says why and staging review mints another. A page draft is "
+      + "not needed to review a presentation change; preview page renders one persisted draft and is a different tool.",
+      `Promote only after review: ${CLI_BINARY_NAME} deploy --production promotes the completed staging deployment. `
+      + "Never use production to discover what staging should have shown.",
+    ]),
+    example: Object.freeze({
+      commands: Object.freeze([
+        `npx --yes @taprootio/site-authoring@latest login`,
+        `${CLI_BINARY_NAME} sites`,
+        `${CLI_BINARY_NAME} use "Riverbend Wellness"`,
+        `${CLI_BINARY_NAME} pull`,
+        `${CLI_BINARY_NAME} media upload media/logo.png media/logo-dark.png media/favicon.png`,
+        `${CLI_BINARY_NAME} validate`,
+        `${CLI_BINARY_NAME} theme push`,
+        `${CLI_BINARY_NAME} deploy --staging`,
+        `${CLI_BINARY_NAME} deploy --production`,
+      ]),
+    }),
+  }),
   nav: Object.freeze({
     title: "Navigation workspace contract",
     summary: "nav push replaces the complete tree in nav.json; item IDs are author-minted canonical lowercase UUIDs.",
@@ -512,6 +621,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Paths are relative to the configured workspace root, not the shell's current directory.",
       "PNG, JPEG, GIF, and WebP are accepted; retina names such as logo@2x.png and logo@3x.png are supported.",
       "For header logos prefer genuine transparent PNG/WebP, check contrast in both themes, and include a simplified square favicon. See help appearance for branding guidance.",
+      "Prepare variants locally with any image tool before uploading: a transparent logo, its @2x copy, a scheme-specific dark logo when one asset does not read on both headers, and a square favicon. The CLI uploads what you give it; it has no recolor, crop, or SVG upload command.",
+      "Assign both schemes after uploading: lightLogoId and darkLogoId in settings/taproot-styles.json and brand.faviconId in settings/brand.json take the returned image ids; theme push writes them. See help walkthrough for the full design pass.",
       "Each result item includes media: { imageId, src, urls, width, height, alt }.",
       "The same src/urls delivery fields are saved in .taproot-site-media.json for page and component authoring.",
     ]),
@@ -539,6 +650,12 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "remain optional and old snapshots without content identity do not block deployment.",
       "deploy --staging and redirects check return a separate fresh single-use staging handoff in "
       + "stagingPreview.url, after authenticating headless redirect checks. Handoffs never go to GITHUB_OUTPUT.",
+      "On a managed Docs site deploy --staging stages settings only and still returns stagingPreview.url: open it "
+      + "once, then use the site's theme toggle to review both schemes; no page draft is needed to preview a "
+      + "presentation change. When no handoff can be minted the result carries stagingPreview.reason "
+      + "(staging.host_unavailable, staging.authority_denied, staging.surface_refused, or staging.handoff_unavailable) "
+      + "and a recovery step; run staging review to mint another (it works on every surface). Never verify a theme "
+      + "on production instead.",
       "A page path resolves through .taproot-site-manifest.json; a canonical page UUID works directly.",
       "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.",
       "Preview before approving: approve consumes the draft, so an approved page has no draft left to render and answers preview.no_draft. Review it on staging after a deploy instead.",
@@ -547,7 +664,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Success returns READY with url, snapshotId, expiresAt, storedPreviewCap, storedPreviewCount, and evictedPreviews.",
       "The url is a single-use handoff that expires two minutes after it is minted: opening it consumes it, and a reused, shared, or bookmarked URL answers Not found. Run preview page again for another.",
       "At the configured cap, creation revokes the oldest snapshot for the same page first, then the oldest snapshot held by the same key.",
-      `A stalled preview can be released with ${CLI_BINARY_NAME} preview revoke <page-id> <snapshot-id>.`,
+      `A stalled preview can be released with ${CLI_BINARY_NAME} preview revoke <page-id> <snapshot-id>. Revocation addresses the snapshot, not the draft: it works after approve has consumed the draft, revoking an already revoked snapshot succeeds again with status REVOKED, and an unknown, expired-and-cleaned-up, or other-page snapshot answers preview.not_found without revealing whether it exists elsewhere.`,
     ]),
     example: Object.freeze({ command: `${CLI_BINARY_NAME} preview page classes` }),
   }),

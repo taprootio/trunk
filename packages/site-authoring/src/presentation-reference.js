@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 
+import { computeThemeProperties } from "@taprootio/espalier/shared/theme-properties";
+
 import {
   DATA_SERIES_KEYS,
   DEFAULT_DATA_RAMP_STEPS,
@@ -11,6 +13,7 @@ import {
   DEFAULT_DARK_THEME,
   DEFAULT_LIGHT_THEME,
   LIGHTNESS_KEYS,
+  mergeTheme,
   NESTED_THEME_KEYS,
   ROLE_NAMES,
   SEMANTIC_COLOR_NAMES,
@@ -92,13 +95,24 @@ function exampleTheme(defaults, scheme) {
       paper: "#fffaf4",
       midnight: "#21172b",
     },
-    roles: {
-      canvas: "primary",
-      ink: { color: "primary", heading: "anchor:midnight" },
-      accent: { color: "anchor:plum", text: "anchor:plum.text", hover: "anchor:plum.hover" },
-      action: { color: "anchor:plum", ink: "anchor:paper" },
-      structure: "primary",
-    },
+    // Contrasting on purpose: light headings sit in the dark anchor on the
+    // light canvas, dark headings in the paper anchor on the dark canvas. The
+    // pair is resolved and contrast-checked by assertPresentationExamples.
+    roles: scheme === "light"
+      ? {
+        canvas: "primary",
+        ink: { color: "primary", heading: "anchor:midnight" },
+        accent: { color: "anchor:plum", text: "anchor:plum.text", hover: "anchor:plum.hover" },
+        action: { color: "anchor:plum", ink: "anchor:paper" },
+        structure: "primary",
+      }
+      : {
+        canvas: "primary",
+        ink: { color: "primary", heading: "anchor:paper" },
+        accent: { color: "anchor:plum", text: "anchor:plum.hover", hover: "anchor:paper" },
+        action: { color: "anchor:plum", ink: "anchor:paper" },
+        structure: "primary",
+      },
     contexts: {
       inverted: {
         canvas: "anchor:midnight",
@@ -251,6 +265,69 @@ const THEME_GROUPS = Object.freeze([
   }),
 ]);
 
+/**
+ * How a role binding becomes a rendered token, in the order the resolver
+ * applies it. Stated once here so help theme, the walkthrough and the
+ * validation warnings describe the same model (TR00801, TR00806).
+ */
+export const ROLE_RESOLUTION = Object.freeze({
+  slots: Object.freeze({
+    canvas: Object.freeze([]),
+    ink: Object.freeze(["heading"]),
+    accent: Object.freeze(["text", "hover"]),
+    action: Object.freeze(["ink"]),
+    structure: Object.freeze([]),
+  }),
+  bindingForms: Object.freeze([
+    "A role takes one mapping source, or { color, ...slots } to bind its slots separately.",
+    "A geometric source (" + COLOR_SOURCES.filter((source) => !STATUS_COLOR_SOURCES.includes(source)).join(", ")
+    + ") is relative: it takes the seed hue through that family's angle and the token's lightness stop, so it moves "
+    + "with seedColor and the lightness ramp. A status family (" + STATUS_COLOR_SOURCES.join(", ")
+    + ") keeps its fixed hue from semanticHues (or its intents override) and does not move with seedColor.",
+    "anchor:<name> is absolute in hue and chroma: the anchor's declared colour supplies both, and the token's own "
+    + "lightness stop (with APCA enforcement) still sets its lightness. anchor:<name>.<slot> selects one of the "
+    + "anchor's declared slots (text, hover, ...) as that hue-and-chroma source and resolves the same way; neither "
+    + "form renders the declared colour verbatim.",
+    "Anchors resolve per scheme: the same anchor:<name> in lightTheme and darkTheme reads each scheme's own anchors "
+    + "table, so a dark scheme usually declares darker or lighter anchors under the same names.",
+  ]),
+  precedence: Object.freeze([
+    "Any mapping present in semanticMappings wins for its token, whether or not explicitMappingTokens names it: "
+    + "the shipped resolver overlays the stored mappings after compiling the roles. To let a role reach a token, "
+    + "delete the mapping; editing the marker alone does not unpin it. explicitMappingTokens records which mappings "
+    + "are authored pins and is what pull writes.",
+    "Otherwise the token is compiled from the roles, and an APCA contrast check may nudge an action or ink stop so "
+    + "the pair stays readable.",
+    "Otherwise the Espalier default mapping applies.",
+    "A context rebinds roles, lightness, tones and pins for one zone with the same precedence inside that zone.",
+  ]),
+});
+
+function themeLightness(value) {
+  const match = /^oklch\(\s*([0-9.]+)/u.exec(value ?? "");
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * The examples must render as contrasting pairs, not merely validate: a dark
+ * example whose headings resolve to a dark anchor on a dark canvas validated
+ * fine and read as a defect. Resolve both through Espalier and require the
+ * text, heading and link tokens to sit well away from the canvas lightness.
+ */
+function assertExampleContrast(theme, scheme) {
+  const properties = computeThemeProperties(
+    mergeTheme(scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME, theme),
+    scheme,
+  );
+  const canvas = themeLightness(properties["--esp-color-background"]);
+  for (const token of ["--esp-color-text", "--esp-color-headings", "--esp-color-link", "--esp-color-action-text"]) {
+    const lightness = themeLightness(properties[token]);
+    if (canvas === undefined || lightness === undefined || Math.abs(lightness - canvas) < 0.4) {
+      throw new Error(`${scheme} theme example: ${token} (${properties[token]}) does not contrast with the canvas (${properties["--esp-color-background"]}).`);
+    }
+  }
+}
+
 export function getThemeReference() {
   const version = getEspalierVersion();
   return {
@@ -270,14 +347,15 @@ export function getThemeReference() {
       semanticColors: SEMANTIC_COLOR_NAMES,
       dataSeries: DATA_SERIES_KEYS,
     },
+    roleResolution: ROLE_RESOLUTION,
     workflow: [
-      "Run taproot-site pull and edit the complete light/dark pair it writes; never build a sparse theme from memory.",
+      "Run taproot-site pull and edit the complete light/dark pair it writes; never build a sparse theme from memory. pull resolves the stored theme over the same defaults every consumer renders, so a fresh workspace validates and every group carries its effective value.",
       "Define brand anchors first, then assign canvas, ink, accent, action, and structure roles in both schemes.",
       "Add named contexts for whole zones, including inverted zones, and rebind lightness when the zone changes brightness.",
       "Tune typography, type/space ratios, radii, and viewport interpolation as one layout system.",
       "Typography is per scheme on purpose: light and dark set their own moods, so a heading, body, or brand face that differs between them is a design choice, and theme push never warns about it.",
       "Retune danger/success/warning/info through intents without changing their meanings; design data palettes separately.",
-      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model.",
+      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model. pull keeps only authored pins there and lists them in explicitMappingTokens; a default mapping copied into the document becomes a pin and makes the role for that token inert.",
       "Run theme push, inspect warnings, then verify text, actions, focus states, and both schemes in authoring previews.",
     ],
     example: THEME_EXAMPLE,
@@ -541,6 +619,8 @@ export function getFooterReference() {
 
 export function assertPresentationExamples() {
   validateAndEncodeThemePair(THEME_EXAMPLE.lightTheme, THEME_EXAMPLE.darkTheme);
+  assertExampleContrast(THEME_EXAMPLE.lightTheme, "light");
+  assertExampleContrast(THEME_EXAMPLE.darkTheme, "dark");
   validateFooterDocument(FOOTER_EXAMPLE);
 }
 
@@ -600,7 +680,15 @@ export function formatPresentationReference(reference) {
       + reference.themePaths.join(", ") + ")\nComplete pulled baseline required: yes\nNested merge groups: "
       + reference.nestedMergeGroups.join(", ") + "\n\nDesign workflow:\n"
       + reference.workflow.map((step, index) => "  " + (index + 1) + ". " + step).join("\n")
-      + "\n\nTheme groups:\n" + groups + "\n\nValid complete pair:\n"
+      + "\n\nRole slots:\n"
+      + Object.entries(reference.roleResolution.slots).map(([role, slots]) =>
+        "  " + role.padEnd(10) + (slots.length === 0 ? "color only" : "color, " + slots.join(", "))
+      ).join("\n")
+      + "\n\nHow a binding resolves:\n"
+      + reference.roleResolution.bindingForms.map((line) => "  - " + line).join("\n")
+      + "\n\nPrecedence:\n"
+      + reference.roleResolution.precedence.map((line, index) => "  " + (index + 1) + ". " + line).join("\n")
+      + "\n\nTheme groups:\n" + groups + "\n\nValid complete pair (both schemes resolved and contrast-checked):\n"
       + JSON.stringify(reference.example, null, 2) + "\n";
   }
   if (reference.referenceKind === "appearance") {

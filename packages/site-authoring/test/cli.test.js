@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
     verb,
   };
 }
@@ -529,6 +529,8 @@ test("exposes help and version at the binary and verb levels", async (testContex
       "preview page",
       "preview revoke",
       "status",
+      "delivery check",
+      "staging review",
     ]
   ) {
     await testContext.test(verb, async () => {
@@ -562,6 +564,18 @@ test("exposes help and version at the binary and verb levels", async (testContex
         );
         assert.match(verbStdout.read(), /--json/u);
       }
+      if (verb === "delivery check") {
+        assert.match(verbStdout.read(), /^Usage: taproot-site \[--config <path>\] delivery check \(--staging \| --production\)/u);
+        assert.match(verbStdout.read(), /--url <origin>/u);
+        assert.match(verbStdout.read(), /--wait <seconds>/u);
+        assert.match(verbStdout.read(), /--no-browser/u);
+        assert.match(verbStdout.read(), /reported as unchecked/u);
+      }
+      if (verb === "use") {
+        // A site selector, never a page path (TR00806).
+        assert.match(verbStdout.read(), /^Usage: taproot-site \[--config <path>\] use <site-name-or-id>/u);
+        assert.doesNotMatch(verbStdout.read(), /page-path/u);
+      }
     });
   }
   for (
@@ -575,7 +589,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.8.4\n");
+    assert.equal(versionStdout.read(), "0.8.5\n");
   }
 });
 
@@ -781,6 +795,8 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "appearance", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "footer", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "fixture", "--json"], topic: "workflow", field: "reference" },
+    { arguments_: ["help", "walkthrough", "--json"], topic: "workflow", field: "reference" },
+    { arguments_: ["help", "delivery", "--json"], topic: "workflow", field: "reference" },
   ];
   for (const scenario of cases) {
     await context.test(scenario.topic, async () => {
@@ -799,7 +815,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.8.4" },
+          cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
           verb: "help",
           referenceVersion: 24,
           topic: scenario.topic,
@@ -878,6 +894,8 @@ test("reference help reports stable usage errors with valid alternatives", async
         "redirects",
         "media",
         "preview",
+        "delivery",
+        "walkthrough",
         "theme",
         "appearance",
         "footer",

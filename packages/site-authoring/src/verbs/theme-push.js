@@ -6,7 +6,7 @@ import {
   footerColorOverlay,
 } from "../appearance-contract.js";
 import { VERB_THEME_PUSH } from "../constants.js";
-import { SiteAuthoringError } from "../errors.js";
+import { MISSING_SETTING_MESSAGE, SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace } from "../footer-contract.js";
 import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import {
@@ -122,13 +122,13 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
   if (missing.length > 0) {
     throw new SiteAuthoringError(
       "theme.settings_missing",
-      "Required settings keys are missing. Run 'taproot-site pull' to update this workspace's contract.",
+      "Required settings keys are absent from this workspace. Restore them locally, or run 'taproot-site pull' if the workspace is stale; a fresh pull that still omits them means the server projection is incomplete for the listed paths.",
       {
         field: missing[0],
         details: missing.map((field) => ({
           code: "theme.setting_missing",
           field,
-          message: `${field} is missing (added in a later contract; run taproot-site pull)`,
+          message: MISSING_SETTING_MESSAGE,
         })),
       },
     );

@@ -15,7 +15,9 @@ import {
   SURFACE_DOCS_PRESENTATION,
   SURFACE_STANDARD,
   VERB_APPROVE,
+  VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
+  VERB_STAGING_REVIEW,
   VERB_ENV,
   VERB_FOOTER_PUSH,
   VERB_HELP,
@@ -290,7 +292,11 @@ const VERBS = Object.freeze([
     tokens: ["theme", "push"],
     summary: "Validate and push the workspace's complete theme and appearance settings.",
     note: "Run pull first. Theme JSON stays decoded in the workspace; this command validates the complete light/dark"
-      + " pair and encodes it only at the API boundary. Image settings reference site-owned image IDs from media upload.",
+      + " pair and encodes it only at the API boundary. Image settings reference site-owned image IDs from media upload. "
+      + "pull writes each scheme's complete effective theme — the stored theme resolved over the same defaults every "
+      + "consumer renders — so a fresh workspace validates as pulled. semanticMappings holds only authored pins, listed "
+      + "in explicitMappingTokens; every other token compiles from roles at render time, so never copy default "
+      + "mappings into a theme: a pinned token shadows its role.",
   },
   {
     name: VERB_FOOTER_PUSH,
@@ -345,6 +351,10 @@ const VERBS = Object.freeze([
     tokens: ["deploy"],
     summary: "Deploy to staging, or promote staging to production.",
     target: true,
+    note: "deploy --staging returns a single-use review handoff in stagingPreview.url, on a managed Docs site too, "
+      + "where it stages settings only: open the URL once, then switch the site's theme toggle to review both "
+      + "schemes before deploy --production. If no handoff could be minted, stagingPreview.reason names why and "
+      + "stagingPreview.recovery the next step; 'staging review' mints another.",
   },
   {
     name: VERB_PREVIEW_PAGE,
@@ -357,7 +367,8 @@ const VERBS = Object.freeze([
     note: "Select the persisted draft by page path (as recorded by pull) or canonical lowercase UUID. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
       + "Preview before approving: approve consumes the draft, so a page that has been approved has no draft "
-      + "left to render and answers preview.no_draft. Review it on staging after a deploy instead. "
+      + "left to render and answers preview.no_draft. Review it on staging after a deploy instead. A preview "
+      + "captured before approval stays revocable afterwards: preview revoke addresses the snapshot itself. "
       + "The handoff URL in the result is single-use and expires two minutes after it is minted: opening it "
       + "consumes it, and a reused, shared, or bookmarked preview URL answers Not found. Run preview page again "
       + "for another. "
@@ -373,6 +384,39 @@ const VERBS = Object.freeze([
     positionals: "previewIds",
     json: true,
     note: "Supply the canonical lowercase page UUID followed by the snapshot UUID returned by preview page.",
+  },
+  {
+    name: VERB_DELIVERY_CHECK,
+    surface: SURFACE_DOCS_PRESENTATION,
+    // Deployments reads the deployment log and mints the staging handoff the
+    // check consumes; the public target itself needs no credential.
+    capabilities: [CAPABILITY_DEPLOYMENTS],
+    tokens: ["delivery", "check"],
+    summary: "Verify what a visitor receives after a deployment completed: routes, assets, runtime, browser.",
+    target: true,
+    deliveryOptions: true,
+    note: "A completed deployment job is not a verified delivery. This read-only check reads the target the way a "
+      + "visitor does and reports each dimension separately: the latest completed deployment for the target, HTTP "
+      + "delivery of the authored routes (from the workspace manifest, bounded), the favicon, images, module "
+      + "preloads and site bundle they reference, internal link targets, accidental local-only references, and the "
+      + "declared runtime (major pointer, fallback copy, entry module and capability modules), plus a browser "
+      + "dimension that runs only when Playwright is installed and is reported as unchecked otherwise. --staging "
+      + "resolves the acknowledged staging host and authorizes one preview session for the run (--url is refused "
+      + "there); --production needs --url https://<published-domain>/ because a site-authoring key cannot read "
+      + "hosting configuration. Only assets on the site's own origin and the runtime the page declares are "
+      + "fetched. --wait "
+      + "<seconds> (at most 120) observes everything once more after that pause for edge propagation. --no-browser skips "
+      + "the browser dimension. Nothing is purged, republished or rolled back.",
+  },
+  {
+    name: VERB_STAGING_REVIEW,
+    surface: SURFACE_DOCS_PRESENTATION,
+    capabilities: [CAPABILITY_DEPLOYMENTS],
+    tokens: ["staging", "review"],
+    summary: "Mint a fresh single-use review handoff for the site's staging host.",
+    note: "The handoff URL is reported only in the final JSON as stagingPreview.url, is single-use, and expires two "
+      + "minutes after it is minted; keep it private. Open it once, then use the site's theme toggle to review both "
+      + "schemes. This is the recovery when deploy --staging could not mint a handoff, on a managed Docs site too.",
   },
   {
     name: VERB_STATUS,
@@ -454,6 +498,12 @@ whoami, and env need no configuration and no site. The offline help family is
 human-readable by default; add --json for stable reference data. Exit codes: 0
 success, 1 failure, 2 usage fault.
 
+Install globally (npm install --global @taprootio/site-authoring) or run the
+current release without installing: npx --yes @taprootio/site-authoring@latest
+<verb>. An unversioned npx keeps whatever copy it cached, so always name
+@latest; check what is running with --version, and compare it with the
+release status reports as cliRelease.
+
 Troubleshooting: a command that fails with field=CliUpgradeRequired (or
 refusal=cli_outdated) means this CLI is behind the latest published release,
 which is the only release Taproot accepts. Nothing is wrong with the
@@ -499,10 +549,17 @@ function verbHelp(verb) {
     ? " <page-id> <snapshot-id>"
     : verb.positionals === "environmentSelector"
     ? " [production | local | <url>]"
+    : verb.positionals === "siteSelector"
+    ? " <site-name-or-id>"
     : verb.positionals
     ? ` [${verb.positionals === "paths" ? "path" : "page-path"}...]`
     : "";
-  const targetOption = verb.target
+  const deliveryOptions = verb.deliveryOptions
+    ? `\n  --url <origin>   The https origin to check; required for --production, refused for --staging.
+  --wait <seconds> Re-check failures once after this pause (0-120) for edge propagation.
+  --no-browser     Skip the browser dimension even when Playwright is installed.`
+    : "";
+  const targetOption = verb.target && !verb.deliveryOptions
     ? `\n  --staging        Deploy the staged site to staging.
   --production     Promote the completed staging deployment to production.
   --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
@@ -571,12 +628,16 @@ function verbHelp(verb) {
   --help           Show this help.
   --version        Show the package version.`
     : COMMON_OPTIONS;
+  const deliveryTargetOption = verb.deliveryOptions
+    ? `\n  --staging        Check the staging target.
+  --production     Check the production target.${deliveryOptions}`
+    : "";
   return `Usage: ${prefix} ${verb.tokens.join(" ")}${positionalUsage}${targetUsage} [options]
 
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${rawHtmlOption}${jsonOption}${nameOption}${note}
+${options}${targetOption}${deliveryTargetOption}${rawHtmlOption}${jsonOption}${nameOption}${note}
 `;
 }
 
@@ -640,6 +701,8 @@ function parseReferenceArguments(arguments_) {
       || topic === "footer"
       || topic === "fixture"
       || topic === "redirects"
+      || topic === "walkthrough"
+      || topic === "delivery"
     )
     && (subject !== undefined || extra.length > 0)
   ) {
@@ -707,6 +770,8 @@ function referenceResult(parsed) {
     case "media":
     case "preview":
     case "fixture":
+    case "walkthrough":
+    case "delivery":
       return {
         ...result,
         topic: "workflow",
@@ -746,6 +811,36 @@ function parseConfigOption(arguments_, index) {
  * (trimmed, 1-100 characters) belongs to the verb, which a programmatic caller
  * reaches without passing through this parser at all.
  */
+function parseUrlOption(arguments_, index) {
+  const candidate = arguments_[index + 1];
+  let url;
+  try {
+    url = typeof candidate === "string" ? new URL(candidate) : undefined;
+  } catch {
+    url = undefined;
+  }
+  if (
+    !url || url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+    || (url.pathname !== "/" && url.pathname !== "") || hasAsciiControl(candidate)
+  ) {
+    throw usageError("cli.url_option", "--url requires one https origin such as https://example.com/.", {
+      field: "url",
+    });
+  }
+  return `${url.origin}/`;
+}
+
+function parseWaitOption(arguments_, index) {
+  const candidate = arguments_[index + 1];
+  const seconds = typeof candidate === "string" && /^\d{1,3}$/u.test(candidate) ? Number(candidate) : undefined;
+  if (seconds === undefined || seconds > 120) {
+    throw usageError("cli.wait_option", "--wait requires a whole number of seconds from 0 to 120.", {
+      field: "propagationWaitSeconds",
+    });
+  }
+  return seconds;
+}
+
 function parseNameOption(arguments_, index) {
   const candidate = arguments_[index + 1];
   if (
@@ -812,6 +907,9 @@ function parseArguments(arguments_) {
   let init = false;
   let quiet = false;
   let deployTarget;
+  let deliveryUrl;
+  let propagationWaitSeconds;
+  let browser;
   let allowFailedPreview = false;
   let allowRawHtml = false;
   let json = false;
@@ -846,6 +944,23 @@ function parseArguments(arguments_) {
         );
       }
       deployTarget = candidate;
+      continue;
+    }
+    if (verb.deliveryOptions && argument === "--url") {
+      if (deliveryUrl !== undefined) throw usageError("cli.duplicate_option", "--url may be supplied only once.");
+      deliveryUrl = parseUrlOption(rest, index);
+      index += 1;
+      continue;
+    }
+    if (verb.deliveryOptions && argument === "--wait") {
+      if (propagationWaitSeconds !== undefined) throw usageError("cli.duplicate_option", "--wait may be supplied only once.");
+      propagationWaitSeconds = parseWaitOption(rest, index);
+      index += 1;
+      continue;
+    }
+    if (verb.deliveryOptions && argument === "--no-browser") {
+      if (browser === false) throw usageError("cli.duplicate_option", "--no-browser may be supplied only once.");
+      browser = false;
       continue;
     }
     if (verb.target && argument === "--allow-failed-preview") {
@@ -893,7 +1008,10 @@ function parseArguments(arguments_) {
     throw usageError("cli.unexpected_argument", "The command contains an unexpected argument.");
   }
   if (verb.target && deployTarget === undefined) {
-    throw usageError("cli.deploy_target", "deploy requires exactly one of --staging or --production.");
+    throw usageError(
+      "cli.deploy_target",
+      `${verb.tokens.join(" ")} requires exactly one of --staging or --production.`,
+    );
   }
   if (
     verb.positionals === "fixturePath"
@@ -984,6 +1102,9 @@ function parseArguments(arguments_) {
     quiet,
     deployTarget,
     allowFailedPreview,
+    ...(deliveryUrl === undefined ? {} : { deliveryUrl }),
+    ...(propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds }),
+    ...(browser === undefined ? {} : { browser }),
     init,
     allowRawHtml,
     keyName,

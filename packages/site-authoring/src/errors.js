@@ -92,6 +92,17 @@ export function sanitizeDiagnostic(value, fallback = "The operation failed.") {
 }
 
 /**
+ * The fixed wording every `theme.setting_missing` detail carries. A required
+ * key that is absent is exactly that: absence alone says nothing about when
+ * the key entered the contract, so the text never claims a later contract
+ * introduced it. The remedy names both truthful recoveries — restore the key
+ * locally, or refresh a workspace that is stale — without promising that a
+ * repeated pull repairs a server projection that already omits the key.
+ */
+export const MISSING_SETTING_MESSAGE =
+  "is required and absent (restore it locally, or run 'taproot-site pull' if this workspace is stale)";
+
+/**
  * The one error type this package throws. Every failure carries a stable
  * dotted code and an exit code: 2 for a usage fault the caller fixes by
  * changing the command line, 1 for everything else.
@@ -111,7 +122,7 @@ export class SiteAuthoringError extends Error {
         .map((item) => ({
           code: item.code,
           field: sanitizeDiagnostic(item.field, "").slice(0, 200),
-          message: "is missing (added in a later contract; run taproot-site pull)",
+          message: MISSING_SETTING_MESSAGE,
         }))
       : undefined;
     this.previewDiagnostic = normalizePreviewDiagnostic(options.previewDiagnostic);

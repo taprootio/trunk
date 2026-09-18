@@ -161,7 +161,7 @@ test("init reports all missing settings through JSON and the human channel befor
     "darkTheme.fontMenu",
     "site-header.headerWidth",
   ]);
-  for (const detail of result.result.error.details) assert.ok(result.stderr.includes(`${detail.field}: is missing`));
+  for (const detail of result.result.error.details) assert.ok(result.stderr.includes(`${detail.field}: is required and absent`));
   assert.ok(!(await readdir(root)).includes("output"));
 });
 

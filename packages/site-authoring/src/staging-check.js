@@ -30,6 +30,10 @@ function unavailable() {
 }
 
 /** Consume only the checker's handoff; never forward a platform bearer or follow a redirect. */
+export async function authorizeStagingHandoff(client, handoff, signal) {
+  return await authorize(client, handoff, signal);
+}
+
 async function authorize(client, handoff, signal) {
   const response = await request(client, handoff.url, undefined, signal);
   const origin = new URL(handoff.stagingUrl).origin;
@@ -47,6 +51,11 @@ async function authorize(client, handoff, signal) {
   const checked = await request(client, checkUrl, cookie, signal);
   if (checked.status !== 302 || checked.headers.get("location") !== `${origin}/`) throw unavailable();
   return cookie;
+}
+
+/** Withhold a Location that could reflect a staging credential; exported for the delivery check. */
+export function withholdCredentialLocation(value) {
+  return safeLocation(value);
 }
 
 function safeLocation(value) {

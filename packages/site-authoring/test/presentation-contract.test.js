@@ -23,6 +23,7 @@ import {
   getFooterReference,
   getThemeReference,
   THEME_FIELD_NAMES,
+  formatPresentationReference,
 } from "../src/presentation-reference.js";
 import { APPEARANCE_COLOR_CONSTRAINT } from "../src/theme-validation.js";
 import {
@@ -531,4 +532,22 @@ test("single-line normalization uses the server's Unicode whitespace set", () =>
     (error) => error?.code === "footer.text_required"
       && error?.field === "footerSettings.bottomLinks[0].label",
   );
+});
+
+test("theme help states the role model the resolver applies and its examples contrast in both schemes", () => {
+  const reference = getThemeReference();
+  assert.deepEqual(Object.keys(reference.roleResolution.slots), [...reference.vocabulary.roles]);
+  assert.deepEqual(reference.roleResolution.slots.accent, ["text", "hover"]);
+  assert.deepEqual(reference.roleResolution.slots.ink, ["heading"]);
+  assert.deepEqual(reference.roleResolution.slots.action, ["ink"]);
+  assert.ok(reference.roleResolution.bindingForms.some((line) => /anchor:<name>\.<slot>/u.test(line)));
+  assert.match(reference.roleResolution.precedence[0], /explicitMappingTokens/u);
+  // The dark example must not reuse the light example's dark heading anchor.
+  assert.notEqual(reference.example.darkTheme.roles.ink.heading, reference.example.lightTheme.roles.ink.heading);
+  assert.equal(reference.example.darkTheme.roles.ink.heading, "anchor:paper");
+  assert.doesNotThrow(() => assertPresentationExamples());
+  const rendered = formatPresentationReference(reference);
+  assert.match(rendered, /Role slots:/u);
+  assert.match(rendered, /accent\s+color, text, hover/u);
+  assert.match(rendered, /Precedence:/u);
 });

@@ -52,6 +52,10 @@ test("one validation reports later font and header keys together even with an ea
   await assert.rejects(() => validateThemeWorkspace(root, SITE_ID, new Set()), (error) => {
     assert.equal(error.code, "theme.settings_missing");
     assert.equal(error.field, "lightTheme.fontMenu");
+    // The aggregate guidance must not promise that repeated pulls repair a
+    // server projection that already omits the keys (TR00774/TR00775).
+    assert.match(error.message, /server projection is incomplete/u);
+    assert.doesNotMatch(error.message, /later contract/u);
     assert.deepEqual(error.details.map((detail) => detail.field), [
       "lightTheme.fontMenu",
       "lightTheme.fontWeightMenu",
@@ -63,7 +67,11 @@ test("one validation reports later font and header keys together even with an ea
     ]);
     for (const detail of error.details) {
       assert.equal(detail.code, "theme.setting_missing");
-      assert.equal(detail.message, "is missing (added in a later contract; run taproot-site pull)");
+      // Absence is the only fact the CLI has; the wording must never assert
+      // the key's contract history or promise a repeated pull repairs it.
+      assert.match(detail.message, /required and absent/u);
+      assert.doesNotMatch(detail.message, /later contract/u);
+      assert.match(detail.message, /taproot-site pull/u);
     }
     return true;
   });

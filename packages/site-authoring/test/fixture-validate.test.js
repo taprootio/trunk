@@ -29,6 +29,9 @@ const SHY_COMPOSITION = fileURLToPath(new URL(
 // canonical shared artifact by renderer-parity.test.js. The shipped fixture's
 // theme pair is that artifact plus four authored groups.
 const DEFAULT_SITE_THEME = fileURLToPath(new URL("./fixtures/default-site-theme.json", import.meta.url));
+const SEMANTIC_MAPPING_COUNT = Object.keys(
+  JSON.parse(await readFile(DEFAULT_SITE_THEME, "utf8")).light.theme.semanticMappings,
+).length;
 const AUTHORED_THEME_GROUPS = new Set(["anchors", "roles", "contexts", "intents"]);
 const SHY_PAGE_ID = "00000000-0000-4000-8000-000000000791";
 const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
@@ -169,6 +172,14 @@ test("the shipped fixture's theme pair is the seeded default plus its authored s
     const fixture = styles.settings[key];
     assert.deepEqual(Object.keys(fixture).sort(), Object.keys(seeded).sort(), `${scheme}: property set`);
     for (const property of Object.keys(seeded)) {
+      if (property === "semanticMappings") {
+        // The seeded theme caches every default mapping; in a document that
+        // declares roles each cached mapping pins its token and keeps the
+        // role from rendering (TR00801). The example stores pins only, which
+        // is exactly what pull writes, so its roles reach the page.
+        assert.deepEqual(fixture[property], {}, `${scheme}.semanticMappings must hold authored pins only`);
+        continue;
+      }
       if (AUTHORED_THEME_GROUPS.has(property)) {
         // Authored on purpose: the seeded theme leaves these empty, and a
         // fixture with no anchors, roles, or contexts could not demonstrate a
@@ -259,7 +270,12 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       footer: true,
     },
   );
-  assert.deepEqual(json.warnings, { items: [], count: 0 });
+  // The www fixture declares roles beside the seeded default mappings, which
+  // pin every token and keep those roles from rendering (TR00801). The CLI
+  // now says so, once per pinned token and scheme, and leaves the fixture as
+  // its owner authored it; the warnings are the only ones it raises.
+  assert.ok(json.warnings.count > 0 && json.warnings.count < 2 * SEMANTIC_MAPPING_COUNT, JSON.stringify(json.warnings));
+  for (const warning of json.warnings.items) assert.match(warning, /^(light|dark): semanticMappings\.[a-zA-Z0-9]+ repeats the Espalier default/u);
   assert.ok(json.doesNotProve.includes("credential authorization or live site ownership"));
   assert.ok(json.doesNotProve.includes("preview or published rendering"));
   // The www fixture keeps the contained header beside a full-bleed image

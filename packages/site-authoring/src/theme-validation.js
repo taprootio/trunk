@@ -1,4 +1,12 @@
-import { encodeTheme, LIGHTNESS_KEYS, SEMANTIC_COLOR_NAMES, validateThemePair } from "@taprootio/espalier/shared/theme";
+import {
+  DEFAULT_DARK_THEME,
+  DEFAULT_LIGHT_THEME,
+  encodeTheme,
+  LIGHTNESS_KEYS,
+  mergeTheme,
+  SEMANTIC_COLOR_NAMES,
+  validateThemePair,
+} from "@taprootio/espalier/shared/theme";
 
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
@@ -286,6 +294,53 @@ function refuseAgentStylesheets(theme, scheme) {
   }
 }
 
+const SCHEME_DEFAULTS = Object.freeze({ light: DEFAULT_LIGHT_THEME, dark: DEFAULT_DARK_THEME });
+
+function sameMapping(left, right) {
+  return isPlainObject(left) && isPlainObject(right)
+    && left.source === right.source && left.lightness === right.lightness;
+}
+
+/**
+ * Roles compile the semantic mappings at render time, and any mapping present
+ * in `semanticMappings` pins its token over that compilation (TR00801). A pin
+ * that merely repeats Espalier's default on a token the declared roles would
+ * have moved is the one an author never meant: it came from a copied example
+ * or a pre-projection pull, and it silently keeps the role from reaching the
+ * token — the accepted-but-gray link WTFM saw. Which tokens the roles move is
+ * asked of Espalier itself, by compiling the same roles with no pins at all;
+ * a token the roles leave at its default, or one the marker names as a
+ * deliberate pin, is never reported. It is a warning rather than a refusal
+ * because the pair still renders exactly as declared; Espalier validation
+ * owns the invalid cases.
+ */
+export function shadowedRoleMappingWarnings(theme, scheme) {
+  if (!isPlainObject(theme) || !isPlainObject(theme.roles) || Object.keys(theme.roles).length === 0) return [];
+  if (!isPlainObject(theme.semanticMappings)) return [];
+  const defaults = SCHEME_DEFAULTS[scheme];
+  let compiled;
+  try {
+    compiled = mergeTheme(defaults, { ...theme, semanticMappings: {}, explicitMappingTokens: [] }).semanticMappings;
+  } catch {
+    // An invalid theme is Espalier validation's finding, not this one's.
+    return [];
+  }
+  const deliberate = new Set(Array.isArray(theme.explicitMappingTokens) ? theme.explicitMappingTokens : []);
+  const warnings = [];
+  for (const [token, mapping] of Object.entries(theme.semanticMappings)) {
+    if (deliberate.has(token)) continue;
+    const fallback = defaults.semanticMappings[token];
+    if (sameMapping(mapping, fallback) && !sameMapping(compiled[token], fallback)) {
+      warnings.push(
+        `${scheme}: semanticMappings.${token} repeats the Espalier default and pins the token, so the declared roles `
+          + `never reach it; remove the pin to let the roles compile ${token}, or list it in explicitMappingTokens `
+          + `if the default is the intent.`,
+      );
+    }
+  }
+  return warnings;
+}
+
 export function validateAndEncodeThemePair(lightTheme, darkTheme) {
   requireCompleteTheme(lightTheme, "light");
   requireCompleteTheme(darkTheme, "dark");
@@ -317,7 +372,12 @@ export function validateAndEncodeThemePair(lightTheme, darkTheme) {
   }
   refuseAgentStylesheets(lightTheme, "light");
   refuseAgentStylesheets(darkTheme, "dark");
-  const warnings = result.warnings
+  const allWarnings = [
+    ...result.warnings,
+    ...shadowedRoleMappingWarnings(lightTheme, "light"),
+    ...shadowedRoleMappingWarnings(darkTheme, "dark"),
+  ];
+  const warnings = allWarnings
     .slice(0, MAXIMUM_THEME_WARNINGS)
     .map((warning) =>
       [...sanitizeDiagnostic(warning, "Theme validation warning.")]
@@ -328,8 +388,8 @@ export function validateAndEncodeThemePair(lightTheme, darkTheme) {
     light,
     dark,
     warnings,
-    warningCount: result.warnings.length,
-    warningsTruncated: result.warnings.length > warnings.length,
+    warningCount: allWarnings.length,
+    warningsTruncated: allWarnings.length > warnings.length,
   };
 }
 

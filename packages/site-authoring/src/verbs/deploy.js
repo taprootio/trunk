@@ -10,10 +10,19 @@ import {
   waitForDeployment,
   withRefusalGuidance,
 } from "../api.js";
-import { DEPLOY_TARGET_PRODUCTION, DEPLOY_TARGET_STAGING, SURFACE_DOCS_PRESENTATION, VERB_DEPLOY } from "../constants.js";
+import {
+  DEPLOY_TARGET_PRODUCTION,
+  DEPLOY_TARGET_STAGING,
+  REFUSAL_CAPABILITY_MISSING,
+  REFUSAL_CREDENTIAL_REJECTED,
+  REFUSAL_UNCLASSIFIED,
+  SURFACE_DOCS_PRESENTATION,
+  VERB_DEPLOY,
+} from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { checkStagingRedirects } from "../staging-check.js";
+import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
 
 /**
@@ -154,6 +163,65 @@ async function inspectStagingPreview(client, siteId, onProgress, now) {
   } catch {
     onProgress("Warning: the deployment completed, but a staging handoff could not be minted.");
     return { ...checks, url: "", warning: "Staging handoff unavailable; run redirects check to retry." };
+  }
+}
+
+const PRESENTATION_REVIEW_GUIDANCE = "Open the URL once in a browser, then switch the site's theme toggle between "
+  + "light and dark to review both schemes; no page draft is needed to preview a presentation change.";
+
+/**
+ * Why a managed Docs staging handoff could not be minted, as a stable reason
+ * the caller can act on. The recovery never points at production or at a host
+ * the CLI has not been told about.
+ */
+function presentationHandoffUnavailable(error) {
+  if (error instanceof ApiError) {
+    const refusal = error.refusalKind();
+    if (refusal === REFUSAL_CREDENTIAL_REJECTED || refusal === REFUSAL_CAPABILITY_MISSING) {
+      return {
+        reason: "staging.authority_denied",
+        recovery: "This credential cannot view staging for this site. Re-issue a site-authoring key that carries "
+          + "the Deployments capability, then run 'taproot-site staging review' for a handoff.",
+      };
+    }
+    if (refusal === REFUSAL_UNCLASSIFIED && error.hasField("SiteId")) {
+      return {
+        reason: "staging.surface_refused",
+        recovery: "The site no longer accepts external presentation authoring (its Docs source is prebuilt). "
+          + "Run 'taproot-site use' to re-record the site's surface; a prebuilt Docs site stages nothing.",
+      };
+    }
+    if (refusal === REFUSAL_UNCLASSIFIED && error.hasField("Host")) {
+      return {
+        reason: "staging.host_unavailable",
+        recovery: "The site has no acknowledged staging host yet. Wait for the staging hostname to become ready "
+          + "(check 'taproot-site status'), then run 'taproot-site staging review' to mint a review handoff.",
+      };
+    }
+  }
+  return {
+    reason: "staging.handoff_unavailable",
+    recovery: "Run 'taproot-site staging review' to mint a fresh review handoff; the staged presentation is "
+      + "already deployed and waits for review.",
+  };
+}
+
+/**
+ * A managed Docs site deploys settings only, so there are no page drafts or
+ * redirects to inspect on staging; the review handoff is the whole handoff.
+ * It is minted after the deployment completed, bound by the server to the
+ * site's exact acknowledged staging host, and single-use like every other.
+ */
+async function mintPresentationStagingHandoff(client, siteId, onProgress, now) {
+  try {
+    const handoff = await mintStagingPreviewHandoff(client, siteId, { now });
+    onProgress(`Staging review handoff minted for ${handoff.stagingUrl}. ${PRESENTATION_REVIEW_GUIDANCE}`);
+    return { ...handoff, review: PRESENTATION_REVIEW_GUIDANCE };
+  } catch (error) {
+    if (error instanceof SiteAuthoringError && !(error instanceof ApiError)) throw error;
+    const unavailable = presentationHandoffUnavailable(error);
+    onProgress(`Warning: the deployment completed, but a staging review handoff could not be minted (${unavailable.reason}). ${unavailable.recovery}`);
+    return { url: "", stagingUrl: "", ...unavailable };
   }
 }
 
@@ -298,7 +366,7 @@ export async function deploy(invocation) {
     });
     await recordDeployment(config, manifest, "staging", completed);
     if (presentationOnly) {
-      onProgress("Review the staged presentation on the site's staging host, then promote it.");
+      const stagingPreview = await mintPresentationStagingHandoff(client, siteId, onProgress, now);
       return successResult(VERB_DEPLOY, siteId, {
         target,
         environment: DEPLOYMENT_ENVIRONMENT_STAGING,
@@ -310,7 +378,8 @@ export async function deploy(invocation) {
         },
         deployment: completed,
         readiness: reportReadiness(readiness),
-        nextStep: "deploy --production",
+        stagingPreview,
+        nextStep: stagingPreview.url === "" ? "staging review" : "deploy --production",
       });
     }
     const stagingPreview = await inspectStagingPreview(client, siteId, onProgress, now);

@@ -2,6 +2,7 @@ import { parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { SiteAuthoringError } from "./errors.js";
 import { projectFooterSettingsForWorkspace } from "./footer-contract.js";
+import { projectPulledTheme } from "./theme-projection.js";
 
 /**
  * The settings surface the authoring CLI covers.
@@ -19,7 +20,8 @@ import { projectFooterSettingsForWorkspace } from "./footer-contract.js";
  *   is not: it is gated on `site.settings.manage` rather than theme management,
  *   promotes immediately rather than through staging, and is site administration
  *   rather than authored presentation.
- * - `lightTheme` and `darkTheme` are decoded into readable JSON objects. Theme
+ * - `lightTheme` and `darkTheme` are decoded into readable JSON objects and
+ *   projected to the complete effective theme (`theme-projection.js`). Theme
  *   push validates and re-encodes them only at the wire boundary.
  * - `footerSettings` is snapshotted as its structured document. Theme push
  *   overlays only its scheme colors onto a fresh server read before using the
@@ -186,6 +188,17 @@ export function projectSettingsGroup(group, response) {
   const projected = {};
   for (const field of group.fields) {
     projected[field.name] = normalizeField(field, source[field.name]);
+    if (field.wireType === "theme") {
+      // A stored theme is what was written, possibly before a required key
+      // existed; the workspace gets the complete theme consumers actually
+      // render, resolved the way they resolve it (TR00775). The read-only
+      // provenance flag says whether Taproot's house look still layers under it.
+      projected[field.name] = projectPulledTheme(
+        projected[field.name],
+        field.name === "lightTheme" ? "light" : "dark",
+        { managedExternally: source[`${field.name}ManagedExternally`] === true },
+      );
+    }
   }
   return projected;
 }

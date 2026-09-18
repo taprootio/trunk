@@ -7,6 +7,8 @@ import {
   CLI_VERSION,
   EXTERNAL_WRITES_SETTING_KEY,
   EXTERNAL_WRITES_SETTING_LOCATION,
+  GRPC_NOT_FOUND,
+  HTTP_NOT_FOUND,
   LIMITS,
   REFUSAL_CAPABILITY_MISSING,
   REFUSAL_CLI_OUTDATED,
@@ -158,6 +160,7 @@ const AUTHORING_PREVIEW_FIELDS = Object.freeze({
   siteCapacity: "AuthoringPreviewCapacity",
   authorityCapacity: "AuthoringPreviewAuthorityCapacity",
   manifest: "AuthoringPreviewManifest",
+  snapshot: "AuthoringPreview",
 });
 const AUTHORING_PREVIEW_FIELD_ERRORS = Object.freeze({
   [AUTHORING_PREVIEW_FIELDS.draft]: [
@@ -1924,6 +1927,38 @@ export async function claimCliAuthorization(client, deviceCode, requestOptions =
 }
 
 /** Maps only preview-domain validation fields; authentication/refusal identity stays an ApiError. */
+/**
+ * Revocation addresses one snapshot, so its refusals are snapshot outcomes.
+ * A NotFound (the page or the snapshot is not available to this caller on
+ * this site) and the server's in-transaction `AuthoringPreview` unavailability
+ * both become `preview.not_found`; the wording never distinguishes another
+ * caller's snapshot from a missing one, mirroring the server. A snapshot that
+ * is already revoked is not an error at all: the server answers REVOKED and
+ * the verb reports that idempotent success. Every other refusal keeps the
+ * shared preview translation (TR00773).
+ */
+export function translateAuthoringPreviewRevokeApiError(error) {
+  if (!(error instanceof ApiError) || error.refusalKind() !== REFUSAL_UNCLASSIFIED) return error;
+  if (
+    error.httpStatus === HTTP_NOT_FOUND || error.grpcCode === GRPC_NOT_FOUND
+    || error.hasField(AUTHORING_PREVIEW_FIELDS.snapshot)
+  ) {
+    return new SiteAuthoringError(
+      "preview.not_found",
+      "No authoring preview with that snapshot ID is available for that page on this site. It may have expired "
+        + "and been cleaned up, or the IDs may belong to another page or site; a snapshot that was already revoked "
+        + "reports a successful revocation instead.",
+      // A NotFound can name the page as readily as the snapshot, so only the
+      // in-transaction snapshot refusal pins the field a caller should fix.
+      {
+        ...(error.hasField(AUTHORING_PREVIEW_FIELDS.snapshot) ? { field: "snapshotId" } : {}),
+        status: error.status,
+      },
+    );
+  }
+  return translateAuthoringPreviewApiError(error);
+}
+
 export function translateAuthoringPreviewApiError(error) {
   if (!(error instanceof ApiError) || error.refusalKind() !== REFUSAL_UNCLASSIFIED) return error;
   for (const [field, [code, message]] of Object.entries(AUTHORING_PREVIEW_FIELD_ERRORS)) {

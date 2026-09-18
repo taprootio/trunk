@@ -1,5 +1,5 @@
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.8.4";
+export const CLI_VERSION = "0.8.5";
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";
@@ -93,6 +93,8 @@ export const VERB_DEPLOY = "deploy";
 export const VERB_PREVIEW_PAGE = "preview page";
 export const VERB_PREVIEW_REVOKE = "preview revoke";
 export const VERB_STATUS = "status";
+export const VERB_DELIVERY_CHECK = "delivery check";
+export const VERB_STAGING_REVIEW = "staging review";
 export const VERB_SITES = "sites";
 export const VERB_USE = "use";
 export const VERB_WHOAMI = "whoami";
@@ -198,6 +200,11 @@ export const HTTP_TOO_MANY_REQUESTS = 429;
 // is the only thing there is to classify on: see `ApiError.refusalKind()`.
 export const GRPC_UNAUTHENTICATED = 16;
 export const HTTP_UNAUTHORIZED = 401;
+
+// gRPC `NotFound`, and its HTTP mapping. Preview revocation classifies on it:
+// the page or snapshot is not available to this caller on this site.
+export const GRPC_NOT_FOUND = 5;
+export const HTTP_NOT_FOUND = 404;
 
 export const LIMITS = Object.freeze({
   configBytes: 16 * 1024,
