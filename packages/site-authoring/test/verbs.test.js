@@ -6621,6 +6621,53 @@ test("deploy --staging refuses a candidate Taproot reports media blockers on", a
   assert.equal(wire.matching("POST", DEPLOY).length, 0);
 });
 
+test("deploy --staging reports a coalesced outcome and prints a reuse note", async (site) => {
+  // TR00839: an identical request inside the settling window coalesces into
+  // the already-anchored deployment instead of creating a new one.
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    deployReply: (call) => ({
+      deployment: deploymentRecord({ environment: call.body.environment, status: undefined }),
+      outcome: "DEPLOYMENT_REQUEST_OUTCOME_COALESCED",
+    }),
+  }));
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const result = await deploy(invocation);
+
+  assert.equal(result.outcome, "DEPLOYMENT_REQUEST_OUTCOME_COALESCED");
+  assert.ok(
+    progress.some((line) =>
+      line.includes("An identical deployment request is already in progress")
+      && line.includes(DEPLOYMENT_ID)
+    ),
+  );
+});
+
+test("deploy --staging surfaces the durable deployment throttle with the server's retry delay", async (site) => {
+  // TR00839: the per-site/per-account rolling-window limit, distinct from the
+  // per-key request-budget throttle, but classified identically.
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    deployReply: () =>
+      new Response(JSON.stringify(violation("Throttled", "Retry in 17 seconds.")), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "17" },
+      }),
+  }));
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  await assert.rejects(
+    deploy(invocation),
+    (error) => error?.field === "Throttled" && error.refusalKind() === "throttled" && error.retryAfterSeconds === 17,
+  );
+  const announcement = progress.join("\n");
+  assert.match(announcement, /Too many deployment requests for this site or account/u);
+  assert.match(announcement, /Retry after: 17s\./u);
+});
+
 test("deploy --production promotes a staging deployment and never carries a selection", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([], {
@@ -6841,7 +6888,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.6" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7277,7 +7324,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.5" },
+    cli: { name: "@taprootio/site-authoring", version: "0.8.6" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

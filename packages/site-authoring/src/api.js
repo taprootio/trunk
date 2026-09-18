@@ -103,6 +103,15 @@ export const DEPLOYMENT_STATUSES = Object.freeze([
   DEPLOYMENT_STATUS_FAILED,
 ]);
 
+// DeploySite's admission outcome (TR00839): whether this request created the
+// deployment or coalesced into an already-anchored one.
+export const DEPLOYMENT_REQUEST_OUTCOME_ACCEPTED = "DEPLOYMENT_REQUEST_OUTCOME_ACCEPTED";
+export const DEPLOYMENT_REQUEST_OUTCOME_COALESCED = "DEPLOYMENT_REQUEST_OUTCOME_COALESCED";
+export const DEPLOYMENT_REQUEST_OUTCOMES = Object.freeze([
+  DEPLOYMENT_REQUEST_OUTCOME_ACCEPTED,
+  DEPLOYMENT_REQUEST_OUTCOME_COALESCED,
+]);
+
 export const IMAGE_PROCESSING_STATE_UNKNOWN = "IMAGE_PROCESSING_STATE_UNKNOWN";
 export const IMAGE_PROCESSING_STATE_COMPLETE = "IMAGE_PROCESSING_STATE_COMPLETE";
 export const IMAGE_PROCESSING_STATE_FAILED = "IMAGE_PROCESSING_STATE_FAILED";
@@ -351,7 +360,11 @@ const REFUSAL_GUIDANCE = Object.freeze({
   [REFUSAL_CREDENTIAL_REJECTED]:
     "The site authoring credential was rejected: it is invalid, revoked, or bound to a different site. "
     + "Stop and re-issue it; retrying cannot succeed.",
-  [REFUSAL_THROTTLED]: "This credential exceeded its request budget. Back off and retry with delay.",
+  // Covers both the per-key request-budget throttle and the durable
+  // per-site/per-account deployment request limit (TR00839): both surface as
+  // gRPC ResourceExhausted / HTTP 429, and the remedy is identical either way.
+  [REFUSAL_THROTTLED]:
+    "Too many deployment requests for this site or account. Back off and retry after the delay the server reported.",
 });
 
 /**
@@ -436,6 +449,12 @@ export function announceRefusal(error, onProgress, action = "request") {
   }
   const guidance = REFUSAL_GUIDANCE[kind];
   if (guidance) onProgress(guidance);
+  // The retry-after trailer (TR00839) is the exact delay the server measured;
+  // surface it when the transport captured it rather than leaving the agent
+  // to guess a backoff.
+  if (kind === REFUSAL_THROTTLED && typeof error.retryAfterSeconds === "number") {
+    onProgress(`  Retry after: ${error.retryAfterSeconds}s.`);
+  }
 }
 
 /**
@@ -1017,6 +1036,9 @@ export function normalizeDeployment(value) {
     errorMessage: text(deployment.errorMessage),
     pageCount: safeCount(deployment.pageCount),
     phaseTimings: normalizePhaseTimings(deployment.phaseHistory),
+    // Identical requests coalesced into this deployment inside its settling
+    // window (TR00839). Zero for a deployment that never anchored one.
+    coalescedRequestCount: safeCount(deployment.coalescedRequestCount),
   };
 }
 
@@ -1074,7 +1096,19 @@ export async function deploySite(client, siteId, body) {
     }
     throw error;
   }
-  return normalizeDeployment(response.deployment);
+  const deployment = normalizeDeployment(response.deployment);
+  // `DEPLOYMENT_REQUEST_OUTCOME_ACCEPTED` is the zero-adjacent default: an
+  // older server that omits the field, or the immutable Standard/Docs
+  // branches that never run through the admission seam, both read as this
+  // request creating its own deployment (TR00839).
+  const outcome = enumValue(
+    response.outcome,
+    DEPLOYMENT_REQUEST_OUTCOMES,
+    DEPLOYMENT_REQUEST_OUTCOME_ACCEPTED,
+    "api.deployment_contract",
+    "deployment request outcome",
+  );
+  return { ...deployment, outcome };
 }
 
 /**

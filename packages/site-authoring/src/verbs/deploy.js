@@ -1,6 +1,7 @@
 import {
   DEPLOYMENT_ENVIRONMENT_PRODUCTION,
   DEPLOYMENT_ENVIRONMENT_STAGING,
+  DEPLOYMENT_REQUEST_OUTCOME_COALESCED,
   DEPLOYMENT_STATUS_COMPLETED,
   deploySite,
   getDeploySelection,
@@ -78,6 +79,16 @@ const MAXIMUM_READINESS_PAGE_IDS = 100;
 
 function usageError(code, message, field) {
   return new SiteAuthoringError(code, message, { field, exitCode: 2 });
+}
+
+/**
+ * One line when this request coalesced into an already in-flight or recently
+ * anchored identical deployment (TR00839), instead of creating a new one.
+ */
+function announceOutcome(created, onProgress) {
+  if (created.outcome === DEPLOYMENT_REQUEST_OUTCOME_COALESCED) {
+    onProgress(`An identical deployment request is already in progress; reusing deployment ${created.id}.`);
+  }
 }
 
 function explicitSelection(invocation) {
@@ -268,6 +279,7 @@ export async function deploy(invocation) {
         ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
       });
       onProgress(`Production deployment ${created.id} accepted; waiting for it to complete.`);
+      announceOutcome(created, onProgress);
       const completed = await waitForDeployment(client, {
         siteId,
         deploymentId: created.id,
@@ -283,6 +295,7 @@ export async function deploy(invocation) {
         ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
         promotedStagingDeploymentId: stagingDeploymentId,
         deployment: completed,
+        outcome: created.outcome,
         readiness: reportReadiness(readiness),
       });
     }
@@ -357,6 +370,7 @@ export async function deploy(invocation) {
       ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
     });
     onProgress(`Staging deployment ${created.id} accepted; waiting for it to complete.`);
+    announceOutcome(created, onProgress);
     const completed = await waitForDeployment(client, {
       siteId,
       deploymentId: created.id,
@@ -377,6 +391,7 @@ export async function deploy(invocation) {
           includeNavigation: false,
         },
         deployment: completed,
+        outcome: created.outcome,
         readiness: reportReadiness(readiness),
         stagingPreview,
         nextStep: stagingPreview.url === "" ? "staging review" : "deploy --production",
@@ -393,6 +408,7 @@ export async function deploy(invocation) {
         includeNavigation,
       },
       deployment: completed,
+      outcome: created.outcome,
       readiness: reportReadiness(readiness),
       stagingPreview,
       nextStep: stagingPreview.redirects?.verified === true ? "deploy --production" : "redirects check",

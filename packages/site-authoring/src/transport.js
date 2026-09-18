@@ -396,8 +396,21 @@ export function capabilityRefusal(value) {
   return undefined;
 }
 
+/**
+ * Reads the `retry-after` response header as a non-negative integer number of
+ * seconds. `headers` is a Fetch `Headers` instance when available; anything
+ * else, a missing header, or a value that does not parse as a non-negative
+ * number, returns undefined rather than throwing.
+ */
+function parseRetryAfterHeader(headers) {
+  const raw = typeof headers?.get === "function" ? headers.get("retry-after") : undefined;
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
 export class ApiError extends SiteAuthoringError {
-  constructor(httpStatus, body) {
+  constructor(httpStatus, body, headers) {
     const grpcCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
     const fields = fieldViolations(body);
     const capability = capabilityRefusal(body);
@@ -433,6 +446,11 @@ export class ApiError extends SiteAuthoringError {
     this.fields = fields;
     this.violationDescriptions = fieldDescriptions(body);
     this.capability = capability;
+    // The `retry-after` trailer (TR00839's deployment throttle, or any other
+    // ResourceExhausted refusal that sets it) transcodes to an ordinary
+    // response header. Undefined when absent or unparseable — callers must
+    // not assume every throttle carries a delay.
+    this.retryAfterSeconds = parseRetryAfterHeader(headers);
   }
 
   hasField(field) {
@@ -767,7 +785,7 @@ export class SiteApiClient {
         responseBody = Object.create(null);
       }
       if (remainingBudget(deadline, now) <= 0) throw deadlineError();
-      throw new ApiError(response.status, responseBody);
+      throw new ApiError(response.status, responseBody, response.headers);
     }
     throw new SiteAuthoringError("transport.retry_exhausted", "The Taproot API request exhausted its retry budget.");
   }
