@@ -711,6 +711,63 @@ export async function saveSiteFooterSettings(client, siteId, footerSettings, exp
   );
 }
 
+/**
+ * The shape of a presentation revision as the site reports it (TR00807): the
+ * server's SHA-256 over the presentation change set, lowercase hex. The CLI
+ * never derives one — it records what it was told and sends it back — so this
+ * is a containment check on a server string that reaches the manifest, not a
+ * claim about how the value is computed.
+ */
+export const PRESENTATION_REVISION = /^[0-9a-f]{64}$/u;
+
+/**
+ * Reads the site's draft presentation — the four theme-gated settings groups
+ * as `GetSettings` projects them — with the revision a save must carry
+ * (TR00807).
+ */
+export async function getSitePresentation(client, siteId) {
+  return requireSitePresentation(await client.request(sitePath(siteId, "presentation")), siteId);
+}
+
+/**
+ * Applies a presentation change set atomically (TR00807). `expectedRevision`
+ * is the revision the workspace was pulled at; `expectedFooterDraftHash` is
+ * the footer document's draft token from the read immediately before, because
+ * the server overlays the ten colours onto that document. Sent through the
+ * replayable-POST path: a save whose response was lost is answered as already
+ * current when it committed, and applied when it did not.
+ */
+export async function saveSitePresentation(client, siteId, body) {
+  const response = requireObject(
+    await client.replaceablePost(sitePath(siteId, "presentation"), { body: { siteId, ...body } }),
+    "api.presentation_contract",
+    "presentation save",
+  );
+  return {
+    applied: response.applied === true,
+    presentation: requireSitePresentation(response.presentation, siteId),
+  };
+}
+
+function requireSitePresentation(value, siteId) {
+  const presentation = requireObject(value, "api.presentation_contract", "site presentation");
+  if (!PRESENTATION_REVISION.test(presentation.revision ?? "")) {
+    throw new SiteAuthoringError(
+      "api.presentation_contract",
+      "Taproot returned a presentation with no revision, so a later push could not be fenced against it.",
+      { field: "revision" },
+    );
+  }
+  if (typeof presentation.siteId === "string" && presentation.siteId !== "" && presentation.siteId !== siteId) {
+    throw new SiteAuthoringError(
+      "api.presentation_contract",
+      "Taproot returned a presentation for a different site.",
+      { field: "siteId" },
+    );
+  }
+  return presentation;
+}
+
 export async function requestImageUpload(client, body) {
   return requireObject(
     await client.request("v1/images/request-upload", { method: "POST", body }),

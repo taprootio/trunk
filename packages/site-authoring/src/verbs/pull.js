@@ -2,6 +2,7 @@ import {
   getNavigation,
   getPage,
   getSettingsGroup,
+  getSitePresentation,
   getSiteRedirectMap,
   listSitePages,
   PAGE_STATUS_DELETED,
@@ -17,7 +18,7 @@ import {
   VERB_PULL,
 } from "../constants.js";
 import { sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
-import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
+import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../footer-workspace.js";
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
 import { projectRedirectMapForWorkspace, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
 import { redirectsManifestEntry } from "../redirects-workspace.js";
@@ -626,28 +627,74 @@ export async function pull(invocation) {
     // decoding is a wire-contract check and can fail on malformed stored data;
     // discovering that after page bodies were written would strand an
     // unbound workspace that the next pull must refuse for safety.
+    //
+    // The four groups and the presentation revision `theme push` is fenced by
+    // (TR00807) come from one read: the presentation snapshot carries the
+    // groups' documents exactly as the revision covers them, so the baseline
+    // the manifest records is the revision of the documents the workspace
+    // holds. Four per-group reads followed by a revision read would pair
+    // whatever the groups held with whatever the revision had become by then,
+    // and a push fenced by that baseline could overwrite an edit the workspace
+    // never saw. The per-group reads remain for a Taproot that predates the
+    // snapshot (404) and for a credential that cannot read it (403): both
+    // record no baseline, and `theme push` refuses toward a pull that does.
+    let presentation;
+    onProgress("Reading the presentation snapshot.");
+    try {
+      presentation = await getSitePresentation(client, siteId);
+    } catch (error) {
+      if (
+        error instanceof ApiError
+        && error.refusalKind() === REFUSAL_UNCLASSIFIED
+        && error.httpStatus === 404
+      ) {
+        onProgress(
+          "This Taproot does not serve the atomic presentation save yet; the settings groups are read one at a "
+            + "time, the manifest records no presentation baseline, and 'theme push' will refuse until it is "
+            + "pulled from a Taproot that does.",
+        );
+      } else if (
+        error instanceof ApiError
+        && (error.refusalKind() === REFUSAL_UNCLASSIFIED
+          || error.refusalKind() === REFUSAL_CAPABILITY_MISSING)
+        && error.httpStatus === 403
+      ) {
+        onProgress(
+          "The presentation snapshot is not readable by this credential; the settings groups are read one at a "
+            + "time and the manifest records no presentation baseline.",
+        );
+      } else {
+        throw error;
+      }
+    }
+    const presentationRevision = presentation?.revision;
+
     const pulledSettings = [];
     const skippedSettings = [];
     const settingsDocuments = [];
     let pulledFooter;
     const pulledAppearance = {};
     for (const group of SETTINGS_GROUPS) {
-      onProgress(`Reading settings group ${group.settingsType}.`);
       let response;
-      try {
-        response = await getSettingsGroup(client, siteId, group.settingsType);
-      } catch (error) {
-        if (
-          error instanceof ApiError
-          && (error.refusalKind() === REFUSAL_UNCLASSIFIED
-            || error.refusalKind() === REFUSAL_CAPABILITY_MISSING)
-          && UNAVAILABLE_SETTINGS_STATUSES.has(error.httpStatus)
-        ) {
-          onProgress(`Settings group ${group.settingsType} is not readable by this credential; skipping it.`);
-          skippedSettings.push(group.settingsType);
-          continue;
+      if (presentation !== undefined) {
+        response = presentation;
+      } else {
+        onProgress(`Reading settings group ${group.settingsType}.`);
+        try {
+          response = await getSettingsGroup(client, siteId, group.settingsType);
+        } catch (error) {
+          if (
+            error instanceof ApiError
+            && (error.refusalKind() === REFUSAL_UNCLASSIFIED
+              || error.refusalKind() === REFUSAL_CAPABILITY_MISSING)
+            && UNAVAILABLE_SETTINGS_STATUSES.has(error.httpStatus)
+          ) {
+            onProgress(`Settings group ${group.settingsType} is not readable by this credential; skipping it.`);
+            skippedSettings.push(group.settingsType);
+            continue;
+          }
+          throw error;
         }
-        throw error;
       }
       const file = `${SETTINGS_DIRECTORY}/${group.file}`;
       const projected = projectSettingsGroup(group, response);
@@ -1048,6 +1095,7 @@ export async function pull(invocation) {
           ? { appearance: appearanceManifestEntry(pulledAppearance) }
           : {}
       ),
+      ...(presentationRevision === undefined ? {} : { presentation: presentationManifestEntry(presentationRevision) }),
       pages: manifestPages,
     };
     await writeManifest(config.workspaceDir, manifest);

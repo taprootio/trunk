@@ -291,10 +291,20 @@ each step names the reference it relies on.
    upload them with `media upload`, then assign `lightLogoId`, `darkLogoId`
    and `brand.faviconId` from the returned ids. There is no recolor, crop or
    SVG upload command.
-5. **Validate, then push.** `validate` runs offline; `theme push` writes the
-   footer colours, the appearance scalars and then both themes in that order,
-   not atomically, and a failure names `completedWrites` — pull, reconcile,
-   push again.
+5. **Validate, preview, then push.** `validate` runs offline;
+   `theme push --dry-run` reads the site and lists the JSON paths at which
+   each settings file differs from it, and whether the baseline `pull`
+   recorded is still current; `theme push` saves both themes, the appearance
+   scalars and the ten footer scheme colours in one transaction fenced by
+   that baseline. A concurrent change to any of those fields refuses the
+   whole push (`theme.concurrent_modification`) and nothing is written: keep
+   copies of the edited files, pull, re-apply, push again. A lost response is
+   safe to retry: the save is recorded as pending before it is sent, running
+   `theme push` again with the same files replays it under its original
+   baseline, and the site answers `applied: false` when it already holds the
+   change set. `pull` reads the four settings documents and the revision
+   from one snapshot, and `footer push` advances the recorded revision only
+   when its save replaced that same revision.
 6. **Review on staging in both schemes.** `deploy --staging` returns a
    single-use handoff in `stagingPreview.url`, on a managed Docs site too;
    open it once and use the site's theme toggle. No page draft is needed;

@@ -1,9 +1,14 @@
-import { saveSiteFooterSettings, withRefusalGuidance } from "../api.js";
+import { PRESENTATION_REVISION, saveSiteFooterSettings, withRefusalGuidance } from "../api.js";
 import { VERB_FOOTER_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace, validateFooterDocument } from "../footer-contract.js";
 import { computeFooterDraftHash } from "../footer-draft-hash.js";
-import { advanceFooterManifest, FOOTER_SETTINGS_FILE, readFooterWorkspaceContext } from "../footer-workspace.js";
+import {
+  advanceFooterManifest,
+  FOOTER_SETTINGS_FILE,
+  readFooterWorkspaceContext,
+  readPresentationBaseline,
+} from "../footer-workspace.js";
 import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
@@ -105,7 +110,27 @@ export async function footerPush(invocation) {
     // fails, a stale token prevents the next push from overwriting the saved
     // remote footer and the completed-write report tells the caller to pull.
     await writeWorkspaceJson(config.workspaceDir, FOOTER_SETTINGS_FILE, nextDocument);
-    await advanceFooterManifest(config.workspaceDir, siteId, saved, footerDraftHash);
+    // A footer save that moved a scheme colour moved the presentation revision
+    // (TR00807); the server reports the new one from its own transaction, and
+    // the one it replaced. The baseline advances only when the replaced
+    // revision is the one this workspace was pulled at: otherwise the site's
+    // appearance moved since the pull, the workspace's appearance files do not
+    // reflect it, and a baseline taken from this save would let the next
+    // theme push overwrite those edits unseen. A Taproot that predates the
+    // fields leaves the recorded baseline alone.
+    const baseline = readPresentationBaseline(context.manifest);
+    const reported = PRESENTATION_REVISION.test(response.presentationRevision ?? "")
+      && PRESENTATION_REVISION.test(response.previousPresentationRevision ?? "");
+    const advances = reported && baseline !== undefined && baseline.revision === response.previousPresentationRevision;
+    if (reported && baseline !== undefined && !advances) {
+      onProgress(
+        "The site's presentation moved after this workspace was pulled, so its presentation baseline was left as "
+          + "it is; 'taproot-site theme push' will refuse until the workspace is pulled again.",
+      );
+    }
+    await advanceFooterManifest(config.workspaceDir, siteId, saved, footerDraftHash, {
+      presentationRevision: advances ? response.presentationRevision : undefined,
+    });
   } catch (error) {
     if (error instanceof SiteAuthoringError) throw error.withCompletedWrites(["footerSettings"]);
     throw error;

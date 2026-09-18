@@ -290,9 +290,16 @@ const VERBS = Object.freeze([
     surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_DESIGN],
     tokens: ["theme", "push"],
-    summary: "Validate and push the workspace's complete theme and appearance settings.",
+    dryRun: true,
+    summary: "Validate and push the workspace's complete theme and appearance settings in one atomic save.",
     note: "Run pull first. Theme JSON stays decoded in the workspace; this command validates the complete light/dark"
       + " pair and encodes it only at the API boundary. Image settings reference site-owned image IDs from media upload. "
+      + "The complete change set — both themes, the appearance scalars, and the ten footer scheme colors — is saved in "
+      + "one transaction fenced by the presentation revision pull recorded: a concurrent change to any of those "
+      + "fields refuses the whole push (theme.concurrent_modification) and nothing is written. A save whose response "
+      + "was lost is replayed safely; the site answers applied=false when it already holds the change set. "
+      + "--dry-run reads the site, reports the JSON paths at which each settings file differs from it and whether "
+      + "the recorded baseline is still current, and writes nothing. "
       + "pull writes each scheme's complete effective theme — the stored theme resolved over the same defaults every "
       + "consumer renders — so a fresh workspace validates as pulled. semanticMappings holds only authored pins, listed "
       + "in explicitMappingTokens; every other token compiles from roles at render time, so never copy default "
@@ -570,6 +577,9 @@ function verbHelp(verb) {
   const jsonOption = verb.json
     ? "\n  --json           Emit the stable JSON contract (operational output is always JSON)."
     : "";
+  const dryRunOption = verb.dryRun
+    ? "\n  --dry-run        Read the site and report what a push would change, without writing."
+    : "";
   const nameOption = verb.keyName
     ? `\n  --name <text>    Name recorded on the issued key (default "${DEFAULT_LOGIN_KEY_NAME}",\n`
       + `                   1-${LOGIN_KEY_NAME_MAXIMUM} characters). The approval screen shows it.`
@@ -637,7 +647,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${deliveryTargetOption}${rawHtmlOption}${jsonOption}${nameOption}${note}
+${options}${targetOption}${deliveryTargetOption}${rawHtmlOption}${jsonOption}${dryRunOption}${nameOption}${note}
 `;
 }
 
@@ -912,6 +922,7 @@ function parseArguments(arguments_) {
   let browser;
   let allowFailedPreview = false;
   let allowRawHtml = false;
+  let dryRun = false;
   let json = false;
   let keyName;
   const positionals = [];
@@ -975,6 +986,11 @@ function parseArguments(arguments_) {
         throw usageError("cli.duplicate_option", "--allow-raw-html may be supplied only once.");
       }
       allowRawHtml = true;
+      continue;
+    }
+    if (verb.dryRun && argument === "--dry-run") {
+      if (dryRun) throw usageError("cli.duplicate_option", "--dry-run may be supplied only once.");
+      dryRun = true;
       continue;
     }
     if (verb.json && argument === "--json") {
@@ -1107,6 +1123,7 @@ function parseArguments(arguments_) {
     ...(browser === undefined ? {} : { browser }),
     init,
     allowRawHtml,
+    dryRun,
     keyName,
     positionals: verb.positionals
       ? {
@@ -1184,6 +1201,7 @@ export async function runCli({
       init: parsed.init,
       quiet: parsed.quiet,
       allowRawHtml: parsed.allowRawHtml,
+      dryRun: parsed.dryRun,
       keyName: parsed.keyName,
       capabilities: parsed.capabilities,
       surface: parsed.surface,

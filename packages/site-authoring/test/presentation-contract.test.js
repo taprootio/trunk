@@ -163,8 +163,13 @@ test("appearance help is derived from the same ordered registries theme push exe
   assert.match(reference.logoContract, /no separate compact-logo setting/u);
   assert.match(reference.headerWidthContract, /'wide' moves them to the viewport edges/u);
   assert.match(reference.headerWidthContract, /headerLayout 'centered-menu'/u);
-  assert.equal(reference.nonAtomic, true);
-  assert.match(reference.recovery, /completedWrites/u);
+  assert.equal(reference.atomic, true);
+  assert.equal(reference.changeSet.length, 3);
+  assert.match(reference.revision, /theme\.concurrent_modification/u);
+  assert.match(reference.dryRun, /--dry-run/u);
+  assert.match(reference.retry, /applied=false/u);
+  assert.match(reference.recovery, /theme\.server_unsupported/u);
+  assert.doesNotMatch(JSON.stringify(reference), /completedWrites|non-atomic/u);
   for (const field of reference.fields.filter((item) => item.type === "appearance-color")) {
     assert.ok(field.allowedTokens.length > 0, field.path);
     assert.deepEqual(field.customForms, APPEARANCE_COLOR_CONSTRAINT.customForms, field.path);

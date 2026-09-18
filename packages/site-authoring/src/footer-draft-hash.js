@@ -66,7 +66,7 @@ function requireBoundedDepth(value) {
 }
 
 /** Deterministic JSON: sorted object keys, JSON.stringify value semantics. */
-function stableJson(value) {
+export function stableJson(value) {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value) ?? "null";
   }

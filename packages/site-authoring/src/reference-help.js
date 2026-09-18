@@ -481,9 +481,13 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `Validate offline: ${CLI_BINARY_NAME} validate checks the complete pair, the appearance files and the footer against `
       + "the contracts the site enforces, and warns when a semanticMappings pin repeats the default on a token your "
       + "roles would have moved (the pin would keep the role from rendering).",
-      `Push: ${CLI_BINARY_NAME} theme push writes the footer scheme colours, the appearance scalars, then the light and dark `
-      + "themes in that order, not atomically. A failure reports completedWrites: pull, compare the remote result "
-      + "with the workspace, reconcile, and push again. footer push owns footer prose, links and imagery.",
+      `Push: ${CLI_BINARY_NAME} theme push --dry-run first: it reads the site and lists the JSON paths at which each `
+      + "settings file differs from it, and says whether the baseline pull recorded is still current. Then "
+      + `${CLI_BINARY_NAME} theme push saves both themes, the appearance scalars and the ten footer scheme colours in `
+      + "one transaction fenced by that baseline: a concurrent change to any of those fields refuses the whole push "
+      + "(theme.concurrent_modification) and nothing is written; keep copies of the edited files, pull, re-apply, "
+      + "and push again. A lost response is safe to retry — the site answers applied=false when it already holds "
+      + "the change set. footer push owns footer prose, links and imagery.",
       `Review on staging: ${CLI_BINARY_NAME} deploy --staging stages the presentation and returns a single-use review handoff `
       + "in stagingPreview.url (on a managed Docs site too). Open it once, then use the site's theme toggle to check "
       + "both schemes: text, headings, links and hover, actions and focus, the header logos, the favicon. When no "

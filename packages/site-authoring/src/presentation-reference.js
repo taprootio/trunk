@@ -440,14 +440,34 @@ export function getAppearanceReference() {
       + "menus with many groups. The navigation face itself is not an appearance scalar: fontMenu and fontWeightMenu "
       + "are per-scheme theme fields set in settings.lightTheme/darkTheme the same way fontBrand is, and an empty "
       + "fontMenu falls back to the body font, never to headings.",
-    mutationOrder: [
-      "fresh footer read plus concurrency-protected ten-color overlay",
+    changeSet: [
+      "the ten footer scheme colors, overlaid onto the site's current footer document",
       "default scheme, assets, favicon, and header scalars",
-      "complete light theme, then complete dark theme",
+      "the complete light theme and the complete dark theme",
     ],
-    nonAtomic: true,
+    atomic: true,
+    revision:
+      "pull reads the four settings documents and the site's presentation revision — a server hash over exactly "
+      + "the fields theme push writes — from one snapshot, so the recorded baseline is the revision of the "
+      + "documents the workspace holds; theme push sends it back as the baseline. The whole change set commits in "
+      + "one transaction or none of it does; a change to any of those fields since the pull refuses the push "
+      + "(theme.concurrent_modification) and nothing is written. Footer prose, links and imagery, and the "
+      + "publishing scalars are outside the revision, so an unrelated concurrent edit is preserved rather than "
+      + "refused. footer push advances the baseline only when its save replaced that same revision.",
+    dryRun:
+      CLI_BINARY_NAME + " theme push --dry-run reads the site, lists the JSON paths at which each settings file "
+      + "differs from it, and says whether the recorded baseline is still current or a pending save of the same "
+      + "change set would be replayed; it writes nothing.",
+    retry:
+      "The save is recorded as pending in the manifest before it is sent. A save whose response was lost is "
+      + "replayed by running theme push again with the same settings files: it goes under the baseline it was "
+      + "first sent with, even after the site's revision moved, and the site answers applied=false when it already "
+      + "holds the change set, so nothing is applied twice and no partial write is ever reported. Editing the "
+      + "files before retrying makes the pending record moot and a moved revision refuses toward pull.",
     recovery:
-      "A failure reports completedWrites. Pull, compare the remote result with the intended workspace, reconcile, and retry.",
+      "On theme.concurrent_modification keep copies of the edited settings files, run " + CLI_BINARY_NAME
+      + " pull to refresh the baseline, re-apply the edits, and push again. A Taproot without the atomic save "
+      + "refuses with theme.server_unsupported; theme push never falls back to sequential writes.",
     footerBoundary:
       "theme push changes only five colors per footer scheme. Use footer push for prose, links, layout, and imagery.",
     footerContentGuard:
@@ -604,9 +624,11 @@ export function getFooterReference() {
     concurrency:
       "pull records expectedDraftHash. A conflict returns footer.concurrent_modification; pull, reconcile, and retry.",
     themeInteraction:
-      "theme push rewrites this file from a fresh server read before its ten-color overlay. It refuses while "
-      + "unpushed footer-content edits exist (theme.unpushed_footer_content); run " + CLI_BINARY_NAME
-      + " footer push first, or " + CLI_BINARY_NAME + " pull to discard the local edit.",
+      "theme push overlays its ten scheme colors onto the site's current footer document inside its atomic save and "
+      + "rewrites this file from the saved result. It refuses while unpushed footer-content edits exist "
+      + "(theme.unpushed_footer_content); run " + CLI_BINARY_NAME + " footer push first, or " + CLI_BINARY_NAME
+      + " pull to discard the local edit. A footer push that changed a scheme color advances the presentation "
+      + "baseline theme push is fenced by.",
     workflow: [
       CLI_BINARY_NAME + " pull",
       "edit settings/site-publishing-preferences.json at settings.footerSettings",
@@ -704,8 +726,11 @@ export function formatPresentationReference(reference) {
       + "\nHeader width: " + reference.headerWidthContract
       + "\nMobile menu and menu font: " + reference.menuContract
       + "\nFooter: " + reference.footerBoundary
-      + "\nFooter content guard: " + reference.footerContentGuard + "\n\nMutation order (non-atomic):\n"
-      + reference.mutationOrder.map((step, index) => "  " + (index + 1) + ". " + step).join("\n")
+      + "\nFooter content guard: " + reference.footerContentGuard + "\n\nAtomic change set (one transaction):\n"
+      + reference.changeSet.map((step, index) => "  " + (index + 1) + ". " + step).join("\n")
+      + "\nRevision: " + reference.revision
+      + "\nDry run: " + reference.dryRun
+      + "\nRetry: " + reference.retry
       + "\nRecovery: " + reference.recovery + "\n";
   }
   if (reference.referenceKind === "footer") {

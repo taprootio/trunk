@@ -79,7 +79,10 @@ async function fixture(context, specifications, { manifestVersion = MANIFEST_VER
       assert.equal(init.method ?? "GET", "GET");
       if (target.pathname.includes("/pages/by_site/")) return jsonResponse({ pages });
       if (target.pathname.endsWith("/redirects")) return jsonResponse({ code: 5 }, 404);
+      // The credential can read neither the settings groups nor the presentation
+      // snapshot that carries them (TR00807); pull records no baseline.
       if (target.pathname.includes("/settings/")) return jsonResponse({ code: 7 }, 403);
+      if (target.pathname.endsWith("/presentation")) return jsonResponse({ code: 7 }, 403);
       if (target.pathname.endsWith("/navigation")) {
         assert.equal(target.searchParams.get("environment"), "SITE_ENVIRONMENT_DRAFT");
         return failNavigation ? jsonResponse({ code: 7 }, 403) : jsonResponse({ navItems: [] });

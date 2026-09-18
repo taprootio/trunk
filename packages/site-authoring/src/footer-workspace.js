@@ -1,7 +1,8 @@
 import { isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import { appearanceImageIds } from "./appearance-contract.js";
 import { footerImageIds } from "./footer-contract.js";
-import { computeFooterContentHash, computeFooterDraftHash } from "./footer-draft-hash.js";
+import { createHash } from "node:crypto";
+import { computeFooterContentHash, computeFooterDraftHash, stableJson } from "./footer-draft-hash.js";
 import { readManifest, readMediaManifest, writeManifest } from "./workspace.js";
 
 export const FOOTER_SETTINGS_FILE = "settings/site-publishing-preferences.json";
@@ -73,7 +74,13 @@ export async function readAppearanceWorkspaceContext(workspaceDir, siteId) {
   };
 }
 
-export async function advanceFooterManifest(workspaceDir, siteId, footerSettings, expectedDraftHash) {
+export async function advanceFooterManifest(
+  workspaceDir,
+  siteId,
+  footerSettings,
+  expectedDraftHash,
+  { presentationRevision } = {},
+) {
   const manifest = await readManifest(workspaceDir, siteId);
   const prior = requireFooterMetadata(manifest);
   const hash = expectedDraftHash ?? computeFooterDraftHash(footerSettings);
@@ -90,8 +97,96 @@ export async function advanceFooterManifest(workspaceDir, siteId, footerSettings
     expectedContentHash: computeFooterContentHash(footerSettings),
     imageIds: [...new Set([...prior.imageIds, ...footerImageIds(footerSettings)])].sort(),
   };
+  // The ten scheme colours are part of the presentation change set, so a
+  // footer save that moved one moved the revision too; the server reports the
+  // new one from the same transaction and it becomes the baseline the next
+  // theme push must carry (TR00807). One manifest write for both baselines.
+  if (presentationRevision !== undefined) {
+    manifest.presentation = presentationManifestEntry(presentationRevision);
+  }
   await writeManifest(workspaceDir, manifest);
   return hash;
+}
+
+/**
+ * The manifest's record of the presentation revision this workspace was
+ * pulled at (TR00807): what `theme push` sends as its baseline, and what a
+ * dry run compares the site's current revision against.
+ */
+export function presentationManifestEntry(revision) {
+  if (!SHA256.test(revision ?? "")) {
+    throw new SiteAuthoringError(
+      "api.presentation_contract",
+      "Taproot returned a presentation revision that could not be recorded.",
+      { field: "revision" },
+    );
+  }
+  return { revision };
+}
+
+/**
+ * The recorded presentation baseline, or `undefined` when the manifest holds
+ * none — a workspace pulled before the atomic save existed, or against a
+ * Taproot that does not serve it. Absent is a fact `theme push` refuses on,
+ * not a value to guess.
+ */
+export function readPresentationBaseline(manifest) {
+  const presentation = manifest.presentation;
+  if (presentation === null || typeof presentation !== "object" || Array.isArray(presentation)) return undefined;
+  return SHA256.test(presentation.revision ?? "") ? { revision: presentation.revision } : undefined;
+}
+
+/**
+ * The content identity of one presentation change set — what `theme push`
+ * sends — so a later run can tell whether a save recorded as pending was for
+ * exactly the change set it is about to send again.
+ */
+export function computePresentationChangeSetHash(changeSet) {
+  return createHash("sha256").update(`presentation-change-set-v1${stableJson(changeSet)}`, "utf8").digest("hex");
+}
+
+/**
+ * The record of a presentation save whose outcome this workspace does not yet
+ * know (TR00807): the baseline it was sent under and the change set it
+ * carried, written before the request and replaced by the manifest write
+ * that follows an authoritative answer. A save that committed while its
+ * response was lost leaves the site one revision ahead of the workspace; the
+ * next push of the same change set replays it under this baseline, and the
+ * site answers already-current instead of the stale refusal the workspace's
+ * own comparison would give. `undefined` when nothing is pending.
+ */
+export function readPendingPresentationSave(manifest) {
+  const pending = manifest.presentation?.pending;
+  if (pending === null || typeof pending !== "object" || Array.isArray(pending)) return undefined;
+  if (!SHA256.test(pending.expectedRevision ?? "") || !SHA256.test(pending.changeSetHash ?? "")) return undefined;
+  return {
+    expectedRevision: pending.expectedRevision,
+    changeSetHash: pending.changeSetHash,
+    startedAt: typeof pending.startedAt === "string" ? pending.startedAt : undefined,
+  };
+}
+
+export async function recordPendingPresentationSave(workspaceDir, siteId, { expectedRevision, changeSetHash, startedAt }) {
+  const manifest = await readManifest(workspaceDir, siteId);
+  const baseline = readPresentationBaseline(manifest);
+  if (baseline === undefined) {
+    throw new SiteAuthoringError(
+      "theme.pull_required",
+      "The pull manifest records no presentation baseline. Run 'taproot-site pull' again.",
+      { field: "presentation.revision" },
+    );
+  }
+  manifest.presentation = { revision: baseline.revision, pending: { expectedRevision, changeSetHash, startedAt } };
+  await writeManifest(workspaceDir, manifest);
+}
+
+/** Drops the pending record after an authoritative refusal; the baseline stays. */
+export async function clearPendingPresentationSave(workspaceDir, siteId) {
+  const manifest = await readManifest(workspaceDir, siteId);
+  const baseline = readPresentationBaseline(manifest);
+  if (baseline === undefined || readPendingPresentationSave(manifest) === undefined) return;
+  manifest.presentation = presentationManifestEntry(baseline.revision);
+  await writeManifest(workspaceDir, manifest);
 }
 
 export function footerManifestEntry(footerSettings) {

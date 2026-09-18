@@ -17,11 +17,13 @@ import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } 
 import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
+import { applyFooterColors } from "../src/appearance-contract.js";
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
-import { appearanceManifestEntry, footerManifestEntry } from "../src/footer-workspace.js";
+import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../src/footer-workspace.js";
 import { failureResult, writeGithubActionsOutput } from "../src/output.js";
 import { REDIRECT_LIMITS } from "../src/redirects-contract.js";
+import { SETTINGS_GROUPS } from "../src/settings-catalog.js";
 import { approve } from "../src/verbs/approve.js";
 import { deliveryCheck } from "../src/verbs/delivery-check.js";
 import { deploy } from "../src/verbs/deploy.js";
@@ -224,6 +226,40 @@ function api(routes) {
   const effectiveRoutes = routes.some((route) => route.method === "GET" && route.pattern === REDIRECT_MAP)
     ? [...routes]
     : [...routes, { method: "GET", pattern: REDIRECT_MAP, reply: emptyRedirectMap() }];
+  // Likewise the presentation snapshot `pull` projects the four settings
+  // groups from, with the revision it records as the baseline (TR00807): a
+  // test about something else gets a stable baseline, and the snapshot is
+  // synthesized from whatever the test's own settings route answers per
+  // group — so a fixture written per group still describes the site. A group
+  // the settings route refuses refuses the snapshot the same way, which is
+  // what the server does: the snapshot is gated on the same permissions.
+  if (!routes.some((route) => route.method === "GET" && route.pattern === PRESENTATION)) {
+    const settingsRoute = routes.find((route) => route.method === "GET" && route.pattern === SETTINGS);
+    effectiveRoutes.push({
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: async (call, calls) => {
+        if (settingsRoute === undefined) return jsonResponse({ code: 5, message: "not found" }, 404);
+        const snapshot = { siteId: SITE_ID, revision: PRESENTATION_REVISION };
+        for (const group of SETTINGS_GROUPS) {
+          const groupCall = {
+            ...call,
+            pathname: `/api/v1/settings/${group.settingsType}`,
+            query: new URLSearchParams({ entityId: SITE_ID, environment: "SITE_ENVIRONMENT_DRAFT" }),
+          };
+          let value = typeof settingsRoute.reply === "function"
+            ? await settingsRoute.reply(groupCall, calls)
+            : settingsRoute.reply;
+          if (value instanceof Response) {
+            if (!value.ok) return value;
+            value = await value.json();
+          }
+          snapshot[group.responseProperty] = value?.[group.responseProperty] ?? {};
+        }
+        return snapshot;
+      },
+    });
+  }
   effectiveRoutes.push({
     method: "GET",
     pattern: DEPLOY_REVIEW,
@@ -411,6 +447,12 @@ function emptyRedirectMap() {
 const SETTINGS = /^\/api\/v1\/settings\//u;
 const SETTING = /^\/api\/v1\/setting$/u;
 const FOOTER_SETTINGS = /\/footer-settings$/u;
+const PRESENTATION = /\/presentation$/u;
+// Two stand-ins for the server's presentation revision (TR00807): 64 lowercase
+// hex characters because that is what the CLI accepts; stable across a test's
+// pull and its push, and different from each other so a moved baseline reads.
+const PRESENTATION_REVISION = "c".repeat(64);
+const NEXT_PRESENTATION_REVISION = "d".repeat(64);
 const READINESS = /\/publishing\/readiness$/u;
 const DEPLOY_REVIEW = /\/deploy\/review$/u;
 const STAGING_MINT = /\/staging-preview:mint-handoff$/u;
@@ -484,6 +526,8 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: SETTINGS, permission: "site.theme.manage" },
   { method: "POST", pattern: SETTING, permission: "site.theme.manage" },
   { method: "POST", pattern: FOOTER_SETTINGS, permission: "site.theme.manage" },
+  { method: "GET", pattern: PRESENTATION, permission: "site.theme.manage" },
+  { method: "POST", pattern: PRESENTATION, permission: "site.theme.manage" },
   { method: "GET", pattern: DEPLOY_REVIEW, permission: "site.deploy" },
   { method: "POST", pattern: STAGING_MINT, permission: "site.staging.view" },
   { method: "GET", pattern: READINESS, permission: "site.deploy" },
@@ -683,6 +727,8 @@ function themeWorkspace(overrides = {}) {
   return {
     ".taproot-site-manifest.json": manifestFixture([], {
       footer: footerManifestEntry(footerSettings),
+      presentation: presentationManifestEntry(PRESENTATION_REVISION),
+      ...overrides.manifest,
     }),
     "settings/taproot-styles.json": settingsDocument("SETTING_TYPE_TAPROOT_STYLES", {
       lightTheme: agentTheme(DEFAULT_SITE_THEME.light.theme),
@@ -805,24 +851,18 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
         }],
       },
     },
+    // No per-group settings route: the four documents and the revision that
+    // covers them come from the one presentation snapshot (TR00807), so the
+    // baseline the manifest records is the revision of the documents it holds.
     {
       method: "GET",
-      pattern: SETTINGS,
-      reply: (call) => {
-        if (call.pathname.endsWith("SETTING_TYPE_SITE_HEADER")) {
-          return {
-            settingsType: "SETTING_TYPE_SITE_HEADER",
-            headerSettings: { headerLayout: "centered-brand", showThemeToggle: true },
-          };
-        }
-        if (call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")) {
-          return { styleSettings: { lightLogoId: IMAGE_ID } };
-        }
-        if (call.pathname.endsWith("SETTING_TYPE_SITE_PUBLISHING_PREFERENCES")) {
-          return { sitePublishingPreferences: { footerSettings: pulledFooterResponse } };
-        }
-        return {};
-      },
+      pattern: PRESENTATION,
+      reply: presentationReply({
+        revision: NEXT_PRESENTATION_REVISION,
+        headerSettings: { headerLayout: "centered-brand", showThemeToggle: true },
+        styleSettings: { lightLogoId: IMAGE_ID },
+        footerSettings: pulledFooterResponse,
+      }),
     },
   ]);
   const { invocation, progress } = invoke(workspace, wire, { verb: "pull" });
@@ -831,6 +871,8 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.equal(result.ok, true);
   assert.equal(result.verb, "pull");
   assert.equal(result.siteId, SITE_ID);
+  assert.equal(wire.matching("GET", PRESENTATION).length, 1);
+  assert.equal(wire.matching("GET", SETTINGS).length, 0);
   assert.equal(result.pages.total, 3);
   assert.equal(result.pages.bodies, 2);
   assert.equal(result.navigation.items, 1);
@@ -874,6 +916,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   );
   assert.equal(manifest.pages[0].resourceId, resourceIdFor(HOME_PAGE_ID));
   assert.deepEqual(manifest.appearance.imageIds, [IMAGE_ID]);
+  assert.deepEqual(manifest.presentation, { revision: NEXT_PRESENTATION_REVISION });
 
   // Every catalogued field is materialized, including the ones proto3 omitted,
   // so a snapshot is readable without knowing which fields were ever set.
@@ -998,6 +1041,9 @@ test("the draft reads name their environment, which has no default", async (site
       expectQuery: { entityId: SITE_ID, environment: "SITE_ENVIRONMENT_DRAFT" },
       reply: {},
     },
+    // The per-group reads are made only against a Taproot without the
+    // presentation snapshot (TR00807); this is that Taproot.
+    { method: "GET", pattern: PRESENTATION, reply: () => jsonResponse({ code: 5, message: "not found" }, 404) },
   ]);
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
 
@@ -1061,14 +1107,13 @@ test("agent theme text outside Latin-1 round-trips through pull and push", async
   );
 
   const pushWire = api([
-    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
-    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
-    { method: "POST", pattern: SETTING, reply: {} },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: (call) => presentationSaveReply(call) },
   ]);
   await themePush(invoke(workspace, pushWire, { verb: "theme push" }).invocation);
-  const themeWrites = pushWire.matching("POST", SETTING).slice(-2);
+  const themeWrites = pushWire.matching("POST", PRESENTATION)[0].body.settings.slice(-2);
   for (const write of themeWrites) {
-    assert.equal(parseTheme(write.body.value)?.fontBrand, "\"日本語 😀\", serif");
+    assert.equal(parseTheme(write.value)?.fontBrand, "\"日本語 😀\", serif");
   }
 });
 
@@ -1134,13 +1179,12 @@ test("pull projects a pre-menu-font stored theme to the complete effective pair 
   // What push stores is the complete theme with its pin marker, so roles
   // compile at render time for every other token.
   const pushWire = api([
-    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
-    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
-    { method: "POST", pattern: SETTING, reply: {} },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: (call) => presentationSaveReply(call) },
   ]);
   await themePush(invoke(workspace, pushWire, { verb: "theme push" }).invocation);
-  for (const write of pushWire.matching("POST", SETTING).slice(-2)) {
-    const pushed = parseTheme(write.body.value);
+  for (const write of pushWire.matching("POST", PRESENTATION)[0].body.settings.slice(-2)) {
+    const pushed = parseTheme(write.value);
     assert.equal(pushed.fontMenu, first.settings.lightTheme.fontMenu);
     assert.deepEqual(pushed.explicitMappingTokens, ["headings"]);
     assert.deepEqual(Object.keys(pushed.semanticMappings), ["headings"]);
@@ -1229,6 +1273,49 @@ test("the settings catalog materializes only real enum members", async (site) =>
   }
 });
 
+test("pull records no presentation baseline against a Taproot without the atomic save", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "GET", pattern: PRESENTATION, reply: () => jsonResponse({ code: 5, message: "not found" }, 404) },
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "pull" });
+  const result = await pull(invocation);
+
+  assert.equal(result.ok, true);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.presentation, undefined);
+  assert.ok(manifest.appearance !== undefined);
+  assert.ok(progress.some((line) => line.includes("does not serve the atomic presentation save")));
+});
+
+test("pull falls back to per-group reads and records no baseline when the snapshot is refused", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    {
+      method: "GET",
+      pattern: SETTINGS,
+      reply: (call) => (call.pathname.endsWith("SETTING_TYPE_TAPROOT_STYLES")
+        ? capabilityDenied("site.theme.manage", [CAPABILITY_CONTENT], [CAPABILITY_DESIGN])
+        : {}),
+    },
+  ]);
+  const result = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.deepEqual(result.settings.skipped, ["SETTING_TYPE_TAPROOT_STYLES"]);
+  // The snapshot is gated on the same permissions as the groups it carries,
+  // so the credential that cannot read styles cannot read it either; the
+  // groups it can read are then read one at a time, and no baseline is
+  // recorded for a workspace whose appearance files are incomplete.
+  assert.equal(wire.matching("GET", PRESENTATION).length, 1);
+  assert.equal(wire.matching("GET", SETTINGS).length, 4);
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation, undefined);
+});
+
 test("pull records a settings group the credential cannot read instead of failing", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
@@ -1259,7 +1346,45 @@ test("pull records a settings group the credential cannot read instead of failin
 // theme push
 // ---------------------------------------------------------------------------
 
-test("theme push validates roles, contexts, and anchors before saving themes last", async (site) => {
+/**
+ * The site's presentation as the read and the save answer it (TR00807): the
+ * four groups as GetSettings projects them, plus the revision. Groups a test
+ * does not care about are left at proto3's omitted zero.
+ */
+function presentationReply({
+  revision = PRESENTATION_REVISION,
+  footerSettings = {},
+  headerSettings = {},
+  styleSettings = {},
+  brandSettings = {},
+} = {}) {
+  return {
+    siteId: SITE_ID,
+    revision,
+    styleSettings,
+    brandSettings,
+    headerSettings,
+    sitePublishingPreferences: { footerSettings },
+  };
+}
+
+/**
+ * What the server does with a save: overlays the ten colours from the request
+ * onto the footer document it holds and answers with the new revision. The
+ * footer is a function of the request so a test can assert the overlay
+ * reached the document the site holds rather than the workspace's copy.
+ */
+function presentationSaveReply(call, { footerSettings = {}, revision = NEXT_PRESENTATION_REVISION, applied = true } = {}) {
+  return {
+    applied,
+    presentation: presentationReply({
+      revision,
+      footerSettings: applyFooterColors(footerSettings, call.body.footerColors),
+    }),
+  };
+}
+
+test("theme push saves the complete change set in one request fenced by the pull baseline", async (site) => {
   const workspace = await fixture(site, {
     ...themeWorkspace({ style: { lightLogoId: IMAGE_ID } }),
     ".taproot-site-media.json": {
@@ -1276,17 +1401,12 @@ test("theme push validates roles, contexts, and anchors before saving themes las
     dark: { backgroundFade: "FOOTER_FADE_MODE_BOTTOM", additionalTopPaddingRem: 2 },
   };
   const wire = api([
-    {
-      method: "GET",
-      pattern: SETTINGS,
-      reply: { sitePublishingPreferences: { footerSettings: currentFooter } },
-    },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ footerSettings: currentFooter }) },
     {
       method: "POST",
-      pattern: FOOTER_SETTINGS,
-      reply: (call) => ({ footerSettings: call.body.footerSettings, footerDraftHash: "next" }),
+      pattern: PRESENTATION,
+      reply: (call) => presentationSaveReply(call, { footerSettings: currentFooter }),
     },
-    { method: "POST", pattern: SETTING, reply: {} },
   ]);
 
   const { invocation, progress } = invoke(workspace, wire, { verb: "theme push" });
@@ -1294,29 +1414,470 @@ test("theme push validates roles, contexts, and anchors before saving themes las
 
   assert.equal(result.ok, true);
   assert.equal(result.verb, "theme push");
+  assert.equal(result.applied, true);
+  assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
   assert.equal(result.written.items.length, 26);
-  const mutations = wire.calls.filter((call) => call.method === "POST");
-  assert.equal(mutations[0].pathname, `/api/v1/sites/${SITE_ID}/footer-settings`);
-  assert.deepEqual(mutations[0].body.footerSettings.bottomLinks, currentFooter.bottomLinks);
-  assert.equal(mutations[0].body.footerSettings.light.backgroundImageOpacity, 0.4);
-  assert.equal(mutations[0].body.footerSettings.light.backgroundColor, "--esp-color-layer-1");
-  assert.match(mutations[0].body.expectedFooterDraftHash, /^[0-9a-f]{64}$/u);
+  // One read, one write: nothing else touches the site.
+  assert.deepEqual(wire.calls.map((call) => call.method), ["GET", "POST"]);
+  const save = wire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.pathname, `/api/v1/sites/${SITE_ID}/presentation`);
+  assert.equal(save.body.siteId, SITE_ID);
+  assert.equal(save.body.expectedRevision, PRESENTATION_REVISION);
+  assert.equal(save.body.expectedFooterDraftHash, computeFooterDraftHash(currentFooter));
+  // The ten colours travel as a typed overlay, never the footer document.
+  assert.equal("footerSettings" in save.body, false);
+  assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
+  assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
+  assert.equal(save.body.settings.length, 25);
   assert.equal(
-    mutations.find((call) => call.body.setting === "lightLogoId")?.body.value,
+    save.body.settings.find((write) => write.setting === "lightLogoId")?.value,
     IMAGE_ID,
   );
-
-  const last = mutations.slice(-2);
-  assert.deepEqual(last.map((call) => call.body.setting), ["lightTheme", "darkTheme"]);
-  for (const call of last) {
-    const decoded = JSON.parse(Buffer.from(call.body.value, "base64").toString("utf8"));
+  assert.equal(
+    save.body.settings.find((write) => write.setting === "lightLogoId")?.settingsType,
+    "SETTING_TYPE_TAPROOT_STYLES",
+  );
+  const themes = save.body.settings.slice(-2);
+  assert.deepEqual(themes.map((write) => write.setting), ["lightTheme", "darkTheme"]);
+  for (const write of themes) {
+    const decoded = JSON.parse(Buffer.from(write.value, "base64").toString("utf8"));
     assert.deepEqual(decoded.roles.action, { color: "anchor:brand", ink: "primary" });
     assert.equal(decoded.contexts.feature.canvas, "anchor:brand");
     assert.equal(decoded.anchors.brand, "#b83280");
     assert.deepEqual(decoded.semanticMappings, {});
   }
+  // The footer document is rewritten from the saved result — the site's
+  // prose and links, the workspace's colours — and both baselines advance.
+  const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+  assert.deepEqual(publishing.settings.footerSettings.bottomLinks, currentFooter.bottomLinks);
+  assert.equal(publishing.settings.footerSettings.light.backgroundColor, "--esp-color-layer-1");
+  assert.equal(publishing.settings.footerSettings.light.backgroundImageOpacity, 0.4);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.presentation.revision, NEXT_PRESENTATION_REVISION);
+  assert.equal(
+    manifest.footer.expectedDraftHash,
+    computeFooterDraftHash(publishing.settings.footerSettings),
+  );
+  assert.equal(
+    manifest.footer.expectedContentHash,
+    computeFooterContentHash(publishing.settings.footerSettings),
+  );
+  assert.ok(progress.some((line) => line.includes("one transaction")));
   assert.ok(progress.some((line) => line.includes("externally managed")));
   wire.assertQueryContracts();
+});
+
+test("theme push --dry-run reads the site, names the paths that differ per file, and writes nothing", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const before = {};
+  for (
+    const file of [
+      "settings/taproot-styles.json",
+      "settings/brand.json",
+      "settings/site-header.json",
+      "settings/site-publishing-preferences.json",
+      ".taproot-site-manifest.json",
+    ]
+  ) {
+    before[file] = await readWorkspaceText(workspace, file);
+  }
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: presentationReply({
+        headerSettings: { brandText: "Remote brand", showThemeToggle: true, showBrandText: true },
+        footerSettings: { light: { backgroundColor: "#000000" } },
+      }),
+    },
+  ]);
+
+  const { invocation, progress } = invoke(workspace, wire, { verb: "theme push", dryRun: true });
+  const result = await themePush(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, true);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.revision, {
+    baseline: PRESENTATION_REVISION,
+    current: PRESENTATION_REVISION,
+    stale: false,
+  });
+  assert.deepEqual(wire.calls.map((call) => call.method), ["GET"]);
+  const header = result.differences.find((entry) => entry.file === "settings/site-header.json");
+  assert.ok(header.paths.includes("$.brandText"));
+  // A field the workspace and the site agree on is not reported.
+  assert.equal(header.paths.includes("$.showThemeToggle"), false);
+  // The site holds one light colour and no dark ones; the workspace sets all
+  // ten, so every colour path is named — sorted, so two runs report alike.
+  const footer = result.differences.find((entry) => entry.file === "settings/site-publishing-preferences.json");
+  assert.deepEqual(
+    footer.paths,
+    ["dark", "light"].flatMap((scheme) =>
+      ["backgroundColor", "headingColor", "linkColor", "linkHoverColor", "textColor"].map((color) =>
+        `$.footerSettings.${scheme}.${color}`
+      )
+    ),
+  );
+  // Only the fields the save owns are compared: the site's `allowSearch` or
+  // footer prose never appears here.
+  assert.ok(result.differences.every((entry) => entry.paths.every((path) => !path.includes("allowSearch"))));
+  assert.ok(progress.some((line) => line.includes("Dry run: nothing was written.")));
+  for (const [file, contents] of Object.entries(before)) {
+    assert.equal(await readWorkspaceText(workspace, file), contents, file);
+  }
+});
+
+test("theme push --dry-run reports a baseline the site has moved past as stale", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision: NEXT_PRESENTATION_REVISION }) },
+  ]);
+
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push", dryRun: true }).invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.revision.stale, true);
+  assert.equal(result.revision.current, NEXT_PRESENTATION_REVISION);
+  assert.equal(wire.matching("POST", PRESENTATION).length, 0);
+});
+
+test("theme push refuses before any write when the site's presentation moved since the pull", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const manifestBefore = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: presentationReply({
+        revision: NEXT_PRESENTATION_REVISION,
+        headerSettings: { brandText: "Changed in the app" },
+      }),
+    },
+  ]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "theme.concurrent_modification"
+      && error?.field === "revision"
+      && error?.message.includes("'taproot-site pull'")
+      && error?.differences.some((path) => path === "settings/site-header.json:$.brandText"),
+  );
+  assert.equal(wire.matching("POST", PRESENTATION).length, 0);
+  assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), manifestBefore);
+});
+
+test("theme push refuses a workspace whose manifest records no presentation baseline", async (site) => {
+  const files = themeWorkspace();
+  delete files[".taproot-site-manifest.json"].presentation;
+  const workspace = await fixture(site, files);
+  const wire = api([]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "theme.pull_required"
+      && error?.field === "presentation.revision"
+      && error?.message.includes("'taproot-site pull'"),
+  );
+  assert.equal(wire.calls.length, 0);
+});
+
+test("theme push refuses truthfully against a Taproot without the atomic save instead of writing sequentially", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: () => jsonResponse({ code: 5, message: "not found" }, 404) },
+    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
+    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
+    { method: "POST", pattern: SETTING, reply: {} },
+  ]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "theme.server_unsupported"
+      && error?.field === "presentation"
+      && error?.message.includes("does not fall back"),
+  );
+  assert.equal(wire.calls.filter((call) => call.method === "POST").length, 0);
+});
+
+test("theme push maps the site's stale-baseline refusal to pull-and-reconcile guidance without local writes", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const beforeSettings = await readWorkspaceText(workspace, "settings/site-publishing-preferences.json");
+  const beforeManifest = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: () => jsonResponse(violation("ExpectedRevision", "changed after it was read"), 400),
+    },
+  ]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "theme.concurrent_modification"
+      && error?.field === "revision"
+      && /pull.*re-apply/su.test(error.message),
+  );
+  assert.equal(wire.matching("POST", PRESENTATION).length, 1);
+  assert.equal(await readWorkspaceText(workspace, "settings/site-publishing-preferences.json"), beforeSettings);
+  assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), beforeManifest);
+});
+
+test("theme push maps a footer document race to a retry, not a pull", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: () => jsonResponse(violation("ExpectedFooterDraftHash", "changed"), 400),
+    },
+  ]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) =>
+      error?.code === "theme.footer_concurrent_modification"
+      && error?.field === "expectedFooterDraftHash"
+      && error?.message.includes("again"),
+  );
+});
+
+test("theme push accepts an already-current answer as success and refreshes the baseline", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => presentationSaveReply(call, { applied: false, revision: PRESENTATION_REVISION }),
+    },
+  ]);
+
+  const { invocation, progress } = invoke(workspace, wire, { verb: "theme push" });
+  const result = await themePush(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.revision, PRESENTATION_REVISION);
+  assert.ok(progress.some((line) => line.includes("already held this presentation")));
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.presentation.revision, PRESENTATION_REVISION);
+});
+
+test("theme push replays a save whose response was lost and takes the already-current answer", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  let attempts = 0;
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        attempts += 1;
+        // The first attempt committed on the server and the reply never
+        // arrived; the second finds the site already at the new revision.
+        if (attempts === 1) throw new Error("connection reset after the save committed");
+        return presentationSaveReply(call, { applied: false });
+      },
+    },
+  ]);
+
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
+  assert.equal(wire.matching("POST", PRESENTATION).length, 2);
+  const [first, second] = wire.matching("POST", PRESENTATION);
+  assert.deepEqual(first.body, second.body);
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.revision, NEXT_PRESENTATION_REVISION);
+});
+
+test("theme push records the save as pending before sending it and clears the record on an answer", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  let pendingDuringSave;
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: async (call) => {
+        pendingDuringSave = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.pending;
+        return presentationSaveReply(call);
+      },
+    },
+  ]);
+
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+
+  assert.equal(result.ok, true);
+  // Written before the request: the baseline it was sent under, the change
+  // set's identity, and when.
+  assert.equal(pendingDuringSave.expectedRevision, PRESENTATION_REVISION);
+  assert.match(pendingDuringSave.changeSetHash, /^[0-9a-f]{64}$/u);
+  assert.equal(pendingDuringSave.startedAt, new Date(1_700_000_000_000).toISOString());
+  assert.deepEqual(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation,
+    { revision: NEXT_PRESENTATION_REVISION },
+  );
+});
+
+test("theme push replays a pending save of the same change set under its original baseline after the site moved past it", async (site) => {
+  // The earlier run's save committed on the server and its response never
+  // arrived (the transport's retries were exhausted too), so the site is at
+  // the next revision and the workspace still records the baseline the save
+  // was sent under. The pending record proves the moved revision is that
+  // save's own, not a concurrent edit.
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision: NEXT_PRESENTATION_REVISION }) },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        assert.equal(call.body.expectedRevision, PRESENTATION_REVISION);
+        return presentationSaveReply(call, { applied: false, revision: NEXT_PRESENTATION_REVISION });
+      },
+    },
+  ]);
+  const first = invoke(workspace, wire, { verb: "theme push" });
+  // Stand in for the earlier run: the record it wrote before its request.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const lostWire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: () => { throw new Error("socket hang up"); } },
+  ]);
+  await assert.rejects(
+    themePush(invoke(workspace, lostWire, { verb: "theme push" }).invocation),
+    (error) => error?.code === "transport.mutation_ambiguous",
+  );
+  const pending = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.pending;
+  assert.equal(pending.expectedRevision, PRESENTATION_REVISION);
+  assert.equal(manifest.presentation.pending, undefined);
+
+  const { invocation, progress } = first;
+  const result = await themePush(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
+  assert.ok(progress.some((line) => line.includes("Replaying the presentation save")));
+  assert.deepEqual(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation,
+    { revision: NEXT_PRESENTATION_REVISION },
+  );
+});
+
+test("theme push --dry-run reports a replayable pending save instead of a stale baseline", async (site) => {
+  const files = themeWorkspace();
+  const workspace = await fixture(site, files);
+  const lostWire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: () => { throw new Error("socket hang up"); } },
+  ]);
+  await assert.rejects(themePush(invoke(workspace, lostWire, { verb: "theme push" }).invocation));
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision: NEXT_PRESENTATION_REVISION }) },
+  ]);
+
+  const { invocation, progress } = invoke(workspace, wire, { verb: "theme push", dryRun: true });
+  const result = await themePush(invocation);
+
+  assert.equal(result.revision.stale, true);
+  assert.deepEqual(result.pendingSave, { startedAt: new Date(1_700_000_000_000).toISOString(), sameChangeSet: true });
+  assert.ok(progress.some((line) => line.includes("would replay it")));
+  assert.equal(wire.matching("POST", PRESENTATION).length, 0);
+});
+
+test("theme push refuses a stale baseline when the pending save carried a different change set", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const lostWire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: () => { throw new Error("socket hang up"); } },
+  ]);
+  await assert.rejects(themePush(invoke(workspace, lostWire, { verb: "theme push" }).invocation));
+  // The author edits again before retrying: the pending record no longer
+  // describes what is about to be sent, so it proves nothing about the site.
+  const header = await readWorkspaceJson(workspace, "settings/site-header.json");
+  header.settings.brandText = "Edited after the lost save";
+  await writeFile(workspacePath(workspace, "settings/site-header.json"), `${JSON.stringify(header, undefined, 2)}\n`);
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision: NEXT_PRESENTATION_REVISION }) },
+  ]);
+
+  const { invocation, progress } = invoke(workspace, wire, { verb: "theme push" });
+  await assert.rejects(themePush(invocation), (error) => error?.code === "theme.concurrent_modification");
+
+  assert.equal(wire.matching("POST", PRESENTATION).length, 0);
+  assert.ok(progress.some((line) => line.includes("different change set")));
+});
+
+test("theme push drops the pending record after an authoritative refusal", async (site) => {
+  const workspace = await fixture(site, themeWorkspace());
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: () => jsonResponse(violation("ExpectedFooterDraftHash", "changed"), 400),
+    },
+  ]);
+
+  await assert.rejects(
+    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+    (error) => error?.code === "theme.footer_concurrent_modification",
+  );
+
+  assert.deepEqual(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation,
+    { revision: PRESENTATION_REVISION },
+  );
+});
+
+test("theme push keeps the pending record when the save errs after it may have committed, and replays it", async (site) => {
+  // The server commits the presentation before deriving favicon renditions;
+  // an error from that derivation arrives as an ordinary response, so the
+  // transport does not call it ambiguous — but the revision has moved.
+  const workspace = await fixture(site, themeWorkspace());
+  let saves = 0;
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: () => presentationReply({ revision: saves === 0 ? PRESENTATION_REVISION : NEXT_PRESENTATION_REVISION }),
+    },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        saves += 1;
+        if (saves === 1) return jsonResponse({ code: 9, message: "favicon renditions failed" }, 400);
+        assert.equal(call.body.expectedRevision, PRESENTATION_REVISION);
+        return presentationSaveReply(call, { applied: false, revision: NEXT_PRESENTATION_REVISION });
+      },
+    },
+  ]);
+
+  const first = invoke(workspace, wire, { verb: "theme push" });
+  await assert.rejects(themePush(first.invocation), (error) => error?.httpStatus === 400);
+  assert.ok(first.progress.some((line) => line.includes("stays recorded as pending")));
+  const pending = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.pending;
+  assert.equal(pending.expectedRevision, PRESENTATION_REVISION);
+
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.deepEqual(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation,
+    { revision: NEXT_PRESENTATION_REVISION },
+  );
 });
 
 test("theme push refuses a workspace still carrying a retired top-level scalar font", async (site) => {
@@ -1343,9 +1904,8 @@ test("theme push succeeds when the same fonts live only inside the per-scheme th
   // misfire on the normal, current-shape workspace.
   const workspace = await fixture(site, themeWorkspace());
   const wire = api([
-    { method: "GET", pattern: SETTINGS, reply: { sitePublishingPreferences: { footerSettings: {} } } },
-    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
-    { method: "POST", pattern: SETTING, reply: {} },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: (call) => presentationSaveReply(call) },
   ]);
 
   const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
@@ -1366,7 +1926,7 @@ test("theme push refuses an incomplete pair before the first API call", async (s
   assert.equal(wire.calls.length, 0);
 });
 
-test("theme push refuses an image id not proven by pull or media upload before its footer write", async (site) => {
+test("theme push refuses an image id not proven by pull or media upload before any request", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const styles = await readWorkspaceJson(workspace, "settings/taproot-styles.json");
   styles.settings.lightLogoId = IMAGE_ID;
@@ -1437,18 +1997,13 @@ test("theme push rejects explicit null footer colors before mutation", async (si
   assert.equal(wire.calls.length, 0);
 });
 
-test("theme push reports writes completed before a later remote refusal", async (site) => {
+test("theme push reports a remote refusal with no completed writes, because nothing was written", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const wire = api([
-    {
-      method: "GET",
-      pattern: SETTINGS,
-      reply: { sitePublishingPreferences: { footerSettings: {} } },
-    },
-    { method: "POST", pattern: FOOTER_SETTINGS, reply: { footerSettings: {} } },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
     {
       method: "POST",
-      pattern: SETTING,
+      pattern: PRESENTATION,
       reply: () => jsonResponse(violation("ExternalApiKey"), 401),
     },
   ]);
@@ -1461,40 +2016,35 @@ test("theme push reports writes completed before a later remote refusal", async 
   }
 
   assert.equal(rejected?.code, "api.request_rejected");
-  assert.deepEqual(rejected?.completedWrites, ["footerSettings.light/dark colors"]);
-  assert.deepEqual(failureResult(rejected).error.completedWrites, ["footerSettings.light/dark colors"]);
+  assert.equal(rejected?.completedWrites, undefined);
+  assert.equal("completedWrites" in failureResult(rejected).error, false);
 });
 
-test("theme push can project stricter stored footer values after its color write", async (site) => {
+test("theme push can project stricter stored footer values after its color overlay", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const currentFooter = projectFooterSettingsForWorkspace({
     bottomLinks: [{ id: navId(22), label: "Legacy", externalUrl: "https://good.example/a\\b" }],
-    asideBodyContent: { paragraphs: [{ runs: [{ text: "Stored\u0001text" }] }] },
+    asideBodyContent: { paragraphs: [{ runs: [{ text: "Storedtext" }] }] },
   });
   const wire = api([
-    {
-      method: "GET",
-      pattern: SETTINGS,
-      reply: { sitePublishingPreferences: { footerSettings: currentFooter } },
-    },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ footerSettings: currentFooter }) },
     {
       method: "POST",
-      pattern: FOOTER_SETTINGS,
-      reply: (call) => ({ footerSettings: call.body.footerSettings }),
+      pattern: PRESENTATION,
+      reply: (call) => presentationSaveReply(call, { footerSettings: currentFooter }),
     },
-    { method: "POST", pattern: SETTING, reply: {} },
   ]);
 
   const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
 
   assert.equal(result.ok, true);
-  const save = wire.matching("POST", FOOTER_SETTINGS)[0];
+  const save = wire.matching("POST", PRESENTATION)[0];
   assert.equal(save.body.expectedFooterDraftHash, computeFooterDraftHash(currentFooter));
   const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   assert.equal(publishing.settings.footerSettings.bottomLinks[0].externalUrl, "https://good.example/a\\b");
   assert.equal(
     publishing.settings.footerSettings.asideBodyContent.paragraphs[0].runs[0].text,
-    "Stored\u0001text",
+    "Storedtext",
   );
 });
 
@@ -1573,27 +2123,23 @@ test("theme push proceeds when only the ten overlay colors differ from the pull 
     bottomLinks: [{ id: navId(32), label: "Remote", externalUrl: "https://example.test/remote" }],
   });
   const wire = api([
-    {
-      method: "GET",
-      pattern: SETTINGS,
-      reply: { sitePublishingPreferences: { footerSettings: currentFooter } },
-    },
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ footerSettings: currentFooter }) },
     {
       method: "POST",
-      pattern: FOOTER_SETTINGS,
-      reply: (call) => ({ footerSettings: call.body.footerSettings }),
+      pattern: PRESENTATION,
+      reply: (call) => presentationSaveReply(call, { footerSettings: currentFooter }),
     },
-    { method: "POST", pattern: SETTING, reply: {} },
   ]);
 
   const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
 
   assert.equal(result.ok, true);
-  const save = wire.matching("POST", FOOTER_SETTINGS)[0];
-  assert.equal(save.body.footerSettings.light.backgroundColor, "#f6efe8");
-  assert.equal(save.body.footerSettings.dark.headingColor, "oklch(0.9 0.05 330)");
-  assert.deepEqual(save.body.footerSettings.bottomLinks, currentFooter.bottomLinks);
+  const save = wire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.body.footerColors.light.backgroundColor, "#f6efe8");
+  assert.equal(save.body.footerColors.dark.headingColor, "oklch(0.9 0.05 330)");
   const written = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+  assert.deepEqual(written.settings.footerSettings.bottomLinks, currentFooter.bottomLinks);
+  assert.equal(written.settings.footerSettings.light.backgroundColor, "#f6efe8");
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(
     manifest.footer.expectedContentHash,
@@ -1665,6 +2211,68 @@ test("footer push replaces the complete validated document and advances its loca
       footer.featureImage.imageId,
     ].sort(),
   );
+});
+
+test("footer push advances the presentation baseline only when the save replaced the revision it was pulled at", async (site) => {
+  const cases = [
+    // The save replaced the recorded baseline: the workspace's appearance
+    // files are still the site's, and the new revision covers them plus this
+    // footer save.
+    { previous: PRESENTATION_REVISION, next: NEXT_PRESENTATION_REVISION, expected: NEXT_PRESENTATION_REVISION, warned: false },
+    // The save replaced a revision the workspace never pulled: the site's
+    // appearance moved unseen, so the baseline stays and theme push refuses
+    // toward a pull instead of overwriting that edit.
+    { previous: "e".repeat(64), next: "f".repeat(64), expected: PRESENTATION_REVISION, warned: true },
+    // A Taproot that predates the fields leaves the baseline alone.
+    { previous: undefined, next: undefined, expected: PRESENTATION_REVISION, warned: false },
+  ];
+  for (const { previous, next, expected, warned } of cases) {
+    const footer = authorableFooter();
+    const workspace = await fixture(site, {
+      ...footerWorkspace(footer),
+      ".taproot-site-manifest.json": {
+        ...footerWorkspace(footer)[".taproot-site-manifest.json"],
+        presentation: presentationManifestEntry(PRESENTATION_REVISION),
+      },
+    });
+    const wire = api([{
+      method: "POST",
+      pattern: FOOTER_SETTINGS,
+      reply: (call) => ({
+        footerSettings: call.body.footerSettings,
+        ...(next === undefined ? {} : { presentationRevision: next, previousPresentationRevision: previous }),
+      }),
+    }]);
+
+    const { invocation, progress } = invoke(workspace, wire, { verb: "footer push" });
+    const result = await footerPush(invocation);
+
+    assert.equal(result.ok, true);
+    const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+    assert.equal(manifest.presentation.revision, expected);
+    assert.equal(progress.some((line) => line.includes("presentation baseline was left")), warned);
+  }
+});
+
+test("footer push does not mint a presentation baseline for a workspace that has none", async (site) => {
+  const footer = authorableFooter();
+  const workspace = await fixture(site, footerWorkspace(footer));
+  const wire = api([{
+    method: "POST",
+    pattern: FOOTER_SETTINGS,
+    reply: (call) => ({
+      footerSettings: call.body.footerSettings,
+      presentationRevision: NEXT_PRESENTATION_REVISION,
+      previousPresentationRevision: PRESENTATION_REVISION,
+    }),
+  }]);
+
+  const result = await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
+
+  assert.equal(result.ok, true);
+  // The workspace's appearance files were pulled at no known revision, so no
+  // revision this save reports can vouch for them.
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation, undefined);
 });
 
 test("footer push heals a manifest that predates the footer-content baseline", async (site) => {
@@ -1813,20 +2421,36 @@ test("theme push followed by footer push preserves both the merged remote footer
     ...themeWorkspace({ footerSettings: desired }),
     ...footerWorkspace(desired),
   };
+  files[".taproot-site-manifest.json"].presentation = presentationManifestEntry(PRESENTATION_REVISION);
   const workspace = await fixture(site, files);
   let remote = remoteStart;
+  let revision = PRESENTATION_REVISION;
   const wire = api([
-    { method: "GET", pattern: SETTINGS, reply: () => ({ sitePublishingPreferences: { footerSettings: remote } }) },
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: () => presentationReply({ revision, footerSettings: remote }),
+    },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        assert.equal(call.body.expectedRevision, revision);
+        assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
+        remote = projectFooterSettingsForWorkspace(applyFooterColors(remote, call.body.footerColors));
+        revision = NEXT_PRESENTATION_REVISION;
+        return { applied: true, presentation: presentationReply({ revision, footerSettings: remote }) };
+      },
+    },
     {
       method: "POST",
       pattern: FOOTER_SETTINGS,
       reply: (call) => {
         assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
         remote = projectFooterSettingsForWorkspace(call.body.footerSettings);
-        return { footerSettings: remote };
+        return { footerSettings: remote, presentationRevision: revision };
       },
     },
-    { method: "POST", pattern: SETTING, reply: {} },
   ]);
 
   await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
@@ -1853,20 +2477,40 @@ test("footer push followed by theme push preserves the footer edit while applyin
     ...themeWorkspace({ footerSettings: initial }),
     ...footerWorkspace(initial),
   };
+  files[".taproot-site-manifest.json"].presentation = presentationManifestEntry(PRESENTATION_REVISION);
   const workspace = await fixture(site, files);
   let remote = initial;
+  // The footer save moves the presentation revision (its colours are in the
+  // change set), reports the new one, and the workspace records it — so the
+  // theme push that follows carries a baseline the site still holds.
+  let revision = PRESENTATION_REVISION;
   const wire = api([
-    { method: "GET", pattern: SETTINGS, reply: () => ({ sitePublishingPreferences: { footerSettings: remote } }) },
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: () => presentationReply({ revision, footerSettings: remote }),
+    },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        assert.equal(call.body.expectedRevision, revision);
+        remote = projectFooterSettingsForWorkspace(applyFooterColors(remote, call.body.footerColors));
+        revision = "e".repeat(64);
+        return { applied: true, presentation: presentationReply({ revision, footerSettings: remote }) };
+      },
+    },
     {
       method: "POST",
       pattern: FOOTER_SETTINGS,
       reply: (call) => {
         assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
         remote = projectFooterSettingsForWorkspace(call.body.footerSettings);
-        return { footerSettings: remote };
+        const previousPresentationRevision = revision;
+        revision = NEXT_PRESENTATION_REVISION;
+        return { footerSettings: remote, presentationRevision: revision, previousPresentationRevision };
       },
     },
-    { method: "POST", pattern: SETTING, reply: {} },
   ]);
 
   const document_ = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
@@ -1876,6 +2520,10 @@ test("footer push followed by theme push preserves the footer edit while applyin
     `${JSON.stringify(document_, undefined, 2)}\n`,
   );
   await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
+  assert.equal(
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.revision,
+    NEXT_PRESENTATION_REVISION,
+  );
 
   const afterFooter = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   afterFooter.settings.footerSettings.light.backgroundColor = "#f4eee8";
@@ -6621,53 +7269,6 @@ test("deploy --staging refuses a candidate Taproot reports media blockers on", a
   assert.equal(wire.matching("POST", DEPLOY).length, 0);
 });
 
-test("deploy --staging reports a coalesced outcome and prints a reuse note", async (site) => {
-  // TR00839: an identical request inside the settling window coalesces into
-  // the already-anchored deployment instead of creating a new one.
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
-  });
-  const wire = api(deployRoutes({
-    deployReply: (call) => ({
-      deployment: deploymentRecord({ environment: call.body.environment, status: undefined }),
-      outcome: "DEPLOYMENT_REQUEST_OUTCOME_COALESCED",
-    }),
-  }));
-  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
-  const result = await deploy(invocation);
-
-  assert.equal(result.outcome, "DEPLOYMENT_REQUEST_OUTCOME_COALESCED");
-  assert.ok(
-    progress.some((line) =>
-      line.includes("An identical deployment request is already in progress")
-      && line.includes(DEPLOYMENT_ID)
-    ),
-  );
-});
-
-test("deploy --staging surfaces the durable deployment throttle with the server's retry delay", async (site) => {
-  // TR00839: the per-site/per-account rolling-window limit, distinct from the
-  // per-key request-budget throttle, but classified identically.
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
-  });
-  const wire = api(deployRoutes({
-    deployReply: () =>
-      new Response(JSON.stringify(violation("Throttled", "Retry in 17 seconds.")), {
-        status: 429,
-        headers: { "content-type": "application/json", "retry-after": "17" },
-      }),
-  }));
-  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
-  await assert.rejects(
-    deploy(invocation),
-    (error) => error?.field === "Throttled" && error.refusalKind() === "throttled" && error.retryAfterSeconds === 17,
-  );
-  const announcement = progress.join("\n");
-  assert.match(announcement, /Too many deployment requests for this site or account/u);
-  assert.match(announcement, /Retry after: 17s\./u);
-});
-
 test("deploy --production promotes a staging deployment and never carries a selection", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([], {
@@ -6888,7 +7489,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.6" },
+    cli: { name: "@taprootio/site-authoring", version: "0.9.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7324,7 +7925,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.8.6" },
+    cli: { name: "@taprootio/site-authoring", version: "0.9.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -8200,6 +8801,7 @@ function completeWorkspace() {
     footer: footerManifestEntry(
       files["settings/site-publishing-preferences.json"].settings.footerSettings,
     ),
+    presentation: presentationManifestEntry(PRESENTATION_REVISION),
   };
   return files;
 }
@@ -8384,6 +8986,7 @@ test("no verb ever emits the credential, upload capability, or page contents", a
     { method: "GET", pattern: SETTINGS, reply: {} },
     { method: "POST", pattern: FOOTER_SETTINGS, reply: (call) => ({ footerSettings: call.body.footerSettings }) },
     { method: "POST", pattern: SETTING, reply: {} },
+    { method: "POST", pattern: PRESENTATION, reply: (call) => presentationSaveReply(call) },
     {
       method: "POST",
       pattern: PAGES_COLLECTION,

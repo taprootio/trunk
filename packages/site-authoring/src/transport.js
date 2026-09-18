@@ -125,6 +125,12 @@ const UUID_PATH = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  *   server answers `..._CONSUMED`, which `login` surfaces as an issued-but-
  *   unreceived credential the owner must revoke. Not replaying would leave that
  *   same orphan and report only a network error, which is strictly worse.
+ * - **Atomic presentation save** (TR00807) — the request carries the revision
+ *   it was built against, and the server computes the revision the change set
+ *   would produce. A replay of a save that committed finds the site already at
+ *   that revision and answers `applied: false` with the current state; a
+ *   replay of one that never committed applies it; anything else is refused as
+ *   stale. No replay can apply the change set twice or report a partial one.
  */
 const REPLACEABLE_POST_PATHS = Object.freeze([
   new RegExp(
@@ -132,6 +138,7 @@ const REPLACEABLE_POST_PATHS = Object.freeze([
     "u",
   ),
   /^v1\/site-authoring\/cli-authorizations\/claim$/u,
+  new RegExp(`^v1/sites/${UUID_PATH}/presentation$`, "u"),
 ]);
 
 /**
