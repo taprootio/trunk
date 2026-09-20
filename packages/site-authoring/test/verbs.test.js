@@ -1258,6 +1258,7 @@ test("the settings catalog materializes only real enum members", async (site) =>
       allowSearch: false,
       showFollowButton: false,
       albumSeamless: false,
+      hideLightboxComments: false,
       tiptapImageMaxHeightVh: 0,
       tiptapImageBorderWidth: 0,
       albumBorderWidth: 0,
@@ -7489,7 +7490,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.9.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.10.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7925,7 +7926,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.9.0" },
+    cli: { name: "@taprootio/site-authoring", version: "0.10.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

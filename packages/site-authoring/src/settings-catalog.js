@@ -119,6 +119,11 @@ export const SETTINGS_GROUPS = Object.freeze([
       { name: "allowSearch", wireType: "boolean" },
       { name: "showFollowButton", wireType: "boolean" },
       { name: "albumSeamless", wireType: "boolean" },
+      // Negative sense on the wire (TR00868): an omitted value means the site
+      // shows lightbox comments, which is also what `false` means here, so the
+      // zero and the default agree and a snapshot of an untouched site reads
+      // the same as the site behaves.
+      { name: "hideLightboxComments", wireType: "boolean" },
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },
       { name: "albumBorderWidth", wireType: "int" },
