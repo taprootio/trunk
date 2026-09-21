@@ -256,6 +256,9 @@ const IMAGE_BANNER = Object.freeze({
   followingSpacing: enumOf("standard", "compact"),
   scrim: enumOf("auto", "none", "flat", "top", "bottom", "left", "right", "radial"),
   scrimStrength: enumOf("soft", "medium", "strong"),
+  // Finish a directional scrim's anchored edge at full alpha so the banner
+  // joins the adjoining band without a seam (Espalier 4.17.0 scrim-edge).
+  scrimEdge: enumOf("none", "flush"),
   bannerScheme: enumOf("auto", "light", "dark"),
   // Drop-shadow strength applied to the overlay text.
   textShadow: enumOf("none", "light", "medium", "strong"),
@@ -502,6 +505,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       followingSpacing: "standard",
       scrim: "auto",
       scrimStrength: "medium",
+      scrimEdge: "none",
       bannerScheme: "auto",
       textShadow: "none",
       texture: "none",
@@ -512,6 +516,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Set altText to describe meaningful banner imagery; leave it empty only when the image is decorative.",
       "Choose a scrim and scheme that keep overlay text readable across the image.",
       "For a full-bleed photograph with text aligned to the surrounding page well, set contentGutter to page. followingSpacing: compact reduces the top padding of an immediately following section so a bottom banner heading reads with its supporting paragraph. Use a banner-only contentPadding: none section followed by a standard text section; keep their theme contexts consistent. Defaults preserve frame-edge text and standard section spacing.",
+      "scrimEdge: flush finishes a directional scrim at full strength where it meets the page, so a full-bleed banner dissolves into the band below instead of ending at a visible line. It requires the arrangement above: a banner-only contentPadding: none section immediately followed by a section in the same theme context. It is inert when scrim is none, flat, or radial, and it stops being seamless when bannerScheme pins a polarity the page scheme does not share, because the scrim ink is then a derived color rather than the adjoining band's own. Default none; add it deliberately, per banner.",
       "Compose around the actual photograph: identify the meaningful subject and a quiet area for copy. Do not cover faces, product details, or high-detail edges. A focal point controls cropping, not text placement; inspect wide and compact crops separately. Keep the subject's face, ears, and other identifying details inside the compact frame, including at both ends of parallax travel. Adjust focus toward the subject rather than reusing a generic center; reduce motion or choose a roomier crop if preserving the subject requires it.",
       "Use contentPosition to place copy in that quiet area, not automatically in the center. Keep one dominant message and nearby supporting copy/actions; if the photo has no safe text area, use a split hero or a separate text section instead of forcing an overlay.",
       "Use the rule of thirds as a composition guide: consider the subject near one third and a compact text group in quiet space on the opposite side. Golden-ratio proportions are optional alternatives, not a proven engagement formula. Neither guide overrides legibility, the actual subject, or the compact crop. Current contentPosition values are edge/center anchors, not exact third or golden-ratio coordinates; do not invent unsupported positioning properties.",

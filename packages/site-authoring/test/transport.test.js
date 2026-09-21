@@ -144,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.10.1");
+  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.10.2");
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });
@@ -1017,4 +1017,68 @@ test("generic error output retains a safe upgrade status message without exposin
     assert.equal(new ApiError(400, body(unsafe)).message, "Taproot rejected the request field 'CliUpgradeRequired'.");
   }
   assert.equal(new ApiError(400, body(TOKEN, "OtherField")).message, "Taproot rejected the request field 'OtherField'.");
+});
+
+/**
+ * An untrusted certificate means opposite things by origin, so the remediation
+ * is scoped to the one where it is the answer. Locally it is nearly always
+ * mkcert plus a Node that does not read the system trust store, and the bare
+ * cause code costs a round-trip to diagnose. On production the same code means
+ * interception or a broken chain, and "here is how to trust it" would be advice
+ * to disable the check that just did its job.
+ */
+test("a certificate failure against the local stack names the CA fix", async () => {
+  const client = SiteApiClient.anonymous({
+    apiBaseUrl: "https://app.taproot.test/api",
+    sleep: async () => {},
+    fetch: async () => {
+      const error = new TypeError("fetch failed");
+      error.cause = Object.assign(new Error("underlying"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" });
+      throw error;
+    },
+  });
+  await assert.rejects(client.request("v1/sites"), (error) => {
+    assert.equal(error.code, "transport.network");
+    assert.match(error.message, /UNABLE_TO_VERIFY_LEAF_SIGNATURE/u);
+    assert.match(error.message, /NODE_EXTRA_CA_CERTS/u);
+    assert.match(error.message, /mkcert/u);
+    return true;
+  });
+});
+
+test("the same certificate failure against production stays a bare warning", async () => {
+  const client = SiteApiClient.anonymous({
+    apiBaseUrl: "https://app.taproot.io/api",
+    sleep: async () => {},
+    fetch: async () => {
+      const error = new TypeError("fetch failed");
+      error.cause = Object.assign(new Error("underlying"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" });
+      throw error;
+    },
+  });
+  await assert.rejects(client.request("v1/sites"), (error) => {
+    assert.equal(error.code, "transport.network");
+    assert.match(error.message, /UNABLE_TO_VERIFY_LEAF_SIGNATURE/u);
+    assert.doesNotMatch(error.message, /NODE_EXTRA_CA_CERTS/u);
+    assert.doesNotMatch(error.message, /NODE_USE_SYSTEM_CA/u);
+    return true;
+  });
+});
+
+test("a non-certificate transport failure carries no CA remediation", async () => {
+  const client = SiteApiClient.anonymous({
+    apiBaseUrl: "https://app.taproot.test/api",
+    sleep: async () => {},
+    fetch: async () => {
+      const error = new TypeError("fetch failed");
+      error.cause = Object.assign(new Error("underlying"), { code: "ECONNREFUSED" });
+      throw error;
+    },
+  });
+  await assert.rejects(client.request("v1/sites"), (error) => {
+    assert.equal(error.code, "transport.network");
+    assert.match(error.message, /ECONNREFUSED/u);
+    assert.doesNotMatch(error.message, /NODE_EXTRA_CA_CERTS/u);
+    return true;
+  });
 });

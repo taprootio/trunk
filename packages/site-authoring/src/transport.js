@@ -10,6 +10,7 @@ import {
   HTTP_TOO_MANY_REQUESTS,
   HTTP_UNAUTHORIZED,
   LIMITS,
+  LOCAL_API_BASE_URL,
   PLAN_LIMIT_REFUSAL_FIELD,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   REFUSAL_CAPABILITY_MISSING,
@@ -83,6 +84,18 @@ function isUndelivered(error) {
 }
 
 /**
+ * The certificate-verification codes, named once. `describeTransportCause`
+ * softens them into a sentence and `localCertificateHint` decides whether a
+ * remediation belongs with them, so the list must not be restated in either.
+ */
+const CERTIFICATE_CAUSE_CODES = new Set([
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+]);
+
+/**
  * The underlying cause, named.
  *
  * `fetch` reports every one of these as "fetch failed", so discarding the cause
@@ -94,10 +107,30 @@ function isUndelivered(error) {
 function describeTransportCause(error) {
   const code = transportCauseCode(error);
   if (code === undefined || !SAFE_CAUSE_CODE.test(code)) return undefined;
-  return code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || code === "SELF_SIGNED_CERT_IN_CHAIN"
-      || code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" || code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+  return CERTIFICATE_CAUSE_CODES.has(code)
     ? `${code}: the server's TLS certificate was not trusted`
     : code;
+}
+
+/**
+ * The one remediation this error has, and only where it is the answer.
+ *
+ * Against the local stack an untrusted certificate is nearly always setup, not
+ * an attack: mkcert installs its root into the system and browser trust stores
+ * and Node reads neither, so the CLI fails while the same host loads fine in
+ * Chrome. Naming the fix here saves the round-trip the bare cause code costs.
+ *
+ * Deliberately silent for every other origin. On production the same code
+ * means an interception or a genuinely broken chain, and printing "here is how
+ * to trust it" would be advice to disable the check that just did its job.
+ */
+function localCertificateHint(apiOrigin, error) {
+  const code = transportCauseCode(error);
+  if (code === undefined || !CERTIFICATE_CAUSE_CODES.has(code)) return "";
+  if (apiOrigin !== new URL(LOCAL_API_BASE_URL).origin) return "";
+  return " The local stack uses mkcert, whose root Node does not read from the system trust store."
+    + " Export NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/mkcert/rootCA.pem\""
+    + " (or NODE_USE_SYSTEM_CA=1 on Node 22.19+ or 24.6+) and run the command again.";
 }
 
 const SAFE_CAUSE_CODE = /^[A-Z0-9_]{1,64}$/u;
@@ -742,7 +775,8 @@ export class SiteApiClient {
           (ambiguous
             ? "A Taproot API mutation ended without an authoritative response."
             : "A Taproot API request failed before a response was received.")
-            + (cause === undefined ? "" : ` (${cause})`),
+            + (cause === undefined ? "" : ` (${cause})`)
+            + localCertificateHint(this.apiOrigin, error),
         );
       }
       if (response.status >= 200 && response.status < 300 && !response.redirected) {
