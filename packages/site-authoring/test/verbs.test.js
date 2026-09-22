@@ -1121,13 +1121,16 @@ test("pull projects a pre-menu-font stored theme to the complete effective pair 
   const workspace = await fixture(site);
   // The SHY Wellness shape: a seeded complete theme stored before the
   // per-scheme menu font existed, with the defaults' cached mappings and
-  // one hand-added pin, still managed by Taproot (no external provenance).
+  // one authored pin, still managed by Taproot (no external provenance).
+  // The pin is claimed by the marker, which is what makes it a pin at all
+  // since Espalier 4.18.0 and what the settings editor now writes.
   const stored = (scheme) => {
     const theme = structuredClone(DEFAULT_SITE_THEME[scheme].theme);
     delete theme.fontMenu;
     delete theme.fontWeightMenu;
     theme.seedColor = "#3b5b3b";
     theme.semanticMappings.headings = { source: "complementary", lightness: "ink" };
+    theme.explicitMappingTokens = ["headings"];
     return theme;
   };
   const pulledThemeWorkspace = themeWorkspace();
@@ -7490,7 +7493,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.10.3" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7926,7 +7929,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.10.3" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

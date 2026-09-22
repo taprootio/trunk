@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { parseTheme } from "@taprootio/espalier/shared/theme";
+import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { APPEARANCE_FOOTER_COLOR_FIELDS } from "../src/appearance-contract.js";
 import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
@@ -13,8 +13,10 @@ import {
   MAXIMUM_THEME_WARNING_SCALARS,
   REQUIRED_THEME_PROPERTIES,
   REQUIRED_THEME_PATHS,
-  shadowedRoleMappingWarnings,
+  fitLintWarnings,
+  inertMappingWarnings,
   validateAndEncodeThemePair,
+  validateAndLintThemePair,
 } from "../src/theme-validation.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
 
@@ -384,37 +386,150 @@ test("appearance colors admit only bounded colors and field-approved tokens", ()
   assert.equal(isSupportedAppearanceColor("oklch(0.8 0.5 330)", tokens), false);
 });
 
-test("a pin that repeats the default warns only for tokens the declared roles would have moved", async () => {
+test("a mapping the marker does not name is reported as inert, whatever put it there", async () => {
   const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
   const withRoles = (theme) => ({
     ...theme,
     anchors: { ...theme.anchors, teal: { color: "#0f766e" } },
     roles: { accent: "anchor:teal", action: "anchor:teal" },
   });
-  // The seeded shape: every default mapping cached. Only the tokens these two
-  // roles compile are shadowed; a token no role targets is not reported.
+  // The seeded shape: every default mapping cached, none of them claimed.
+  // Only the tokens these roles move away from their cached value are
+  // discarded, so only those are reported.
   const cached = withRoles(defaults.light.theme);
-  const warnings = shadowedRoleMappingWarnings(cached, "light");
+  const warnings = inertMappingWarnings(cached, "light");
   const tokens = warnings.map((warning) => /semanticMappings\.([a-zA-Z0-9]+)/u.exec(warning)[1]);
   assert.ok(tokens.includes("link") && tokens.includes("actionBackground"), tokens.join(","));
   assert.ok(!tokens.includes("border") && !tokens.includes("shadow"), tokens.join(","));
   assert.ok(tokens.length < Object.keys(cached.semanticMappings).length);
-  assert.match(warnings[0], /repeats the Espalier default/u);
-  // A default-valued pin the marker names is deliberate and never reported.
+  assert.match(warnings[0], /is not named in explicitMappingTokens/u);
+  // The warning names what the token actually renders as, so an author can
+  // tell an accepted role from a silently dropped value.
+  assert.match(warnings.find((warning) => /\.link /u.test(warning)), /renders as anchor:teal\/accent/u);
+  // A pin the marker names is deliberate and never reported.
   const deliberate = { ...cached, explicitMappingTokens: ["link"] };
-  assert.ok(!shadowedRoleMappingWarnings(deliberate, "light").some((warning) => /\.link /u.test(warning)));
+  assert.ok(!inertMappingWarnings(deliberate, "light").some((warning) => /\.link /u.test(warning)));
   // Pins only: an authored pin that differs from the default is intentional.
   const pinsOnly = withRoles({
     ...defaults.light.theme,
     semanticMappings: { headings: { source: "anchor:teal", lightness: "ink" } },
     explicitMappingTokens: ["headings"],
   });
-  assert.deepEqual(shadowedRoleMappingWarnings(pinsOnly, "light"), []);
-  // Without roles there is nothing for a default-valued pin to shadow.
-  assert.deepEqual(shadowedRoleMappingWarnings(defaults.light.theme, "light"), []);
+  assert.deepEqual(inertMappingWarnings(pinsOnly, "light"), []);
+  // Cached values the resolver reproduces exactly stay invisible: the seeded
+  // theme on its own must not produce a wall of warnings.
+  assert.deepEqual(inertMappingWarnings(defaults.light.theme, "light"), []);
+  // A mapping edited by hand without adding its token to the marker is the
+  // case a default-comparison missed: the value is neither the default nor
+  // applied, and it used to disappear with nothing said.
+  const handEdited = {
+    ...defaults.light.theme,
+    semanticMappings: { ...defaults.light.theme.semanticMappings, typeLabel: { source: "danger", lightness: "ink" } },
+  };
+  assert.match(
+    inertMappingWarnings(handEdited, "light").find((warning) => /\.typeLabel /u.test(warning)),
+    /is not named in explicitMappingTokens/u,
+  );
+  // A document with no marker at all predates the contract: every mapping in
+  // it is still a pin, so there is nothing inert to report.
+  const { explicitMappingTokens: _marker, ...unmarked } = handEdited;
+  assert.deepEqual(inertMappingWarnings(unmarked, "light"), []);
+  // A marker Espalier would reject reads the same way it does there — the
+  // whole marker is ignored and every mapping stays a pin — so reporting any
+  // of them as inert would be describing a rendering that never happens.
+  // (A name with no mapping entry is the third way a marker is rejected; this
+  // seeded document carries all twenty-three, so that case lives in the
+  // projection tests, where the document is sparse.)
+  for (const marker of [["link", "link"], ["link", "notAToken"]]) {
+    assert.deepEqual(inertMappingWarnings({ ...cached, explicitMappingTokens: marker }, "light"), []);
+  }
   // The warning reaches the push/validate result beside Espalier's own, for both schemes.
   const result = validateAndEncodeThemePair(cached, withRoles(defaults.dark.theme));
-  assert.ok(result.warnings.some((warning) => /^light: semanticMappings\.link repeats/u.test(warning)));
-  assert.ok(result.warnings.some((warning) => /^dark: semanticMappings\.link repeats/u.test(warning)));
+  assert.ok(result.warnings.some((warning) => /^light: semanticMappings\.link is not named/u.test(warning)));
+  assert.ok(result.warnings.some((warning) => /^dark: semanticMappings\.link is not named/u.test(warning)));
   assert.equal(result.warningCount >= result.warnings.length, true);
+});
+
+test("validate and theme push report Espalier's fit lints on every surface, in both schemes", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  // A dark band whose filled action names a paper swatch. The theme is valid;
+  // what is wrong is the compiled result — the engine seats the action at a
+  // mid-band stop, so the paper renders grey carrying a pale label, the wrong
+  // way round. Only the fit report sees that, and only on the context.
+  const withBand = (theme, band = {}) => ({
+    ...theme,
+    anchors: { ...theme.anchors, paper: "#fffaf4", midnight: "#21172b" },
+    contexts: {
+      band: {
+        canvas: "anchor:midnight",
+        ink: { color: "anchor:paper", heading: "anchor:paper" },
+        action: { color: "anchor:paper", ink: "anchor:midnight" },
+        lightness: { surface: 0.16, raised1: 0.2, raised2: 0.25, raised3: 0.3, raised4: 0.36, text: 0.96, ink: 0.99 },
+        ...band,
+      },
+    },
+  });
+  const inverted = await validateAndLintThemePair(withBand(defaults.light.theme), withBand(defaults.dark.theme));
+  assert.deepEqual(
+    inverted.warnings.map((warning) => /^(?:light|dark): contexts\.band fit lint [a-z-]+/u.exec(warning)?.[0]),
+    ["light: contexts.band fit lint action-anchor-inversion", "dark: contexts.band fit lint action-anchor-inversion"],
+  );
+  assert.equal(inverted.warningCount, 2);
+  // The remedy is the last sentence of a long message, so the whole lint has
+  // to survive the per-warning bound or the warning names a problem and not
+  // its fix.
+  for (const warning of inverted.warnings) {
+    assert.match(warning, /Retune by pinning semanticMappings\.actionBackground/u);
+    assert.match(warning, /cannot hold a label at its own lightness\.$/u);
+  }
+  // The remedy the lint names clears it: pin the band's action past the band.
+  const pin = {
+    tones: { "paper-band": 0.88 },
+    semanticMappings: { actionBackground: { source: "anchor:paper", lightness: "tone:paper-band" } },
+  };
+  const pinned = await validateAndLintThemePair(withBand(defaults.light.theme, pin), withBand(defaults.dark.theme, pin));
+  assert.deepEqual(pinned.warnings, []);
+
+  // A root-surface lint carries no context path. It shares one count and cap
+  // with the other warnings and sits between Espalier's validation warnings
+  // and the inert mappings: the seeded shape alone yields an inert warning
+  // per cached token and scheme, enough to fill the cap, and the lint is the
+  // finding that must not be the one cut off.
+  const gold = (theme) => ({
+    ...theme,
+    anchors: { ...theme.anchors, gold: "oklch(0.81 0.15 85)", umber: "#1d1a14" },
+    roles: { ...theme.roles, action: { color: "anchor:gold", ink: "anchor:umber" } },
+  });
+  const root = await validateAndLintThemePair(gold(defaults.light.theme), gold(defaults.dark.theme));
+  const kind = (warning) =>
+    / fit lint /u.test(warning) ? "lint" : /is not named in explicitMappingTokens/u.test(warning) ? "inert" : "validation";
+  const lints = root.warnings.filter((warning) => kind(warning) === "lint");
+  assert.deepEqual(
+    lints.map((warning) => /^(?:light|dark): fit lint [a-z-]+/u.exec(warning)?.[0]),
+    ["light: fit lint action-anchor-inversion", "dark: fit lint action-anchor-inversion"],
+  );
+  const kinds = root.warnings.map(kind);
+  assert.ok(kinds.includes("validation") && kinds.includes("inert"), kinds.join(","));
+  assert.deepEqual(kinds, [...kinds].sort((left, right) =>
+    ["validation", "lint", "inert"].indexOf(left) - ["validation", "lint", "inert"].indexOf(right)
+  ));
+  assert.equal(root.warningCount, root.warnings.length);
+
+  // Data-palette collisions are Espalier validation's warning already; the
+  // suite's copy of the same finding is not repeated.
+  const collided = (theme) => ({ ...theme, dataPalette: { ...theme.dataPalette, series2: theme.dataPalette.series1 } });
+  const palette = await validateAndLintThemePair(collided(defaults.light.theme), collided(defaults.dark.theme));
+  assert.ok(palette.warnings.length > 0);
+  assert.ok(palette.warnings.every((warning) => !/ fit lint /u.test(warning)), palette.warnings.join("\n"));
+
+  // Lints are not a validation phase an unparseable pair could skip quietly:
+  // a report Espalier cannot build says the lints were not checked.
+  const unchecked = await fitLintWarnings(encodeTheme({ seedColor: "not-a-colour" }), encodeTheme({}));
+  assert.equal(unchecked.length, 1);
+  assert.match(unchecked[0], /^Espalier could not build the fit report, so no fit lints were checked: /u);
+
+  // None of that loaded Espalier's component modules: they register custom
+  // elements on import, which a process holding another Espalier copy cannot
+  // survive (generator/src/site-authoring-content-isolation.test.ts).
+  assert.equal(globalThis.customElements, undefined);
 });

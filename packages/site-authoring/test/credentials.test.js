@@ -273,7 +273,7 @@ test("login stores an approved credential and never emits the secret or the devi
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.2" },
+    cli: { name: "@taprootio/site-authoring", version: "0.10.3" },
     verb: "login",
     accountId: ACCOUNT_ID,
     keyId: KEY_ID,

@@ -4,6 +4,7 @@ import {
   encodeTheme,
   LIGHTNESS_KEYS,
   mergeTheme,
+  parseTheme,
   SEMANTIC_COLOR_NAMES,
   validateThemePair,
 } from "@taprootio/espalier/shared/theme";
@@ -11,7 +12,10 @@ import {
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
 export const MAXIMUM_THEME_WARNINGS = 32;
-export const MAXIMUM_THEME_WARNING_SCALARS = 512;
+// Large enough for a whole fit lint: apca-target-unmet lists every pair that
+// missed its floor before the remedy, and a surface that fails across the
+// board runs past 900 scalars. Truncating it would cut the remedy off.
+export const MAXIMUM_THEME_WARNING_SCALARS = 2048;
 export const MAXIMUM_THEME_OPEN_MAP_ENTRIES = 128;
 export const MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS = 64;
 
@@ -302,46 +306,180 @@ function sameMapping(left, right) {
 }
 
 /**
- * Roles compile the semantic mappings at render time, and any mapping present
- * in `semanticMappings` pins its token over that compilation (TR00801). A pin
- * that merely repeats Espalier's default on a token the declared roles would
- * have moved is the one an author never meant: it came from a copied example
- * or a pre-projection pull, and it silently keeps the role from reaching the
- * token — the accepted-but-gray link WTFM saw. Which tokens the roles move is
- * asked of Espalier itself, by compiling the same roles with no pins at all;
- * a token the roles leave at its default, or one the marker names as a
- * deliberate pin, is never reported. It is a warning rather than a refusal
- * because the pair still renders exactly as declared; Espalier validation
- * owns the invalid cases.
+ * The tokens a stored theme's `explicitMappingTokens` marker claims, or
+ * undefined when the document has no usable marker at all.
+ *
+ * Espalier accepts a marker all-or-nothing: one entry that is not a semantic
+ * token name, one duplicate, or one name with no matching `semanticMappings`
+ * entry and it ignores the whole marker, falling back to treating every stored
+ * mapping as a pin. Reading a malformed marker leniently here — keeping the
+ * entries that happen to parse — would make this CLI describe and project a
+ * theme that renders differently from what Espalier actually resolves, which
+ * is the one thing the projection must never do.
  */
-export function shadowedRoleMappingWarnings(theme, scheme) {
-  if (!isPlainObject(theme) || !isPlainObject(theme.roles) || Object.keys(theme.roles).length === 0) return [];
-  if (!isPlainObject(theme.semanticMappings)) return [];
+export function serializedMarkerTokens(theme) {
+  const tokens = theme?.explicitMappingTokens;
+  if (!Array.isArray(tokens)) return undefined;
+  if (tokens.some((token) => typeof token !== "string" || !SEMANTIC_COLOR_NAMES.includes(token))) return undefined;
+  const unique = new Set(tokens);
+  if (unique.size !== tokens.length) return undefined;
+  if (unique.size > 0) {
+    if (!isPlainObject(theme.semanticMappings)) return undefined;
+    for (const token of unique) {
+      if (!Object.hasOwn(theme.semanticMappings, token)) return undefined;
+    }
+  }
+  return unique;
+}
+
+/**
+ * Which of a stored theme's `semanticMappings` its author actually pinned: the
+ * marker's tokens, or — for a document that carries no usable marker — all of
+ * them, since a marker-less document predates the contract and every mapping
+ * in it is still a pin.
+ */
+export function authoredMappingTokens(theme) {
+  if (!isPlainObject(theme) || !isPlainObject(theme.semanticMappings)) return new Set();
+  return serializedMarkerTokens(theme) ?? new Set(Object.keys(theme.semanticMappings));
+}
+
+/**
+ * A mapping the document carries but never claims is inert. Since Espalier
+ * 4.18.0 the serialized marker decides which `semanticMappings` entries are
+ * pins: the resolver recompiles every other token from the roles and the
+ * stored value is not applied. A cached entry that already matches what the
+ * resolver produces is invisible — that is the seeded shape every site has —
+ * so only a value the resolver will actually discard is reported. That covers
+ * both the pin that merely repeats Espalier's default on a token the roles
+ * move (the accepted-but-gray link WTFM saw, TR00801) and a mapping edited by
+ * hand without adding its token to the marker, which would otherwise vanish
+ * with no sign it was ignored. A document with no marker at all predates the
+ * contract and keeps every mapping as a pin, so it has nothing to report. It
+ * is a warning rather than a refusal because the theme still renders a valid,
+ * coherent result; Espalier validation owns the invalid cases.
+ */
+export function inertMappingWarnings(theme, scheme) {
+  if (!isPlainObject(theme) || !isPlainObject(theme.semanticMappings)) return [];
+  // No usable marker means Espalier keeps every mapping as a pin, so nothing
+  // the document carries is inert and there is nothing to report.
+  const deliberate = serializedMarkerTokens(theme);
+  if (deliberate === undefined) return [];
   const defaults = SCHEME_DEFAULTS[scheme];
-  let compiled;
+  let resolved;
   try {
-    compiled = mergeTheme(defaults, { ...theme, semanticMappings: {}, explicitMappingTokens: [] }).semanticMappings;
+    resolved = mergeTheme(defaults, theme).semanticMappings;
   } catch {
     // An invalid theme is Espalier validation's finding, not this one's.
     return [];
   }
-  const deliberate = new Set(Array.isArray(theme.explicitMappingTokens) ? theme.explicitMappingTokens : []);
   const warnings = [];
   for (const [token, mapping] of Object.entries(theme.semanticMappings)) {
     if (deliberate.has(token)) continue;
-    const fallback = defaults.semanticMappings[token];
-    if (sameMapping(mapping, fallback) && !sameMapping(compiled[token], fallback)) {
-      warnings.push(
-        `${scheme}: semanticMappings.${token} repeats the Espalier default and pins the token, so the declared roles `
-          + `never reach it; remove the pin to let the roles compile ${token}, or list it in explicitMappingTokens `
-          + `if the default is the intent.`,
-      );
+    if (sameMapping(mapping, resolved[token])) continue;
+    const applied = isPlainObject(resolved[token])
+      ? `${resolved[token].source}/${resolved[token].lightness}`
+      : "the compiled value";
+    warnings.push(
+      `${scheme}: semanticMappings.${token} is not named in explicitMappingTokens, so the resolver recompiles the `
+        + `token and this value is never applied — ${token} renders as ${applied}; list ${token} in `
+        + `explicitMappingTokens to pin the value, or remove the mapping to author the intent through the roles.`,
+    );
+  }
+  return warnings;
+}
+
+let fitReport;
+
+/**
+ * Espalier exports its fit report only from the package root, and the root
+ * re-exports every component module, which registers custom elements as it
+ * loads. This package must never do that: a process that already holds
+ * another Espalier copy — the generator's browser harness loads this package
+ * beside its own — throws on a second esp-root
+ * (generator/src/site-authoring-content-isolation.test.ts). The report itself
+ * is side-effect free and sits beside the exported theme module, so it is
+ * loaded from there, sharing that module's instance, and only when a theme is
+ * actually checked. The exact Espalier pin and this package's tests catch a
+ * release that moves it.
+ */
+function loadFitReport() {
+  fitReport ??= import(new URL("./theme-fit-report.js", import.meta.resolve("@taprootio/espalier/shared/theme")).href);
+  return fitReport;
+}
+
+/**
+ * Validation says whether Espalier accepts a theme; the fit report says how
+ * the accepted theme renders. Its lints are the findings no validator can
+ * make, because each is about the compiled result: a filled action that came
+ * out the opposite way round from its swatches (action-anchor-inversion), a
+ * text pair enforcement could not rescue (apca-target-unmet), an action lost
+ * in its canvas, or a hover weaker than its resting link. Every surface is
+ * checked — the root and each context, in both schemes — because a context
+ * declares its own action and fails on its own; a root-only check misses it.
+ * The suite's data-palette lints are left out: validateThemePair already warns
+ * about the same collisions, in the same words.
+ *
+ * The pair passed in is the encoded one that is stored, parsed back, so the
+ * report describes exactly what the published page resolves. Lints are
+ * warnings rather than refusals, matching how Espalier classifies them.
+ */
+export async function fitLintWarnings(light, dark) {
+  const { ROOT_SURFACE, themeFitReportSuite } = await loadFitReport();
+  let suite;
+  try {
+    suite = themeFitReportSuite(parseTheme(light) ?? {}, parseTheme(dark) ?? {});
+  } catch (error) {
+    // A pair that passed validation resolves, so this should not happen; if
+    // it does, say the lints were not checked rather than implying none fired.
+    return [`Espalier could not build the fit report, so no fit lints were checked: ${error?.message ?? error}`];
+  }
+  const warnings = [];
+  for (const scheme of ["light", "dark"]) {
+    for (const report of suite[scheme]) {
+      const surface = report.surface === ROOT_SURFACE ? "" : `contexts.${report.surface} `;
+      for (const lint of report.lints) {
+        warnings.push(`${scheme}: ${surface}fit lint ${lint.id} — ${lint.message}`);
+      }
     }
   }
   return warnings;
 }
 
+function boundedThemeWarnings(allWarnings) {
+  const warnings = allWarnings
+    .slice(0, MAXIMUM_THEME_WARNINGS)
+    .map((warning) =>
+      [...sanitizeDiagnostic(warning, "Theme validation warning.")]
+        .slice(0, MAXIMUM_THEME_WARNING_SCALARS)
+        .join("")
+    );
+  return {
+    warnings,
+    warningCount: allWarnings.length,
+    warningsTruncated: allWarnings.length > warnings.length,
+  };
+}
+
 export function validateAndEncodeThemePair(lightTheme, darkTheme) {
+  const { light, dark, warnings, inert } = checkThemePair(lightTheme, darkTheme);
+  return { light, dark, ...boundedThemeWarnings([...warnings, ...inert]) };
+}
+
+/**
+ * The validation `validate` and `theme push` run: everything
+ * validateAndEncodeThemePair checks, plus the fit lints over the accepted
+ * pair, bounded together so the cap and the count cover both. The lints come
+ * before the inert-mapping warnings because the seeded shape alone produces
+ * one of those per cached token and scheme — enough to fill the cap — and a
+ * lint is the finding an author can least afford to have cut off.
+ */
+export async function validateAndLintThemePair(lightTheme, darkTheme) {
+  const { light, dark, warnings, inert } = checkThemePair(lightTheme, darkTheme);
+  const lints = await fitLintWarnings(light, dark);
+  return { light, dark, ...boundedThemeWarnings([...warnings, ...lints, ...inert]) };
+}
+
+function checkThemePair(lightTheme, darkTheme) {
   requireCompleteTheme(lightTheme, "light");
   requireCompleteTheme(darkTheme, "dark");
 
@@ -372,24 +510,11 @@ export function validateAndEncodeThemePair(lightTheme, darkTheme) {
   }
   refuseAgentStylesheets(lightTheme, "light");
   refuseAgentStylesheets(darkTheme, "dark");
-  const allWarnings = [
-    ...result.warnings,
-    ...shadowedRoleMappingWarnings(lightTheme, "light"),
-    ...shadowedRoleMappingWarnings(darkTheme, "dark"),
-  ];
-  const warnings = allWarnings
-    .slice(0, MAXIMUM_THEME_WARNINGS)
-    .map((warning) =>
-      [...sanitizeDiagnostic(warning, "Theme validation warning.")]
-        .slice(0, MAXIMUM_THEME_WARNING_SCALARS)
-        .join("")
-    );
   return {
     light,
     dark,
-    warnings,
-    warningCount: allWarnings.length,
-    warningsTruncated: allWarnings.length > warnings.length,
+    warnings: result.warnings,
+    inert: [...inertMappingWarnings(lightTheme, "light"), ...inertMappingWarnings(darkTheme, "dark")],
   };
 }
 

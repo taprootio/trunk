@@ -448,6 +448,10 @@ export async function validateFixture(invocation = {}) {
     }
   }
   for (const warning of presentation.themes.warnings) onProgress(`Espalier warning: ${warning}`);
+  if (presentation.themes.warningsTruncated) {
+    const hidden = presentation.themes.warningCount - presentation.themes.warnings.length;
+    onProgress(`${hidden} more Espalier warning(s) not shown; resolve the ones above and run validate again to see them.`);
+  }
   const sharedContexts = sharedThemeContextNames(
     presentation.style.lightTheme,
     presentation.style.darkTheme,

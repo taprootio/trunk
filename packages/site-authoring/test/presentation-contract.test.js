@@ -89,9 +89,9 @@ function csharpIntegerConstant(source, name) {
   return Number(match[1].replaceAll("_", ""));
 }
 
-test("the presentation references expose examples accepted by their executable validators", () => {
-  assert.doesNotThrow(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "4.17.0");
+test("the presentation references expose examples accepted by their executable validators", async () => {
+  await assert.doesNotReject(() => assertPresentationExamples());
+  assert.equal(getThemeReference().espalierVersion, "4.19.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -539,7 +539,7 @@ test("single-line normalization uses the server's Unicode whitespace set", () =>
   );
 });
 
-test("theme help states the role model the resolver applies and its examples contrast in both schemes", () => {
+test("theme help states the role model the resolver applies and its examples contrast in both schemes", async () => {
   const reference = getThemeReference();
   assert.deepEqual(Object.keys(reference.roleResolution.slots), [...reference.vocabulary.roles]);
   assert.deepEqual(reference.roleResolution.slots.accent, ["text", "hover"]);
@@ -550,7 +550,7 @@ test("theme help states the role model the resolver applies and its examples con
   // The dark example must not reuse the light example's dark heading anchor.
   assert.notEqual(reference.example.darkTheme.roles.ink.heading, reference.example.lightTheme.roles.ink.heading);
   assert.equal(reference.example.darkTheme.roles.ink.heading, "anchor:paper");
-  assert.doesNotThrow(() => assertPresentationExamples());
+  await assert.doesNotReject(() => assertPresentationExamples());
   const rendered = formatPresentationReference(reference);
   assert.match(rendered, /Role slots:/u);
   assert.match(rendered, /accent\s+color, text, hover/u);

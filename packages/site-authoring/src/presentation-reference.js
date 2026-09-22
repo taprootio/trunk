@@ -42,7 +42,7 @@ import {
   MAXIMUM_THEME_OPEN_MAP_ENTRIES,
   MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS,
   REQUIRED_THEME_PROPERTIES,
-  validateAndEncodeThemePair,
+  validateAndLintThemePair,
 } from "./theme-validation.js";
 import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
@@ -90,6 +90,12 @@ function exampleTheme(defaults, scheme) {
     seedColor: scheme === "light" ? "oklch(0.58 0.14 305)" : "oklch(0.72 0.11 305)",
     pageBackgroundImage: "",
     pageBackgroundImageOpacity: 0,
+    // The shape pull writes for a theme authored through its roles: no cached
+    // mappings and a marker that claims none. The defaults' complete
+    // semanticMappings would hand every agent who copies this twenty entries
+    // the resolver never applies, each one a warning.
+    semanticMappings: {},
+    explicitMappingTokens: [],
     anchors: {
       plum: { color: "#6f2a78", text: "#4b1553", hover: "#8a3d92" },
       paper: "#fffaf4",
@@ -120,6 +126,13 @@ function exampleTheme(defaults, scheme) {
         accent: { color: "anchor:plum", text: "anchor:paper", hover: "anchor:plum.hover" },
         action: { color: "anchor:paper", ink: "anchor:midnight" },
         structure: "anchor:paper",
+        // Left to the engine, the paper action compiles to a grey button with
+        // a pale label — the wrong way round for a swatch that wants dark ink.
+        // A context declares its own action, so it needs its own pin; 0.88
+        // carries the midnight label at Lc 83 without crowding the status
+        // colours, which a paler stop does.
+        tones: { "paper-band": 0.88 },
+        semanticMappings: { actionBackground: { source: "anchor:paper", lightness: "tone:paper-band" } },
         lightness: scheme === "light"
           ? { surface: 0.16, raised1: 0.2, raised2: 0.25, raised3: 0.3, raised4: 0.36, text: 0.96, ink: 0.99 }
           : { surface: 0.12, raised1: 0.16, raised2: 0.21, raised3: 0.27, raised4: 0.34, text: 0.96, ink: 0.99 },
@@ -184,6 +197,7 @@ const THEME_GROUPS = Object.freeze([
       themeField("tones", "Open map of named 0–1 lightness values for explicit mappings.", {
         additionalProperties: true,
         maximumEntries: MAXIMUM_THEME_OPEN_MAP_ENTRIES,
+        namePattern: "lowercase slug beginning with a letter",
         maximumNameScalars: MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS,
         minimum: 0,
         maximum: 1,
@@ -288,14 +302,28 @@ export const ROLE_RESOLUTION = Object.freeze({
     + "lightness stop (with APCA enforcement) still sets its lightness. anchor:<name>.<slot> selects one of the "
     + "anchor's declared slots (text, hover, ...) as that hue-and-chroma source and resolves the same way; neither "
     + "form renders the declared colour verbatim.",
+    "Because an anchor supplies the chroma, a near-white anchor makes a near-grey ramp. A canvas anchor around "
+    + "#FFFDF4 carries about 1% chroma, so background, every layer, and every border resolve at that 1% however "
+    + "vivid the rest of the palette is: the page reads grey and no role, lightness stop or seedColor can add the "
+    + "colour back. Give the canvas anchor the brand's own colour at full strength and let the lightness stops do "
+    + "the lightening — a violet #6136C9 canvas resolves to a pale violet background and carries about 11% chroma "
+    + "by the third layer, where a pale lavender picked to 'look like a light background' caps the whole ramp at "
+    + "its own 6%. Choose the hue before the chroma: saturating toward whichever hue holds the most chroma near "
+    + "white gives a tan page whatever the brand is, because pale yellows survive there and pale violets and blues "
+    + "do not.",
+    "A canvas anchor needs to be its own anchor. The light ink on a dark band is usually the same near-white the "
+    + "light scheme wanted for its page, so one anchor ends up serving both, and then it cannot be saturated "
+    + "without putting brand-coloured text on a brand-coloured band. Declare a second anchor for the canvas and "
+    + "leave the pale one to its ink duty.",
     "Anchors resolve per scheme: the same anchor:<name> in lightTheme and darkTheme reads each scheme's own anchors "
     + "table, so a dark scheme usually declares darker or lighter anchors under the same names.",
   ]),
   precedence: Object.freeze([
-    "Any mapping present in semanticMappings wins for its token, whether or not explicitMappingTokens names it: "
-    + "the shipped resolver overlays the stored mappings after compiling the roles. To let a role reach a token, "
-    + "delete the mapping; editing the marker alone does not unpin it. explicitMappingTokens records which mappings "
-    + "are authored pins and is what pull writes.",
+    "A mapping in semanticMappings wins for its token only when explicitMappingTokens names it. The marker is what "
+    + "makes a mapping a pin: the resolver recompiles every token the marker leaves out, so a mapping it does not "
+    + "name is a cached value that is never applied. To pin a token, set the mapping and add the token to the "
+    + "marker; to let a role reach it, drop the token from the marker or delete the mapping. A document that "
+    + "carries no explicitMappingTokens at all predates the marker, and every mapping in it is still a pin.",
     "Otherwise the token is compiled from the roles, and an APCA contrast check may nudge an action or ink stop so "
     + "the pair stays readable.",
     "Otherwise the Espalier default mapping applies.",
@@ -309,21 +337,31 @@ function themeLightness(value) {
 }
 
 /**
- * The examples must render as contrasting pairs, not merely validate: a dark
+ * Each ink is checked against the surface it is actually painted on. A dark
  * example whose headings resolve to a dark anchor on a dark canvas validated
- * fine and read as a defect. Resolve both through Espalier and require the
- * text, heading and link tokens to sit well away from the canvas lightness.
+ * fine and read as a defect, so the examples must render as contrasting
+ * pairs rather than merely validate. Action ink is the one that does not sit
+ * on the canvas: it is painted on the action background, and pairing it with
+ * the canvas asserts the wrong thing — an action ink chosen to read on a
+ * dark button looked like a failure once the roles reached it.
  */
+const EXAMPLE_CONTRAST_PAIRS = Object.freeze([
+  ["--esp-color-text", "--esp-color-background"],
+  ["--esp-color-headings", "--esp-color-background"],
+  ["--esp-color-link", "--esp-color-background"],
+  ["--esp-color-action-text", "--esp-color-action-background"],
+]);
+
 function assertExampleContrast(theme, scheme) {
   const properties = computeThemeProperties(
     mergeTheme(scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME, theme),
     scheme,
   );
-  const canvas = themeLightness(properties["--esp-color-background"]);
-  for (const token of ["--esp-color-text", "--esp-color-headings", "--esp-color-link", "--esp-color-action-text"]) {
+  for (const [token, surfaceToken] of EXAMPLE_CONTRAST_PAIRS) {
+    const surface = themeLightness(properties[surfaceToken]);
     const lightness = themeLightness(properties[token]);
-    if (canvas === undefined || lightness === undefined || Math.abs(lightness - canvas) < 0.4) {
-      throw new Error(`${scheme} theme example: ${token} (${properties[token]}) does not contrast with the canvas (${properties["--esp-color-background"]}).`);
+    if (surface === undefined || lightness === undefined || Math.abs(lightness - surface) < 0.4) {
+      throw new Error(`${scheme} theme example: ${token} (${properties[token]}) does not contrast with ${surfaceToken} (${properties[surfaceToken]}).`);
     }
   }
 }
@@ -350,13 +388,17 @@ export function getThemeReference() {
     roleResolution: ROLE_RESOLUTION,
     workflow: [
       "Run taproot-site pull and edit the complete light/dark pair it writes; never build a sparse theme from memory. pull resolves the stored theme over the same defaults every consumer renders, so a fresh workspace validates and every group carries its effective value.",
-      "Define brand anchors first, then assign canvas, ink, accent, action, and structure roles in both schemes.",
-      "Add named contexts for whole zones, including inverted zones, and rebind lightness when the zone changes brightness.",
+      "Define brand anchors first, then assign canvas, ink, accent, action, and structure roles in both schemes. Give the canvas anchor as much chroma as the design's saturation calls for: it sets the chroma of the background, every layer and every border, so a near-white paper anchor produces a grey page that no other setting can rescue.",
+      "Check the filled action before anything else looks finished. Its ramp stop is chosen by the engine near a mid-band target rather than named by the theme, so seating the ramp — the remedy for every other anchored token — cannot move it, and declaring an action role does not either. The only lever is pinning semanticMappings.actionBackground.",
+      "A brand colour between roughly L 0.55 and L 0.83 cannot be a button surface at its own lightness: across that band no ink, not even pure black, reaches the Lc 75 APCA asks of a button label. Espalier then walks the label to the far end of the ramp and the button renders inverted — a dark surface carrying a pale label where the swatch wanted the opposite. Pin the stop just past the band instead. A gold at L 0.81 pinned to a tone at L 0.85 carries a dark label at Lc 76; the same gold left to the engine compiles to a brown one.",
+      "Name a tone as a lowercase slug — gold-band, not goldBand. theme push refuses any other name, and refuses a mapping that names a tone its theme or context never declares.",
+      "theme push runs Espalier's fit report over the root and every context in both schemes and lists each finding as a warning reading 'fit lint <id>'; theme push --dry-run does the same and writes nothing, and validate does it for an offline fixture. Read the lints before calling a theme done: action-anchor-inversion names a filled action that rendered the opposite way round from the swatches it declares, apca-target-unmet names a pair enforcement could not rescue, and action-canvas-separation and link-hover-ordering cover an action lost in its canvas and a hover weaker than its link. A lint is a warning, not a refusal, so a push still goes through with one — the lints are what tell an agent the design did not survive the compile.",
+      "Add named contexts for whole zones, including inverted zones, and rebind lightness when the zone changes brightness. A context that declares its own action needs its own actionBackground pin: without one it compiles at the engine's mid-band stop, and where the root is pinned it carries the root's pin instead, whatever action colour the context declares.",
       "Tune typography, type/space ratios, radii, and viewport interpolation as one layout system.",
       "Typography is per scheme on purpose: light and dark set their own moods, so a heading, body, or brand face that differs between them is a design choice, and theme push never warns about it.",
       "Retune danger/success/warning/info through intents without changing their meanings; design data palettes separately.",
-      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model. pull keeps only authored pins there and lists them in explicitMappingTokens; a default mapping copied into the document becomes a pin and makes the role for that token inert.",
-      "Run theme push, inspect warnings, then verify text, actions, focus states, and both schemes in authoring previews.",
+      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model. pull keeps only authored pins there and lists them in explicitMappingTokens; a mapping the marker does not name is never applied, so a hand-added pin needs its token added to the marker or theme push reports it as inert.",
+      "Run theme push --dry-run and clear its warnings, fit lints included; then run theme push and verify text, actions, focus states, and both schemes in authoring previews.",
     ],
     example: THEME_EXAMPLE,
   };
@@ -639,8 +681,13 @@ export function getFooterReference() {
   };
 }
 
-export function assertPresentationExamples() {
-  validateAndEncodeThemePair(THEME_EXAMPLE.lightTheme, THEME_EXAMPLE.darkTheme);
+export async function assertPresentationExamples() {
+  const themes = await validateAndLintThemePair(THEME_EXAMPLE.lightTheme, THEME_EXAMPLE.darkTheme);
+  // The example is what an agent copies, so it has to look like a finished
+  // theme: nothing for validate to warn about, fit lints included.
+  if (themes.warningCount > 0) {
+    throw new Error(`The theme example raises ${themes.warningCount} warning(s): ${themes.warnings.join(" | ")}`);
+  }
   assertExampleContrast(THEME_EXAMPLE.lightTheme, "light");
   assertExampleContrast(THEME_EXAMPLE.darkTheme, "dark");
   validateFooterDocument(FOOTER_EXAMPLE);

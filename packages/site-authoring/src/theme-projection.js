@@ -11,7 +11,7 @@ import {
 } from "@taprootio/espalier/shared/theme";
 
 import { SiteAuthoringError } from "./errors.js";
-import { missingThemeFields } from "./theme-validation.js";
+import { authoredMappingTokens, missingThemeFields } from "./theme-validation.js";
 
 /**
  * Project one stored scheme theme to the complete theme a consumer actually
@@ -28,16 +28,16 @@ import { missingThemeFields } from "./theme-validation.js";
  * every group with its authoritative value instead of reconstructing it.
  *
  * Semantic mappings are the one group that is *not* filled from defaults.
- * Espalier compiles them from `roles` at merge time; a mapping stored in
- * `semanticMappings` pins that token and shadows whatever the roles would
- * have produced. Copying the defaults' twenty-three mappings into the
- * document would therefore freeze them and make later role changes inert
- * — the failure a complete seeded theme already exhibits. The projection
- * keeps only the mappings that are authored pins: those the stored marker
- * names, plus any mapping whose value differs from the effective default
- * (a pin added by hand without updating the marker). It writes the marker
- * for exactly that set, so `theme push` stores pins only and roles compile
- * for everything else.
+ * Espalier compiles them from `roles` at merge time, and since 4.18.0 the
+ * serialized `explicitMappingTokens` marker decides which stored mappings
+ * pin their token: an entry the marker does not claim is a cached value the
+ * resolver recompiles. So the projection keeps exactly the claimed mappings
+ * and drops the rest. Writing an unclaimed one back would pin a role-derived
+ * token and make the roles inert for it from then on — the failure a complete
+ * seeded theme used to exhibit for every token at once. A document carrying no
+ * usable marker predates that contract, and every mapping in it is still a
+ * pin, so all of them survive. `theme push` then stores pins only, and
+ * `theme push`'s own warnings report any mapping the marker leaves inert.
  *
  * Layering alone is not rendering parity: `mergeTheme` also lets an
  * unpinned type-role ink inherit a customized `text` mapping, and lets a
@@ -59,12 +59,6 @@ const SCHEME_DEFAULTS = Object.freeze({
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function sameMapping(left, right) {
-  return isPlainObject(left) && isPlainObject(right)
-    && left.source === right.source && left.lightness === right.lightness
-    && Object.keys(left).length === Object.keys(right).length;
 }
 
 /**
@@ -97,14 +91,11 @@ export function projectPulledTheme(stored, scheme, { managedExternally = false }
   // mapping as authored; the pin filter below then decides which survive.
   const merged = mergePartials({ ...layerable, semanticMappings: {}, explicitMappingTokens: [] }, source);
 
-  const marker = Array.isArray(source.explicitMappingTokens)
-    ? new Set(source.explicitMappingTokens.filter((token) => typeof token === "string"))
-    : undefined;
+  const authored = authoredMappingTokens(source);
   const pins = {};
   if (isPlainObject(source.semanticMappings)) {
     for (const [token, mapping] of Object.entries(source.semanticMappings)) {
-      const cachedDefault = sameMapping(mapping, base.semanticMappings?.[token]);
-      if (marker?.has(token) || !cachedDefault) pins[token] = mapping;
+      if (authored.has(token)) pins[token] = mapping;
     }
   }
   const projected = reconcileWithRendering(
@@ -112,6 +103,7 @@ export function projectPulledTheme(stored, scheme, { managedExternally = false }
     source,
     scheme,
     managedExternally,
+    authored,
   );
 
   requireProjectedThemeComplete(projected, scheme);
@@ -138,22 +130,18 @@ function canonicalJson(value) {
  * Two passes suffice: a mapping pin can change what a companion token
  * inherits, so the comparison runs again after the first corrections.
  *
- * One deliberate exception: a cached default mapping on a token the stored
- * theme's own roles would move is the shadowing pin TR00801 documents and
- * warns about. Restoring it would keep the roles inert, so it stays dropped
- * and the role-compiled value is accepted as the rendering the author asked
- * for. Every other difference is written back.
+ * One deliberate exception, and it is the whole point of the pins-only
+ * document: a token its author never pinned is role-derived, so writing the
+ * value it happens to resolve to today would pin it and make the roles inert
+ * for it from then on — the defect Espalier 4.18.0 fixed. Those tokens stay
+ * out of the projection and keep recompiling. Every other difference between
+ * the projection and the stored theme's rendering is written back.
  */
-function reconcileWithRendering(projected, stored, scheme, managedExternally) {
+function reconcileWithRendering(projected, stored, scheme, managedExternally, authored) {
   const { defaults } = SCHEME_DEFAULTS[scheme];
   let rendered;
-  let roleCompiled;
   try {
     rendered = renderedTheme(stored, scheme, managedExternally);
-    const declaresRoles = isPlainObject(stored.roles) && Object.keys(stored.roles).length > 0;
-    roleCompiled = declaresRoles
-      ? mergeTheme(defaults, { ...stored, semanticMappings: {}, explicitMappingTokens: [] }).semanticMappings
-      : undefined;
   } catch {
     // An invalid stored theme cannot be rendered for comparison; validation
     // reports it, and the layered projection is the best available document.
@@ -176,11 +164,7 @@ function reconcileWithRendering(projected, stored, scheme, managedExternally) {
         const pins = { ...current.semanticMappings };
         for (const [token, mapping] of Object.entries(rendered.semanticMappings)) {
           if (canonicalJson(mapping) === canonicalJson(candidate.semanticMappings[token])) continue;
-          const storedMapping = isPlainObject(stored.semanticMappings) ? stored.semanticMappings[token] : undefined;
-          const cachedDefaultTheRolesMove = roleCompiled !== undefined
-            && sameMapping(storedMapping, defaults.semanticMappings[token])
-            && canonicalJson(candidate.semanticMappings[token]) === canonicalJson(roleCompiled[token]);
-          if (cachedDefaultTheRolesMove) continue;
+          if (!authored.has(token)) continue;
           pins[token] = structuredClone(mapping);
         }
         current = { ...current, semanticMappings: pins, explicitMappingTokens: Object.keys(pins) };

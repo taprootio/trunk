@@ -29,7 +29,7 @@ import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
-import { missingThemeFields, validateAndEncodeThemePair } from "../theme-validation.js";
+import { missingThemeFields, validateAndLintThemePair } from "../theme-validation.js";
 import { ApiError } from "../transport.js";
 import {
   readWorkspaceJson,
@@ -151,7 +151,7 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
       },
     );
   }
-  const themes = validateAndEncodeThemePair(style.lightTheme, style.darkTheme);
+  const themes = await validateAndLintThemePair(style.lightTheme, style.darkTheme);
   const scalarOperations = buildAppearanceScalarOperations(
     documents,
     knownImageIds,
@@ -316,6 +316,10 @@ export async function themePush(invocation) {
   }
   onProgress(`Validated the complete light/dark theme pair and ${scalarOperations.length} appearance settings.`);
   for (const warning of themes.warnings) onProgress(`Espalier warning: ${warning}`);
+  if (themes.warningsTruncated) {
+    const hidden = themes.warningCount - themes.warnings.length;
+    onProgress(`${hidden} more Espalier warning(s) not shown; resolve the ones above and run theme push --dry-run to see them.`);
+  }
   const warnings = {
     items: themes.warnings,
     count: themes.warningCount,

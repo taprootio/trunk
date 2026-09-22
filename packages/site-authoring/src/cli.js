@@ -300,6 +300,8 @@ const VERBS = Object.freeze([
       + "was lost is replayed safely; the site answers applied=false when it already holds the change set. "
       + "--dry-run reads the site, reports the JSON paths at which each settings file differs from it and whether "
       + "the recorded baseline is still current, and writes nothing. "
+      + "Validation includes Espalier's fit report over the root and every context in both schemes; each lint prints "
+      + "as a warning naming 'fit lint <id>' and does not stop the push, so read them in a --dry-run first. "
       + "pull writes each scheme's complete effective theme — the stored theme resolved over the same defaults every "
       + "consumer renders — so a fresh workspace validates as pulled. semanticMappings holds only authored pins, listed "
       + "in explicitMappingTokens; every other token compiles from roles at render time, so never copy default "

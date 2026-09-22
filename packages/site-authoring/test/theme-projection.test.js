@@ -77,7 +77,7 @@ test("a legacy stored theme gains the missing per-scheme fonts from the authorit
   assert.equal(typeof result.light, "string");
 });
 
-test("cached default mappings are dropped so roles compile, while authored pins and the marker survive", () => {
+test("only the mappings the marker claims survive projection, and rendering is unchanged", () => {
   const stored = structuredClone(DEFAULT_SITE_THEME.light.theme);
   assert.equal(Object.keys(stored.semanticMappings).length, 23);
   assert.deepEqual(stored.explicitMappingTokens, []);
@@ -88,22 +88,31 @@ test("cached default mappings are dropped so roles compile, while authored pins 
   stored.explicitMappingTokens = ["headings"];
   stored.semanticMappings.typeLabel = { source: "anchor:teal", lightness: "muted" };
 
+  // Since Espalier 4.18.0 the cached defaults no longer shadow the roles in
+  // the stored document itself: the marker leaves them recompilable, so the
+  // roles already reach link and the action tokens before any projection.
+  const before = mergeTheme(DEFAULT_LIGHT_THEME, stored).semanticMappings;
+  assert.equal(before.link.source, "anchor:teal");
+  assert.equal(before.actionBackground.source, "anchor:teal");
+
   const projected = projectPulledTheme(stored, "light", { managedExternally: true });
+  // Projection keeps the claimed pin and nothing else. The twenty-one cached
+  // defaults and the hand-added mapping the marker never claimed are both
+  // dropped — writing either back would pin a role-derived token and make the
+  // roles inert for it, which is the defect 4.18.0 fixed. theme push reports
+  // the unclaimed hand edit so it does not vanish silently.
   assert.deepEqual(canonical(projected.semanticMappings), canonical({
     headings: { source: "anchor:teal", lightness: "ink" },
-    typeLabel: { source: "anchor:teal", lightness: "muted" },
   }));
-  assert.deepEqual([...projected.explicitMappingTokens].sort(), ["headings", "typeLabel"]);
+  assert.deepEqual(projected.explicitMappingTokens, ["headings"]);
 
-  // Before projection the twenty-one cached defaults shadow the roles; after
-  // it the roles reach the rendered link and action tokens and the pins hold.
-  const before = mergeTheme(DEFAULT_LIGHT_THEME, stored).semanticMappings;
+  // Dropping them changes nothing about the rendering, which is the contract
+  // a pins-only document has to hold.
   const after = mergeTheme(DEFAULT_LIGHT_THEME, projected).semanticMappings;
-  assert.equal(before.link.source, "complementary");
   assert.equal(after.link.source, "anchor:teal");
   assert.equal(after.actionBackground.source, "anchor:teal");
   assert.deepEqual(canonical(after.headings), canonical({ source: "anchor:teal", lightness: "ink" }));
-  assert.deepEqual(canonical(after.typeLabel), canonical({ source: "anchor:teal", lightness: "muted" }));
+  assert.deepEqual(canonical(after.typeLabel), canonical(before.typeLabel));
 });
 
 test("a round trip of a theme without roles renders identically and projection is idempotent", () => {
@@ -136,9 +145,42 @@ test("present invalid values are preserved for validation rather than replaced b
   const stored = legacyStoredTheme();
   stored.angles = null;
   stored.semanticMappings = { link: "not-a-mapping" };
+  stored.explicitMappingTokens = ["link"];
   const projected = projectPulledTheme(stored, "light");
   assert.equal(projected.angles, null);
+  // A pin the marker claims reaches validation as written, junk and all.
+  // Replacing it with a default here would hide the fault the author has to
+  // fix and silently push a colour they never chose.
   assert.deepEqual(projected.semanticMappings, { link: "not-a-mapping" });
+
+  // An unclaimed mapping is cached data, not an authored value, so a corrupt
+  // one is dropped with the rest rather than pinned into the pulled document.
+  const unclaimed = legacyStoredTheme();
+  unclaimed.angles = null;
+  unclaimed.semanticMappings = { link: "not-a-mapping" };
+  const withoutPin = projectPulledTheme(unclaimed, "light");
+  assert.equal(withoutPin.angles, null);
+  assert.deepEqual(withoutPin.semanticMappings, {});
+  assert.deepEqual(withoutPin.explicitMappingTokens, []);
+});
+
+test("a marker Espalier would reject leaves every stored mapping a pin", () => {
+  // Espalier reads the marker all-or-nothing: a duplicate, an unknown token
+  // name, or a name with no mapping entry and it ignores the whole marker and
+  // renders every stored mapping as a pin. Reading it leniently here would
+  // project a document that renders differently from the one it came from.
+  for (const marker of [["link", "link"], ["link", "notAToken"], ["headings"]]) {
+    const stored = legacyStoredTheme();
+    stored.semanticMappings = { link: { source: "danger", lightness: "accent" } };
+    stored.explicitMappingTokens = marker;
+    const projected = projectPulledTheme(stored, "light");
+    assert.deepEqual(canonical(projected.semanticMappings), canonical(stored.semanticMappings));
+    // Rendering parity is the contract that matters, and it holds either way.
+    assert.deepEqual(
+      canonical(withoutMarker(mergeTheme(DEFAULT_LIGHT_THEME, projected))),
+      canonical(withoutMarker(mergeTheme(DEFAULT_LIGHT_THEME, stored))),
+    );
+  }
 });
 
 test("a projection that still lacks required fields refuses with the paths and no pull remedy", () => {

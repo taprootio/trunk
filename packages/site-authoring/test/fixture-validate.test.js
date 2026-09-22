@@ -27,12 +27,9 @@ const SHY_COMPOSITION = fileURLToPath(new URL(
 ));
 // The package's copy of the seeded default theme, pinned byte-for-byte to the
 // canonical shared artifact by renderer-parity.test.js. The shipped fixture's
-// theme pair is that artifact plus four authored groups.
+// theme pair is that artifact plus its authored groups and its one pin.
 const DEFAULT_SITE_THEME = fileURLToPath(new URL("./fixtures/default-site-theme.json", import.meta.url));
-const SEMANTIC_MAPPING_COUNT = Object.keys(
-  JSON.parse(await readFile(DEFAULT_SITE_THEME, "utf8")).light.theme.semanticMappings,
-).length;
-const AUTHORED_THEME_GROUPS = new Set(["anchors", "roles", "contexts", "intents"]);
+const AUTHORED_THEME_GROUPS = new Set(["anchors", "roles", "contexts", "intents", "tones"]);
 const SHY_PAGE_ID = "00000000-0000-4000-8000-000000000791";
 const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
 const SHY_IMAGE_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
@@ -161,6 +158,46 @@ test("the shipped example fixture validates without credentials, network, or wri
   assert.match(result.stderr, /Validated 2 page\(s\), 3 navigation item\(s\)/u);
 });
 
+test("validate reports a fit lint the theme's own validation cannot see", async (context) => {
+  const { fixture } = await copiedFixture(context, "fit lint fixture");
+  const file = path.join(fixture, "settings", "taproot-styles.json");
+  const document_ = JSON.parse(await readFile(file, "utf8"));
+  // A paper button on a midnight band. Espalier accepts the theme; left to
+  // the engine, the action compiles grey with a pale label — the wrong way
+  // round — and only the fit report over that context says so.
+  for (const key of ["lightTheme", "darkTheme"]) {
+    const theme = document_.settings[key];
+    theme.anchors = { ...theme.anchors, "fit-paper": "#fffaf4", "fit-midnight": "#21172b" };
+    theme.contexts = {
+      ...theme.contexts,
+      "fit-band": {
+        canvas: "anchor:fit-midnight",
+        ink: { color: "anchor:fit-paper", heading: "anchor:fit-paper" },
+        action: { color: "anchor:fit-paper", ink: "anchor:fit-midnight" },
+        lightness: { surface: 0.16, raised1: 0.2, raised2: 0.25, raised3: 0.3, raised4: 0.36, text: 0.96, ink: 0.99 },
+      },
+    };
+  }
+  await writeFile(file, `${JSON.stringify(document_, undefined, 2)}\n`);
+
+  const result = await runValidation(fixture, { quiet: false });
+
+  // A lint is a warning, not a refusal.
+  assert.equal(result.exitCode, 0);
+  const json = JSON.parse(result.stdout);
+  // The rest of the fixture checks clean, so every lint is the band's.
+  assert.ok(json.warnings.items.length > 0);
+  for (const warning of json.warnings.items) {
+    assert.match(warning, /^(?:light|dark): contexts\.fit-band fit lint [a-z-]+ — /u);
+  }
+  assert.ok(
+    json.warnings.items.some((warning) => warning.startsWith("light: contexts.fit-band fit lint action-anchor-inversion — ")),
+    json.warnings.items.join("\n"),
+  );
+  assert.equal(json.warnings.count, json.warnings.items.length);
+  assert.match(result.stderr, /Espalier warning: light: contexts\.fit-band fit lint action-anchor-inversion — /u);
+});
+
 test("the shipped fixture's theme pair is the seeded default plus its authored semantics", async () => {
   const defaultTheme = JSON.parse(await readFile(DEFAULT_SITE_THEME, "utf8"));
   const styles = JSON.parse(
@@ -172,18 +209,22 @@ test("the shipped fixture's theme pair is the seeded default plus its authored s
     const fixture = styles.settings[key];
     assert.deepEqual(Object.keys(fixture).sort(), Object.keys(seeded).sort(), `${scheme}: property set`);
     for (const property of Object.keys(seeded)) {
-      if (property === "semanticMappings") {
+      if (property === "semanticMappings" || property === "explicitMappingTokens") {
         // The seeded theme caches every default mapping; in a document that
         // declares roles each cached mapping pins its token and keeps the
-        // role from rendering (TR00801). The example stores pins only, which
-        // is exactly what pull writes, so its roles reach the page.
-        assert.deepEqual(fixture[property], {}, `${scheme}.semanticMappings must hold authored pins only`);
+        // role from rendering (TR00801). The example stores pins only, each
+        // claimed by the marker, which is exactly what pull writes, so its
+        // roles reach the page. Its one pin is the filled action: ember sits
+        // in the band where no label clears its tier at the swatch's own
+        // lightness, and only a pin moves the stop the engine picks.
+        assert.deepEqual(Object.keys(fixture.semanticMappings), ["actionBackground"], `${scheme}.semanticMappings`);
+        assert.deepEqual(fixture.explicitMappingTokens, ["actionBackground"], `${scheme}.explicitMappingTokens`);
         continue;
       }
       if (AUTHORED_THEME_GROUPS.has(property)) {
         // Authored on purpose: the seeded theme leaves these empty, and a
         // fixture with no anchors, roles, or contexts could not demonstrate a
-        // named section context.
+        // named section context. The tones are the stops the action pins name.
         assert.notDeepEqual(fixture[property], seeded[property], `${scheme}.${property} is still the seeded value`);
         continue;
       }
@@ -270,12 +311,29 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       footer: true,
     },
   );
-  // The www fixture declares roles beside the seeded default mappings, which
-  // pin every token and keep those roles from rendering (TR00801). The CLI
-  // now says so, once per pinned token and scheme, and leaves the fixture as
-  // its owner authored it; the warnings are the only ones it raises.
-  assert.ok(json.warnings.count > 0 && json.warnings.count < 2 * SEMANTIC_MAPPING_COUNT, JSON.stringify(json.warnings));
-  for (const warning of json.warnings.items) assert.match(warning, /^(light|dark): semanticMappings\.[a-zA-Z0-9]+ repeats the Espalier default/u);
+  // The www fixture declares roles beside the seeded default mappings, and
+  // its marker claims none of them — so the resolver recompiles those tokens
+  // and the cached values are never applied (TR00801, TR00852). The CLI says
+  // so once per discarded token and scheme, and leaves the fixture as its
+  // owner authored it. Its gold action also sits in the band no label can
+  // clear at the swatch's own lightness, so it renders the wrong way round;
+  // the fit report names that ahead of the inert mappings, which alone would
+  // fill the cap. Those two are the only kinds of warning it raises.
+  const kinds = json.warnings.items.map((warning) =>
+    /^(light|dark): (contexts\.[a-z][a-z0-9-]* )?fit lint [a-z-]+ — /u.test(warning)
+      ? "lint"
+      : /^(light|dark): semanticMappings\.[a-zA-Z0-9]+ is not named in explicitMappingTokens/u.test(warning)
+      ? "inert"
+      : warning
+  );
+  assert.ok(kinds.every((kind) => kind === "lint" || kind === "inert"), JSON.stringify(json.warnings));
+  assert.ok(kinds.includes("lint") && kinds.includes("inert"), JSON.stringify(json.warnings));
+  assert.ok(kinds.lastIndexOf("lint") < kinds.indexOf("inert"), kinds.join(","));
+  assert.ok(
+    json.warnings.items.some((warning) => /^light: fit lint action-anchor-inversion — /u.test(warning)),
+    JSON.stringify(json.warnings),
+  );
+  assert.ok(json.warnings.count >= json.warnings.items.length);
   assert.ok(json.doesNotProve.includes("credential authorization or live site ownership"));
   assert.ok(json.doesNotProve.includes("preview or published rendering"));
   // The www fixture keeps the contained header beside a full-bleed image

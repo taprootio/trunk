@@ -351,6 +351,10 @@ complete effective theme — the stored theme resolved over the same defaults
 every consumer renders — so a fresh workspace validates as pulled, and it
 keeps only authored `semanticMappings` pins (listed in
 `explicitMappingTokens`) because a pinned token shadows its role.
+`theme push` — and `theme push --dry-run`, which writes nothing — also runs
+Espalier's fit report over the root and every context in both schemes and
+prints each lint as a warning, such as a filled action that renders the
+opposite way round from its swatches; a lint never stops the push.
 `redirects pull` writes the site's
 redirect map to `redirects.json` with a baseline, and `redirects push`
 validates the file offline and replaces the whole map; `help redirects`
