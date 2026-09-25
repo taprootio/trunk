@@ -203,14 +203,25 @@ const TESTIMONIAL = Object.freeze({
 
 /** `LatestPostsData` — resolved at generation time. */
 const LATEST_POSTS = Object.freeze({
-  count: num({ values: Object.freeze([3, 6, 9, 12]) }),
-  columns: num({ values: Object.freeze([2, 3, 4]) }),
+  count: num({
+    integer: true,
+    minimum: 1,
+    maximum: 12,
+    description: "How many posts to show, 1 to 12; a single post spans the full width.",
+  }),
+  columns: num({ values: Object.freeze([1, 2, 3, 4]) }),
   pageTypes: list(enumOf(...LATEST_POST_PAGE_TYPES)),
   showPinned: bool(),
   highlightFirst: bool(),
   showDescription: bool(),
   showDate: bool(),
   showAuthor: bool(),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around each card, as on a card grid; the grid itself is never framed. 0 boxes nothing; omitted publishes 1.",
+  }),
+  bannerScheme: enumOf("auto", "light", "dark"),
 });
 
 /** `CardGridData`. `cropState` is the one genuinely optional field in types.ts. */
@@ -435,6 +446,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       showDescription: true,
       showDate: true,
       showAuthor: false,
+      borderWidth: 1,
+      bannerScheme: "auto",
     },
     ["Keep descriptions enabled when titles alone do not make each destination clear."],
     {
@@ -446,6 +459,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       showDescription: true,
       showDate: true,
       showAuthor: false,
+      borderWidth: 1,
+      bannerScheme: "dark",
     },
   ),
   "card-grid": component(

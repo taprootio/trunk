@@ -113,6 +113,8 @@ const COMPLETE = {
     showDescription: true,
     showDate: true,
     showAuthor: false,
+    borderWidth: 2,
+    bannerScheme: "light",
   },
   "card-grid": {
     cards: [{
@@ -163,7 +165,7 @@ const VIOLATIONS = {
   "testimonial": ["columns", 4, "/attrs/componentData/columns"],
   "feature-grid": ["iconSize", "huge", "/attrs/componentData/iconSize"],
   "spacer": ["dividerStyle", "double", "/attrs/componentData/dividerStyle"],
-  "latest-posts": ["count", 5, "/attrs/componentData/count"],
+  "latest-posts": ["count", 13, "/attrs/componentData/count"],
   "card-grid": ["columns", 4, "/attrs/componentData/columns"],
   "image-banner": ["ratio", "16/9", "/attrs/componentData/ratio"],
 };

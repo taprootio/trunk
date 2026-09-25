@@ -51,7 +51,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 24;
+export const REFERENCE_VERSION = 26;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 
 function deepFreeze(value) {
@@ -177,7 +177,7 @@ const DESIGN_BLUEPRINTS = deepFreeze([
         section: { entrance: "fade", entranceStagger: "tight" },
         components: [
           { type: "image-banner", properties: { ratio: "2/1", heightMode: "ratio", contentPosition: "bottom-start", scrim: "bottom", imageMotion: "none" } },
-          { type: "latest-posts", properties: { count: 6, columns: 3, highlightFirst: false, showDescription: true, showDate: true } },
+          { type: "latest-posts", properties: { count: 5, columns: 3, highlightFirst: false, showDescription: true, showDate: true, borderWidth: 1, bannerScheme: "auto" } },
         ],
       },
       {

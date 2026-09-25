@@ -732,10 +732,10 @@ function renderSection(
       "--esp-section-padding-block: 0",
     );
   }
-  if (kind === "explicit") {
-    const decorationStyle = normalizedSectionDecorationStyle(attrs.decoration);
-    if (decorationStyle) sectionStyleParts.push(...decorationStyle);
-  }
+  // Espalier paints the decoration plane only on a section carrying the
+  // `decoration` attribute, so the hooks and the attribute travel together.
+  const decorationStyle = kind === "explicit" ? normalizedSectionDecorationStyle(attrs.decoration) : undefined;
+  if (decorationStyle) sectionStyleParts.push(...decorationStyle);
   const background = kind === "explicit" ? normalizeSectionBackground(attrs.background) : undefined;
   const backgroundPicture = background
     ? renderSectionBackgroundPicture(background, options.claimSectionBackgroundImage?.() === true)
@@ -773,6 +773,7 @@ function renderSection(
       "data-entrance": entrance,
       "data-entrance-stagger": entranceStagger,
       context,
+      decoration: decorationStyle ? true : undefined,
       style: sectionStyle,
     },
     surfaced,
