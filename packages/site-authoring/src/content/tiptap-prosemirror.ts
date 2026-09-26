@@ -76,6 +76,8 @@ export interface RenderProseMirrorOptions {
   };
   /** Records visible document-order content after each node is rendered. */
   onRenderedNode?: (node: ProseMirrorNode, html: string) => void;
+  /** Maps an authored heading level (1–4) to the level rendered; defaults to the authored level. */
+  headingLevel?: (authored: number) => number;
   /** Claims the page's one LCP slot before rendering a section photo. */
   claimSectionBackgroundImage?: () => boolean;
 }
@@ -363,7 +365,8 @@ function wrapMark(html: string, mark: ProseMirrorMark): string {
 
 function renderHeading(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
   const rawLevel = numberAttr(node.attrs?.level) ?? 1;
-  const level = Math.min(4, Math.max(1, Math.trunc(rawLevel)));
+  const authored = Math.min(4, Math.max(1, Math.trunc(rawLevel)));
+  const level = Math.min(6, Math.max(1, options.headingLevel?.(authored) ?? authored));
   return renderElement(
     `h${level}`,
     withProseMeasure(textBlockAttrs(node.attrs), node.type, options),
