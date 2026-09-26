@@ -157,6 +157,10 @@ const CTA = Object.freeze({
   }),
   imagePosition: enumOf("top", "left", "right"),
   mediaImage: image(),
+  // TR00890: "waitlist" replaces the link button with an email-capture form
+  // that posts to the platform's public waitlist endpoint. buttonUrl is
+  // ignored in that mode; buttonText becomes the submit button's label.
+  formMode: enumOf("none", "waitlist"),
 });
 
 /** `FeatureGridData`. */
@@ -359,10 +363,12 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       borderWidth: 0,
       imagePosition: "top",
       mediaImage: null,
+      formMode: "none",
     },
     [
       "Button text must describe its action or destination.",
       "Give meaningful media a descriptive alt value and decorative media an empty alt value.",
+      "formMode \"waitlist\" renders an email-capture form instead of the link button; leave buttonUrl empty and use buttonText for the submit label.",
     ],
     {
       heading: "Ready to begin?",

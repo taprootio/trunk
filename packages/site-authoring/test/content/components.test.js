@@ -84,6 +84,7 @@ const COMPLETE = {
     borderWidth: 2,
     imagePosition: "left",
     mediaImage: null,
+    formMode: "none",
   },
   "testimonial": {
     items: [{ quote: "It worked.", authorName: "A. Rivera", authorTitle: "Member", authorImage: IMAGE }],
@@ -267,6 +268,22 @@ test("holds the CTA variant to the narrowed primary|danger vocabulary", async (t
       assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/variant"]);
     });
   }
+});
+
+test("holds the CTA formMode to none|waitlist (TR00890)", async (testContext) => {
+  for (const formMode of ["none", "waitlist"]) {
+    await testContext.test(`accepts ${formMode}`, () => {
+      assert.deepEqual(validate("cta", { ...COMPLETE["cta"], formMode }), []);
+    });
+  }
+  await testContext.test("defaults to none", () => {
+    assert.equal(getComponentDefinition("cta").defaultData.formMode, "none");
+  });
+  await testContext.test("refuses an unknown value", () => {
+    const errors = validate("cta", { ...COMPLETE["cta"], formMode: "email-capture" });
+    assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
+    assert.deepEqual(errors.map((error) => error.path), ["/attrs/componentData/formMode"]);
+  });
 });
 
 test("holds the image-banner height mode to the ratio|viewport vocabulary", async (testContext) => {

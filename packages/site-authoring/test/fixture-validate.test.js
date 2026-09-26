@@ -346,6 +346,38 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
   assert.match(result.stderr, /without credentials or mutation\.\n$/u);
 });
 
+// The app.taproot.io waitlist notice (TR00890, taproot-account-sign-up.ts's
+// renderWaitlistNotice) sends an uninvited visitor to the marketing site to
+// join the waitlist. Every page there must actually carry a working waitlist
+// form — a component:cta block in formMode "waitlist", not a plain link
+// button pointed at the invite-gated /create-account — or that notice is
+// a dead-end loop regardless of which page the visitor lands on. Hero-section
+// primary actions are deliberately excluded: TR00912 tracks giving those a
+// waitlist destination separately, so this check stays scoped to the one
+// component that notice depends on.
+test(
+  "every www.taproot.io fixture page's CTA component is a working waitlist form, not a link to the invite-gated sign-up page",
+  { skip: MONOREPO_ONLY },
+  async () => {
+    const pagesDirectory = path.join(TAPROOT_FIXTURE, "pages");
+    const pageFiles = (await readdir(pagesDirectory)).filter((name) => name.endsWith(".md"));
+    assert.ok(pageFiles.length >= 8, `expected at least 8 fixture pages, found ${pageFiles.length}`);
+
+    for (const file of pageFiles) {
+      const text = await readFile(path.join(pagesDirectory, file), "utf8");
+      const match = /```component:cta\n([\s\S]*?)\n```/u.exec(text);
+      assert.ok(match, `${file} has no component:cta block`);
+      const cta = JSON.parse(match[1]);
+      assert.equal(cta.formMode, "waitlist", `${file}'s CTA component is not formMode "waitlist"`);
+      assert.equal(
+        Object.hasOwn(cta, "buttonUrl"),
+        false,
+        `${file}'s CTA component still sets buttonUrl, which formMode "waitlist" ignores`,
+      );
+    }
+  },
+);
+
 test("validate drops the header-width hint once the workspace opts into the wide header", { skip: MONOREPO_ONLY }, async (context) => {
   // The www fixture owns this case: the hint needs a full-bleed root-band
   // component on a page, and the shipped fixture deliberately has none so its
