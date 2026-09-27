@@ -72,7 +72,8 @@ export interface RenderProseMirrorOptions {
   nodeRenderers?: {
     componentBlock?: (node: ProseMirrorNode) => string | undefined;
     taprootImage?: (node: ProseMirrorNode) => string | undefined;
-    rawHtml?: (html: string, node: ProseMirrorNode) => string | undefined;
+    /** Emits an adopted fragment's canonical bytes; without it the node renders nothing. */
+    integrationFragment?: (node: ProseMirrorNode) => string | undefined;
   };
   /** Records visible document-order content after each node is rendered. */
   onRenderedNode?: (node: ProseMirrorNode, html: string) => void;
@@ -130,16 +131,6 @@ function collectText(node: ProseMirrorNode, parts: string[]): void {
     return;
   }
 
-  // rawHtml is an intentional, already-sanitized node in the JSON document
-  // contract. It is not the retired outer HTML-body transport. Preserve its
-  // reader-visible text when a consumer (for example Recipe JSON-LD) needs a
-  // plain-text representation of the document.
-  if (node.type === "rawHtml") {
-    const html = stringAttr(node.attrs?.html);
-    if (html) parts.push(plainTextFromRawHtml(html));
-    return;
-  }
-
   for (const child of node.content ?? []) {
     collectText(child, parts);
   }
@@ -157,12 +148,6 @@ function isTextBlock(type: string): boolean {
     || type === "codeBlock"
     || type === "tableCell"
     || type === "tableHeader";
-}
-
-function plainTextFromRawHtml(html: string): string {
-  return html
-    .replace(/<(?:br\s*\/?|\/(?:p|div|li|h[1-6]|blockquote|pre|tr|table|section|article))\s*[^>]*>/giu, " ")
-    .replace(/<[^>]*>/gu, "");
 }
 
 type RenderPlacement = "root" | "section" | "nested";
@@ -294,10 +279,10 @@ function renderNode(
         placement === "root" ? "section" : "nested",
         compactFollowing,
       );
-    case "rawHtml": {
-      const html = stringAttr(node.attrs?.html) ?? "";
-      return options.nodeRenderers?.rawHtml?.(html, node) ?? html;
-    }
+    case "integrationFragment":
+      // Root only: a fragment nested in a section, list or quote is not one
+      // adoption wrote, so it renders nothing whatever hook is supplied.
+      return placement === "root" ? options.nodeRenderers?.integrationFragment?.(node) ?? "" : "";
     default:
       return renderNodes(node.content ?? [], options, "nested");
   }

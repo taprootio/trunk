@@ -49,12 +49,12 @@ const validTable = (attrs = {}) => ({
 const codesOf = (result) => result.errors.map((error) => error.code);
 const pathsOf = (result) => result.errors.map((error) => error.path);
 
-function assertValid(document, options) {
-  assert.deepEqual(validateDocument(document, options).errors, []);
+function assertValid(document) {
+  assert.deepEqual(validateDocument(document).errors, []);
 }
 
-function assertRejects(document, code, options) {
-  const result = validateDocument(document, options);
+function assertRejects(document, code) {
+  const result = validateDocument(document);
   assert.ok(
     codesOf(result).includes(code),
     `expected ${code}, got ${JSON.stringify(result.errors)}`,
@@ -1130,13 +1130,91 @@ test("enforces the editor's content model, not merely the renderer's tolerance",
   }
 });
 
-test("gates rawHtml on the caller opting in", () => {
-  const document = doc({ type: "rawHtml", attrs: { html: "<section>Hand written</section>" } });
-  const result = assertRejects(document, "content.raw_html_forbidden");
-  assert.deepEqual(pathsOf(result), ["/content/0"]);
-  assertValid(document, { allowRawHtml: true });
-  // The opt-in does not relax the attribute rules.
-  assertRejects(doc({ type: "rawHtml", attrs: {} }, paragraph("keep")), "content.attr_invalid", { allowRawHtml: true });
+test("refuses the retired rawHtml node by name, wherever it appears", () => {
+  const root = validateDocument(doc({ type: "rawHtml", attrs: { html: "<section>Hand written</section>" } }));
+  assert.deepEqual(codesOf(root), ["content.raw_html_forbidden", "content.empty_document"]);
+  assert.deepEqual(pathsOf(root), ["/content/0", ""]);
+  assert.match(root.errors[0].message, /'rawHtml' is a retired node type/u);
+
+  const nested = validateDocument(doc({
+    type: "blockquote",
+    content: [paragraph("keep"), { type: "rawHtml", attrs: { html: "<p>x</p>" } }],
+  }));
+  assert.deepEqual(codesOf(nested), ["content.raw_html_forbidden"]);
+  assert.deepEqual(pathsOf(nested), ["/content/0/content/1"]);
+});
+
+const FRAGMENT_IMAGE_A = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const FRAGMENT_IMAGE_B = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+function fragment(attrs = {}) {
+  return {
+    type: "integrationFragment",
+    attrs: { html: "<div class=\"adopted\"><p>Adopted</p></div>", imageIds: [FRAGMENT_IMAGE_A], ...attrs },
+  };
+}
+
+test("accepts an adopted integrationFragment at the document root", () => {
+  assertValid(doc(fragment()));
+  assertValid(doc(
+    paragraph("before"),
+    fragment({ imageIds: [] }),
+    fragment({ imageIds: [FRAGMENT_IMAGE_A, FRAGMENT_IMAGE_B] }),
+  ));
+});
+
+test("refuses an integrationFragment that adoption could not have written", async (testContext) => {
+  const cases = [
+    [
+      "missing html",
+      doc(paragraph("keep"), { type: "integrationFragment", attrs: { imageIds: [] } }),
+      "content.attr_invalid",
+    ],
+    ["empty html", doc(paragraph("keep"), fragment({ html: "" })), "content.attr_invalid"],
+    ["non-string html", doc(paragraph("keep"), fragment({ html: 7 })), "content.attr_invalid"],
+    [
+      "missing imageIds",
+      doc(paragraph("keep"), { type: "integrationFragment", attrs: { html: "<p>x</p>" } }),
+      "content.attr_invalid",
+    ],
+    [
+      "imageIds that is not an array",
+      doc(paragraph("keep"), fragment({ imageIds: FRAGMENT_IMAGE_A })),
+      "content.attr_invalid",
+    ],
+    [
+      "uppercase imageIds",
+      doc(paragraph("keep"), fragment({ imageIds: [FRAGMENT_IMAGE_A.toUpperCase()] })),
+      "content.attr_invalid",
+    ],
+    ["a non-UUID image id", doc(paragraph("keep"), fragment({ imageIds: ["hero"] })), "content.attr_invalid"],
+    [
+      "duplicate imageIds",
+      doc(paragraph("keep"), fragment({ imageIds: [FRAGMENT_IMAGE_A, FRAGMENT_IMAGE_A] })),
+      "content.attr_invalid",
+    ],
+    [
+      "imageIds out of ascending ordinal order",
+      doc(paragraph("keep"), fragment({ imageIds: [FRAGMENT_IMAGE_B, FRAGMENT_IMAGE_A] })),
+      "content.attr_invalid",
+    ],
+    ["an unknown attribute", doc(paragraph("keep"), fragment({ source: "wix" })), "content.attr_unknown"],
+    ["children", doc(paragraph("keep"), { ...fragment(), content: [paragraph("x")] }), "content.node_key"],
+    ["marks", doc(paragraph("keep"), { ...fragment(), marks: [{ type: "bold" }] }), "content.mark_misplaced"],
+    [
+      "nesting inside a section",
+      doc({ type: "section", attrs: {}, content: [fragment()] }, paragraph("keep")),
+      "content.child_not_allowed",
+    ],
+    [
+      "nesting inside a blockquote",
+      doc({ type: "blockquote", content: [paragraph("keep"), fragment()] }),
+      "content.child_not_allowed",
+    ],
+  ];
+  for (const [name, document, code] of cases) {
+    await testContext.test(name, () => assertRejects(document, code));
+  }
 });
 
 test("refuses the document shapes the server's IsPresent gate refuses", async (testContext) => {
@@ -1181,13 +1259,8 @@ test("names an empty body locally instead of letting the server say 'Body is req
     await testContext.test(`accepts ${name}`, () => assertValid(document));
   }
 
-  await testContext.test("raw HTML counts only when it has visible text", () => {
-    assertValid(doc({ type: "rawHtml", attrs: { html: "<p>Hello</p>" } }), { allowRawHtml: true });
-    assertRejects(doc({ type: "rawHtml", attrs: { html: "<br>" } }), "content.empty_document", { allowRawHtml: true });
-    assertRejects(doc({ type: "rawHtml", attrs: { html: "<p>&nbsp;</p>" } }), "content.empty_document", {
-      allowRawHtml: true,
-    });
-    assertValid(doc({ type: "rawHtml", attrs: { html: "<p>&amp;</p>" } }), { allowRawHtml: true });
+  await testContext.test("an adopted integration fragment counts as content on its own", () => {
+    assertValid(doc(fragment({ html: "<br>", imageIds: [] })));
   });
 });
 

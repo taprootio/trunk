@@ -63,7 +63,6 @@ import { whoami } from "./whoami.js";
  *   configPath,    // an explicit --config path, or undefined
  *   deployTarget,  // "staging" | "production" for `deploy`, else undefined
  *   quiet,         // --quiet; suppresses progress, never the JSON result
- *   allowRawHtml,  // --allow-raw-html; `pages push` only, false everywhere else
  *   keyName,       // --name; `login` only, undefined everywhere else
  *   onProgress,    // human progress sink (stderr, or a no-op when quiet)
  *   fetch,         // injectable fetch, for tests

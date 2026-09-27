@@ -27,7 +27,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.9" },
+    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
     verb,
   };
 }
@@ -290,7 +290,7 @@ test("usage faults exit 2 with stable codes", async (testContext) => {
     { arguments_: ["deploy", "--staging", "--production"], code: "cli.deploy_target" },
     { arguments_: ["deploy", "--staging", "--staging"], code: "cli.duplicate_option" },
     { arguments_: ["pull", "--allow-raw-html"], code: "cli.unknown_option" },
-    { arguments_: ["pages", "push", "--allow-raw-html", "--allow-raw-html"], code: "cli.duplicate_option" },
+    { arguments_: ["pages", "push", "--allow-raw-html"], code: "cli.unknown_option" },
     { arguments_: ["status", "stray-positional"], code: "cli.unexpected_argument" },
     { arguments_: ["approve", "blogpage"], code: "cli.unexpected_argument" },
     { arguments_: ["preview", "page"], code: "preview.page_selector_invalid" },
@@ -348,7 +348,7 @@ test("usage faults exit 2 with stable codes", async (testContext) => {
   }
 });
 
-test("threads the raw-html flag and verb positionals into the invocation", async (testContext) => {
+test("threads verb positionals into the invocation", async (testContext) => {
   const cases = [
     {
       arguments_: ["validate", "fixtures/taproot-www"],
@@ -357,16 +357,10 @@ test("threads the raw-html flag and verb positionals into the invocation", async
       label: "validate receives one scalar fixture directory",
     },
     {
-      arguments_: ["pages", "push", "--allow-raw-html"],
-      verb: "pages push",
-      expect: (invocation) => invocation.allowRawHtml === true,
-      label: "pages push --allow-raw-html",
-    },
-    {
       arguments_: ["pages", "push"],
       verb: "pages push",
-      expect: (invocation) => invocation.allowRawHtml === false,
-      label: "pages push defaults raw html off",
+      expect: (invocation) => invocation.pagePaths === undefined && !Object.hasOwn(invocation, "allowRawHtml"),
+      label: "pages push without positionals pushes the whole workspace",
     },
     {
       arguments_: ["media", "upload", "a.png", "assets/b.jpg"],
@@ -553,9 +547,8 @@ test("exposes help and version at the binary and verb levels", async (testContex
         assert.match(verbStdout.read(), /reused, shared, or bookmarked preview URL answers Not found/u);
       }
       if (verb === "pages push") {
-        assert.match(verbStdout.read(), /system 404 projection written by pull is read-only/u);
-        assert.match(verbStdout.read(), /changed, missing, or replacement source is refused before any page mutation/u);
         assert.match(verbStdout.read(), /taproot-site help page free-form/u);
+        assert.doesNotMatch(verbStdout.read(), /raw-html|read-only/u);
       }
       if (verb === "preview revoke") {
         assert.match(
@@ -589,7 +582,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.10.9\n");
+    assert.equal(versionStdout.read(), "0.11.0\n");
   }
 });
 
@@ -602,13 +595,8 @@ test("serves page and component reference help without configuration, credential
       arguments_: ["help", "page", "free-form"],
       match: /^Free-form page \(free-form\)/u,
       contains: [
-        "rejected by default",
-        "System page projections:",
-        "whole-workspace pages push verifies the hash and skips this file",
-        "Do not delete, replace, or edit this file",
-        "tracked .pm.json document only",
-        "taproot-site pages push --allow-raw-html",
-        "For .md, Inline HTML remains unsupported and is rejected even when --allow-raw-html is present",
+        "System pages: Home and 404 are ordinary editable pages.",
+        "integrationFragment: Adopted integration content: preserved or deleted, never authored.",
         "Semantic tables:",
         "Table: Drop-in rates",
         "content.markdown_table_alignment",
@@ -742,7 +730,7 @@ test("serves page and component reference help without configuration, credential
         "Required root fields: manifestVersion, siteId, pages, pagesTruncated, navigation, redirects, settings, "
         + "settingsSkipped, fixture.",
         "Optional root fields: pulledAt, deployments, appearance, footer",
-        "manifestVersion must be 6; fixture.contractVersion must be 1.",
+        "manifestVersion must be 7; fixture.contractVersion must be 1.",
         "workspaceMode editable",
         ".md is 'markdown', .pm.json is 'prosemirror'",
         "pages must declare at least one entry, pagesTruncated must be false, and settingsSkipped must be empty",
@@ -817,9 +805,9 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.10.9" },
+          cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
           verb: "help",
-          referenceVersion: 26,
+          referenceVersion: 27,
           topic: scenario.topic,
         },
       );

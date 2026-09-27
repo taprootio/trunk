@@ -550,8 +550,8 @@ The destination must be new, outside the source workspace, and its parent must e
 `taproot-site --config path/to/taproot-site.json validate --init ../authoring-fixture`
 to select another source configuration. Initialization needs no credential or
 network. It exports editable free-form pages as ProseMirror with navigation,
-redirects, settings, and version-6 appearance/footer metadata, validates the
-result, and leaves the source unchanged. Excluded metadata/read-only pages are
+redirects, settings, and version-7 appearance/footer metadata, validates the
+result, and leaves the source unchanged. Excluded metadata-only pages are
 counted; unresolved references to them fail validation.
 
 Exported UUIDs and HTTP(S) origins are deterministic fixture values under

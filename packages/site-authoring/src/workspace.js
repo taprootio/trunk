@@ -128,6 +128,10 @@ export function internalPageObservedRevisionFile(pageId) {
     : undefined;
 }
 
+// Version 7 tracks the system 404 as an ordinary editable page with a
+// baseline, like home; version 6 wrote it as a hash-checked read-only
+// projection that push and approve skipped.
+//
 // Version 6 records the site's own `baseline.revision` for every tracked page:
 // the opaque revision of the stored authoring state the site reported when this
 // workspace last agreed with it. Version 5 could only compare one pull's body
@@ -139,7 +143,7 @@ export function internalPageObservedRevisionFile(pageId) {
 // classified pulled files but recorded no registry. The package is in-repo and
 // its manifests are workspace state, so an older one is re-pulled rather than
 // migrated.
-export const MANIFEST_VERSION = 6;
+export const MANIFEST_VERSION = 7;
 
 /**
  * The shape of a page body revision as the site reports it: a scheme name and
@@ -240,10 +244,7 @@ function normalizeObservedDifferences(value) {
 
 export const PAGE_WORKSPACE_MODE_EDITABLE = "editable";
 export const PAGE_WORKSPACE_MODE_METADATA_ONLY = "metadata-only";
-export const PAGE_WORKSPACE_MODE_READ_ONLY = "read-only";
-export const PAGE_READ_ONLY_REASON_SYSTEM_404 = "system-404";
 export const SYSTEM_PAGE_NOT_FOUND_PATH = "404";
-export const SYSTEM_PAGE_NOT_FOUND_FILE = `${PAGES_DIRECTORY}/404.pm.json`;
 export const WORKSPACE_CONTENT_HASH = /^sha256:[0-9a-f]{64}$/u;
 // Bumped when the media manifest gained its `siteId` binding: a manifest
 // without one cannot be proved to belong to the site being written to, and the
@@ -273,7 +274,7 @@ export const WORKSPACE_LIMITS = Object.freeze({
   pagePathBytes: 512,
 });
 
-/** Hashes the exact bounded bytes pull wrote for a read-only projection. */
+/** Hashes the exact bounded bytes of a workspace source. */
 export function workspaceContentHash(bytes) {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
@@ -487,47 +488,6 @@ export function requireManifestSourceRegistry(registry) {
     }
   }
   return registry;
-}
-
-/**
- * Returns only the complete read-only projection shape that `pull` writes.
- *
- * A manifest is editable input, so a caller must not treat an arbitrary
- * `workspaceMode: read-only` as permission to omit a page from push or
- * approval. The live page identity is checked separately after listing the
- * site; this function proves only the deterministic on-disk half.
- */
-export function readOnlySystem404Projections(manifest) {
-  const projections = [];
-  for (const [index, entry] of manifest.pages.entries()) {
-    if (entry?.workspaceMode !== PAGE_WORKSPACE_MODE_READ_ONLY) continue;
-    const pagePath = normalizePagePath(entry.path);
-    if (
-      pagePath?.toLowerCase() !== SYSTEM_PAGE_NOT_FOUND_PATH
-      || entry.file !== SYSTEM_PAGE_NOT_FOUND_FILE
-      || typeof entry.pageId !== "string"
-      || entry.pageId.trim() === ""
-      || entry.readOnlyReason !== PAGE_READ_ONLY_REASON_SYSTEM_404
-      || typeof entry.workspaceContentHash !== "string"
-      || !WORKSPACE_CONTENT_HASH.test(entry.workspaceContentHash)
-    ) {
-      throw new SiteAuthoringError(
-        "workspace.manifest_invalid",
-        `The read-only page projection at pages[${index}] is not the complete system-404 shape written by pull. `
-          + "Run 'taproot-site pull' again.",
-        { field: `pages[${index}].workspaceMode` },
-      );
-    }
-    projections.push(entry);
-  }
-  if (projections.length > 1) {
-    throw new SiteAuthoringError(
-      "workspace.manifest_invalid",
-      "The manifest records more than one read-only system 404 projection. Run 'taproot-site pull' again.",
-      { field: "pages" },
-    );
-  }
-  return projections;
 }
 
 const WINDOWS_DEVICE_BASENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu;

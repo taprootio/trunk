@@ -664,7 +664,7 @@ function capabilityGatedFetch(verbName, fetchImpl) {
 
 function manifestFixture(pages, extra = {}) {
   return {
-    manifestVersion: 6,
+    manifestVersion: 7,
     siteId: SITE_ID,
     pulledAt: "2026-08-20T00:00:00.000Z",
     navigation: { file: "nav.json", items: 1 },
@@ -897,7 +897,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.deepEqual((await readWorkspaceJson(workspace, "nav.json")).navItems.length, 1);
 
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 6);
+  assert.equal(manifest.manifestVersion, 7);
   assert.equal(manifest.siteId, SITE_ID);
   assert.equal(manifest.pulledAt, new Date(1_700_000_000_000).toISOString());
   assert.deepEqual(
@@ -2840,7 +2840,7 @@ test("pull repairs a version-4 workspace that already tracks a Markdown source",
   assert.equal(result.pages.tracked, 1);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 6);
+  assert.equal(manifest.manifestVersion, 7);
   assert.equal(manifest.pages[0].file, "pages/about.md");
   assert.equal(manifest.pages[0].sourceFormat, "markdown");
 });
@@ -3421,7 +3421,7 @@ test("a version-5 manifest's superseded body hash does not refuse the pull that 
   assert.equal(migrated.pages.tracked, 1);
   assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 6);
+  assert.equal(manifest.manifestVersion, 7);
   // The migration pull establishes the revision baseline, which is what every
   // later pull compares instead of falling back to a hash again.
   assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
@@ -4122,7 +4122,7 @@ test("a long page title round-trips through pull and push unchanged", async (sit
   assert.equal(wire.matching("PATCH", PAGE_BY_ID)[0].body.title, longTitle);
 });
 
-test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four canonical drafts update", {
+test("TR00621 pull-to-push tracks the system 404 as an editable page beside four canonical drafts", {
   skip: MONOREPO_ONLY,
 }, async (site) => {
   const workspace = await fixture(site);
@@ -4150,7 +4150,7 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
       hasDraft: true,
     }),
   ];
-  const legacy404 = pageSummary({
+  const notFound = pageSummary({
     pageId: NOT_FOUND_PAGE_ID,
     path: "404",
     title: "Not found",
@@ -4158,7 +4158,7 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
     hasDraft: true,
     isGenerated: true,
   });
-  const livePages = [...ordinaryPages, legacy404];
+  const livePages = [...ordinaryPages, notFound];
   const wire = api([
     { method: "GET", pattern: PAGES_LIST, reply: { pages: livePages, nextPageToken: "" } },
     {
@@ -4167,20 +4167,7 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
       reply: (call) => {
         const pageId = call.pathname.split("/").pop();
         if (pageId === NOT_FOUND_PAGE_ID) {
-          return {
-            ...freeFormPageDetail(pageId, "unused"),
-            title: "Not found",
-            template: {
-              templateType: "TEMPLATE_TYPE_FREE_FORM",
-              templateVersion: "1.0",
-              freeFormData: {
-                body: {
-                  type: "doc",
-                  content: [{ type: "rawHtml", attrs: { html: "<h1>Nothing rooted here yet.</h1>" } }],
-                },
-              },
-            },
-          };
+          return { ...freeFormPageDetail(pageId, "Nothing rooted here yet."), title: "Not found" };
         }
         return freeFormPageDetail(pageId, `pulled body ${pageId}`);
       },
@@ -4191,48 +4178,33 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
   ]);
 
   const pulled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
-  assert.equal(pulled.pages.readOnly, 1);
+  assert.equal(Object.hasOwn(pulled.pages, "readOnly"), false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  const readOnly404 = manifest.pages.find((entry) => entry.pageId === NOT_FOUND_PAGE_ID);
+  const notFoundEntry = manifest.pages.find((entry) => entry.pageId === NOT_FOUND_PAGE_ID);
   assert.deepEqual(
-    {
-      file: readOnly404.file,
-      path: readOnly404.path,
-      workspaceMode: readOnly404.workspaceMode,
-      readOnlyReason: readOnly404.readOnlyReason,
-    },
-    {
-      file: "pages/404.pm.json",
-      path: "404",
-      workspaceMode: "read-only",
-      readOnlyReason: "system-404",
-    },
+    { file: notFoundEntry.file, path: notFoundEntry.path, workspaceMode: notFoundEntry.workspaceMode },
+    { file: "pages/404.pm.json", path: "404", workspaceMode: "editable" },
   );
-  assert.match(readOnly404.workspaceContentHash, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(notFoundEntry.baseline.sourceHash, /^sha256:[0-9a-f]{64}$/u);
+  assert.equal(Object.hasOwn(notFoundEntry, "readOnlyReason"), false);
+  assert.equal(Object.hasOwn(notFoundEntry, "workspaceContentHash"), false);
 
-  // The complete unchanged pull is executable: the legacy rawHtml projection
-  // is verified and skipped while the four ordinary files take their existing
-  // fresh live identities. This is the step that failed during TR00621.
+  // The complete unchanged pull is executable, and the 404 is sent back like
+  // home rather than verified and skipped.
   const unchanged = await pagesPush(
     invoke(workspace, wire, {
       verb: "pages push",
       content: REAL_CONTENT,
     }).invocation,
   );
-  assert.equal(unchanged.pages.updated, 4);
-  assert.equal(unchanged.pages.skippedReadOnly, 1);
-  assert.deepEqual(unchanged.pages.readOnlyItems, [{
-    file: "pages/404.pm.json",
-    path: "404",
-    pageId: NOT_FOUND_PAGE_ID,
-    reason: "system-404",
-  }]);
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).some((call) => call.body.pageId === NOT_FOUND_PAGE_ID), false);
+  assert.equal(unchanged.pages.updated, 5);
+  assert.equal(Object.hasOwn(unchanged.pages, "skippedReadOnly"), false);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).some((call) => call.body.pageId === NOT_FOUND_PAGE_ID), true);
 
-  // Reproduce the dogfood edit: replace only the four pulled editable sources
-  // with the checked-in Taproot-www Markdown fixture, then push the whole
-  // workspace again. The real converter and validator exercise tables,
-  // sections, inline facts, and component documents beside the unchanged 404.
+  // Reproduce the dogfood edit: replace the four ordinary pulled sources with
+  // the checked-in Taproot-www Markdown fixture and edit the 404 in place, then
+  // push the whole workspace again. The real converter and validator exercise
+  // tables, sections, inline facts, and component documents.
   const currentManifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   for (const pagePath of TAPROOT_WWW_PAGE_PATHS) {
     const entry = currentManifest.pages.find((candidate) => candidate.path === pagePath);
@@ -4242,6 +4214,10 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
       TAPROOT_WWW_PAGE_SOURCES[pagePath],
     );
   }
+  await writeFile(
+    workspacePath(workspace, "pages/404.pm.json"),
+    `${JSON.stringify(paragraphDocument("This page wandered off."), undefined, 2)}\n`,
+  );
   const styles = structuredClone(TAPROOT_WWW_STYLES);
   styles.entityId = SITE_ID;
   await writeFile(
@@ -4255,54 +4231,86 @@ test("TR00621 pull-to-push keeps a legacy raw-HTML 404 read-only while four cano
       content: REAL_CONTENT,
     }).invocation,
   );
-  assert.equal(dogfood.pages.updated, 4);
-  assert.equal(dogfood.pages.skippedReadOnly, 1);
+  assert.equal(dogfood.pages.updated, 5);
+  const dogfoodPatches = wire.matching("PATCH", PAGE_BY_ID).slice(-5);
   assert.deepEqual(
-    wire.matching("PATCH", PAGE_BY_ID).slice(-4).map((call) => call.body.path).sort(),
-    TAPROOT_WWW_PAGE_PATHS.slice().sort(),
+    dogfoodPatches.map((call) => call.body.path).sort(),
+    [...TAPROOT_WWW_PAGE_PATHS, "404"].sort(),
   );
+  const notFoundPatch = dogfoodPatches.find((call) => call.body.pageId === NOT_FOUND_PAGE_ID);
+  assert.match(JSON.stringify(notFoundPatch.body), /This page wandered off\./u);
   // Pull and both pushes each resolve the site's page list instead of trusting
   // fixture ids without a current site-bound lookup.
   assert.equal(wire.matching("GET", PAGES_LIST).length, 3);
+});
 
-  const readOnlySource = await readWorkspaceText(workspace, "pages/404.pm.json");
-  const mutationsBeforeRefusals = wire.matching("PATCH", PAGE_BY_ID).length;
-  await writeFile(workspacePath(workspace, "pages/404.pm.json"), `${readOnlySource} `);
-  await assert.rejects(
-    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) => error?.code === "pages.read_only_modified" && error?.field === "pages/404.pm.json",
-  );
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, mutationsBeforeRefusals);
-
-  await writeFile(workspacePath(workspace, "pages/404.pm.json"), readOnlySource);
-  const replacementManifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  replacementManifest.pages.push({
-    pageId: "00000000-0000-4000-8000-000000000099",
-    resourceId: "00000000-0000-4000-8000-000000000199",
-    path: "404",
-    title: "Replacement",
-    status: "PAGE_STATUS_DRAFT",
-    templateType: "TEMPLATE_TYPE_FREE_FORM",
-    hasDraft: true,
-    isGenerated: false,
-    file: "pages/replacement-404.pm.json",
+test("pull re-pulls a version-6 read-only 404 projection as an ordinary editable page", async (site) => {
+  // Version 6 wrote the system 404 as a hash-checked read-only projection with
+  // no baseline, holding the site's then-current rawHtml body. The owner has
+  // since converted the page on the site.
+  const retiredSource = {
+    type: "doc",
+    content: [{ type: "rawHtml", attrs: { html: "<p>Old stored markup</p>" } }],
+  };
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{
+      pageId: NOT_FOUND_PAGE_ID,
+      resourceId: resourceIdFor(NOT_FOUND_PAGE_ID),
+      path: "404",
+      title: "Not found",
+      description: "",
+      status: "PAGE_STATUS_PUBLISHED",
+      templateType: "TEMPLATE_TYPE_FREE_FORM",
+      file: "pages/404.pm.json",
+      workspaceMode: "read-only",
+      readOnlyReason: "system-404",
+      workspaceContentHash: `sha256:${"0".repeat(64)}`,
+    }], { manifestVersion: 6 }),
+    "pages/404.pm.json": `${JSON.stringify(retiredSource, undefined, 2)}\n`,
   });
-  await writeFile(
-    workspacePath(workspace, ".taproot-site-manifest.json"),
-    `${JSON.stringify(replacementManifest, undefined, 2)}\n`,
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PAGES_LIST,
+      reply: {
+        pages: [pageSummary({ pageId: NOT_FOUND_PAGE_ID, path: "404", title: "Not found", isGenerated: true })],
+        nextPageToken: "",
+      },
+    },
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: { ...freeFormPageDetail(NOT_FOUND_PAGE_ID, "Converted not-found body."), title: "Not found" },
+    },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ]);
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.manifestVersion, 7);
+  const entry = manifest.pages.find((candidate) => candidate.pageId === NOT_FOUND_PAGE_ID);
+  assert.equal(entry.file, "pages/404.pm.json");
+  assert.equal(entry.workspaceMode, "editable");
+  assert.equal(Object.hasOwn(entry, "readOnlyReason"), false);
+  assert.equal(Object.hasOwn(entry, "workspaceContentHash"), false);
+  assert.match(entry.baseline.sourceHash, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(entry.baseline.remoteHash, /^sha256:[0-9a-f]{64}$/u);
+  const pulledSource = await readWorkspaceJson(workspace, "pages/404.pm.json");
+  assert.match(JSON.stringify(pulledSource), /Converted not-found body\./u);
+  assert.doesNotMatch(JSON.stringify(pulledSource), /rawHtml/u);
+
+  // The next whole-workspace push sends the page like any other rather than
+  // refusing on the retired markup the author never touched.
+  const pushed = await pagesPush(
+    invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation,
   );
-  await writeFile(
-    workspacePath(workspace, "pages/replacement-404.pm.json"),
-    JSON.stringify({
-      type: "doc",
-      content: [{ type: "rawHtml", attrs: { html: "<aside>unsafe replacement</aside>" } }],
-    }),
-  );
-  await assert.rejects(
-    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) => error?.code === "pages.system_page_read_only" && error?.field === "pages/replacement-404.pm.json",
-  );
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, mutationsBeforeRefusals);
+  assert.equal(pushed.pages.updated, 1);
+  const patches = wire.matching("PATCH", PAGE_BY_ID);
+  assert.deepEqual(patches.map((call) => call.body.pageId), [NOT_FOUND_PAGE_ID]);
+  assert.match(JSON.stringify(patches[0].body), /Converted not-found body\./u);
 });
 
 // ---------------------------------------------------------------------------
@@ -4355,14 +4363,13 @@ test("pages push creates and updates from the workspace and round-trips the mani
 
   assert.equal(result.pages.created, 1);
   assert.equal(result.pages.updated, 1);
-  assert.equal(result.allowRawHtml, false);
+  assert.equal(Object.hasOwn(result, "allowRawHtml"), false);
   assert.equal(result.nextStep, "approve");
 
   // Every document is validated before the first mutation leaves the process:
   // the server checks a free-form body only for presence, so a half-validated
   // push would leave a half-broken site behind.
   assert.equal(content.calls.validate.length, 2);
-  assert.deepEqual(content.calls.validate[0].options, { allowRawHtml: false });
 
   const created = wire.matching("POST", PAGES_COLLECTION);
   assert.equal(created.length, 1);
@@ -4830,8 +4837,7 @@ test("a targeted push reports the whole-workspace mode when no path narrows it",
   assert.equal(result.pages.unresolved, undefined);
 });
 
-async function readOnly404Fixture(site, extra = {}) {
-  const body = `${JSON.stringify(paragraphDocument("system 404"), undefined, 2)}\n`;
+test("a selection may name the system 404, which pushes like any tracked page", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([
       trackedAboutEntry(),
@@ -4844,20 +4850,12 @@ async function readOnly404Fixture(site, extra = {}) {
         templateType: "TEMPLATE_TYPE_FREE_FORM",
         file: "pages/404.pm.json",
         sourceFormat: "prosemirror",
-        workspaceMode: "read-only",
-        readOnlyReason: "system-404",
-        workspaceContentHash: workspaceContentHash(Buffer.from(body, "utf8")),
+        workspaceMode: "editable",
       },
     ]),
-    "pages/404.pm.json": body,
+    "pages/404.pm.json": `${JSON.stringify(paragraphDocument("system 404"), undefined, 2)}\n`,
     "pages/about.md": ABOUT_MARKDOWN,
-    ...extra,
   });
-  return { workspace, body };
-}
-
-test("a selection may not name the read-only 404, and an edited one blocks only the whole-workspace push", async (site) => {
-  const { workspace, body } = await readOnly404Fixture(site);
   const wire = api(pushRoutes({
     live: [
       pageSummary({ pageId: ABOUT_PAGE_ID, path: "about", title: "About us" }),
@@ -4865,29 +4863,14 @@ test("a selection may not name the read-only 404, and an edited one blocks only 
     ],
   }));
 
-  await assert.rejects(
-    pagesPush(
-      invoke(workspace, wire, { verb: "pages push", pagePaths: ["404"], content: contentStub().module }).invocation,
-    ),
-    (error) => error?.code === "pages.page_read_only" && error?.field === "404",
-  );
-  assert.equal(wire.calls.length, 0);
-
-  // An edited projection is a real refusal for the command that would verify
-  // and skip it. A push of a different page never sends the 404 at all, so it
-  // is not the command that has to notice.
-  await writeFile(workspacePath(workspace, "pages/404.pm.json"), `${body} `);
-  await assert.rejects(
-    pagesPush(invoke(workspace, wire, { verb: "pages push", content: contentStub().module }).invocation),
-    (error) => error?.code === "pages.read_only_modified" && error?.field === "pages/404.pm.json",
-  );
-
   const result = await pagesPush(
-    invoke(workspace, wire, { verb: "pages push", pagePaths: ["about"], content: contentStub().module }).invocation,
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["404"], content: contentStub().module }).invocation,
   );
+
   assert.equal(result.pages.updated, 1);
-  assert.equal(result.pages.skippedReadOnly, 0);
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).every((call) => call.body.pageId === ABOUT_PAGE_ID), true);
+  const patches = wire.matching("PATCH", PAGE_BY_ID);
+  assert.deepEqual(patches.map((call) => [call.body.pageId, call.body.path]), [[NOT_FOUND_PAGE_ID, "404"]]);
+  assert.match(JSON.stringify(patches[0].body), /system 404/u);
 });
 
 test("a selection does not soften the workspace's ownership or containment guards", async (testContext) => {
@@ -5120,59 +5103,6 @@ test("pages push keeps the seeded system pages update-only with immutable paths"
   });
 });
 
-test("pages push never honors a read-only marker on an ordinary authored page", async (site) => {
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([{
-      pageId: ABOUT_PAGE_ID,
-      path: "about",
-      title: "About",
-      templateType: "TEMPLATE_TYPE_FREE_FORM",
-      file: "pages/about.pm.json",
-      workspaceMode: "read-only",
-      readOnlyReason: "system-404",
-      workspaceContentHash: `sha256:${"a".repeat(64)}`,
-    }]),
-    "pages/about.pm.json": paragraphDocument("Authored page"),
-  });
-  const wire = api(pushRoutes({ live: [pageSummary()] }));
-
-  await assert.rejects(
-    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) =>
-      error?.code === "workspace.manifest_invalid"
-      && error?.field === "pages[0].workspaceMode",
-  );
-  assert.equal(wire.calls.length, 0);
-});
-
-test("pages push verifies a marker-shaped projection against the live system 404 identity", async (site) => {
-  const body = paragraphDocument("Authored page");
-  const source = `${JSON.stringify(body, undefined, 2)}\n`;
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([{
-      pageId: ABOUT_PAGE_ID,
-      path: "404",
-      title: "Not found",
-      templateType: "TEMPLATE_TYPE_FREE_FORM",
-      file: "pages/404.pm.json",
-      workspaceMode: "read-only",
-      readOnlyReason: "system-404",
-      workspaceContentHash: workspaceContentHash(Buffer.from(source, "utf8")),
-    }]),
-    "pages/404.pm.json": source,
-  });
-  const wire = api(pushRoutes({ live: [pageSummary()] }));
-
-  await assert.rejects(
-    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
-    (error) =>
-      error?.code === "workspace.manifest_invalid"
-      && error?.field === "pages[0].pageId",
-  );
-  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
-});
-
 test("pages push refuses to change a page's immutable template type", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([
@@ -5295,25 +5225,7 @@ test("pages push requires the staged styles snapshot when a section names a cont
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
 });
 
-test("pages push only permits rawHtml when the caller explicitly asks for it", async (site) => {
-  for (const allowRawHtml of [undefined, true]) {
-    const workspace = await fixture(site, PUSH_WORKSPACE);
-    const wire = api(pushRoutes());
-    const content = contentStub();
-    const { invocation } = invoke(workspace, wire, {
-      verb: "pages push",
-      content: content.module,
-      ...(allowRawHtml === undefined ? {} : { allowRawHtml }),
-    });
-    const result = await pagesPush(invocation);
-    assert.equal(result.allowRawHtml, allowRawHtml === true);
-    for (const call of content.calls.validate) {
-      assert.deepEqual(call.options, { allowRawHtml: allowRawHtml === true });
-    }
-  }
-});
-
-test("authored rawHtml keeps a stable human and JSON refusal before any page mutation", async (site) => {
+test("a retired rawHtml node keeps a stable human and JSON refusal before any page mutation", async (site) => {
   const file = "pages/about.pm.json";
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([{
@@ -6861,9 +6773,7 @@ test("approve stages only the drafts this workspace owns and says it did not dep
         status: "PAGE_STATUS_DRAFT",
         hasDraft: true,
         file: "pages/404.pm.json",
-        workspaceMode: "read-only",
-        readOnlyReason: "system-404",
-        workspaceContentHash: `sha256:${"a".repeat(64)}`,
+        workspaceMode: "editable",
       },
     ]),
   });
@@ -6877,8 +6787,8 @@ test("approve stages only the drafts this workspace owns and says it did not dep
           // A draft an owner is editing in the browser: not in the manifest, so
           // an agent's approve must not sweep it into the next deployment.
           pageSummary({ pageId: STORY_PAGE_ID, path: "story", status: "PAGE_STATUS_DRAFT", hasDraft: true }),
-          // Pull records the system 404 for visibility, but its read-only mode
-          // keeps an agent's ordinary approve step from staging that draft.
+          // The system 404 is an ordinary tracked page, so its draft is staged
+          // like any other the workspace owns.
           pageSummary({ pageId: NOT_FOUND_PAGE_ID, path: "404", status: "PAGE_STATUS_DRAFT", hasDraft: true }),
           pageSummary({ pageId: HOME_PAGE_ID, path: "", hasDraft: false }),
         ],
@@ -6898,55 +6808,14 @@ test("approve stages only the drafts this workspace owns and says it did not dep
   const { invocation, progress } = invoke(workspace, wire, { verb: "approve" });
   const result = await approve(invocation);
 
-  assert.deepEqual(wire.matching("POST", PUBLISH_DRAFTS)[0].body, { pageIds: [ABOUT_PAGE_ID] });
-  assert.equal(result.approved.total, 1);
+  assert.deepEqual(wire.matching("POST", PUBLISH_DRAFTS)[0].body, { pageIds: [ABOUT_PAGE_ID, NOT_FOUND_PAGE_ID] });
+  assert.equal(result.approved.total, 2);
   assert.equal(result.stagedNotDeployed, true);
   assert.equal(result.nextStep, "deploy --staging");
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.pages[0].status, "PAGE_STATUS_APPROVED");
   assert.equal(manifest.pages[0].pendingApproval, false);
   assert.ok(progress.some((line) => line.includes("Nothing is published until")));
-
-  await assert.rejects(
-    approve(invoke(workspace, wire, { verb: "approve", pagePaths: ["404"] }).invocation),
-    (error) => error?.code === "approve.page_read_only" && error?.field === "404",
-  );
-  assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 1);
-});
-
-test("approve verifies a marker-shaped projection against the live system 404 identity", async (site) => {
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([{
-      pageId: ABOUT_PAGE_ID,
-      path: "404",
-      title: "Not found",
-      status: "PAGE_STATUS_DRAFT",
-      hasDraft: true,
-      templateType: "TEMPLATE_TYPE_FREE_FORM",
-      file: "pages/404.pm.json",
-      workspaceMode: "read-only",
-      readOnlyReason: "system-404",
-      workspaceContentHash: `sha256:${"a".repeat(64)}`,
-    }]),
-  });
-  const wire = api([
-    {
-      method: "GET",
-      pattern: PAGES_LIST,
-      reply: {
-        pages: [pageSummary({ status: "PAGE_STATUS_DRAFT", hasDraft: true })],
-        nextPageToken: "",
-      },
-    },
-  ]);
-
-  await assert.rejects(
-    approve(invoke(workspace, wire, { verb: "approve" }).invocation),
-    (error) =>
-      error?.code === "workspace.manifest_invalid"
-      && error?.field === "pages[0].pageId",
-  );
-  assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 0);
 });
 
 test("approve narrows to the page paths it was given", async (testContext) => {
@@ -7493,7 +7362,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.9" },
+    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7929,7 +7798,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.10.9" },
+    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

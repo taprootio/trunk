@@ -65,7 +65,7 @@ async function invoke(cwd, args) {
   return { exit, result: JSON.parse(stdout), stderr };
 }
 
-test("init exports a self-contained version-6 fixture, remaps identities and origins, and preserves its source", async (t) => {
+test("init exports a self-contained version-7 fixture, remaps identities and origins, and preserves its source", async (t) => {
   const { source, manifest } = await sourceWorkspace(t);
   const before = await readFile(path.join(source, ".taproot-site-manifest.json"), "utf8");
   const initialized = await invoke(source, ["validate", "--init", "../output"]);
@@ -75,7 +75,7 @@ test("init exports a self-contained version-6 fixture, remaps identities and ori
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.result.validated.pages.total, 2);
   const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
-  assert.equal(fixture.manifestVersion, 6);
+  assert.equal(fixture.manifestVersion, 7);
   assert.ok(fixture.appearance && fixture.footer);
   assert.notEqual(fixture.siteId, manifest.siteId);
   assert.ok(fixture.fixture.deliveryOrigins.every((origin) => new URL(origin).hostname.endsWith(".example.test")));

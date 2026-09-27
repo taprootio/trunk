@@ -503,7 +503,7 @@ test("the canonical SHY composition document executes through the same quiet off
 test("offline failures retain the push validators' stable code and field", async (context) => {
   const cases = [
     {
-      label: "page raw HTML",
+      label: "page retired rawHtml node",
       mutate: async (fixture) => {
         const manifestPath = path.join(fixture, "manifest.fixture.json");
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));

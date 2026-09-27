@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { COMPONENT_TYPES } from "../../src/content/components.js";
 import { FREE_FORM_SECTION_REGISTRY } from "../../src/content/free-form-sections.js";
 import { NODE_RULES } from "../../src/content/validate-document.js";
-import { MARK_TYPES, NODE_TYPES } from "../../src/content/vocabulary.js";
+import { MARK_TYPES, NODE_TYPES, RETIRED_NODE_TYPES } from "../../src/content/vocabulary.js";
 import { MONOREPO_ONLY, MONOREPO_ROOT } from "../monorepo.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -99,6 +99,15 @@ test("the accepted mark vocabulary is exactly what the renderer switches on", ()
 
 test("every accepted node has a validation rule, and no rule invents a node", () => {
   assert.deepEqual(Object.keys(NODE_RULES).sort(), [...NODE_TYPES].sort());
+});
+
+test("no retired node name is accepted or given a validation rule", () => {
+  assert.deepEqual(RETIRED_NODE_TYPES, FREE_FORM_SECTION_REGISTRY.retiredNodeTypes);
+  assert.ok(RETIRED_NODE_TYPES.includes("rawHtml"));
+  for (const type of RETIRED_NODE_TYPES) {
+    assert.equal(NODE_TYPES.includes(type), false, `${type} is retired but still in NODE_TYPES`);
+    assert.equal(Object.hasOwn(NODE_RULES, type), false, `${type} is retired but still has a rule`);
+  }
 });
 
 test("the component types are exactly the registry's built-in templates", { skip: MONOREPO_ONLY }, () => {

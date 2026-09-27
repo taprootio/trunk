@@ -1,20 +1,8 @@
-import {
-  listSitePages,
-  PAGE_STATUS_DELETED,
-  publishDrafts,
-  TEMPLATE_TYPE_FREE_FORM,
-  withRefusalGuidance,
-} from "../api.js";
+import { listSitePages, PAGE_STATUS_DELETED, publishDrafts, withRefusalGuidance } from "../api.js";
 import { VERB_APPROVE } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import {
-  normalizePagePath,
-  readManifest,
-  readOnlySystem404Projections,
-  SYSTEM_PAGE_NOT_FOUND_PATH,
-  writeManifest,
-} from "../workspace.js";
+import { normalizePagePath, readManifest, writeManifest } from "../workspace.js";
 
 /**
  * `approve` — publish the site's drafts.
@@ -46,7 +34,6 @@ export async function approve(invocation) {
   const manifestByPageId = new Map(
     manifest.pages.filter((entry) => typeof entry?.pageId === "string").map((entry) => [entry.pageId, entry]),
   );
-  const readOnlyProjections = readOnlySystem404Projections(manifest);
 
   // Positional arguments narrow the selection to those page paths; `cli.js`
   // hands them over as `pagePaths`, and a programmatic caller can supply the
@@ -84,41 +71,10 @@ export async function approve(invocation) {
         { field: "pages" },
       );
     }
-    const pagesById = new Map(pages.map((summary) => [summary.pageId, summary]));
-    for (const projection of readOnlyProjections) {
-      const summary = pagesById.get(projection.pageId);
-      if (
-        summary?.status === PAGE_STATUS_DELETED
-        || normalizePagePath(summary?.path)?.toLowerCase() !== SYSTEM_PAGE_NOT_FOUND_PATH
-        || summary?.templateType !== TEMPLATE_TYPE_FREE_FORM
-      ) {
-        const index = manifest.pages.indexOf(projection);
-        throw new SiteAuthoringError(
-          "workspace.manifest_invalid",
-          `The read-only page projection at pages[${index}] does not identify the live free-form system 404. `
-            + "Nothing was approved; run 'taproot-site pull' again.",
-          { field: `pages[${index}].pageId` },
-        );
-      }
-    }
-    const readOnlyPageIds = new Set(readOnlyProjections.map((entry) => entry.pageId));
-    if (requestedPaths !== undefined) {
-      const requestedReadOnly = readOnlyProjections.find((entry) =>
-        requestedPaths.has(normalizePagePath(entry.path) ?? entry.path));
-      if (requestedReadOnly !== undefined) {
-        const pagePath = normalizePagePath(requestedReadOnly.path) ?? requestedReadOnly.path;
-        throw new SiteAuthoringError(
-          "approve.page_read_only",
-          `Page path '${pagePath}' is the pulled read-only system 404 projection and cannot be approved.`,
-          { field: pagePath },
-        );
-      }
-    }
     const candidates = pages.filter((summary) =>
       summary.status !== PAGE_STATUS_DELETED
       && summary.hasDraft
       && manifestByPageId.has(summary.pageId)
-      && !readOnlyPageIds.has(summary.pageId)
       && (requestedPaths === undefined || requestedPaths.has(normalizePagePath(summary.path) ?? summary.path)));
 
     if (requestedPaths !== undefined) {

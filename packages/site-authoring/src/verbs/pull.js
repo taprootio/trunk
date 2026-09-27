@@ -46,12 +46,10 @@ import {
   NAVIGATION_FILE_NAME,
   normalizePageBodyRevision,
   normalizePagePath,
-  PAGE_READ_ONLY_REASON_SYSTEM_404,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_SOURCE_FORMAT_MARKDOWN,
   PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_METADATA_ONLY,
-  PAGE_WORKSPACE_MODE_READ_ONLY,
   PAGES_DIRECTORY,
   pageSourceFormat,
   pageSourceRegistry,
@@ -59,7 +57,6 @@ import {
   readWorkspaceFile,
   readWorkspaceJson,
   SETTINGS_DIRECTORY,
-  SYSTEM_PAGE_NOT_FOUND_PATH,
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
   workspaceContentHash,
@@ -117,10 +114,6 @@ const APPEARANCE_SETTINGS_TYPES = Object.freeze([
   SETTINGS_TYPE_BRAND,
   SETTINGS_TYPE_SITE_HEADER,
 ]);
-
-function isSystemNotFound(pagePath) {
-  return normalizePagePath(pagePath)?.toLowerCase() === SYSTEM_PAGE_NOT_FOUND_PATH;
-}
 
 /**
  * The refusal for a remote body this workspace cannot represent.
@@ -342,11 +335,6 @@ function assignPageFiles(pages, tracked) {
 async function resolveTrackedSources(workspaceDir, pages, registry, onProgress) {
   const tracked = new Map();
   for (const summary of pages) {
-    // The system 404 is never authored locally: pull owns its bytes and
-    // records their hash, and every other verb refuses to send them back.
-    // Tracking it would offer to keep local edits to a file whose whole
-    // contract is that local edits are a refusal.
-    if (isSystemNotFound(summary.path)) continue;
     const entry = registry.get(summary.pageId);
     if (entry === undefined) continue;
     // One file cannot be two pages' source. Keeping either entry would hash
@@ -412,8 +400,29 @@ async function readSourceRegistry(workspaceDir, siteId) {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || parsed.siteId !== siteId) {
     return new Map();
   }
-  const registry = pageSourceRegistry(parsed);
+  const registry = pageSourceRegistry(withoutRetiredReadOnlyProjections(parsed));
   return parsed.manifestVersion === MANIFEST_VERSION ? registry : withoutSupersededRemoteHashes(registry);
+}
+
+/**
+ * Drops every page entry a version-6 manifest recorded as the retired
+ * `workspaceMode: "read-only"` system-404 projection.
+ *
+ * That entry carries a file but no baseline, and push skipped it, so its bytes
+ * are the site's old `rawHtml` body rather than anything the author wrote.
+ * Tracking it would keep those bytes as local work: once the owner converts the
+ * 404 on the site, this pull would neither refresh nor conflict on it, and the
+ * next whole-workspace push would refuse with `content.raw_html_forbidden` on
+ * a page the author never touched. Forgetting the entry sends the page through
+ * the ordinary fresh pull instead, which overwrites the file with the site's
+ * body and records a baseline.
+ */
+function withoutRetiredReadOnlyProjections(manifest) {
+  if (!Array.isArray(manifest.pages)) return manifest;
+  return {
+    ...manifest,
+    pages: manifest.pages.filter((entry) => entry?.workspaceMode !== "read-only"),
+  };
 }
 
 /**
@@ -1031,23 +1040,14 @@ export async function pull(invocation) {
         } else {
           entry.file = pageFiles.get(summary.pageId);
           const source = Buffer.from(`${JSON.stringify(body, undefined, 2)}\n`, "utf8");
-          if (isSystemNotFound(summary.path)) {
-            entry.workspaceMode = PAGE_WORKSPACE_MODE_READ_ONLY;
-            entry.readOnlyReason = PAGE_READ_ONLY_REASON_SYSTEM_404;
-            entry.workspaceContentHash = workspaceContentHash(source);
-            onProgress(
-              `Page '${summary.path}' is the system 404; writing an integrity-checked read-only projection.`,
-            );
-          } else {
-            entry.workspaceMode = PAGE_WORKSPACE_MODE_EDITABLE;
-            entry.sourceFormat = pageSourceFormat(entry.file);
-            const revision = normalizePageBodyRevision(page.bodyRevision);
-            entry.baseline = {
-              remoteHash: canonicalDocumentHash(body),
-              sourceHash: workspaceContentHash(source),
-              ...(revision === undefined ? {} : { revision }),
-            };
-          }
+          entry.workspaceMode = PAGE_WORKSPACE_MODE_EDITABLE;
+          entry.sourceFormat = pageSourceFormat(entry.file);
+          const revision = normalizePageBodyRevision(page.bodyRevision);
+          entry.baseline = {
+            remoteHash: canonicalDocumentHash(body),
+            sourceHash: workspaceContentHash(source),
+            ...(revision === undefined ? {} : { revision }),
+          };
           await writeWorkspaceFile(config.workspaceDir, entry.file, source);
           bodies += 1;
           const baselineFile = internalPageBaselineFile(summary.pageId);
@@ -1132,7 +1132,6 @@ export async function pull(invocation) {
         // Markdown page to survive the pull can assert on it.
         tracked: tracked.size,
         revisionsRecordedWithoutBodyComparison,
-        readOnly: manifestPages.filter((entry) => entry.workspaceMode === PAGE_WORKSPACE_MODE_READ_ONLY).length,
         truncated,
         items: reported.items,
         ...(reported.truncated ? { itemsTruncated: true } : {}),

@@ -39,10 +39,8 @@ import {
   INTERNAL_PAGE_BASELINE_DIRECTORY,
   MANIFEST_VERSION,
   NAVIGATION_FILE_NAME,
-  PAGE_READ_ONLY_REASON_SYSTEM_404,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_WORKSPACE_MODE_EDITABLE,
-  PAGE_WORKSPACE_MODE_READ_ONLY,
   PAGES_DIRECTORY,
   pageSourceFormat,
   SETTINGS_DIRECTORY,
@@ -51,7 +49,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 26;
+export const REFERENCE_VERSION = 27;
 export const PAGE_TYPES = Object.freeze(["free-form"]);
 
 function deepFreeze(value) {
@@ -716,9 +714,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "with no duplicates. Fixtures are copied and shipped, so a real delivery host in one would be a live "
       + "reference in every copy.",
       "validate reads the fixture and writes nothing to it. Copy the directory somewhere writable before editing it.",
-      "validate --init <new-directory> exports the current pulled workspace as a validated version-6 fixture with "
+      "validate --init <new-directory> exports the current pulled workspace as a validated version-7 fixture with "
       + "appearance and footer metadata. Run from the workspace or its configured project; --config may select the source.",
-      "Initialization keeps editable free-form pages as ProseMirror sources and reports excluded metadata/read-only pages. "
+      "Initialization keeps editable free-form pages as ProseMirror sources and reports excluded metadata-only pages. "
       + "References to excluded pages must be resolved before the fixture can validate. It never copies credentials, "
       + "internal reconciliation state, or deployment receipts. UUIDs and HTTP(S) origins are replaced with deterministic "
       + "fixture identities and example.test origins; URL credentials, queries and fragments are removed. Authored prose is retained.",
@@ -1315,26 +1313,9 @@ const FREE_FORM_REFERENCE = Object.freeze({
           "Read from .taproot-site-manifest.json at the workspace root; the document file contains only the ProseMirror root.",
       }),
     ]),
-    systemPages: Object.freeze([
-      Object.freeze({
-        path: SYSTEM_PAGE_NOT_FOUND_PATH,
-        mode: PAGE_WORKSPACE_MODE_READ_ONLY,
-        reason: PAGE_READ_ONLY_REASON_SYSTEM_404,
-        projection:
-          "pull writes the exact stored ProseMirror body and records its SHA-256 in .taproot-site-manifest.json",
-        unchangedPush: "A whole-workspace pages push verifies the hash and skips this file without updating the page.",
-        approval:
-          "An unscoped approve excludes this projection even when the live system page carries a draft; naming it explicitly is refused.",
-        modifiedError: "pages.read_only_modified",
-        missingError: "pages.read_only_missing",
-        replacementError: "pages.system_page_read_only",
-        scopedPushError: "pages.page_read_only",
-        scopedApprovalError: "approve.page_read_only",
-        guidance:
-          "Do not delete, replace, or edit this file. Run pull to restore it; author the system 404 through an owner-controlled surface.",
-      }),
-    ]),
-    systemHome: "The pulled home page remains an ordinary editable page.",
+    systemPages:
+      `Home and ${SYSTEM_PAGE_NOT_FOUND_PATH} are ordinary editable pages. Taproot seeds both, so they are update-only `
+      + "and their paths are immutable.",
   }),
   document: Object.freeze({
     root: Object.freeze({ type: "doc", content: "array of supported block nodes" }),
@@ -1369,19 +1350,9 @@ const FREE_FORM_REFERENCE = Object.freeze({
     }),
     tableNode: TABLE_REFERENCE,
     inlineFactsNode: INLINE_FACTS_REFERENCE,
-    rawHtml: Object.freeze({
-      default: "rejected",
-      trackedProseMirror: Object.freeze({
-        format: ".pm.json",
-        optIn: `${CLI_BINARY_NAME} pages push --allow-raw-html`,
-        behavior: "The flag permits explicit rawHtml nodes only in a tracked ProseMirror document.",
-      }),
-      markdown: Object.freeze({
-        format: ".md",
-        supported: false,
-        behavior: "Inline HTML remains unsupported and is rejected even when --allow-raw-html is present.",
-      }),
-      warning: "rawHtml renders verbatim and unsanitized; use it only for trusted hand-written markup.",
+    integrationFragmentNode: Object.freeze({
+      type: "integrationFragment",
+      note: "Adopted integration content: preserved or deleted, never authored.",
     }),
   }),
   sections: Object.freeze({
@@ -1592,13 +1563,7 @@ export function formatReferenceResult(result) {
         page.workspace.formats.map((format) => `  ${format.extension.padEnd(9)} ${format.purpose}`).join("\n")
       }\n\nOne source per page:\n  rule                  ${sourceRule.rule}\n  manifest fields       ${
         sourceRule.manifestFields.join(", ")
-      }\n  pull                  ${sourceRule.pull}\n  internal state        ${sourceRule.internalState}\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${sourceRule.renamedSource} (${sourceRule.renamedSourceError})\n  conflicts             ${sourceRule.conflict} (${sourceRule.conflictError})\n  conflict detail       ${sourceRule.conflictDetail}\n  push conflicts        ${sourceRule.pushConflict} (${sourceRule.pushConflictError})\n  revision              ${sourceRule.revisionSource}\n  recovery              ${sourceRule.conflictRecovery}\n  push selection        ${sourceRule.pushSelection}\n\nSystem page projections:\n${
-        page.workspace.systemPages.map((systemPage) =>
-          `  ${systemPage.path.padEnd(9)} ${systemPage.mode}; ${systemPage.projection}.\n${
-            " ".repeat(12)
-          }${systemPage.unchangedPush} ${systemPage.approval}\n${" ".repeat(12)}${systemPage.guidance}`
-        ).join("\n")
-      }\n  home      editable; ${page.workspace.systemHome}\n\nMarkdown front matter:\n${
+      }\n  pull                  ${sourceRule.pull}\n  internal state        ${sourceRule.internalState}\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${sourceRule.renamedSource} (${sourceRule.renamedSourceError})\n  conflicts             ${sourceRule.conflict} (${sourceRule.conflictError})\n  conflict detail       ${sourceRule.conflictDetail}\n  push conflicts        ${sourceRule.pushConflict} (${sourceRule.pushConflictError})\n  revision              ${sourceRule.revisionSource}\n  recovery              ${sourceRule.conflictRecovery}\n  push selection        ${sourceRule.pushSelection}\n\nSystem pages: ${page.workspace.systemPages}\n\nMarkdown front matter:\n${
         markdownFormat.metadata.map(formatMetadata).join("\n")
       }\n\nDocument root: { "type": "doc", "content": [...] }\nSupported nodes: ${
         page.document.nodes.join(", ")
@@ -1633,7 +1598,7 @@ export function formatReferenceResult(result) {
         page.inlineFacts.attrs.items.itemFieldOrder.join(", ")
       } order\n  value                 ${page.inlineFacts.valuePolicy}\n  label                 ${page.inlineFacts.labelPolicy}\n  url                   ${page.inlineFacts.urlPolicy}\n  Markdown              fenced ${page.inlineFacts.markdown.fence} block whose body is a JSON array\n\nInline-facts Markdown example:\n${page.inlineFacts.markdown.example}\n\nDirect ProseMirror inlineFacts example:\n${
         JSON.stringify(page.inlineFacts.examples.proseMirror, null, 2)
-      }\n\nRaw HTML: ${page.document.rawHtml.default} by default. For a tracked ${page.document.rawHtml.trackedProseMirror.format} document only: ${page.document.rawHtml.trackedProseMirror.behavior} Opt in with ${page.document.rawHtml.trackedProseMirror.optIn}. For ${page.document.rawHtml.markdown.format}, ${page.document.rawHtml.markdown.behavior} ${page.document.rawHtml.warning}\n\nComponents:\n${
+      }\n\n${page.document.integrationFragmentNode.type}: ${page.document.integrationFragmentNode.note}\n\nComponents:\n${
         page.components.map((component) => `  ${component.type.padEnd(16)} ${component.summary}`).join("\n")
       }\n\nWorkflow:\n${
         page.workflow.map((step) => `  ${step.command}: ${step.result}`).join("\n")

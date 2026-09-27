@@ -50,9 +50,9 @@ export const NODE_TYPES = Object.freeze([
   "taprootImage",
   "componentBlock",
   "integrationPlacement",
+  "integrationFragment",
   "section",
   freeFormSectionRegistry.inlineFacts.nodeType,
-  "rawHtml",
   freeFormSectionRegistry.table.nodeTypes.table,
   freeFormSectionRegistry.table.nodeTypes.row,
   freeFormSectionRegistry.table.nodeTypes.header,
@@ -72,6 +72,12 @@ export const MARK_TYPES = Object.freeze([
 
 export const NODE_TYPE_SET = Object.freeze(new Set(NODE_TYPES));
 export const MARK_TYPE_SET = Object.freeze(new Set(MARK_TYPES));
+
+// Node names the contract has retired. Each is refused by name rather than
+// reported as unknown, so an old document gets a pointed answer instead of a
+// generic one, and the parity test keeps every name out of NODE_TYPES.
+export const RETIRED_NODE_TYPES = Object.freeze([...freeFormSectionRegistry.retiredNodeTypes]);
+export const RETIRED_NODE_TYPE_SET = Object.freeze(new Set(RETIRED_NODE_TYPES));
 
 /**
  * Every code this module emits. They are wire identities an agent branches on,
@@ -109,7 +115,7 @@ export const CONTENT_ERROR_CODES = Object.freeze({
   componentUnknown: "content.component_unknown",
   componentData: "content.component_data",
   sectionContextUnknown: "content.section_context_unknown",
-  // Raw HTML
+  // Retired rawHtml node
   rawHtmlForbidden: "content.raw_html_forbidden",
   // Tables
   tableHeader: "content.table_header",
@@ -283,78 +289,24 @@ export function isUuid(value) {
 // Server-parity: RichTextBody.IsPresent
 // ---------------------------------------------------------------------------
 
-const NAMED_ENTITIES = Object.freeze({
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  nbsp: " ",
-  quot: "\"",
-});
-
-/**
- * A bounded stand-in for `WebUtility.HtmlDecode`, used only to answer "does
- * this raw HTML contain visible text?". The named set covers the entities that
- * can hide a `<` or a space; an unknown named entity stays literal, which
- * makes the answer *more* likely to be "yes, there is text" — the safe
- * direction, because a false "empty" would refuse a page the server accepts.
- */
-function decodeHtmlEntities(html) {
-  return html.replace(/&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});/g, (match, body) => {
-    if (body[0] === "#") {
-      const codePoint = body[1] === "x" || body[1] === "X"
-        ? Number.parseInt(body.slice(2), 16)
-        : Number.parseInt(body.slice(1), 10);
-      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return match;
-      try {
-        return String.fromCodePoint(codePoint);
-      } catch {
-        return match;
-      }
-    }
-    return NAMED_ENTITIES[body] ?? match;
-  });
-}
-
-/** Mirrors `RichTextBody.HasMeaningfulHtml`: text outside tags, after decoding. */
-function hasMeaningfulHtml(html) {
-  if (typeof html !== "string" || html.trim() === "") return false;
-  const decoded = decodeHtmlEntities(html).replaceAll("\u00a0", " ");
-  let insideTag = false;
-  for (const character of decoded) {
-    if (character === "<") {
-      insideTag = true;
-      continue;
-    }
-    if (character === ">") {
-      insideTag = false;
-      continue;
-    }
-    if (!insideTag && character.trim() !== "") return true;
-  }
-  return false;
-}
-
 /**
  * Mirrors `RichTextBody.HasMeaningfulContent` in
  * `api/src/Taproot.Domain/Entities/PageModel/RichTextBody.cs`. Text counts when
- * it is non-whitespace, raw HTML when it has visible text, and images and
- * component blocks always count; every other node counts only through its
- * children. A body that fails this is refused by the server with "Body is
- * required", which is why this package names it locally instead.
+ * it is non-whitespace; images, component blocks, integration placements and
+ * adopted integration fragments always count; every other node counts only
+ * through its children. A body that fails this is refused by the server with
+ * "Body is required", which is why this package names it locally instead.
  */
 function hasMeaningfulContent(node, depth = 0) {
   if (!isPlainObject(node) || depth > CONTENT_LIMITS.documentDepth) return false;
   if (node.type === "text") {
     return typeof node.text === "string" && node.text.trim() !== "";
   }
-  if (node.type === "rawHtml") {
-    return isPlainObject(node.attrs) && hasMeaningfulHtml(node.attrs.html);
-  }
   if (
     node.type === "taprootImage"
     || node.type === "componentBlock"
     || node.type === "integrationPlacement"
+    || node.type === "integrationFragment"
     || node.type === freeFormSectionRegistry.inlineFacts.nodeType
   ) return true;
   if (!Array.isArray(node.content)) return false;

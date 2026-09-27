@@ -145,7 +145,7 @@ test("pull reports only existing sources that adopt a first revision without com
 });
 
 test("first revision adoption reports superseded hashes in old and current manifests", async (context) => {
-  for (const manifestVersion of [4, 5, MANIFEST_VERSION]) {
+  for (const manifestVersion of [4, 5, 6, MANIFEST_VERSION]) {
     await context.test(`manifest version ${manifestVersion}`, async (subtest) => {
       const site = await fixture(subtest, [{
         baseline: { remoteHash: OLD_HASH, sourceHash: workspaceContentHash(Buffer.from(MARKDOWN)) },

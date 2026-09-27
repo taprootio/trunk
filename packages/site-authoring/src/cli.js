@@ -222,7 +222,6 @@ const VERBS = Object.freeze([
     tokens: ["pages", "push"],
     summary: "Create and update pages from the local workspace.",
     positionals: "pagePaths",
-    allowRawHtml: true,
     note:
       "Positional page paths narrow the push to those pages; with none, every workspace page is validated and sent. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
@@ -234,13 +233,7 @@ const VERBS = Object.freeze([
       + "documents of pages it is not sending: an unrelated page left on an obsolete contract is reported by the "
       + "whole-workspace push, not used to block this one. The result states the selection and how many sources were "
       + "discovered and validated. "
-      + "The system 404 projection written by pull is read-only: an unchanged whole-workspace push verifies and skips it, "
-      + "while a changed, missing, or replacement source is refused before any page mutation, and naming it in a "
-      + "selection is refused outright. "
-      + "See 'taproot-site help page free-form' for the stable manifest and error contract. "
-      + "--allow-raw-html permits rawHtml nodes, which render verbatim and"
-      + " unsanitized on the published site. Off by default on purpose; leave"
-      + " it off unless the content is trusted hand-written markup.",
+      + "See 'taproot-site help page free-form' for the stable manifest and error contract.",
   },
   {
     name: VERB_NAV_PUSH,
@@ -573,9 +566,6 @@ function verbHelp(verb) {
   --production     Promote the completed staging deployment to production.
   --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
     : "";
-  const rawHtmlOption = verb.allowRawHtml
-    ? "\n  --allow-raw-html Permit rawHtml nodes. They render verbatim and unsanitized."
-    : "";
   const jsonOption = verb.json
     ? "\n  --json           Emit the stable JSON contract (operational output is always JSON)."
     : "";
@@ -649,7 +639,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${deliveryTargetOption}${rawHtmlOption}${jsonOption}${dryRunOption}${nameOption}${note}
+${options}${targetOption}${deliveryTargetOption}${jsonOption}${dryRunOption}${nameOption}${note}
 `;
 }
 
@@ -923,7 +913,6 @@ function parseArguments(arguments_) {
   let propagationWaitSeconds;
   let browser;
   let allowFailedPreview = false;
-  let allowRawHtml = false;
   let dryRun = false;
   let json = false;
   let keyName;
@@ -981,13 +970,6 @@ function parseArguments(arguments_) {
         throw usageError("cli.duplicate_option", "--allow-failed-preview may be supplied only once.");
       }
       allowFailedPreview = true;
-      continue;
-    }
-    if (verb.allowRawHtml && argument === "--allow-raw-html") {
-      if (allowRawHtml) {
-        throw usageError("cli.duplicate_option", "--allow-raw-html may be supplied only once.");
-      }
-      allowRawHtml = true;
       continue;
     }
     if (verb.dryRun && argument === "--dry-run") {
@@ -1124,7 +1106,6 @@ function parseArguments(arguments_) {
     ...(propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds }),
     ...(browser === undefined ? {} : { browser }),
     init,
-    allowRawHtml,
     dryRun,
     keyName,
     positionals: verb.positionals
@@ -1202,7 +1183,6 @@ export async function runCli({
       allowFailedPreview: parsed.allowFailedPreview,
       init: parsed.init,
       quiet: parsed.quiet,
-      allowRawHtml: parsed.allowRawHtml,
       dryRun: parsed.dryRun,
       keyName: parsed.keyName,
       capabilities: parsed.capabilities,

@@ -22,6 +22,7 @@ import {
   NODE_TYPE_SET,
   normalizeCssLengthOverride,
   pointerSegment,
+  RETIRED_NODE_TYPE_SET,
   TEXT_ALIGNMENTS,
   TIPTAP_SITE_DEFAULT,
 } from "./vocabulary.js";
@@ -280,14 +281,19 @@ const BLOCKS = Object.freeze([
   "taprootImage",
   "componentBlock",
   "integrationPlacement",
-  "rawHtml",
 ]);
 const SECTION_BLOCKS = Object.freeze([
   ...BLOCKS,
   TABLE_NODE_TYPES.table,
   INLINE_FACTS_CONTRACT.nodeType,
 ]);
-const ROOT_BLOCKS = Object.freeze([...SECTION_BLOCKS, FREE_FORM_SECTION_REGISTRY.section.nodeType]);
+// integrationFragment is root-only: adoption writes one per source fragment
+// as a direct child of the doc, and nothing nests it anywhere else.
+const ROOT_BLOCKS = Object.freeze([
+  ...SECTION_BLOCKS,
+  FREE_FORM_SECTION_REGISTRY.section.nodeType,
+  "integrationFragment",
+]);
 const NONE = Object.freeze([]);
 
 const rule = (options) => Object.freeze({ attrs: Object.freeze({}), children: NONE, minChildren: 0, ...options });
@@ -401,6 +407,24 @@ const NODE_RULES = Object.freeze({
         ? null : "a positive server-assigned configuration revision"),
     }),
   }),
+  // Integration adoption's frozen fragment. Authors keep or delete one, never
+  // create or alter it; the API holds every pushed fragment to a stored copy,
+  // so this checks only that the shape is one adoption could have written.
+  integrationFragment: rule({
+    attrs: Object.freeze({
+      html: spec((value) => (typeof value === "string" && value !== "" ? null : "a non-empty string"), {
+        required: true,
+      }),
+      // Strictly ascending ordinal order, which also makes the ids distinct:
+      // adoption writes them sorted, and the API's PageBodyNodePolicy refuses
+      // any other order. Lowercase UUIDs are ASCII, so `<` is ordinal here.
+      imageIds: spec((value) => (Array.isArray(value)
+          && value.every(isUuid)
+          && value.every((id, index) => index === 0 || value[index - 1] < id)
+        ? null
+        : "an array of distinct lowercase image UUIDs in ascending order"), { required: true }),
+    }),
+  }),
   section: rule({
     attrs: SECTION_ATTRS,
     children: SECTION_BLOCKS,
@@ -416,12 +440,6 @@ const NODE_RULES = Object.freeze({
       }),
     }),
     inlineFacts: true,
-  }),
-  rawHtml: rule({
-    attrs: Object.freeze({
-      html: spec((value) => (typeof value === "string" ? null : "a string"), { required: true }),
-    }),
-    rawHtml: true,
   }),
   [TABLE_NODE_TYPES.table]: rule({
     attrs: TABLE_ATTRS,
@@ -975,6 +993,15 @@ function validateNode(node, path, parentRule, index, state, depth) {
     report(state, path, CODES.nodeInvalid, "A node must be an object with a string 'type'.");
     return;
   }
+  if (RETIRED_NODE_TYPE_SET.has(node.type)) {
+    report(
+      state,
+      path,
+      CODES.rawHtmlForbidden,
+      `'${identifier(node.type)}' is a retired node type. Rewrite its content as ordinary nodes.`,
+    );
+    return;
+  }
   if (!NODE_TYPE_SET.has(node.type)) {
     report(
       state,
@@ -1003,14 +1030,6 @@ function validateNode(node, path, parentRule, index, state, depth) {
   }
 
   const nodeRule = NODE_RULES[node.type];
-  if (nodeRule.rawHtml && !state.allowRawHtml) {
-    report(
-      state,
-      path,
-      CODES.rawHtmlForbidden,
-      "A 'rawHtml' node is published verbatim and unsanitised. Pass allowRawHtml to accept one deliberately.",
-    );
-  }
   if (node.type === "text") {
     if (typeof node.text !== "string") {
       report(state, path, CODES.textInvalid, "A text node must carry a string 'text'.");
@@ -1036,16 +1055,11 @@ function validateNode(node, path, parentRule, index, state, depth) {
  * itself, `/content/3/content/0` its fourth block's first child, and a
  * component finding continues *through* the `componentData` JSON string into
  * the parsed data). `code` is one of `CONTENT_ERROR_CODES`.
- *
- * `allowRawHtml` opts a caller into `rawHtml` nodes, which are published
- * unsanitised. It is off by default precisely because an agent should not be
- * able to emit one by accident.
  */
-export function validateDocument(document, options = {}) {
+export function validateDocument(document) {
   const state = {
     errors: [],
     truncated: false,
-    allowRawHtml: options?.allowRawHtml === true,
   };
 
   if (!isPlainObject(document) || document.type !== "doc") {

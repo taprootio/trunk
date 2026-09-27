@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -488,8 +488,8 @@
       "measure": "wide",
       "placement": "flow"
     },
-    "rawHtml": {
-      "label": "Raw HTML",
+    "integrationFragment": {
+      "label": "Integration content",
       "measure": "wide",
       "placement": "flow"
     },
@@ -593,5 +593,8 @@
       "section": true,
       "measure": "wide"
     }
-  }
+  },
+  "retiredNodeTypes": [
+    "rawHtml"
+  ]
 }

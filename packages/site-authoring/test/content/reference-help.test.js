@@ -52,7 +52,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 26);
+  assert.equal(REFERENCE_VERSION, 27);
   assert.deepEqual(PAGE_TYPES, ["free-form"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -248,38 +248,15 @@ test("the free-form reference exposes the production document vocabulary and aut
   assert.match(page.sections.decoration.maskGuidance, /transparent PNG or WebP/u);
   assert.match(page.sections.decoration.opaqueWarning, /opaque rectangle/u);
   assert.match(page.sections.decoration.markdownExample, /"anchor":"top-end"/u);
-  assert.deepEqual(page.document.rawHtml, {
-    default: "rejected",
-    trackedProseMirror: {
-      format: ".pm.json",
-      optIn: "taproot-site pages push --allow-raw-html",
-      behavior: "The flag permits explicit rawHtml nodes only in a tracked ProseMirror document.",
-    },
-    markdown: {
-      format: ".md",
-      supported: false,
-      behavior: "Inline HTML remains unsupported and is rejected even when --allow-raw-html is present.",
-    },
-    warning: "rawHtml renders verbatim and unsanitized; use it only for trusted hand-written markup.",
+  assert.equal(Object.hasOwn(page.document, "rawHtml"), false);
+  assert.deepEqual(page.document.integrationFragmentNode, {
+    type: "integrationFragment",
+    note: "Adopted integration content: preserved or deleted, never authored.",
   });
-  assert.deepEqual(page.workspace.systemPages, [{
-    path: "404",
-    mode: "read-only",
-    reason: "system-404",
-    projection:
-      "pull writes the exact stored ProseMirror body and records its SHA-256 in .taproot-site-manifest.json",
-    unchangedPush: "A whole-workspace pages push verifies the hash and skips this file without updating the page.",
-    approval:
-      "An unscoped approve excludes this projection even when the live system page carries a draft; naming it explicitly is refused.",
-    modifiedError: "pages.read_only_modified",
-    missingError: "pages.read_only_missing",
-    replacementError: "pages.system_page_read_only",
-    scopedPushError: "pages.page_read_only",
-    scopedApprovalError: "approve.page_read_only",
-    guidance:
-      "Do not delete, replace, or edit this file. Run pull to restore it; author the system 404 through an owner-controlled surface.",
-  }]);
-  assert.equal(page.workspace.systemHome, "The pulled home page remains an ordinary editable page.");
+  assert.equal(
+    page.workspace.systemPages,
+    "Home and 404 are ordinary editable pages. Taproot seeds both, so they are update-only and their paths are immutable.",
+  );
   // TR00622: the one-source rule is a contract an agent authors against, so
   // its error codes and recovery are reference data rather than prose.
   const sourceRule = page.workspace.sourceRule;
@@ -473,20 +450,16 @@ test("plain-text page help reports full-bleed placement for every supported node
   assert.match(placementLines.find((line) => line.includes("node:paragraph")), /full bleed no/u);
 });
 
-test("plain-text free-form help explains the integrity-checked read-only 404 projection", () => {
+test("plain-text free-form help treats home and the 404 as editable system pages", () => {
   const output = formatReferenceResult({ topic: "page", page: getPageTypeReference("free-form") });
 
-  assert.match(output, /System page projections:/u);
-  assert.match(output, /404\s+read-only/u);
-  assert.match(output, /records its SHA-256/u);
-  assert.match(output, /whole-workspace pages push verifies the hash and skips this file/u);
-  assert.match(output, /approve excludes this projection/u);
-  assert.match(output, /Do not delete, replace, or edit this file/u);
+  assert.match(output, /System pages: Home and 404 are ordinary editable pages\./u);
+  assert.doesNotMatch(output, /read-only|raw-html|Raw HTML/u);
+  assert.match(output, /integrationFragment: Adopted integration content: preserved or deleted, never authored\./u);
   assert.match(output, /One source per page:/u);
   assert.match(output, /pages\.pull_conflict/u);
   assert.match(output, /pages\.source_conflict/u);
   assert.match(output, /never discovered as a page source/u);
-  assert.match(output, /home\s+editable/u);
 });
 
 test("plain-text free-form help prints background defaults, focal bounds, scrim mapping, and both image paths", () => {

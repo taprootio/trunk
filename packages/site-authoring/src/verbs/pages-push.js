@@ -32,7 +32,6 @@ import {
   readManifest,
   readMediaManifest,
   readObservedPageRevision,
-  readOnlySystem404Projections,
   readWorkspaceFile,
   readWorkspaceJson,
   requireManifestSourceRegistry,
@@ -81,15 +80,6 @@ import {
  * - Creates are POST and updates are PATCH with a *whole* template, not a patch
  *   mask. Neither is replayed by the transport, so each is issued once and an
  *   ambiguous outcome surfaces as ambiguous.
- *
- * `rawHtml` renders verbatim and unsanitized. It is rejected unless the caller
- * explicitly asks for it via `allowRawHtml`, which is exactly the thing an
- * agent must not be able to emit by accident.
- *
- * Pull's system 404 is the deliberate exception to "every file is authored."
- * Its exact bytes remain inspectable in the workspace but carry a manifest
- * hash and read-only marker. An unchanged whole-workspace push skips it;
- * changing, deleting, or replacing it is a refusal before any remote write.
  */
 
 const MAXIMUM_REPORTED = 200;
@@ -337,8 +327,8 @@ function requireContentFunctions(content) {
   return content;
 }
 
-function assertValid(content, document_, file, allowRawHtml) {
-  const outcome = content.validateDocument(document_, { allowRawHtml });
+function assertValid(content, document_, file) {
+  const outcome = content.validateDocument(document_);
   const errors = outcome === null || typeof outcome !== "object" ? undefined : outcome.errors;
   if (!Array.isArray(errors)) {
     throw new SiteAuthoringError(
@@ -579,11 +569,10 @@ export async function validateWorkspacePageDocument({
   file,
   document: document_,
   content: injectedContent,
-  allowRawHtml = false,
   getSharedThemeContexts,
 }) {
   const content = requireContentFunctions(await loadContentModule(injectedContent));
-  assertValid(content, document_, file, allowRawHtml);
+  assertValid(content, document_, file);
   if (hasNamedFreeFormSectionContext(document_)) {
     const contexts = typeof getSharedThemeContexts === "function"
       ? await getSharedThemeContexts()
@@ -607,7 +596,6 @@ export async function pagesPush(invocation) {
   // exchange said the platform is paused. It changes nothing else: the write
   // still runs and its refusal still classifies as platform_paused (TR00692).
   warnIfExternalWritesPaused(session, VERB_PAGES_PUSH);
-  const allowRawHtml = invocation.allowRawHtml === true;
   // Both manifests are bound to the site before anything is planned or sent:
   // every id in them is site-scoped, and a workspace pulled from another site
   // reads as entirely valid until phase two is already writing.
@@ -630,71 +618,18 @@ export async function pagesPush(invocation) {
   // Manifest integrity is never scoped: a registry that contradicts itself
   // describes some other workspace, and a selection cannot make that safe.
   requireManifestSourceRegistry(pageSourceRegistry(manifest));
-  const readOnlyProjections = readOnlySystem404Projections(manifest);
   const targeted = requestedPaths !== undefined;
-  const readOnlyByFile = new Map(readOnlyProjections.map((entry) => [entry.file, entry]));
-  const readOnlyByPath = new Map(readOnlyProjections.map((entry) => [normalizePagePath(entry.path), entry]));
-
-  // Naming the projection in a selection is refused by name before anything is
-  // read. It is the one page this workspace may never send, and a selection is
-  // an explicit request rather than something to quietly drop.
-  if (targeted) {
-    const requestedReadOnly = readOnlyProjections.find((entry) =>
-      requestedPaths.has(normalizePagePath(entry.path) ?? entry.path));
-    if (requestedReadOnly !== undefined) {
-      const pagePath = normalizePagePath(requestedReadOnly.path) ?? requestedReadOnly.path;
-      throw new SiteAuthoringError(
-        "pages.page_read_only",
-        `Page path '${pagePath}' is the pulled read-only system 404 projection and cannot be pushed.`,
-        { field: pagePath },
-      );
-    }
-  }
 
   // The shared list, so the set `pull` refuses to write over is exactly the set
   // this walks: a file one counted and the other ignored would be a page pushed
   // from a workspace nothing proved the ownership of.
   const files = await walkWorkspaceFiles(config.workspaceDir, PAGES_DIRECTORY, PAGE_SOURCE_EXTENSIONS);
-  const editableFiles = files.filter((file) => !readOnlyByFile.has(file));
-  if (editableFiles.length === 0 && readOnlyProjections.length === 0) {
+  if (files.length === 0) {
     throw new SiteAuthoringError(
       "pages.none_found",
       `No Markdown or ProseMirror page files were found under '${PAGES_DIRECTORY}/' in the workspace.`,
       { field: PAGES_DIRECTORY },
     );
-  }
-  // The projection's own integrity is a whole-workspace check. A targeted push
-  // has already refused to name it and cannot reach it any other way, so an
-  // edited projection is something `pages push` with no path reports — not
-  // something that blocks a different page from being sent.
-  const skippedReadOnly = [];
-  if (!targeted) {
-    for (const entry of readOnlyProjections) {
-      if (!files.includes(entry.file)) {
-        throw documentError(
-          "pages.read_only_missing",
-          `The pulled read-only system 404 projection '${entry.file}' is missing or was replaced. Run pull again; `
-            + "author the system 404 through an owner-controlled surface.",
-          entry.file,
-        );
-      }
-      const bytes = await readWorkspaceFile(config.workspaceDir, entry.file, WORKSPACE_LIMITS.documentBytes);
-      if (workspaceContentHash(bytes) !== entry.workspaceContentHash) {
-        throw documentError(
-          "pages.read_only_modified",
-          `The pulled read-only system 404 projection '${entry.file}' changed after pull. No page was pushed. `
-            + "Restore it or pull again; author the system 404 through an owner-controlled surface.",
-          entry.file,
-        );
-      }
-      skippedReadOnly.push({
-        file: entry.file,
-        path: normalizePagePath(entry.path),
-        pageId: entry.pageId,
-        reason: entry.readOnlyReason,
-      });
-      onProgress(`Verified read-only system 404 projection '${entry.file}'; it will not be pushed.`);
-    }
   }
   let sharedThemeContexts;
   const manifestByFile = new Map(
@@ -727,25 +662,6 @@ export async function pagesPush(invocation) {
     const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
     const liveById = new Map(live.map((summary) => [summary.pageId, summary]));
     const liveByPath = new Map(live.map((summary) => [normalizePagePath(summary.path) ?? summary.path, summary]));
-    // The projection's live identity is the other half of the whole-workspace
-    // read-only check above, and is scoped with it for the same reason.
-    if (!targeted) {
-      for (const projection of readOnlyProjections) {
-        const summary = liveById.get(projection.pageId);
-        if (
-          normalizePagePath(summary?.path)?.toLowerCase() !== SYSTEM_PAGE_NOT_FOUND_PATH
-          || summary?.templateType !== TEMPLATE_TYPE_FREE_FORM
-        ) {
-          const index = manifest.pages.indexOf(projection);
-          throw documentError(
-            "workspace.manifest_invalid",
-            `The read-only page projection at pages[${index}] does not identify the live free-form system 404. `
-              + "No page was pushed; run 'taproot-site pull' again.",
-            `pages[${index}].pageId`,
-          );
-        }
-      }
-    }
 
     // Resolution: which file is each page path's one authoritative source.
     // This reads metadata only — a manifest entry, or a front-matter block —
@@ -754,7 +670,7 @@ export async function pagesPush(invocation) {
     const sources = [];
     const claimants = [];
     const unresolved = [];
-    for (const file of editableFiles) {
+    for (const file of files) {
       const manifestEntry = manifestByFile.get(file);
       try {
         const source = await readWorkspacePageSource({ workspaceDir: config.workspaceDir, file, manifestEntry });
@@ -844,14 +760,6 @@ export async function pagesPush(invocation) {
       const manifestEntry = manifestByFile.get(file);
       requireCompletePageMetadata(source);
       const document_ = await convertWorkspacePageSource({ source, mediaManifest, content });
-      if (readOnlyByPath.has(pagePath)) {
-        throw documentError(
-          "pages.system_page_read_only",
-          `'${file}' attempts to replace the read-only system 404 projection. No page was pushed. `
-            + "Run pull again; author the system 404 through an owner-controlled surface.",
-          file,
-        );
-      }
 
       const target = manifestEntry?.pageId !== undefined
         ? liveById.get(manifestEntry.pageId)
@@ -930,7 +838,6 @@ export async function pagesPush(invocation) {
         file,
         document: document_,
         content,
-        allowRawHtml,
         getSharedThemeContexts: async () => {
           sharedThemeContexts ??= await readSharedThemeContexts(config.workspaceDir, siteId);
           return sharedThemeContexts;
@@ -1044,18 +951,15 @@ export async function pagesPush(invocation) {
     const reported = boundedList(applied, MAXIMUM_REPORTED);
     const reportedUnresolved = boundedList(unresolved, MAXIMUM_REPORTED);
     return successResult(VERB_PAGES_PUSH, siteId, {
-      allowRawHtml,
       pages: {
         total: planned.length,
         created: applied.filter((entry) => entry.action === "created").length,
         updated: applied.filter((entry) => entry.action === "updated").length,
-        skippedReadOnly: skippedReadOnly.length,
-        readOnlyItems: skippedReadOnly,
         // What this run actually looked at, so automation can tell a targeted
         // push from a whole-workspace one without inferring it from counts.
         selection: targeted ? "targeted" : "workspace",
         ...(targeted ? { selectedPaths: [...requestedPaths].sort().map((pagePath) => pagePath || "/") } : {}),
-        discovered: editableFiles.length,
+        discovered: files.length,
         validated: planned.length,
         ...(unresolved.length > 0
           ? {
