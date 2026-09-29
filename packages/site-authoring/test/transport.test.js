@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from "../src/constants.js";
+import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from "../src/constants.js";
 import { ApiError, capabilityRefusal, fieldViolations, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
 
@@ -144,7 +144,7 @@ test("sends the reviewed authorization, user agent, and redirect policy", async 
   await client.request("v1/sites/site/pages");
   assert.equal(calls[0].url, "https://app.taproot.test/api/v1/sites/site/pages");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
-  assert.equal(calls[0].init.headers["user-agent"], "@taprootio/site-authoring/0.11.0");
+  assert.equal(calls[0].init.headers["user-agent"], `@taprootio/site-authoring/${CLI_VERSION}`);
   assert.equal(calls[0].init.headers.accept, "application/json");
   assert.equal(calls[0].init.redirect, "error");
 });

@@ -14,7 +14,7 @@ import {
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
 import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } from "../src/cli.js";
-import { CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS } from "../src/constants.js";
+import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
 import { applyFooterColors } from "../src/appearance-contract.js";
@@ -7362,7 +7362,7 @@ test("preview page creates once, polls status, then mints and returns the stable
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
+    cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
     verb: "preview page",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,
@@ -7798,7 +7798,7 @@ test("preview revoke frees an active snapshot without reading workspace content"
   assert.deepEqual(result, {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
+    cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
     verb: "preview revoke",
     siteId: SITE_ID,
     pageId: ABOUT_PAGE_ID,

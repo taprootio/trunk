@@ -10,6 +10,17 @@
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 
 export const TIPTAP_SITE_DEFAULT = "site-default";
+export const DEFAULT_TIPTAP_IMAGE_MAX_IMAGES_PER_ROW = 2;
+export const TIPTAP_IMAGE_MAX_IMAGES_PER_ROW_OPTIONS = [1, 2, 3] as const;
+export const TIPTAP_IMAGE_NARROW_CONTENT_REM = 40;
+
+export function normalizeTiptapImageMaxImagesPerRow(value: unknown): number {
+  const count = Number(value);
+  return TIPTAP_IMAGE_MAX_IMAGES_PER_ROW_OPTIONS.some(option => option === count)
+    ? count
+    : DEFAULT_TIPTAP_IMAGE_MAX_IMAGES_PER_ROW;
+}
+
 export const DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH = 60;
 export const TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS = [45, 60, 75, 90] as const;
 const SECTION_CONTEXT_PATTERN = new RegExp(
@@ -64,6 +75,7 @@ export interface RenderProseMirrorOptions {
   /** Normalize free-form root flow into full-bleed Espalier sections. */
   freeFormSections?: boolean;
   imageDefaults?: {
+    maxImagesPerRow?: number | null;
     placement?: TiptapImagePresentationPlacement | string | null;
     /** The page shell emits this default once so rich-text formats inherit it. */
     maxHeightVh?: TiptapImageMaxHeightVh | number | null;
@@ -71,7 +83,10 @@ export interface RenderProseMirrorOptions {
   /** Generator-only render hooks for structured nodes that need page context. */
   nodeRenderers?: {
     componentBlock?: (node: ProseMirrorNode) => string | undefined;
-    taprootImage?: (node: ProseMirrorNode) => string | undefined;
+    taprootImage?: (
+      node: ProseMirrorNode,
+      context: { groupColumns?: number; fullWidth: boolean },
+    ) => string | undefined;
     /** Emits an adopted fragment's canonical bytes; without it the node renders nothing. */
     integrationFragment?: (node: ProseMirrorNode) => string | undefined;
   };
@@ -151,14 +166,26 @@ function isTextBlock(type: string): boolean {
 }
 
 type RenderPlacement = "root" | "section" | "nested";
+type RenderOptionsWithLayout = RenderProseMirrorOptions & { fullWidthImages?: boolean };
 
 function renderNodes(
   nodes: readonly ProseMirrorNode[],
-  options: RenderProseMirrorOptions,
+  options: RenderOptionsWithLayout,
   placement: RenderPlacement,
 ): string {
-  return nodes.map((node) => {
-    const html = renderNode(node, options, placement);
+  let imageRunEnd = 0;
+  let groupColumns: number | undefined;
+  return nodes.map((node, index) => {
+    const isImage = node.type === "taprootImage";
+    if (isImage && index >= imageRunEnd) {
+      imageRunEnd = index + 1;
+      while (imageRunEnd < nodes.length && nodes[imageRunEnd].type === "taprootImage") imageRunEnd++;
+      const count = imageRunEnd - index;
+      groupColumns = count > 1
+        ? Math.min(count, normalizeTiptapImageMaxImagesPerRow(options.imageDefaults?.maxImagesPerRow))
+        : undefined;
+    }
+    const html = renderNode(node, options, placement, false, isImage ? groupColumns : undefined);
     options.onRenderedNode?.(node, html);
     return html;
   }).join("");
@@ -217,9 +244,10 @@ function isRootBandComponent(node: ProseMirrorNode): boolean {
 
 function renderNode(
   node: ProseMirrorNode,
-  options: RenderProseMirrorOptions,
+  options: RenderOptionsWithLayout,
   placement: RenderPlacement,
   compactFollowing = false,
+  groupColumns?: number,
 ): string {
   switch (node.type) {
     case "doc":
@@ -263,7 +291,8 @@ function renderNode(
     case "table":
       return placement === "root" || placement === "section" ? renderTable(node, options) : "";
     case "taprootImage":
-      return options.nodeRenderers?.taprootImage?.(node) ?? renderTaprootImage(node, options);
+      return options.nodeRenderers?.taprootImage?.(node, { groupColumns, fullWidth: options.fullWidthImages === true })
+        ?? renderTaprootImage(node, options);
     case "inlineFacts":
       return renderInlineFacts(node, options, placement);
     case "componentBlock":
@@ -737,7 +766,7 @@ function renderSection(
   const content = renderElement(
     "div",
     { "data-section-content": true },
-    renderNodes(nodes, options, contentPlacement),
+    renderNodes(nodes, { ...options, fullWidthImages: contentPadding === "none" }, contentPlacement),
   );
   const surfaced = surface === "none"
     ? content
@@ -1181,6 +1210,7 @@ function resolveImagePresentation(
   if (maxHeightOverride) styleParts.push(`--taproot-article-image-max-height: ${maxHeightOverride}`);
   if (borderWidthOverride) styleParts.push(`--esp-image-border: ${imageBorderValue(borderWidthOverride)}`);
   return {
+    "data-tiptap-image": normalizeTiptapImageMaxImagesPerRow(defaults?.maxImagesPerRow),
     // The page shell owns the inherited site default so HTML and structured
     // rich text share it. Serialize only an explicit legacy choice; this
     // includes 60vh when it intentionally overrides a taller site default.

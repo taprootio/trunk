@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { LIMITS } from "../src/constants.js";
+import { CLI_VERSION, LIMITS } from "../src/constants.js";
 import { SiteAuthoringError } from "../src/errors.js";
 import { failureResult, humanFailure, serializeResult, writeGithubActionsOutput } from "../src/output.js";
 import { ApiError } from "../src/transport.js";
@@ -44,7 +44,7 @@ test("the machine-readable failure carries only the reviewed keys", () => {
   const result = failureResult(error);
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: "0.11.0" });
+  assert.deepEqual(result.cli, { name: "@taprootio/site-authoring", version: CLI_VERSION });
   assert.deepEqual(Object.keys(result.error).sort(), RESERVED_ERROR_KEYS);
   assert.deepEqual(result.error.differences, ["$.content[0].text"]);
 });

@@ -125,6 +125,7 @@ export const SETTINGS_GROUPS = Object.freeze([
       // the same as the site behaves.
       { name: "hideLightboxComments", wireType: "boolean" },
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
+      { name: "tiptapImageMaxImagesPerRow", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },
       { name: "albumBorderWidth", wireType: "int" },
       { name: "albumMaxImagesPerRow", wireType: "int" },

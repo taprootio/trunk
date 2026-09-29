@@ -1,5 +1,7 @@
+import packageMetadata from "../package.json" with { type: "json" };
+
 export const CLI_NAME = "@taprootio/site-authoring";
-export const CLI_VERSION = "0.11.0";
+export const CLI_VERSION = packageMetadata.version;
 export const CLI_BINARY_NAME = "taproot-site";
 export const RESULT_SCHEMA_VERSION = 1;
 export const CONFIG_FILE_NAME = "taproot-site.json";

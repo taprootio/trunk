@@ -1,3 +1,4 @@
+import { CLI_VERSION } from "../src/constants.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -27,7 +28,7 @@ function successResult(verb) {
   return {
     schemaVersion: 1,
     ok: true,
-    cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
+    cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
     verb,
   };
 }
@@ -582,7 +583,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   ) {
     const versionStdout = sink();
     assert.equal(await runCli({ arguments_, stdout: versionStdout, stderr: sink() }), 0);
-    assert.equal(versionStdout.read(), "0.11.0\n");
+    assert.equal(versionStdout.read(), `${CLI_VERSION}\n`);
   }
 });
 
@@ -805,7 +806,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
         {
           schemaVersion: 1,
           ok: true,
-          cli: { name: "@taprootio/site-authoring", version: "0.11.0" },
+          cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
           referenceVersion: 27,
           topic: scenario.topic,
