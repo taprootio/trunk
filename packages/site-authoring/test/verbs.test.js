@@ -42,7 +42,7 @@ import { redirectsPush } from "../src/verbs/redirects-push.js";
 import { stagingReview } from "../src/verbs/staging-review.js";
 import { status } from "../src/verbs/status.js";
 import { themePush, validateThemeWorkspace } from "../src/verbs/theme-push.js";
-import { readWorkspaceFile, workspaceContentHash, writeWorkspaceFile } from "../src/workspace.js";
+import { internalPageObservedRevisionFile, readWorkspaceFile, workspaceContentHash, writeWorkspaceFile } from "../src/workspace.js";
 import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
 
 const SITE_ID = "aaaa1111-bbbb-4111-8111-cccc11111111";
@@ -164,6 +164,19 @@ async function readWorkspaceJson(site, relative) {
 /** For asserting a refusal left a damaged file untouched, JSON or not. */
 async function readWorkspaceText(site, relative) {
   return await readFile(workspacePath(site, relative), "utf8");
+}
+
+/**
+ * Appends a newline to every editable page source the manifest names, the way an
+ * edit changes a file's bytes. A push skips a page whose source and metadata
+ * match what the site last agreed to, so a test that needs a page sent edits it first.
+ */
+async function touchPulledSources(site) {
+  const manifest = await readWorkspaceJson(site, ".taproot-site-manifest.json");
+  for (const entry of manifest.pages) {
+    if (typeof entry.file !== "string") continue;
+    await writeWorkspaceFile(site.workspaceDir, entry.file, Buffer.from(`${await readWorkspaceText(site, entry.file)}\n`));
+  }
 }
 
 async function workspaceHas(site, relative) {
@@ -815,7 +828,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
       pattern: PAGES_LIST,
       reply: (call) => (call.query.get("pageToken")
         ? {
-          pages: [pageSummary({ pageId: STORY_PAGE_ID, path: "story", templateType: "TEMPLATE_TYPE_ARTICLE" })],
+          pages: [pageSummary({ pageId: STORY_PAGE_ID, path: "story", templateType: "TEMPLATE_TYPE_LEGAL" })],
           nextPageToken: "",
         }
         : {
@@ -887,8 +900,8 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
 
   assert.equal(await workspaceHas(workspace, "pages/index.pm.json"), true);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
-  // The article page is snapshotted as metadata only: this CLI authors
-  // free-form bodies and does not pretend to round-trip the other templates.
+  // The legal page is snapshotted as metadata only: this CLI authors the five
+  // content templates and does not pretend to round-trip the others.
   assert.equal(await workspaceHas(workspace, "pages/story.pm.json"), false);
   assert.deepEqual(
     (await readWorkspaceJson(workspace, "pages/index.pm.json")).content[0].content[0].text,
@@ -2595,6 +2608,7 @@ test("pull gives two pages that want the same file name distinct files", async (
   ]);
   const pulled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
   assert.equal(pulled.pages.bodies, 2);
+  await touchPulledSources(workspace);
 
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   const files = new Map(manifest.pages.map((entry) => [entry.pageId, entry.file]));
@@ -3146,8 +3160,10 @@ test("a push records the revision it wrote, so a second push needs no pull in be
   );
 
   assert.equal(first.pages.updated, 1);
-  assert.equal(second.pages.updated, 1);
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 2);
+  // Nothing changed between the two pushes, so the second sends nothing.
+  assert.equal(second.pages.updated, 0);
+  assert.equal(second.pages.unchanged, 1);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 1);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
 });
@@ -3187,6 +3203,7 @@ test("pull records a page's title and path from the read that supplied its revis
   const entry = manifest.pages.find((candidate) => candidate.pageId === ABOUT_PAGE_ID);
   assert.equal(entry.title, "Renamed on the site");
   assert.equal(entry.path, "about-us");
+  await touchPulledSources(workspace);
 
   // A ProseMirror source takes its metadata from the manifest, so the next
   // push carries the rename rather than reverting it.
@@ -4117,6 +4134,7 @@ test("a long page title round-trips through pull and push unchanged", async (sit
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.pages[0].title, longTitle);
+  await touchPulledSources(workspace);
 
   await pagesPush(invoke(workspace, wire, { verb: "pages push", content: contentStub().module }).invocation);
   assert.equal(wire.matching("PATCH", PAGE_BY_ID)[0].body.title, longTitle);
@@ -4189,17 +4207,18 @@ test("TR00621 pull-to-push tracks the system 404 as an editable page beside four
   assert.equal(Object.hasOwn(notFoundEntry, "readOnlyReason"), false);
   assert.equal(Object.hasOwn(notFoundEntry, "workspaceContentHash"), false);
 
-  // The complete unchanged pull is executable, and the 404 is sent back like
-  // home rather than verified and skipped.
+  // The complete unchanged pull is executable: every page validates, and none
+  // is sent, because nothing changed since the pull.
   const unchanged = await pagesPush(
     invoke(workspace, wire, {
       verb: "pages push",
       content: REAL_CONTENT,
     }).invocation,
   );
-  assert.equal(unchanged.pages.updated, 5);
+  assert.equal(unchanged.pages.updated, 0);
+  assert.equal(unchanged.pages.unchanged, 5);
   assert.equal(Object.hasOwn(unchanged.pages, "skippedReadOnly"), false);
-  assert.equal(wire.matching("PATCH", PAGE_BY_ID).some((call) => call.body.pageId === NOT_FOUND_PAGE_ID), true);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
 
   // Reproduce the dogfood edit: replace the four ordinary pulled sources with
   // the checked-in Taproot-www Markdown fixture and edit the 404 in place, then
@@ -4302,8 +4321,9 @@ test("pull re-pulls a version-6 read-only 404 projection as an ordinary editable
   assert.match(JSON.stringify(pulledSource), /Converted not-found body\./u);
   assert.doesNotMatch(JSON.stringify(pulledSource), /rawHtml/u);
 
-  // The next whole-workspace push sends the page like any other rather than
-  // refusing on the retired markup the author never touched.
+  // Once the author edits it, the next whole-workspace push sends the page like
+  // any other rather than refusing on the retired markup the author never touched.
+  await touchPulledSources(workspace);
   const pushed = await pagesPush(
     invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation,
   );
@@ -5125,6 +5145,534 @@ test("pages push refuses to change a page's immutable template type", async (sit
     (error) => error?.code === "pages.template_immutable" && /TEMPLATE_TYPE_ARTICLE/u.test(error.message),
   );
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// TR00893 — every authored content type, not only free-form pages
+// ---------------------------------------------------------------------------
+
+const TYPED_PLACE_ID = "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a";
+const TYPED_COVER_ID = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1";
+const TYPED_ALBUM_IMAGE_ID = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
+const TYPED_SOURCES = {
+  "pages/story.md": "---\ntitle: The story\npath: blog/story\ntemplate: article\ndisplayDate: 2019-02-03\n"
+    + "coverImage: media/cover.jpg\n---\n\nOnce upon a time.\n\n![Cover](media/cover.jpg)\n",
+  "pages/lemon-bars.md":
+    "---\ntitle: Lemon bars\npath: recipes/lemon-bars\ntemplate: recipe\nservings: 16\n---\n\nTart.\n\n"
+    + "## Ingredients\n\n- 4 eggs\n\n## Instructions\n\n1. Bake.\n",
+  "pages/trip.md":
+    "---\ntitle: The trip\npath: albums/trip\ntemplate: album\n---\n\n## Images\n\n![Sunrise](media/one.jpg)\n",
+  "pages/cafe.md":
+    `---\ntitle: Cafe\npath: reviews/cafe\ntemplate: place-review\nplaceId: ${TYPED_PLACE_ID}\nrating: will-return\n---\n\nGreat.\n`,
+};
+const TYPED_MEDIA_MANIFEST = {
+  mediaManifestVersion: 2,
+  siteId: SITE_ID,
+  media: {
+    "media/cover.jpg": { imageId: TYPED_COVER_ID, width: 1600, height: 900, alt: "Cover" },
+    "media/one.jpg": { imageId: TYPED_ALBUM_IMAGE_ID, width: 1200, height: 800, alt: "One" },
+  },
+};
+
+function typedCreateRoutes(live = []) {
+  let created = 0;
+  return [
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: live, nextPageToken: "" } },
+    {
+      method: "POST",
+      pattern: PAGES_COLLECTION,
+      reply: (call) => {
+        created += 1;
+        return draftSummary(`5555555${created}-5555-4555-8555-555555555555`, call.body.path, {
+          templateType: call.body.template.templateType,
+        });
+      },
+    },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ];
+}
+
+test("pages push creates an article, a recipe, an album, and a place review with their own templates", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    ".taproot-site-media.json": TYPED_MEDIA_MANIFEST,
+    ...TYPED_SOURCES,
+  });
+  const wire = api(typedCreateRoutes());
+  const result = await pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+
+  assert.equal(result.pages.created, 4);
+  const byPath = new Map(wire.matching("POST", PAGES_COLLECTION).map((call) => [call.body.path, call.body]));
+  const article = byPath.get("blog/story");
+  assert.equal(article.template.templateType, "TEMPLATE_TYPE_ARTICLE");
+  assert.equal(article.template.articleData.body.type, "doc");
+  assert.equal(article.displayDate, "2019-02-03");
+  assert.equal(article.coverImageId, TYPED_COVER_ID);
+
+  const recipe = byPath.get("recipes/lemon-bars");
+  assert.equal(recipe.template.templateType, "TEMPLATE_TYPE_RECIPE");
+  assert.equal(recipe.template.recipeData.servings, 16);
+  assert.equal(recipe.template.recipeData.ingredientGroups[0].ingredients[0].rawText, "4 eggs");
+  assert.equal(recipe.template.recipeData.instructionSections[0].stepBodies.length, 1);
+  assert.equal("displayDate" in recipe, false, "an unstated date is left to the first publication");
+
+  const album = byPath.get("albums/trip");
+  assert.equal(album.template.templateType, "TEMPLATE_TYPE_ALBUM");
+  assert.deepEqual(album.template.albumData.images, [
+    { imageId: TYPED_ALBUM_IMAGE_ID, caption: "Sunrise", width: 1200, height: 800 },
+  ]);
+
+  const review = byPath.get("reviews/cafe");
+  assert.equal(review.template.templateType, "TEMPLATE_TYPE_PLACE_REVIEW");
+  assert.equal(review.template.placeReviewData.rating, "PLACE_REVIEW_RATING_WILL_RETURN");
+  assert.equal(review.template.placeReviewData.placeId, TYPED_PLACE_ID);
+
+  // The manifest records each page's own type so a later push targets it.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.deepEqual(
+    manifest.pages.map((entry) => [entry.path, entry.templateType]).sort(),
+    [
+      ["albums/trip", "TEMPLATE_TYPE_ALBUM"],
+      ["blog/story", "TEMPLATE_TYPE_ARTICLE"],
+      ["recipes/lemon-bars", "TEMPLATE_TYPE_RECIPE"],
+      ["reviews/cafe", "TEMPLATE_TYPE_PLACE_REVIEW"],
+    ],
+  );
+  wire.assertQueryContracts();
+});
+
+test("pull writes each authored type as a document, and a pull-edit-push cycle sends only the edit", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-media.json": TYPED_MEDIA_MANIFEST });
+  const pages = [
+    ["blog/story", "TEMPLATE_TYPE_ARTICLE", {
+      articleData: {
+        body: {
+          type: "doc",
+          content: [
+            ...paragraphDocument("Once upon a time.").content,
+            { type: "taprootImage", attrs: { imageId: TYPED_COVER_ID, src: "", urls: [], width: 1600, height: 900, alt: "Cover" } },
+          ],
+        },
+      },
+    }],
+    ["recipes/lemon-bars", "TEMPLATE_TYPE_RECIPE", {
+      recipeData: {
+        ingredientGroups: [{ ingredients: [{ rawText: "4 eggs" }] }],
+        instructionSections: [{ stepBodies: [paragraphDocument("Bake.")] }],
+        servings: 16,
+      },
+    }],
+    ["albums/trip", "TEMPLATE_TYPE_ALBUM", {
+      albumData: {
+        images: [{ imageId: TYPED_ALBUM_IMAGE_ID, caption: "Sunrise", width: 1200, height: 800, urls: [{ url: "https://cdn.example/x.webp", minWidth: 640 }] }],
+      },
+    }],
+    ["reviews/cafe", "TEMPLATE_TYPE_PLACE_REVIEW", {
+      placeReviewData: {
+        placeId: TYPED_PLACE_ID,
+        rating: "PLACE_REVIEW_RATING_MIGHT_RETURN",
+        body: paragraphDocument("Fine."),
+        placeName: "Cafe",
+      },
+    }],
+  ].map(([pagePath, templateType, data], index) => ({
+    summary: pageSummary({
+      pageId: `6666666${index}-6666-4666-8666-666666666666`,
+      path: pagePath,
+      title: pagePath,
+      templateType,
+      ...(pagePath === "blog/story" ? { displayDate: "2019-02-03" } : {}),
+    }),
+    templateType,
+    data,
+  }));
+  const detail = (call) => {
+    const page = pages.find(({ summary }) => call.pathname.endsWith(`/${summary.pageId}`));
+    return {
+      pageId: page.summary.pageId,
+      title: page.summary.title,
+      path: page.summary.path,
+      displayDate: page.summary.path === "blog/story" ? "2019-02-03" : undefined,
+      coverImageId: page.summary.path === "blog/story" ? TYPED_COVER_ID : undefined,
+      template: { templateType: page.templateType, templateVersion: "1.0.0", ...page.data },
+    };
+  };
+  const routes = [
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: pages.map(({ summary }) => summary), nextPageToken: "" } },
+    { method: "GET", pattern: PAGE_BY_ID, reply: detail },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ];
+  const wire = api(routes);
+  const pulled = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.equal(pulled.pages.bodies, 4);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.deepEqual(
+    manifest.pages.map((entry) => [entry.path, entry.workspaceMode, entry.sourceFormat]),
+    pages.map(({ summary }) => [summary.path, "editable", "prosemirror"]),
+  );
+  const storyFile = manifest.pages[0].file;
+  const story = await readWorkspaceJson(workspace, storyFile);
+  assert.deepEqual(Object.keys(story), ["template", "displayDate", "coverImageId", "data"]);
+  assert.equal(story.displayDate, "2019-02-03");
+  const albumFile = manifest.pages[2].file;
+  assert.deepEqual((await readWorkspaceJson(workspace, albumFile)).data.images, [
+    { imageId: TYPED_ALBUM_IMAGE_ID, caption: "Sunrise", width: 1200, height: 800 },
+  ]);
+  const reviewFile = manifest.pages[3].file;
+  assert.equal((await readWorkspaceJson(workspace, reviewFile)).data.rating, "might-return");
+
+  // A second pull over unchanged pages rewrites nothing.
+  const before = await Promise.all(manifest.pages.map((entry) => readWorkspaceText(workspace, entry.file)));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.deepEqual(
+    await Promise.all(manifest.pages.map((entry) => readWorkspaceText(workspace, entry.file))),
+    before,
+  );
+
+  // Edit one page's text; push the workspace. Every page is sent back as the
+  // site holds it, and only the edited one differs.
+  const edited = structuredClone(story);
+  edited.data.body.content[0].content[0].text = "Twice upon a time.";
+  await writeWorkspaceFile(workspace.workspaceDir, storyFile, Buffer.from(`${JSON.stringify(edited, undefined, 2)}\n`));
+  const pushWire = api(routes);
+  await pagesPush(invoke(workspace, pushWire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  const sent = new Map(pushWire.matching("PATCH", PAGE_BY_ID).map((call) => [call.body.path, call.body]));
+  // Only the edited page is sent; the other three are unchanged since the pull.
+  assert.deepEqual([...sent.keys()], ["blog/story"]);
+  assert.equal(sent.get("blog/story").template.articleData.body.content[0].content[0].text, "Twice upon a time.");
+  assert.equal(sent.get("blog/story").displayDate, "2019-02-03");
+  assert.equal(sent.get("blog/story").coverImageId, TYPED_COVER_ID);
+  // Edit every source, and each page reaches the wire as the site holds it: only
+  // defaults added, and the server-derived delivery URLs left off.
+  await touchPulledSources(workspace);
+  const everyWire = api(routes);
+  await pagesPush(invoke(workspace, everyWire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  const every = new Map(everyWire.matching("PATCH", PAGE_BY_ID).map((call) => [call.body.path, call.body]));
+  for (const { summary, templateType, data } of pages.slice(1)) {
+    const body = every.get(summary.path);
+    assert.equal(body.template.templateType, templateType);
+    const [dataKey] = Object.keys(data);
+    // The site's template data reaches the wire with only defaults added and
+    // the server-derived delivery URLs left off.
+    assert.equal(body.template[dataKey].placeName, undefined);
+    assert.equal(JSON.stringify(body.template[dataKey]).includes("cdn.example"), false);
+  }
+});
+
+test("a display date changed on the site is not overwritten by a stale local copy", async (site) => {
+  const workspace = await fixture(site, {});
+  const state = { displayDate: "2019-02-03" };
+  const summary = () => pageSummary({ pageId: STORY_PAGE_ID, path: "blog/story", title: "Story", templateType: "TEMPLATE_TYPE_ARTICLE", displayDate: state.displayDate });
+  const routes = [
+    { method: "GET", pattern: PAGES_LIST, reply: () => ({ pages: [summary()], nextPageToken: "" }) },
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      // The revision does not move with the date: the server's revision covers
+      // the body, title, path, description and cover, but not the date.
+      reply: () => ({
+        pageId: STORY_PAGE_ID,
+        title: "Story",
+        path: "blog/story",
+        bodyRevision: `v2:${"a".repeat(64)}`,
+        displayDate: state.displayDate,
+        template: { templateType: "TEMPLATE_TYPE_ARTICLE", articleData: { body: paragraphDocument("Once.") } },
+      }),
+    },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ];
+  const wire = api(routes);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages[0].baseline.displayDate, "2019-02-03");
+
+  // Someone changes only the date in the app, and the author edits the body.
+  state.displayDate = "2021-05-05";
+  const document_ = await readWorkspaceJson(workspace, manifest.pages[0].file);
+  document_.data.body.content[0].content[0].text = "Twice.";
+  await writeWorkspaceFile(workspace.workspaceDir, manifest.pages[0].file, Buffer.from(`${JSON.stringify(document_)}\n`));
+  const pushWire = api(routes);
+  await assert.rejects(
+    pagesPush(invoke(workspace, pushWire, { verb: "pages push", content: REAL_CONTENT }).invocation),
+    (error) => error?.code === "pages.push_conflict" && error.alternatives.join() === "2019-02-03,2021-05-05",
+  );
+  assert.equal(pushWire.matching("PATCH", PAGE_BY_ID).length, 0);
+
+  // pull reports the same movement as a conflict rather than adopting it over the local edit.
+  await assert.rejects(
+    pull(invoke(workspace, api(routes), { verb: "pull" }).invocation),
+    { code: "pages.pull_conflict" },
+  );
+
+  // Once the author takes the site's version, the next push goes through.
+  await rm(workspacePath(workspace, manifest.pages[0].file));
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const adopted = await readWorkspaceJson(workspace, manifest.pages[0].file);
+  assert.equal(adopted.displayDate, "2021-05-05");
+  // Adopting the site's version left nothing to send.
+  const idleWire = api(routes);
+  await pagesPush(invoke(workspace, idleWire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  assert.equal(idleWire.matching("PATCH", PAGE_BY_ID).length, 0);
+  await touchPulledSources(workspace);
+  const settledWire = api(routes);
+  await pagesPush(invoke(workspace, settledWire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  assert.equal(settledWire.matching("PATCH", PAGE_BY_ID)[0].body.displayDate, "2021-05-05");
+});
+
+test("after a refused pull, a push overrides only the display date that pull showed", async (site) => {
+  const workspace = await fixture(site, {});
+  const state = { displayDate: "2019-02-03" };
+  const routes = [
+    {
+      method: "GET",
+      pattern: PAGES_LIST,
+      reply: () => ({
+        pages: [pageSummary({
+          pageId: STORY_PAGE_ID,
+          path: "blog/story",
+          title: "Story",
+          templateType: "TEMPLATE_TYPE_ARTICLE",
+          displayDate: state.displayDate,
+        })],
+        nextPageToken: "",
+      }),
+    },
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: () => ({
+        pageId: STORY_PAGE_ID,
+        title: "Story",
+        path: "blog/story",
+        bodyRevision: `v2:${"a".repeat(64)}`,
+        displayDate: state.displayDate,
+        template: { templateType: "TEMPLATE_TYPE_ARTICLE", articleData: { body: paragraphDocument("Once.") } },
+      }),
+    },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ];
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const { file } = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0];
+  const document_ = await readWorkspaceJson(workspace, file);
+  document_.data.body.content[0].content[0].text = "Twice.";
+  await writeWorkspaceFile(workspace.workspaceDir, file, Buffer.from(`${JSON.stringify(document_)}\n`));
+
+  state.displayDate = "2021-05-05";
+  await assert.rejects(pull(invoke(workspace, api(routes), { verb: "pull" }).invocation), {
+    code: "pages.pull_conflict",
+  });
+
+  // The date moved again after the operator was shown 2021-05-05.
+  state.displayDate = "2022-06-06";
+  await assert.rejects(
+    pagesPush(invoke(workspace, api(routes), { verb: "pages push", content: REAL_CONTENT }).invocation),
+    { code: "pages.push_conflict" },
+  );
+
+  // The date the refusal showed is the site's again: the documented recovery goes through.
+  state.displayDate = "2021-05-05";
+  const recovery = api(routes);
+  await pagesPush(invoke(workspace, recovery, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  assert.equal(recovery.matching("PATCH", PAGE_BY_ID)[0].body.displayDate, "2019-02-03");
+});
+
+test("a node the API refuses in an album introduction stops the whole push before any send", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([
+      { pageId: NEW_PAGE_ID, path: "albums/trip", title: "Trip", templateType: "TEMPLATE_TYPE_ALBUM", file: "pages/trip.pm.json" },
+    ]),
+    "pages/story.md": "---\ntitle: Story\npath: blog/story\ntemplate: article\n---\n\nOnce.\n",
+    "pages/trip.pm.json": {
+      template: "album",
+      data: {
+        introductionBody: {
+          type: "doc",
+          content: [{ type: "section", attrs: {}, content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }] }],
+        },
+        images: [{ imageId: TYPED_ALBUM_IMAGE_ID, caption: "", width: 1, height: 1 }],
+      },
+    },
+  });
+  const wire = api(typedCreateRoutes([pageSummary({ pageId: NEW_PAGE_ID, path: "albums/trip", templateType: "TEMPLATE_TYPE_ALBUM" })]));
+  await assert.rejects(
+    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
+    { code: "pages.node_unsupported_for_template" },
+  );
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+test("a whole-workspace push sends only the pages whose source changed since the last pull or push", async (site) => {
+  const workspace = await fixture(site);
+  const summaries = [
+    pageSummary({ pageId: HOME_PAGE_ID, path: undefined, title: "Home" }),
+    pageSummary({ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }),
+    pageSummary({ pageId: STORY_PAGE_ID, path: "story", title: "Story" }),
+  ];
+  const routes = [
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: summaries, nextPageToken: "" } },
+    { method: "GET", pattern: PAGE_BY_ID, reply: (call) => freeFormPageDetail(call.pathname.split("/").pop(), BODY_MARKER) },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+  ];
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const push = async () => {
+    const wire = api(routes);
+    const result = await pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+    return { result, patched: wire.matching("PATCH", PAGE_BY_ID).map((call) => call.body.pageId) };
+  };
+
+  // Nothing edited since the pull: nothing is sent, so approved pages stay approved.
+  const idle = await push();
+  assert.deepEqual(idle.patched, []);
+  assert.equal(idle.result.pages.unchanged, 3);
+  assert.equal(idle.result.pages.updated, 0);
+
+  // One page edited: exactly that page is sent.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const aboutFile = manifest.pages.find((entry) => entry.pageId === ABOUT_PAGE_ID).file;
+  const edited = await readWorkspaceJson(workspace, aboutFile);
+  edited.content[0].content[0].text = "Edited";
+  await writeWorkspaceFile(workspace.workspaceDir, aboutFile, Buffer.from(`${JSON.stringify(edited, undefined, 2)}\n`));
+  const one = await push();
+  assert.deepEqual(one.patched, [ABOUT_PAGE_ID]);
+  assert.equal(one.result.pages.unchanged, 2);
+
+  // The push recorded what it sent, so repeating it sends nothing.
+  assert.deepEqual((await push()).patched, []);
+
+  // A manifest-only edit (a .pm.json takes its description from the manifest) is a change.
+  const current = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  current.pages.find((entry) => entry.pageId === STORY_PAGE_ID).description = "A new description";
+  await writeWorkspaceFile(workspace.workspaceDir, ".taproot-site-manifest.json", Buffer.from(`${JSON.stringify(current)}\n`));
+  assert.deepEqual((await push()).patched, [STORY_PAGE_ID]);
+});
+
+test("an unchanged Markdown page is skipped, and everything that changes what would be sent brings it back", async (site) => {
+  const media = (imageId) => ({
+    mediaManifestVersion: 2,
+    siteId: SITE_ID,
+    media: { "media/hero.png": { imageId, width: 10, height: 10, alt: "Hero", src: "", urls: [] } },
+  });
+  const markdown = "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\n![Hero](media/hero.png)\n\nHello.\n";
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    ".taproot-site-media.json": media(IMAGE_ID),
+    "pages/about.md": markdown,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const routes = trackedRoutes(state);
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const push = async () => {
+    const wire = api(routes);
+    const result = await pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation);
+    return { result, patches: wire.matching("PATCH", PAGE_BY_ID).length };
+  };
+  assert.equal((await push()).patches, 1, "the first push after a pull of a Markdown source sends it");
+  // A later pull keeps the recorded key, so the next push still has nothing to send.
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const idle = await push();
+  assert.equal(idle.patches, 0);
+  assert.equal(idle.result.pages.unchanged, 1);
+  assert.equal(idle.result.nextStep, undefined);
+  // A targeted push of an unchanged page sends nothing either.
+  const targeted = api(routes);
+  await pagesPush(invoke(workspace, targeted, { verb: "pages push", pagePaths: ["about"], content: REAL_CONTENT }).invocation);
+  assert.equal(targeted.matching("PATCH", PAGE_BY_ID).length, 0);
+
+  // Re-uploading the image changes the manifest, not the file, and changes what is sent.
+  await writeWorkspaceFile(workspace.workspaceDir, ".taproot-site-media.json", Buffer.from(`${JSON.stringify(media("66666666-6666-4666-8666-666666666667"))}\n`));
+  assert.equal((await push()).patches, 1);
+  assert.equal((await push()).patches, 0);
+
+  // A front-matter edit is a change.
+  await writeWorkspaceFile(workspace.workspaceDir, "pages/about.md", Buffer.from(markdown.replace("Who we are", "Who we really are")));
+  assert.equal((await push()).patches, 1);
+
+  // A conflict the operator was shown lets the source be reasserted even though it is unchanged.
+  const { revision } = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].baseline;
+  await writeWorkspaceFile(
+    workspace.workspaceDir,
+    internalPageObservedRevisionFile(ABOUT_PAGE_ID),
+    Buffer.from(JSON.stringify({ pageId: ABOUT_PAGE_ID, revision })),
+  );
+  assert.equal((await push()).patches, 1);
+
+  // Moving the source to another file re-registers it in the manifest, even with identical bytes.
+  await rm(workspacePath(workspace, "pages/about.md"));
+  await writeWorkspaceFile(workspace.workspaceDir, "pages/company.md", Buffer.from(markdown.replace("Who we are", "Who we really are")));
+  assert.equal((await push()).patches, 1);
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].file, "pages/company.md");
+});
+
+test("a failed send leaves its page unrecorded, so the retry sends it and skips the one that succeeded", async (site) => {
+  const workspace = await fixture(site);
+  const summaries = [
+    pageSummary({ pageId: HOME_PAGE_ID, path: undefined, title: "Home" }),
+    pageSummary({ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }),
+  ];
+  let failHome = true;
+  const routes = [
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: summaries, nextPageToken: "" } },
+    { method: "GET", pattern: PAGE_BY_ID, reply: (call) => freeFormPageDetail(call.pathname.split("/").pop(), BODY_MARKER) },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    {
+      method: "PATCH",
+      pattern: PAGE_BY_ID,
+      reply: (call) => (failHome && call.body.pageId === HOME_PAGE_ID
+        ? jsonResponse({ code: 3, message: "invalid" }, 400)
+        : draftSummary(call.body.pageId, call.body.path)),
+    },
+  ];
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  await touchPulledSources(workspace);
+  await assert.rejects(pagesPush(invoke(workspace, api(routes), { verb: "pages push", content: REAL_CONTENT }).invocation));
+  failHome = false;
+  const retry = api(routes);
+  await pagesPush(invoke(workspace, retry, { verb: "pages push", content: REAL_CONTENT }).invocation);
+  assert.deepEqual(retry.matching("PATCH", PAGE_BY_ID).map((call) => call.body.pageId), [HOME_PAGE_ID]);
+});
+
+test("pages push refuses to send a typed source at a page that has another template", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    ".taproot-site-media.json": TYPED_MEDIA_MANIFEST,
+    "pages/story.md": TYPED_SOURCES["pages/story.md"],
+  });
+  const wire = api([
+    ...typedCreateRoutes([
+      pageSummary({ pageId: STORY_PAGE_ID, path: "blog/story", templateType: "TEMPLATE_TYPE_FREE_FORM" }),
+    ]),
+  ]);
+  await assert.rejects(
+    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
+    (error) => error?.code === "pages.template_immutable" && /article source/u.test(error.message),
+  );
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("a typed source that fails validation sends nothing, even beside pages that are valid", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    ".taproot-site-media.json": TYPED_MEDIA_MANIFEST,
+    "pages/story.md": TYPED_SOURCES["pages/story.md"],
+    "pages/trip.md": "---\ntitle: The trip\npath: albums/trip\ntemplate: album\n---\n\n## Images\n\n![Gone](media/missing.jpg)\n",
+  });
+  const wire = api(typedCreateRoutes());
+  await assert.rejects(
+    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
+    { code: "media.unresolved_reference" },
+  );
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
 });
 
 test("pages push sends nothing when any document fails validation", async (site) => {
@@ -9513,6 +10061,38 @@ test("delivery check --production verifies the public origin it is given and rep
   assert.ok(progress.some((line) => /Delivery verified over HTTP/u.test(line)));
 });
 
+test("delivery check spends its route allowance on every template before repeating one", async (site) => {
+  const posts = Array.from({ length: 25 }, (_, index) => ({
+    pageId: `7777777${index % 10}-7777-4777-8777-77777777${String(index).padStart(4, "0")}`,
+    path: `journal/post-${index}`,
+    title: `Post ${index}`,
+    templateType: "TEMPLATE_TYPE_ARTICLE",
+  }));
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([
+      ...posts,
+      { pageId: STORY_PAGE_ID, path: "recipes/lemon-bars", title: "Lemon bars", templateType: "TEMPLATE_TYPE_RECIPE" },
+    ]),
+  });
+  const html = () => new Response(deliveredHtml(), { status: 200, headers: { "content-type": "text/html" } });
+  const wire = api([
+    ...deliveryRoutes(),
+    { method: "GET", pattern: /^\/(journal\/post-\d+|recipes\/lemon-bars)\/$/u, reply: html },
+  ]);
+  const { invocation } = invoke(workspace, wire, {
+    verb: "delivery check",
+    deployTarget: "production",
+    deliveryUrl: `${PUBLIC_ORIGIN}/`,
+    browser: false,
+  });
+  const result = await deliveryCheck(invocation);
+  const checked = result.routes.items.map((item) => item.path);
+  assert.equal(result.routes.truncated, true);
+  // The recipe is the last page in the manifest, yet it is among the routes
+  // fetched: the first article and the recipe are chosen before the second article.
+  assert.deepEqual(checked.slice(0, 3), ["/", "/journal/post-0/", "/recipes/lemon-bars/"]);
+});
+
 test("delivery check reports a stale runtime pointer and a differing workspace record without changing the verdict semantics", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([], {
@@ -9979,4 +10559,21 @@ test("no site verb asks its surface for nothing, because an empty request means 
   // a standard site, Design is what carries site.media.manage on a Docs site.
   assert.deepEqual(verbCapabilitiesForSurface("media upload", "standard"), [CAPABILITY_CONTENT]);
   assert.deepEqual(verbCapabilitiesForSurface("media upload", "docs-presentation"), [CAPABILITY_DESIGN]);
+});
+
+test("a cover image the page does not use stops the whole push before any request is sent", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    ".taproot-site-media.json": TYPED_MEDIA_MANIFEST,
+    "pages/ok.md": "---\ntitle: Fine\npath: journal/fine\ntemplate: article\n---\n\nText.\n",
+    "pages/story.md": "---\ntitle: Story\npath: journal/story\ntemplate: article\ncoverImage: media/cover.jpg\n---\n\nNo picture.\n",
+  });
+  const wire = api(typedCreateRoutes());
+  await assert.rejects(
+    pagesPush(invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT }).invocation),
+    (error) =>
+      error?.code === "pages.cover_image_unused"
+      && /The selected cover image must be used by this page\./u.test(error.message),
+  );
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
 });

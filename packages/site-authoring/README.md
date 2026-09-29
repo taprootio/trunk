@@ -99,6 +99,7 @@ taproot-site help
 taproot-site help designs
 taproot-site help design professional-portfolio
 taproot-site help page free-form
+taproot-site help page recipe
 taproot-site help component hero-section --json
 ```
 
@@ -141,8 +142,8 @@ taproot-site validate "$(npm root --global)/@taprootio/site-authoring/examples/r
 
 The fixture is a fictional wellness studio — `example.test` hostnames, a
 reserved `555-01xx` telephone number, an invented street and town — with two
-free-form pages, a three-item navigation tree, and all four settings
-documents. Nothing in it describes a real business. Copy the directory
+free-form pages and one each of the article, recipe, album and place-review
+templates, a three-item navigation tree, and all four settings documents. Nothing in it describes a real business. Copy the directory
 somewhere writable before you edit it; `validate` never writes to the fixture
 it reads.
 
@@ -337,6 +338,17 @@ the site's own document is kept as internal state under
 `.taproot-site-state/`, which is never a page source and never pushed. A page
 edited on the site since the last pull is a `pages.pull_conflict` refusal
 before anything under `pages/` changes, with both recovery paths named.
+
+Pages are not only free-form. A source chooses its template with `template:` in
+its front matter — `article`, `recipe`, `album` or `place-review`; free-form is
+the default — and `pull` writes the other four as a `.pm.json` wrapper
+(`{ "template", "displayDate", "coverImageId", "data" }`) that `pages push`
+sends back unchanged. Typed pages also carry `displayDate` (so an import keeps
+its original publication date) and `coverImage`, which the site requires to be an
+image the page itself uses (place it in the body too; `pages.cover_image_unused`). A page's template is fixed when
+it is created: a source for another template is refused with
+`pages.template_immutable`. `taproot-site help page <type>` gives each
+template's fields and one worked example.
 
 `pages push [page-path...]` validates and sends the selected pages, or every
 workspace page when none is named; the homepage is addressed as `/`. It fails
@@ -549,7 +561,7 @@ taproot-site validate ../authoring-fixture
 The destination must be new, outside the source workspace, and its parent must exist. Use
 `taproot-site --config path/to/taproot-site.json validate --init ../authoring-fixture`
 to select another source configuration. Initialization needs no credential or
-network. It exports editable free-form pages as ProseMirror with navigation,
+network. It exports editable pages of every template as workspace documents with navigation,
 redirects, settings, and version-7 appearance/footer metadata, validates the
 result, and leaves the source unchanged. Excluded metadata-only pages are
 counted; unresolved references to them fail validation.

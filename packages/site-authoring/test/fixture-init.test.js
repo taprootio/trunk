@@ -73,7 +73,7 @@ test("init exports a self-contained version-7 fixture, remaps identities and ori
   const output = initialized.result.initialized.directory;
   const result = await invoke(source, ["validate", output]);
   assert.equal(result.exit, 0, result.stderr);
-  assert.equal(result.result.validated.pages.total, 2);
+  assert.equal(result.result.validated.pages.total, 6);
   const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
   assert.equal(fixture.manifestVersion, 7);
   assert.ok(fixture.appearance && fixture.footer);
@@ -173,5 +173,5 @@ test("init discovers an explicit source configuration without reading credential
   );
   const result = await invoke(root, ["--config", "selected.json", "validate", "--init", "output"]);
   assert.equal(result.exit, 0, result.stderr);
-  assert.equal(result.result.initialized.pages, 2);
+  assert.equal(result.result.initialized.pages, 6);
 });

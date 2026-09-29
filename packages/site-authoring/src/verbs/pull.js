@@ -8,7 +8,6 @@ import {
   PAGE_STATUS_DELETED,
   PAGE_STATUS_DRAFT,
   PAGE_STATUS_UNKNOWN,
-  TEMPLATE_TYPE_FREE_FORM,
   withRefusalGuidance,
 } from "../api.js";
 import {
@@ -32,6 +31,7 @@ import {
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
+import { isAuthorableTemplateType, sentDisplayDate, workspaceDocumentFromPage } from "../typed-pages.js";
 import {
   canonicalDocumentHash,
   deleteWorkspaceFile,
@@ -47,6 +47,7 @@ import {
   normalizePageBodyRevision,
   normalizePagePath,
   PAGE_SOURCE_EXTENSIONS,
+  pageContentKey,
   PAGE_SOURCE_FORMAT_MARKDOWN,
   PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_METADATA_ONLY,
@@ -481,13 +482,9 @@ function pathFromRead(page, summary) {
   return normalized === undefined ? summary.path : normalized;
 }
 
-function freeFormBody(page) {
-  const template = page.template;
-  if (template === null || typeof template !== "object") return undefined;
-  const data = template.freeFormData;
-  if (data === null || typeof data !== "object") return undefined;
-  const body = data.body;
-  return body !== null && typeof body === "object" && !Array.isArray(body) ? body : undefined;
+/** The date a read reports for a page whose push sends one, or `undefined` for a free-form page. */
+function trackedDisplayDate(page, templateType) {
+  return sentDisplayDate(templateType) ? (typeof page.displayDate === "string" ? page.displayDate : "") : undefined;
 }
 
 function notThisSite(message, field) {
@@ -601,9 +598,9 @@ export async function pull(invocation) {
       ({ pages, truncated } = await listSitePages(client, siteId, { onProgress }));
     }
     const live = pages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
-    const freeForm = live.filter((summary) => summary.templateType === TEMPLATE_TYPE_FREE_FORM);
-    const tracked = await resolveTrackedSources(config.workspaceDir, freeForm, registry, onProgress);
-    const pageFiles = assignPageFiles(freeForm, tracked);
+    const authorable = live.filter((summary) => isAuthorableTemplateType(summary.templateType));
+    const tracked = await resolveTrackedSources(config.workspaceDir, authorable, registry, onProgress);
+    const pageFiles = assignPageFiles(authorable, tracked);
 
     // The redirect map, with the revision a later push is fenced by (TR00702).
     // Read here, before the first workspace write, for the same reason the
@@ -732,18 +729,18 @@ export async function pull(invocation) {
     const conflicts = [];
     let bufferedBytes = 0;
     let revisionsRecordedWithoutBodyComparison = 0;
-    for (const summary of freeForm) {
+    for (const summary of authorable) {
       const source = tracked.get(summary.pageId);
       if (source === undefined) continue;
-      onProgress(`Reading free-form page '${summary.path}'.`);
+      onProgress(`Reading page '${summary.path}'.`);
       const page = await getPage(client, summary.pageId, bodyStatusFor(summary));
-      const body = freeFormBody(page);
+      const body = workspaceDocumentFromPage(page, summary.templateType);
       const description = typeof page.shortDescription === "string" ? page.shortDescription : "";
       if (body === undefined) {
         // The site's body is unreadable, but the workspace file is still this
         // page's one source. Dropping it from the registry would let the next
         // pull mint the competing document all over again.
-        onProgress(`Page '${summary.path}' has no readable free-form body; keeping '${source.file}' as its source.`);
+        onProgress(`Page '${summary.path}' has no readable body; keeping '${source.file}' as its source.`);
         trackedPlans.set(summary.pageId, {
           description,
           title: titleFromRead(page, summary),
@@ -798,9 +795,17 @@ export async function pull(invocation) {
       // projection moved across the API deploy. This costs one pull's detection
       // at the upgrade boundary, the same trade `withoutSupersededRemoteHashes`
       // accepts.
-      const remoteChanged = revision !== undefined
+      const revisionChanged = revision !== undefined
         ? source.baseline?.revision !== undefined && source.baseline.revision !== revision
         : source.baseline?.remoteHash !== undefined && source.baseline.remoteHash !== remoteHash;
+      // A typed page's display date is edited in the app and is not covered by
+      // the revision, so it is compared on its own: otherwise a push would
+      // silently write a stale date over the newer one (TR00893).
+      const remoteDisplayDate = trackedDisplayDate(page, summary.templateType);
+      const dateChanged = remoteDisplayDate !== undefined
+        && source.baseline?.displayDate !== undefined
+        && source.baseline.displayDate !== remoteDisplayDate;
+      const remoteChanged = revisionChanged || dateChanged;
       // Markdown is one-way, so a Markdown source can never be rewritten from
       // the site's document and is always kept. A ProseMirror source can be
       // refreshed — but only over content the author has not edited since the
@@ -860,12 +865,22 @@ export async function pull(invocation) {
           ? {
             remoteHash,
             sourceHash: localChanged ? source.baseline?.sourceHash : sourceHash,
+            // Carried, never minted here: a kept source is only known to match
+            // the site if a push or an earlier pull already said so.
+            ...(source.baseline?.contentKey === undefined ? {} : { contentKey: source.baseline.contentKey }),
             ...(revision === undefined ? {} : { revision }),
+            ...(remoteDisplayDate === undefined ? {} : { displayDate: remoteDisplayDate }),
           }
           : {
             remoteHash,
             sourceHash: workspaceContentHash(serialized),
+            contentKey: pageContentKey(workspaceContentHash(serialized), {
+              title: titleFromRead(page, summary),
+              path: pathFromRead(page, summary),
+              description,
+            }),
             ...(revision === undefined ? {} : { revision }),
+            ...(remoteDisplayDate === undefined ? {} : { displayDate: remoteDisplayDate }),
           },
         ...(keepLocal ? { baselineBody: serialized, baselineFile } : { refresh: serialized, baselineFile }),
       });
@@ -887,7 +902,10 @@ export async function pull(invocation) {
         // what the fallback comparison above is made against, so it is equally
         // the thing a record has to name.
         const observed = await readObservedPageRecord(config.workspaceDir, summary.pageId);
+        // A typed page's date moves without moving the revision, so the date
+        // the record showed must match too or its differences are stale.
         const alreadyShown = observed !== undefined
+          && observed.displayDate === remoteDisplayDate
           && (revision === undefined
             ? observed.revision === undefined && observed.remoteHash === remoteHash
             : observed.revision === revision);
@@ -922,6 +940,7 @@ export async function pull(invocation) {
             differences,
             observedRevision: revision,
             observedRemoteHash: remoteHash,
+            observedDisplayDate: remoteDisplayDate,
             observedRevisionFile: internalPageObservedRevisionFile(summary.pageId),
           });
         }
@@ -972,6 +991,7 @@ export async function pull(invocation) {
           ...(conflict.observedRevision === undefined
             ? { remoteHash: conflict.observedRemoteHash }
             : { revision: conflict.observedRevision }),
+          ...(conflict.observedDisplayDate === undefined ? {} : { displayDate: conflict.observedDisplayDate }),
           ...(conflict.differences === undefined ? {} : { differences: conflict.differences }),
         });
       }
@@ -993,7 +1013,7 @@ export async function pull(invocation) {
         isGenerated: summary.isGenerated,
         workspaceMode: PAGE_WORKSPACE_MODE_METADATA_ONLY,
       };
-      if (summary.templateType === TEMPLATE_TYPE_FREE_FORM) {
+      if (isAuthorableTemplateType(summary.templateType)) {
         // This pull is reconciling the page, so the manifest below carries the
         // newer and stronger claim and the "what the operator was shown" record
         // is spent. Leaving it would let a push override a remote change this
@@ -1026,9 +1046,9 @@ export async function pull(invocation) {
           manifestPages.push(entry);
           continue;
         }
-        onProgress(`Reading free-form page '${summary.path}'.`);
+        onProgress(`Reading page '${summary.path}'.`);
         const page = await getPage(client, summary.pageId, bodyStatusFor(summary));
-        const body = freeFormBody(page);
+        const body = workspaceDocumentFromPage(page, summary.templateType);
         entry.description = typeof page.shortDescription === "string" ? page.shortDescription : "";
         entry.title = titleFromRead(page, summary);
         entry.path = pathFromRead(page, summary);
@@ -1036,17 +1056,24 @@ export async function pull(invocation) {
           // The server accepts and stores a body it never validates, so an
           // unreadable one is a real state. It is reported rather than written
           // as an empty document that a later push would send back.
-          onProgress(`Page '${summary.path}' has no readable free-form body; snapshotting metadata only.`);
+          onProgress(`Page '${summary.path}' has no readable body; snapshotting metadata only.`);
         } else {
           entry.file = pageFiles.get(summary.pageId);
           const source = Buffer.from(`${JSON.stringify(body, undefined, 2)}\n`, "utf8");
           entry.workspaceMode = PAGE_WORKSPACE_MODE_EDITABLE;
           entry.sourceFormat = pageSourceFormat(entry.file);
           const revision = normalizePageBodyRevision(page.bodyRevision);
+          const displayDate = trackedDisplayDate(page, summary.templateType);
           entry.baseline = {
             remoteHash: canonicalDocumentHash(body),
             sourceHash: workspaceContentHash(source),
+            contentKey: pageContentKey(workspaceContentHash(source), {
+              title: entry.title,
+              path: entry.path,
+              description: entry.description,
+            }),
             ...(revision === undefined ? {} : { revision }),
+            ...(displayDate === undefined ? {} : { displayDate }),
           };
           await writeWorkspaceFile(config.workspaceDir, entry.file, source);
           bodies += 1;

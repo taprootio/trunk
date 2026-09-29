@@ -35,6 +35,28 @@ function environmentFor(target) {
   return target === DEPLOY_TARGET_STAGING ? DEPLOYMENT_ENVIRONMENT_STAGING : DEPLOYMENT_ENVIRONMENT_PRODUCTION;
 }
 
+/**
+ * The site-relative routes to verify, one page of every template first.
+ *
+ * `checkDelivery` looks at a bounded number of routes. A site with a long blog
+ * would otherwise spend the whole allowance on its first pages and never fetch
+ * the recipe, album or review that renders through a different template, which
+ * is exactly what a delivery check on a typed-content site has to prove (TR00893).
+ */
+function routesToCheck(pages) {
+  const usable = pages.filter((page) => page !== null && typeof page === "object" && typeof page.path === "string");
+  const seenTemplates = new Set();
+  const firstOfTemplate = [];
+  const rest = [];
+  for (const page of usable) {
+    (seenTemplates.has(page.templateType) ? rest : firstOfTemplate).push(page);
+    seenTemplates.add(page.templateType);
+  }
+  return [...firstOfTemplate, ...rest].map((page) =>
+    page.path === "" ? "/" : `/${page.path.replace(/^\/+/u, "")}/`.replace(/\/\/$/u, "/")
+  );
+}
+
 async function resolveTarget(client, siteId, target, invocation, onProgress, now) {
   if (typeof invocation.deliveryUrl === "string" && invocation.deliveryUrl !== "") {
     if (target === DEPLOY_TARGET_STAGING) {
@@ -118,9 +140,7 @@ export async function deliveryCheck(invocation) {
     }
 
     const resolved = await resolveTarget(client, siteId, target, invocation, onProgress, now);
-    const routes = (manifest?.pages ?? [])
-      .filter((page) => page !== null && typeof page === "object" && typeof page.path === "string")
-      .map((page) => (page.path === "" ? "/" : `/${page.path.replace(/^\/+/u, "")}/`.replace(/\/\/$/u, "/")));
+    const routes = routesToCheck(manifest?.pages ?? []);
     onProgress(`Checking ${resolved.baseUrl} (${Math.min(routes.length + 1, DELIVERY_LIMITS.routes)} route(s), assets, runtime).`);
     const report = await checkDelivery({
       fetch: client.fetch,

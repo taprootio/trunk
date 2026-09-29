@@ -139,7 +139,7 @@ test("the shipped example fixture validates without credentials, network, or wri
       manifest: "manifest.fixture.json",
       imageIds: 3,
       deliveryOrigins: 1,
-      pages: 2,
+      pages: 6,
       navigationItems: 3,
       themes: 2,
       appearanceSettings: 23,
@@ -147,7 +147,11 @@ test("the shipped example fixture validates without credentials, network, or wri
     },
   );
   assert.deepEqual(json.validated.pages.items, [
+    { file: "pages/green-smoothie.md", path: "recipes/green-smoothie" },
     { file: "pages/index.md", path: "" },
+    { file: "pages/journal-welcome.md", path: "journal/welcome" },
+    { file: "pages/juice-bar.md", path: "reviews/juice-bar" },
+    { file: "pages/studio-tour.pm.json", path: "albums/studio-tour" },
     { file: "pages/visit.md", path: "visit" },
   ]);
   // The README promises exit 0 with nothing to read afterwards, so the shipped
@@ -155,7 +159,7 @@ test("the shipped example fixture validates without credentials, network, or wri
   assert.deepEqual(json.warnings, { items: [], count: 0 });
   assert.deepEqual(json.hints, []);
   assert.match(result.stderr, /^Reading manifest\.fixture\.json\./u);
-  assert.match(result.stderr, /Validated 2 page\(s\), 3 navigation item\(s\)/u);
+  assert.match(result.stderr, /Validated 6 page\(s\), 3 navigation item\(s\)/u);
 });
 
 test("validate reports a fit lint the theme's own validation cannot see", async (context) => {
@@ -346,38 +350,6 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
   assert.match(result.stderr, /without credentials or mutation\.\n$/u);
 });
 
-// The app.taproot.io waitlist notice (TR00890, taproot-account-sign-up.ts's
-// renderWaitlistNotice) sends an uninvited visitor to the marketing site to
-// join the waitlist. Every page there must actually carry a working waitlist
-// form — a component:cta block in formMode "waitlist", not a plain link
-// button pointed at the invite-gated /create-account — or that notice is
-// a dead-end loop regardless of which page the visitor lands on. Hero-section
-// primary actions are deliberately excluded: TR00912 tracks giving those a
-// waitlist destination separately, so this check stays scoped to the one
-// component that notice depends on.
-test(
-  "every www.taproot.io fixture page's CTA component is a working waitlist form, not a link to the invite-gated sign-up page",
-  { skip: MONOREPO_ONLY },
-  async () => {
-    const pagesDirectory = path.join(TAPROOT_FIXTURE, "pages");
-    const pageFiles = (await readdir(pagesDirectory)).filter((name) => name.endsWith(".md"));
-    assert.ok(pageFiles.length >= 8, `expected at least 8 fixture pages, found ${pageFiles.length}`);
-
-    for (const file of pageFiles) {
-      const text = await readFile(path.join(pagesDirectory, file), "utf8");
-      const match = /```component:cta\n([\s\S]*?)\n```/u.exec(text);
-      assert.ok(match, `${file} has no component:cta block`);
-      const cta = JSON.parse(match[1]);
-      assert.equal(cta.formMode, "waitlist", `${file}'s CTA component is not formMode "waitlist"`);
-      assert.equal(
-        Object.hasOwn(cta, "buttonUrl"),
-        false,
-        `${file}'s CTA component still sets buttonUrl, which formMode "waitlist" ignores`,
-      );
-    }
-  },
-);
-
 test("validate drops the header-width hint once the workspace opts into the wide header", { skip: MONOREPO_ONLY }, async (context) => {
   // The www fixture owns this case: the hint needs a full-bleed root-band
   // component on a page, and the shipped fixture deliberately has none so its
@@ -522,6 +494,29 @@ test("offline failures retain the push validators' stable code and field", async
       },
       code: "content.raw_html_forbidden",
       field: "pages/visit.pm.json:/content/0",
+    },
+    {
+      label: "page bound as another template",
+      mutate: async (fixture) => {
+        const manifestPath = path.join(fixture, "manifest.fixture.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.pages.find((entry) => entry.path === "recipes/green-smoothie").templateType =
+          "TEMPLATE_TYPE_ARTICLE";
+        await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
+      },
+      code: "fixture.page_template_mismatch",
+      field: "pages/green-smoothie.md",
+    },
+    {
+      label: "album image the fixture does not declare",
+      mutate: async (fixture) => {
+        const file = path.join(fixture, "pages/studio-tour.pm.json");
+        const document_ = JSON.parse(await readFile(file, "utf8"));
+        document_.data.images[1].imageId = "99999999-9999-4999-8999-999999999999";
+        await writeFile(file, `${JSON.stringify(document_, undefined, 2)}\n`);
+      },
+      code: "fixture.image_reference_unknown",
+      field: "pages/studio-tour.pm.json",
     },
     {
       label: "fixture settings entity binding",

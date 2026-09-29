@@ -52,14 +52,14 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 27);
-  assert.deepEqual(PAGE_TYPES, ["free-form"]);
+  assert.equal(REFERENCE_VERSION, 28);
+  assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
   const componentTypes = listComponentTypeReferences().map((component) => component.type);
   assert.deepEqual(componentTypes, COMPONENT_TYPES);
   assert.deepEqual(getPageTypeReference("free-form").components.map((component) => component.type), COMPONENT_TYPES);
-  assert.equal(getPageTypeReference("article"), undefined);
+  assert.equal(getPageTypeReference("poem"), undefined);
   assert.equal(getComponentReference("hero"), undefined);
 });
 
@@ -147,7 +147,7 @@ test("the free-form reference exposes the production document vocabulary and aut
   const proseMirrorFormat = page.workspace.formats.find((format) => format.extension === ".pm.json");
   assert.deepEqual(
     markdownFormat.metadata.map((field) => field.name),
-    ["title", "path", "description"],
+    ["title", "path", "description", "template"],
   );
   assert.deepEqual(proseMirrorFormat.metadata, []);
   assert.equal(

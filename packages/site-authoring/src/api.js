@@ -490,6 +490,9 @@ export function normalizePageSummary(value) {
     // at" — and both are carried as `undefined` rather than as a sentinel that
     // would compare unequal to every recorded baseline and refuse every push.
     bodyRevision: normalizePageBodyRevision(summary.bodyRevision),
+    // The page's calendar date, empty when it has none. It is not part of
+    // `bodyRevision`, so a typed page's push guard compares it separately.
+    displayDate: typeof summary.displayDate === "string" ? summary.displayDate : "",
   };
 }
 
@@ -524,14 +527,6 @@ export async function getPage(client, pageId, status) {
     "api.page_contract",
     "page",
   );
-}
-
-export function freeFormTemplate(body) {
-  return {
-    templateType: TEMPLATE_TYPE_FREE_FORM,
-    templateVersion: FREE_FORM_TEMPLATE_VERSION,
-    freeFormData: { body },
-  };
 }
 
 export async function createPage(client, body) {
@@ -1118,7 +1113,6 @@ export async function listDeployments(
         `deployments${
           query([
             ["pageSize", pageSize],
-            ["includeStaging", true],
             ["environment", environment],
           ])
         }`,

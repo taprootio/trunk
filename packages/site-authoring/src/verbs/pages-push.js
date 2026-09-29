@@ -1,16 +1,25 @@
-import {
-  createPage,
-  freeFormTemplate,
-  listSitePages,
-  PAGE_STATUS_DELETED,
-  TEMPLATE_TYPE_FREE_FORM,
-  updatePage,
-  withRefusalGuidance,
-} from "../api.js";
+import { createPage, listSitePages, PAGE_STATUS_DELETED, updatePage, withRefusalGuidance } from "../api.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
+import {
+  contentDocuments,
+  COVER_IMAGE_UNUSED_MESSAGE,
+  documentTemplate,
+  FRONT_MATTER_KEYS,
+  PAGE_TEMPLATES,
+  requireTemplateName,
+  sentDisplayDate,
+  TEMPLATE_FREE_FORM,
+  templateFrontMatterFault,
+  typedDocumentFromJson,
+  typedDocumentFromMarkdown,
+  unusedCoverImageId,
+  unsupportedRestrictedNode,
+  wirePageFields,
+  wireTemplate,
+} from "../typed-pages.js";
 import {
   hasNamedFreeFormSectionContext,
   sharedThemeContextNames,
@@ -31,7 +40,7 @@ import {
   PAGES_DIRECTORY,
   readManifest,
   readMediaManifest,
-  readObservedPageRevision,
+  readObservedPageRecord,
   readWorkspaceFile,
   readWorkspaceJson,
   requireManifestSourceRegistry,
@@ -40,6 +49,8 @@ import {
   SYSTEM_PAGE_NOT_FOUND_PATH,
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
+  pageContentKey,
+  canonicalDocumentHash,
   workspaceContentHash,
   workspaceFileExists,
   writeManifest,
@@ -75,8 +86,10 @@ import {
  * Wire facts the body honors:
  * - Home (path `""`) and `404` are seeded system pages: update-only, and their
  *   paths are immutable (`SystemPagePaths.IsPathChangeAllowed`).
- * - A page's template type is immutable after creation, so an update against a
- *   page that is not FREE_FORM is refused rather than sent.
+ * - A page's template type is immutable after creation, so a source whose
+ *   template differs from the live page's is refused rather than sent. The
+ *   templates are free-form, article, recipe, album and place review; the
+ *   read-only system pages stay out of reach.
  * - Creates are POST and updates are PATCH with a *whole* template, not a patch
  *   mask. Neither is replayed by the transport, so each is issued once and an
  *   ambiguous outcome surfaces as ambiguous.
@@ -84,7 +97,6 @@ import {
 
 const MAXIMUM_REPORTED = 200;
 const FRONT_MATTER_FENCE = "---";
-const FRONT_MATTER_KEYS = new Set(["title", "path", "description"]);
 const FRONT_MATTER_ENTRY = /^([A-Za-z][A-Za-z0-9_]*)[ \t]*:[ \t]*(.*)$/u;
 
 /**
@@ -122,10 +134,10 @@ function unquote(value) {
 }
 
 /**
- * A deliberately tiny front-matter reader: exactly the three keys the page
- * contract needs, and a hard error on anything else. Silently dropping an
- * unrecognized key is how authored metadata disappears without a trace, and the
- * server would never notice.
+ * A deliberately tiny front-matter reader: exactly the keys the page contract
+ * names (`FRONT_MATTER_KEYS`), and a hard error on anything else. Silently
+ * dropping an unrecognized key is how authored metadata disappears without a
+ * trace, and the server would never notice.
  */
 function parseFrontMatter(source, file) {
   const lines = source.split(/\r?\n/u);
@@ -198,10 +210,24 @@ function parseFrontMatter(source, file) {
     if (distinct.length === 1) fields.set(key, distinct[0]);
     else candidates.set(key, distinct);
   }
+  // Which keys are legal depends on the template, so this can only run once
+  // every entry has been read. It is a fault on the file like any other bad
+  // entry: the path may still be readable.
+  let template = TEMPLATE_FREE_FORM;
+  if (fields.has("template")) {
+    try {
+      template = requireTemplateName(fields.get("template"), file);
+    } catch (error) {
+      record(error);
+    }
+  }
+  const stray = templateFrontMatterFault(template, [...values.keys()], file);
+  if (stray !== undefined) record(stray);
   return {
     fields,
     candidates,
     fault,
+    template,
     markdown: lines.slice(closing + 1).join("\n"),
   };
 }
@@ -327,15 +353,16 @@ function requireContentFunctions(content) {
   return content;
 }
 
-function assertValid(content, document_, file) {
+function assertValid(content, document_, file, { mayBeEmpty = false } = {}) {
   const outcome = content.validateDocument(document_);
-  const errors = outcome === null || typeof outcome !== "object" ? undefined : outcome.errors;
-  if (!Array.isArray(errors)) {
+  const reported = outcome === null || typeof outcome !== "object" ? undefined : outcome.errors;
+  if (!Array.isArray(reported)) {
     throw new SiteAuthoringError(
       "content.contract_invalid",
       "The content validator did not return a list of validation errors.",
     );
   }
+  const errors = mayBeEmpty ? reported.filter((error) => error?.code !== CONTENT_ERROR_CODES.emptyDocument) : reported;
   if (errors.length === 0) return;
   const first = errors[0] ?? {};
   const location = typeof first.path === "string" && first.path !== "" ? first.path : "doc";
@@ -356,6 +383,20 @@ function systemPageKind(pagePath) {
 function requireText(value, code, message, field) {
   if (typeof value !== "string" || value.trim() === "") throw documentError(code, message, field);
   return value;
+}
+
+/**
+ * The template a `.pm.json` source declares, read without validating anything
+ * else. A file that is not JSON, or is a bare document, reads as free-form here;
+ * the conversion step is the one that reports why it cannot be used.
+ */
+function peekJsonTemplate(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return documentTemplate(parsed);
+  } catch {
+    return TEMPLATE_FREE_FORM;
+  }
 }
 
 /**
@@ -381,8 +422,12 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
   let title;
   let declaredDescription;
   let declaredPath;
+  let template = TEMPLATE_FREE_FORM;
+  let fields;
   if (isMarkdown) {
     const frontMatter = parseFrontMatter(source, file);
+    template = frontMatter.template;
+    fields = frontMatter.fields;
     title = frontMatter.fields.get("title") ?? manifestEntry?.title;
     declaredDescription = frontMatter.fields.get("description") ?? manifestEntry?.description;
     declaredPath = frontMatter.fields.has("path") ? frontMatter.fields.get("path") : manifestEntry?.path;
@@ -401,6 +446,7 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
     title = manifestEntry.title;
     declaredDescription = manifestEntry.description;
     declaredPath = manifestEntry.path;
+    template = peekJsonTemplate(source);
   }
 
   const pagePath = normalizePagePath(declaredPath);
@@ -445,6 +491,8 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
     declaredDescription,
     fault,
     pathClaims: [],
+    template,
+    fields,
     sourceFormat: isMarkdown ? PAGE_SOURCE_FORMAT_MARKDOWN : PAGE_SOURCE_FORMAT_PROSEMIRROR,
     sourceHash: workspaceContentHash(bytes),
     markdown,
@@ -492,6 +540,33 @@ function requireReconciledRevision({ file, pagePath, target, entry, observedRevi
 }
 
 /**
+ * The same guard for a typed page's display date, which the revision does not
+ * cover. It refuses only when this push would change a date that moved on the
+ * site since the workspace last saw it: an unset date is left alone by the
+ * update, and a pull that showed the operator a conflict has already handed
+ * them the site's version.
+ */
+function requireReconciledDisplayDate({ file, pagePath, target, entry, document_, observed }) {
+  const sent = documentTemplate(document_) === TEMPLATE_FREE_FORM ? undefined : document_.displayDate;
+  const recorded = entry?.baseline?.displayDate;
+  const live = target.displayDate;
+  if (sent === undefined || recorded === undefined) return;
+  // A refused pull records the date it showed. Only that date is overridable: a
+  // page whose date moved again since is refused again, like a moved revision.
+  // A record from a pull that named no date still counts as having shown it.
+  if (observed !== undefined && (observed.displayDate === undefined || observed.displayDate === live)) return;
+  if (typeof recorded !== "string" || live === recorded || live === sent) return;
+  throw new SiteAuthoringError(
+    "pages.push_conflict",
+    `Page '${pagePath || "/"}' has a different display date on the site (${live || "none"}) than the one this `
+      + `workspace last reconciled with (${recorded || "none"}), and '${file}' would replace it with `
+      + `${sent || "none"}. No page was pushed. Run 'taproot-site pull' to adopt the site's date, or delete `
+      + `'${file}' and pull again.`,
+    { field: file, alternatives: [recorded, live] },
+  );
+}
+
+/**
  * The metadata checks that are *not* part of deciding which page a source is.
  *
  * They are separate because a file that declares `path: about` is a source for
@@ -516,13 +591,23 @@ export async function convertWorkspacePageSource({ source, mediaManifest, conten
   const content = requireContentFunctions(await loadContentModule(injectedContent));
   const { file } = source;
   if (source.sourceFormat === PAGE_SOURCE_FORMAT_MARKDOWN) {
-    const converted = await content.markdownToProseMirror(source.markdown, {
-      resolveImage: makeResolveImage(mediaManifest, file),
-    });
-    return unwrapProseMirrorDocument(
-      converted === null || typeof converted !== "object" ? undefined : converted.doc,
+    const resolveImage = makeResolveImage(mediaManifest, file);
+    const convert = async (markdown) => {
+      const converted = await content.markdownToProseMirror(markdown, { resolveImage });
+      return unwrapProseMirrorDocument(
+        converted === null || typeof converted !== "object" ? undefined : converted.doc,
+        file,
+      );
+    };
+    if (source.template === TEMPLATE_FREE_FORM) return await convert(source.markdown);
+    return await typedDocumentFromMarkdown({
+      template: source.template,
+      fields: source.fields,
+      markdown: source.markdown,
       file,
-    );
+      convert,
+      resolveImage,
+    });
   }
   let parsed;
   try {
@@ -530,6 +615,7 @@ export async function convertWorkspacePageSource({ source, mediaManifest, conten
   } catch {
     throw documentError("pages.document_shape", `'${file}' is not valid JSON.`, file);
   }
+  if (source.template !== TEMPLATE_FREE_FORM) return typedDocumentFromJson(parsed, file);
   return unwrapProseMirrorDocument(parsed, file);
 }
 
@@ -572,19 +658,43 @@ export async function validateWorkspacePageDocument({
   getSharedThemeContexts,
 }) {
   const content = requireContentFunctions(await loadContentModule(injectedContent));
-  assertValid(content, document_, file);
-  if (hasNamedFreeFormSectionContext(document_)) {
-    const contexts = typeof getSharedThemeContexts === "function"
-      ? await getSharedThemeContexts()
-      : await readSharedThemeContexts(workspaceDir, siteId);
-    const contextErrors = validateFreeFormSectionContexts(document_, contexts).errors;
-    if (contextErrors.length > 0) {
-      const first = contextErrors[0];
+  // A typed page carries several ProseMirror documents (an introduction, each
+  // recipe step); every one goes through the same vocabulary and context checks
+  // a free-form body does.
+  const unusedCover = unusedCoverImageId(document_);
+  if (unusedCover !== undefined) {
+    throw documentError(
+      "pages.cover_image_unused",
+      `${COVER_IMAGE_UNUSED_MESSAGE} '${file}' selects cover image ${unusedCover}, but no image in the page's own `
+        + "content uses it: place that image in the body (or introduction, steps, or album images), or remove coverImage.",
+      `${file}:coverImageId`,
+    );
+  }
+  for (const { doc, path, mayBeEmpty, restricted } of contentDocuments(document_)) {
+    const location = path === "" ? file : `${file}:${path}`;
+    assertValid(content, doc, location, { mayBeEmpty });
+    const unsupported = restricted ? unsupportedRestrictedNode(doc) : undefined;
+    if (unsupported !== undefined) {
       throw documentError(
-        first.code,
-        `'${file}' has an invalid section context at ${first.path}: ${first.message}`,
-        `${file}:${first.path}`,
+        "pages.node_unsupported_for_template",
+        `'${location}' uses the '${unsupported}' node, which a ${documentTemplate(document_)} introduction or step `
+          + "does not accept. Put that content in a free-form page or an article, or remove it.",
+        location,
       );
+    }
+    if (hasNamedFreeFormSectionContext(doc)) {
+      const contexts = typeof getSharedThemeContexts === "function"
+        ? await getSharedThemeContexts()
+        : await readSharedThemeContexts(workspaceDir, siteId);
+      const contextErrors = validateFreeFormSectionContexts(doc, contexts).errors;
+      if (contextErrors.length > 0) {
+        const first = contextErrors[0];
+        throw documentError(
+          first.code,
+          `'${location}' has an invalid section context at ${first.path}: ${first.message}`,
+          `${location}:${first.path}`,
+        );
+      }
     }
   }
 }
@@ -758,6 +868,7 @@ export async function pagesPush(invocation) {
       const { file, pagePath, title, declaredDescription } = source;
       onProgress(`Validating '${file}'.`);
       const manifestEntry = manifestByFile.get(file);
+      let observedRecord;
       requireCompletePageMetadata(source);
       const document_ = await convertWorkspacePageSource({ source, mediaManifest, content });
 
@@ -786,11 +897,13 @@ export async function pagesPush(invocation) {
             file,
           );
         }
-        if (target.templateType !== TEMPLATE_TYPE_FREE_FORM) {
+        const sourceTemplate = documentTemplate(document_);
+        if (target.templateType !== PAGE_TEMPLATES[sourceTemplate].wireType) {
           throw documentError(
             "pages.template_immutable",
-            `'${file}' targets page '${livePath}', whose template type is ${target.templateType}. `
-              + "A page's template type is immutable after creation.",
+            `'${file}' is a ${sourceTemplate} source, but page '${livePath}' has template type `
+              + `${target.templateType}. A page's template type is immutable after creation: author the page `
+              + "with the template it already has, or create a new page at another path.",
             file,
           );
         }
@@ -799,13 +912,17 @@ export async function pagesPush(invocation) {
         // page is written, rather than discovered after the site has changed.
         const observedRecordFile = internalPageObservedRevisionFile(target.pageId);
         if (observedRecordFile !== undefined) await workspaceFileExists(config.workspaceDir, observedRecordFile);
-        requireReconciledRevision({
+        const observed = await readObservedPageRecord(config.workspaceDir, target.pageId);
+        observedRecord = observed;
+        const guard = {
           file,
           pagePath,
           target,
           entry: manifestByPageId.get(target.pageId),
-          observedRevision: await readObservedPageRevision(config.workspaceDir, target.pageId),
-        });
+          observedRevision: observed?.revision,
+        };
+        requireReconciledRevision(guard);
+        requireReconciledDisplayDate({ ...guard, document_, observed });
       }
 
       // The duplicate-source check above only catches two workspace files
@@ -844,15 +961,33 @@ export async function pagesPush(invocation) {
         },
       });
 
+      const sentDescription = typeof description === "string" ? description : "";
+      const contentKey = pageContentKey(
+        source.sourceHash,
+        { title, path: pagePath, description: sentDescription },
+        source.sourceFormat === PAGE_SOURCE_FORMAT_MARKDOWN ? canonicalDocumentHash(document_) : "",
+      );
       planned.push({
         file,
         pagePath,
         title,
-        description: typeof description === "string" ? description : "",
+        contentKey,
+        // The source and everything sent with it match what the site last agreed
+        // to, so sending again would only turn an approved page back into a draft.
+        // Not when the operator was shown a conflict for this page (the record
+        // exists to let this push reassert the source), and not when the source
+        // moved or changed format, which the send re-registers in the manifest.
+        unchanged: target !== undefined
+          && targetEntry?.baseline?.contentKey === contentKey
+          && observedRecord === undefined
+          && targetEntry.file === file
+          && targetEntry.sourceFormat === source.sourceFormat,
+        description: sentDescription,
         document: document_,
         sourceFormat: source.sourceFormat,
         sourceHash: source.sourceHash,
         pageId: target?.pageId,
+        templateType: PAGE_TEMPLATES[documentTemplate(document_)].wireType,
         action: target === undefined ? "created" : "updated",
       });
     }
@@ -863,23 +998,21 @@ export async function pagesPush(invocation) {
     let manifestDirty = false;
     try {
       for (const page of planned) {
+        if (page.unchanged) {
+          onProgress(`Skipping '${page.pagePath}': '${page.file}' is unchanged since the last pull or push.`);
+          continue;
+        }
         onProgress(`${page.action === "created" ? "Creating" : "Updating"} '${page.pagePath}' from '${page.file}'.`);
-        const template = freeFormTemplate(page.document);
+        const fields = {
+          path: page.pagePath,
+          title: page.title,
+          shortDescription: page.description,
+          template: wireTemplate(page.document),
+          ...wirePageFields(page.document),
+        };
         const summary = page.action === "created"
-          ? await createPage(client, {
-            siteId,
-            path: page.pagePath,
-            title: page.title,
-            shortDescription: page.description,
-            template,
-          })
-          : await updatePage(client, page.pageId, {
-            pageId: page.pageId,
-            path: page.pagePath,
-            title: page.title,
-            shortDescription: page.description,
-            template,
-          });
+          ? await createPage(client, { siteId, ...fields })
+          : await updatePage(client, page.pageId, { pageId: page.pageId, ...fields });
         manifestDirty = true;
         applied.push({
           file: page.file,
@@ -901,7 +1034,7 @@ export async function pagesPush(invocation) {
           title: page.title,
           description: page.description,
           status: summary.status,
-          templateType: TEMPLATE_TYPE_FREE_FORM,
+          templateType: page.templateType,
           hasDraft: summary.hasDraft,
           // The registry: this file, in this format, is now the page's one
           // authoritative source, whatever the entry said before. That is what
@@ -927,7 +1060,11 @@ export async function pagesPush(invocation) {
           // this workspace made itself.
           baseline: {
             sourceHash: page.sourceHash,
+            contentKey: page.contentKey,
             ...(summary.bodyRevision === undefined ? {} : { revision: summary.bodyRevision }),
+            // Recorded for the pages whose push sends a date, so the next push
+            // can tell a date the site changed from one it already holds.
+            ...(sentDisplayDate(page.templateType) ? { displayDate: summary.displayDate } : {}),
           },
           pendingApproval: true,
         });
@@ -953,6 +1090,7 @@ export async function pagesPush(invocation) {
     return successResult(VERB_PAGES_PUSH, siteId, {
       pages: {
         total: planned.length,
+        unchanged: planned.filter((page) => page.unchanged).length,
         created: applied.filter((entry) => entry.action === "created").length,
         updated: applied.filter((entry) => entry.action === "updated").length,
         // What this run actually looked at, so automation can tell a targeted
@@ -973,7 +1111,8 @@ export async function pagesPush(invocation) {
       },
       // `pages push` writes drafts. Nothing reaches an audience until `approve`
       // stages them and `deploy` publishes the site.
-      nextStep: "approve",
+      // Nothing to approve when every page was unchanged and nothing was sent.
+      ...(applied.length > 0 ? { nextStep: "approve" } : {}),
     });
   });
 }

@@ -786,6 +786,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "appearance", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "footer", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "fixture", "--json"], topic: "workflow", field: "reference" },
+    { arguments_: ["help", "import", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "walkthrough", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "delivery", "--json"], topic: "workflow", field: "reference" },
   ];
@@ -808,7 +809,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 27,
+          referenceVersion: 28,
           topic: scenario.topic,
         },
       );
@@ -890,13 +891,14 @@ test("reference help reports stable usage errors with valid alternatives", async
         "theme",
         "appearance",
         "footer",
+        "import",
         "fixture",
       ],
     },
     {
-      arguments_: ["help", "page", "article", "--json"],
+      arguments_: ["help", "page", "poem", "--json"],
       code: "help.page_type_unknown",
-      alternatives: ["free-form"],
+      alternatives: ["free-form", "article", "recipe", "album", "place-review"],
     },
     {
       arguments_: ["help", "component", "carousel", "--json"],

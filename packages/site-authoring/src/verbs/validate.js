@@ -1,7 +1,7 @@
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { NAVIGATION_MAXIMUM_DEPTH, TEMPLATE_TYPE_FREE_FORM } from "../api.js";
+import { NAVIGATION_MAXIMUM_DEPTH } from "../api.js";
 import { VERB_VALIDATE } from "../constants.js";
 import { freeFormRootPresentation, sharedThemeContextNames } from "../content/free-form-sections.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
@@ -41,6 +41,7 @@ import { validateFooterWorkspaceDocument } from "./footer-push.js";
 import { validateNavigationWorkspaceDocument } from "./nav-push.js";
 import { validateWorkspacePageDocument, validateWorkspacePageSource } from "./pages-push.js";
 import { validateThemeWorkspace } from "./theme-push.js";
+import { documentImageIds, documentTemplate, isAuthorableTemplateType, PAGE_TEMPLATES } from "../typed-pages.js";
 
 const MAXIMUM_REPORTED = 200;
 const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
@@ -277,7 +278,7 @@ function validateFixtureManifest(manifest) {
       !isPlainObject(entry)
       || !isCanonicalUuid(entry.pageId)
       || !isCanonicalUuid(entry.resourceId)
-      || entry.templateType !== TEMPLATE_TYPE_FREE_FORM
+      || !isAuthorableTemplateType(entry.templateType)
       || entry.workspaceMode !== PAGE_WORKSPACE_MODE_EDITABLE
       || typeof entry.file !== "string"
       || !entry.file.startsWith(`${PAGES_DIRECTORY}/`)
@@ -286,7 +287,7 @@ function validateFixtureManifest(manifest) {
     ) {
       fail(
         "fixture.page_invalid",
-        `${field} must bind one editable free-form source to deterministic page/resource identities and a usable path.`,
+        `${field} must bind one editable page source to deterministic page/resource identities and a usable path.`,
         field,
       );
     }
@@ -499,7 +500,27 @@ export async function validateFixture(invocation = {}) {
         file,
       );
     }
+    // The manifest states which template the page has, and the source must be
+    // one: a recipe document bound as an article would push as the wrong type.
+    if (PAGE_TEMPLATES[documentTemplate(page.document)].wireType !== entry.templateType) {
+      fail(
+        "fixture.page_template_mismatch",
+        `'${file}' is a ${documentTemplate(page.document)} source, but its fixture manifest entry binds `
+          + `${entry.templateType}.`,
+        file,
+      );
+    }
     validatePageImageReferences(page.document, file, imageIds, deliveryOrigins);
+    // Album images and the cover image are bare ids with no delivery URL, so
+    // the walk above cannot see them.
+    const unknownImage = documentImageIds(page.document).find((imageId) => !imageIds.has(imageId));
+    if (unknownImage !== undefined) {
+      fail(
+        "fixture.image_reference_unknown",
+        `Fixture image '${unknownImage}' is not declared in fixture.imageIds.`,
+        file,
+      );
+    }
     validatedPages.push({ file, path: page.pagePath });
     if (pageUsesRootBand(page.document)) rootBandPages.push(file);
   }

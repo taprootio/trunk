@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 
-import { TEMPLATE_TYPE_FREE_FORM } from "./api.js";
 import { CLI_BINARY_NAME } from "./constants.js";
 import {
   canonicalizeComponentData,
@@ -35,6 +34,8 @@ import {
   REDIRECTS_FILE_NAME,
 } from "./redirects-contract.js";
 import { SETTINGS_GROUPS } from "./settings-catalog.js";
+import { formatTypedPageReference, getTypedPageReference, TYPED_PAGE_TYPES } from "./typed-page-reference.js";
+import { PAGE_TEMPLATES } from "./typed-pages.js";
 import {
   INTERNAL_PAGE_BASELINE_DIRECTORY,
   MANIFEST_VERSION,
@@ -49,8 +50,8 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 27;
-export const PAGE_TYPES = Object.freeze(["free-form"]);
+export const REFERENCE_VERSION = 28;
+export const PAGE_TYPES = Object.freeze(["free-form", ...TYPED_PAGE_TYPES]);
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -334,7 +335,7 @@ export function getDesignBlueprint(type) {
   return DESIGN_BLUEPRINTS.find((blueprint) => blueprint.type === type);
 }
 export const REFERENCE_TOPICS = Object.freeze([
-  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types." }),
+  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types: free-form, article, recipe, album, place-review." }),
   Object.freeze({
     name: "page",
     usage: `${CLI_BINARY_NAME} help page <page-type>`,
@@ -398,6 +399,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Author and concurrency-safely push the complete footer document.",
   }),
   Object.freeze({
+    name: "import",
+    usage: `${CLI_BINARY_NAME} help import`,
+    summary: "Import an existing WordPress site from its export: mapping rules, order of work, and what to report.",
+  }),
+  Object.freeze({
     name: "fixture",
     usage: `${CLI_BINARY_NAME} help fixture`,
     summary: "State the offline fixture manifest contract and locate the shipped example.",
@@ -405,6 +411,60 @@ export const REFERENCE_TOPICS = Object.freeze([
 ]);
 
 const WORKFLOW_REFERENCES = Object.freeze({
+  import: Object.freeze({
+    title: "Importing a WordPress site",
+    summary: "Turn a WordPress export (WXR) into a published Taproot site with the templates, dates, media and redirects preserved, and a written account of everything that could not be mapped.",
+    usage: `${CLI_BINARY_NAME} pull | media upload <files...> | pages push | redirects push | nav push | deploy --staging`,
+    details: Object.freeze([
+      "Source: a WordPress export file (Tools > Export > All content, WXR 1.2). Read the live site only when the owner "
+      + "has said you may; the export names every media URL but carries no image bytes, so downloading originals from "
+      + "the old site also needs that permission. Work in a fresh workspace: 'use' the site, then 'pull'.",
+      "Order of work: 1 parse the export; 2 classify every item; 3 stage media; 4 write page sources; 5 check every "
+      + "source; 6 pages push; 7 nav.json and nav push; 8 redirects.json and redirects push; 9 approve, deploy "
+      + "--staging, review it; 10 redirects check and delivery check --staging; 11 deploy --production; 12 delivery "
+      + "check --production --url <the origin 'sites' reports as primaryDomain>. Do not promote until the account of unmapped content has been read by the owner.",
+      "Classify. Published post: article (the default); recipe when it has an Ingredients list and a Steps list "
+      + "(help page recipe); album when it is a gallery with little text (help page album). Published page: a free-form "
+      + "page at its path, children under their parent's path. Never guess a place review: it needs a Taproot "
+      + "placeId this CLI cannot look up, so import the post as an article and list it. Not imported, and always "
+      + "listed: drafts, pending, private, scheduled and password-protected items; custom post types; comments; the WordPress front "
+      + "page (Taproot seeds its own home page: ask the owner what belongs there).",
+      "Paths and dates. A post's path is '<first category slug, ignoring the default Uncategorized>/<post name>' ('journal/' with no category; a post or page whose slug has no ASCII letters gets a name like post-<id>, listed), a "
+      + "page's is its post name under its parents. Keep the original publication date in displayDate (the date "
+      + "part of wp:post_date). Categories beyond the first, and all tags, have no Taproot equivalent (tags are "
+      + "generated per page type): list them. The featured image becomes coverImage on typed pages, and the same image must also appear in the page's own content (put it at the top of the body), or the site refuses the cover; a free-form page "
+      + "has none, so list it.",
+      "Content. Convert the HTML to the Markdown subset. Keep headings from h2 to h4 (the title is the h1; deeper levels are refused, so make h5 and h6 an h4). Decode HTML entities (&amp;, &#8217;) in titles, excerpts, menu labels and term names; WordPress stores them encoded. An image "
+      + "must stand alone in its own block, so split paragraphs around images and lift images out of links; a link "
+      + "to the full-size file is dropped, so list it. Tables need a header row and 2 to 12 columns, else write "
+      + "a list and report it. Remove Gutenberg block comments and the more-tag marker. In a recipe, times and servings "
+      + "go to front matter, text after the steps moves into the introduction with its headings dropped to level 3, and the only "
+      + "level-2 headings are Ingredients and Instructions; an album's only level-2 heading is Images.",
+      "Report, never silently drop. Shortcodes with no equivalent ([contact-form-7], [adsense], maps, recipe cards "
+      + "whose data sits in separate records), iframes and other embeds (a YouTube, Vimeo, X/Twitter, Instagram or TikTok address becomes a plain "
+      + "link), scripts, video and audio elements, inline styles, galleries (flattened to sequential images, or an "
+      + "album when they are the post), links to content you did not import (keep the absolute old link), and images "
+      + "on other hosts. Every item goes in the account with its page and what happened to it.",
+      "Media. Save each original in the workspace's media/ directory (PNG, JPEG, GIF or WebP up to 32 MiB each; list SVG, AVIF, HEIC and oversized files, which cannot be uploaded; use the original, not "
+      + "the -300x200 thumbnail WordPress also stores), then upload in batches of at most 10 files (conservative: the limit depends on how long the delivery URLs are, and was measured only with short stand-in URLs): 'media upload' "
+      + "prints every file's delivery URLs into a result capped at 64 KiB, and a longer batch uploads everything, "
+      + "writes .taproot-site-media.json, then exits 1 with output.too_large. If that happens the files are already "
+      + "uploaded; run the same paths again (they deduplicate) in smaller batches.",
+      "Check before sending. 'pages push' validates every source before it sends anything but stops at the first "
+      + "problem. On a large import, validate the sources yourself first so you see every problem at once: run the "
+      + "package's validators over each file, or push one page at a time ('pages push <path>').",
+      "Navigation. A site can have several menus (header, footer): ask which is primary and list the rest. Rebuild it as nav.json after 'pages push', at most three levels deep with canonical UUID ids, 1000 items and 200-character titles (help nav); a label-only dropdown heading (a WordPress '#' link) is a GROUP_HEADER, and a child of an item you cannot map is listed, not promoted (page items carry the resourceId from the "
+      + "manifest; a custom link is an EXTERNAL_URL item; a category or tag item has no target, so list it).",
+      "Redirects. At most 2000 entries; never redirect to a page you did not push. Every imported page's old path (from its <link>) becomes a 301 to its new path, unless the two "
+      + "are the same. A category archive redirects to its folder when it became one. Query-string URLs (?p=12), "
+      + "feeds, tag archives, author archives and attachment pages cannot be redirect sources or have no "
+      + "destination: list them and ask the owner whether each is 410 or goes to an index. A source that a live page "
+      + "occupies is refused by the site.",
+      "Finish with the account: counts of pages by template, media staged, redirects written, then every unmapped "
+      + "item grouped by kind with examples, the questions only the owner can answer, and the verification results "
+      + "(redirects check, delivery check).",
+    ]),
+  }),
   delivery: Object.freeze({
     title: "Delivery verification",
     summary: "delivery check reads a completed deployment's target the way a visitor does and reports HTTP delivery, runtime compatibility and (optionally) browser behaviour as separate dimensions.",
@@ -683,8 +743,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `manifestVersion must be ${MANIFEST_VERSION}; fixture.contractVersion must be ${FIXTURE_CONTRACT_VERSION}.`,
       "siteId, every pageId and resourceId, every settings entityId, and every fixture.imageIds entry is a canonical "
       + "lowercase UUID. They are deterministic fixture identities, not identities from a live site.",
-      `Each pages[] entry binds one editable free-form source: pageId, resourceId, path, title, templateType `
-      + `${TEMPLATE_TYPE_FREE_FORM}, file, sourceFormat, and workspaceMode ${PAGE_WORKSPACE_MODE_EDITABLE}. `
+      `Each pages[] entry binds one editable page source: pageId, resourceId, path, title, templateType `
+      + `(${Object.values(PAGE_TEMPLATES).map((template) => template.wireType).join(", ")}; the source must be that template), file, `
+      + `sourceFormat, and workspaceMode ${PAGE_WORKSPACE_MODE_EDITABLE}. Album images and the cover image must be `
+      + "listed in fixture.imageIds. "
       + "status, hasDraft, isGenerated, and description are recorded by pull and not read: the page key set "
       + "stays open so a fixture from a newer pull is not refused. The homepage's path is the empty string.",
       `file lives under '${PAGES_DIRECTORY}/' and ends in ${PAGE_SOURCE_EXTENSIONS.join(" or ")}; sourceFormat must be `
@@ -716,7 +778,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "validate reads the fixture and writes nothing to it. Copy the directory somewhere writable before editing it.",
       "validate --init <new-directory> exports the current pulled workspace as a validated version-7 fixture with "
       + "appearance and footer metadata. Run from the workspace or its configured project; --config may select the source.",
-      "Initialization keeps editable free-form pages as ProseMirror sources and reports excluded metadata-only pages. "
+      "Initialization keeps editable pages of every template as workspace documents and reports excluded metadata-only pages. "
       + "References to excluded pages must be resolved before the fixture can validate. It never copies credentials, "
       + "internal reconciliation state, or deployment receipts. UUIDs and HTTP(S) origins are replaced with deterministic "
       + "fixture identities and example.test origins; URL credentials, queries and fragments are removed. Authored prose is retained.",
@@ -1302,6 +1364,14 @@ const FREE_FORM_REFERENCE = Object.freeze({
             inheritedForTracked: true,
             defaultForNew: "",
           }),
+          Object.freeze({
+            name: "template",
+            type: "string",
+            requiredForNew: false,
+            inheritedForTracked: false,
+            defaultForNew: "free-form",
+            description: `Other templates: ${TYPED_PAGE_TYPES.join(", ")}; see '${CLI_BINARY_NAME} help pages'.`,
+          }),
         ]),
       }),
       Object.freeze({
@@ -1387,17 +1457,20 @@ const FREE_FORM_REFERENCE = Object.freeze({
 });
 
 export function listPageTypeReferences() {
-  return PAGE_TYPES.map((type) => ({
-    type,
-    displayName: FREE_FORM_REFERENCE.displayName,
-    summary: FREE_FORM_REFERENCE.summary,
-    helpCommand: `${CLI_BINARY_NAME} help page ${type}`,
-  }));
+  return PAGE_TYPES.map((type) => {
+    const reference = type === "free-form" ? FREE_FORM_REFERENCE : getTypedPageReference(type);
+    return {
+      type,
+      displayName: reference.displayName,
+      summary: reference.summary,
+      helpCommand: `${CLI_BINARY_NAME} help page ${type}`,
+    };
+  });
 }
 
 export function getPageTypeReference(type) {
-  if (type !== "free-form") return undefined;
-  return { ...FREE_FORM_REFERENCE, components: listComponentTypeReferences() };
+  if (type === "free-form") return { ...FREE_FORM_REFERENCE, components: listComponentTypeReferences() };
+  return getTypedPageReference(type);
 }
 
 function schemaLabel(schema) {
@@ -1557,6 +1630,7 @@ export function formatReferenceResult(result) {
     }
     case "page": {
       const page = result.page;
+      if (page.type !== "free-form") return formatTypedPageReference(page);
       const markdownFormat = page.workspace.formats.find((format) => format.extension === ".md");
       const sourceRule = page.workspace.sourceRule;
       return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace:\n${

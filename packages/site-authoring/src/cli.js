@@ -705,6 +705,7 @@ function parseReferenceArguments(arguments_) {
       || topic === "redirects"
       || topic === "walkthrough"
       || topic === "delivery"
+      || topic === "import"
     )
     && (subject !== undefined || extra.length > 0)
   ) {
@@ -774,6 +775,7 @@ function referenceResult(parsed) {
     case "fixture":
     case "walkthrough":
     case "delivery":
+    case "import":
       return {
         ...result,
         topic: "workflow",

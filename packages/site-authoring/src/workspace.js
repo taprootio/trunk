@@ -218,7 +218,14 @@ export async function readObservedPageRecord(workspaceDir, pageId) {
   // A record naming neither version says nothing about what was shown, which is
   // the same position as no record at all.
   if (revision === undefined && remoteHash === undefined) return undefined;
-  return { revision, remoteHash, differences: normalizeObservedDifferences(parsed.differences) };
+  return {
+    revision,
+    remoteHash,
+    // The date the refusal showed, for a typed page. A date edit does not move
+    // the revision, so the record has to name it to say what was seen.
+    displayDate: normalizeBaselineDisplayDate(parsed.displayDate),
+    differences: normalizeObservedDifferences(parsed.differences),
+  };
 }
 
 /**
@@ -317,8 +324,29 @@ export function canonicalDocumentHash(document_) {
   return `sha256:${createHash("sha256").update(canonicalJson(document_, 0), "utf8").digest("hex")}`;
 }
 
+/**
+ * What a push would send for a page, as one hash: the source's bytes plus the
+ * title, path and description that travel with it (for a `.pm.json` source they
+ * come from the manifest, not the file). `pages push` skips a page whose key
+ * equals the one recorded when the workspace last agreed with the site, so an
+ * unedited page is never re-sent (an update would turn an approved page back
+ * into a draft). A Markdown source also folds in the hash of the document it
+ * converts to, because its media references resolve through the media manifest:
+ * re-uploading an image changes what is sent without changing the file.
+ */
+export function pageContentKey(sourceHash, { title, path, description }, documentHash = "") {
+  return workspaceContentHash(
+    Buffer.from(JSON.stringify([sourceHash, title ?? "", path ?? "", description ?? "", documentHash]), "utf8"),
+  );
+}
+
 function normalizeBaselineHash(value) {
   return typeof value === "string" && WORKSPACE_CONTENT_HASH.test(value) ? value : undefined;
+}
+
+// A calendar date or "" (no date). Anything else is a damaged baseline member.
+function normalizeBaselineDisplayDate(value) {
+  return typeof value === "string" && (value === "" || /^\d{4}-\d{2}-\d{2}$/u.test(value)) ? value : undefined;
 }
 
 /**
@@ -388,14 +416,20 @@ export function pageSourceRegistry(manifest) {
     const declared = entry.baseline;
     const remoteHash = normalizeBaselineHash(declared?.remoteHash);
     const sourceHash = normalizeBaselineHash(declared?.sourceHash);
+    const contentKey = normalizeBaselineHash(declared?.contentKey);
     const revision = normalizePageBodyRevision(declared?.revision);
-    const baseline = remoteHash === undefined && sourceHash === undefined && revision === undefined
-      ? undefined
-      : {
-        ...(remoteHash === undefined ? {} : { remoteHash }),
-        ...(sourceHash === undefined ? {} : { sourceHash }),
-        ...(revision === undefined ? {} : { revision }),
-      };
+    const displayDate = normalizeBaselineDisplayDate(declared?.displayDate);
+    const baseline =
+      remoteHash === undefined && sourceHash === undefined && revision === undefined && displayDate === undefined
+        && contentKey === undefined
+        ? undefined
+        : {
+          ...(remoteHash === undefined ? {} : { remoteHash }),
+          ...(sourceHash === undefined ? {} : { sourceHash }),
+          ...(contentKey === undefined ? {} : { contentKey }),
+          ...(revision === undefined ? {} : { revision }),
+          ...(displayDate === undefined ? {} : { displayDate }),
+        };
     const record = {
       pageId: entry.pageId,
       file: entry.file,

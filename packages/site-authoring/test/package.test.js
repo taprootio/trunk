@@ -74,11 +74,15 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "README.md",
     "bin/taproot-site.js",
     // The complete offline fixture the README's first command validates and
-    // 'help fixture' locates (TR00647). About 28 KB unpacked, 17 KB of it the
+    // 'help fixture' locates (TR00647). About 32 KB unpacked, 17 KB of it the
     // light and dark theme pair in taproot-styles.json.
     "examples/riverbend-wellness/manifest.fixture.json",
     "examples/riverbend-wellness/nav.json",
+    "examples/riverbend-wellness/pages/green-smoothie.md",
     "examples/riverbend-wellness/pages/index.md",
+    "examples/riverbend-wellness/pages/journal-welcome.md",
+    "examples/riverbend-wellness/pages/juice-bar.md",
+    "examples/riverbend-wellness/pages/studio-tour.pm.json",
     "examples/riverbend-wellness/pages/visit.md",
     "examples/riverbend-wellness/redirects.json",
     "examples/riverbend-wellness/settings/brand.json",
@@ -148,6 +152,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/theme-projection.js",
     "src/theme-validation.js",
     "src/transport.js",
+    "src/typed-page-reference.js",
+    "src/typed-pages.js",
     "src/verbs/approve.js",
     "src/verbs/delivery-check.js",
     "src/verbs/deploy.js",
