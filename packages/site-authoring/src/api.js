@@ -1207,7 +1207,7 @@ export async function poll({
     // poll runs every few seconds for up to fifteen minutes, and a line per
     // tick scrolls the one thing the operator still needs — the code — off the
     // top of the terminal.
-    if (result.progress !== undefined) onProgress(result.progress);
+    if (result.progress !== undefined) onProgress(result.progress, result.event);
     if (now() >= deadline) break;
     await client.sleep(Math.min(intervalMilliseconds, Math.max(1, deadline - now())), client.signal);
   }
@@ -1220,8 +1220,20 @@ export async function poll({
 }
 
 export async function waitForDeployment(client, { siteId, deploymentId, environment, onProgress, now }) {
+  try {
+    return await awaitDeployment(client, { siteId, deploymentId, environment, onProgress, now });
+  } finally {
+    // The wait is over whether the deployment finished or failed; the verb's later
+    // output (staging checks, the failure text) must not sit beside a spinner.
+    onProgress?.endWait?.();
+  }
+}
+
+async function awaitDeployment(client, { siteId, deploymentId, environment, onProgress, now }) {
   let misses = 0;
   let lastEvidence;
+  let truncatedReported = false;
+  const reportedPhases = new Set();
   return await poll({
     client,
     now,
@@ -1248,6 +1260,11 @@ export async function waitForDeployment(client, { siteId, deploymentId, environm
         lastEvidence = evidence;
         if (deployment.phaseTimings.known) {
           for (const phase of deployment.phaseTimings.phases) {
+            // Each phase is reported when it is entered and again when it ends,
+            // never re-listed on every later change.
+            const key = `${phase.status}|${phase.enteredAt}|${phase.durationMilliseconds ?? ""}`;
+            if (reportedPhases.has(key)) continue;
+            reportedPhases.add(key);
             onProgress(
               `Deployment phase ${phase.status} entered ${phase.enteredAt}`
                 + (phase.durationMilliseconds === undefined
@@ -1255,7 +1272,8 @@ export async function waitForDeployment(client, { siteId, deploymentId, environm
                   : `; ${phase.durationMilliseconds}ms until ${phase.endedAt}.`),
             );
           }
-          if (deployment.phaseTimings.truncated) {
+          if (deployment.phaseTimings.truncated && !truncatedReported) {
+            truncatedReported = true;
             onProgress("Earlier deployment phase evidence was truncated by the server.");
           }
         } else onProgress("Deployment phase timings are unknown for this legacy deployment.");
@@ -1270,7 +1288,11 @@ export async function waitForDeployment(client, { siteId, deploymentId, environm
           { status: deployment.status },
         );
       }
-      return { done: false, progress: `Waiting for the deployment (${deployment.status}).` };
+      // The phase a reader sees is the latest one the server recorded, or the
+      // deployment's own status when it recorded none.
+      const phases = deployment.phaseTimings.known ? deployment.phaseTimings.phases : [];
+      const phase = phases.length > 0 ? phases[phases.length - 1].status : deployment.status;
+      return { done: false, progress: `Waiting for the deployment (${phase}).`, event: { phase } };
     },
     timeoutCode: "deploy.timeout",
   });

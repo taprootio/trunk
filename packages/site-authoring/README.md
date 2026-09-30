@@ -400,7 +400,11 @@ site.
 ## Output contract
 
 Human progress goes to stderr and `--quiet` silences it (except for `login`,
-whose approval code and URL exist only as progress). Stdout carries exactly
+whose approval code and URL exist only as progress). While a deployment is
+awaited, a terminal shows one in-place line (spinner, phase, elapsed time) that
+starts a new line only when the phase changes; a pipe or CI log never receives
+control characters, only one line per phase change plus a heartbeat at most
+every 60 seconds. Stdout carries exactly
 one JSON object per run, schema version `1`: `ok`, the CLI name and version,
 the verb, and the verb's own result on success; a stable `error.code` with an
 optional `field`, `status`, and classified `refusal` on failure. Exit codes are

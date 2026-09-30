@@ -1136,3 +1136,57 @@ test("refuses a verb result that is not a serializable result object", async () 
   assert.equal(exitCode, 1);
   assert.equal(JSON.parse(stdout.read()).error.code, "output.result_invalid");
 });
+
+test("on a terminal, the wait line is wiped before the failure text and the JSON, and never reaches stdout", async () => {
+  const stdout = sink();
+  const stderrWrites = [];
+  const stderr = { isTTY: true, columns: 120, write: (chunk) => stderrWrites.push(chunk) };
+
+  const exitCode = await runCli({
+    arguments_: ["deploy", "--staging"],
+    environment: { TAPROOT_SITE_KEY: "key" },
+    cwd: "/workspace",
+    stdout,
+    stderr,
+    handlers: {
+      deploy: async (invocation) => {
+        invocation.onProgress("Waiting for the deployment (DEPLOYMENT_STATUS_GENERATING).", {
+          phase: "DEPLOYMENT_STATUS_GENERATING",
+        });
+        throw new SiteAuthoringError("deploy.failed", "The deployment failed: Files: no root page.");
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  const text = stderrWrites.join("");
+  assert.doesNotMatch(stdout.read(), /\u001B|Waiting for the deployment/u);
+  // The in-place line is erased before the failure text is written.
+  assert.match(text, /Waiting for the deployment \(GENERATING\)[^\n]*\r\u001B\[2K[^\n]*The deployment failed/u);
+});
+
+test("off a terminal, a wait writes plain lines to stderr and no control characters", async () => {
+  const stderrWrites = [];
+  const stderr = { isTTY: false, write: (chunk) => stderrWrites.push(chunk) };
+
+  await runCli({
+    arguments_: ["deploy", "--staging"],
+    environment: { TAPROOT_SITE_KEY: "key" },
+    cwd: "/workspace",
+    stdout: sink(),
+    stderr,
+    handlers: {
+      deploy: async (invocation) => {
+        invocation.onProgress("Waiting for the deployment (DEPLOYMENT_STATUS_GENERATING).", {
+          phase: "DEPLOYMENT_STATUS_GENERATING",
+        });
+        invocation.onProgress("Waiting for the deployment (DEPLOYMENT_STATUS_GENERATING).", {
+          phase: "DEPLOYMENT_STATUS_GENERATING",
+        });
+        return successResult("deploy");
+      },
+    },
+  });
+
+  assert.equal(stderrWrites.join(""), "Waiting for the deployment (DEPLOYMENT_STATUS_GENERATING).\n");
+});

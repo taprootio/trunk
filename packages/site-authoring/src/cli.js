@@ -47,6 +47,7 @@ import {
   SiteAuthoringError,
 } from "./errors.js";
 import { failureResult, humanFailure, serializeResult, writeGithubActionsOutput } from "./output.js";
+import { createProgressReporter } from "./progress.js";
 import {
   formatReferenceResult,
   getAppearanceReference,
@@ -1134,6 +1135,7 @@ export async function runCli({
   signal,
 } = {}) {
   let parsed;
+  let progress;
   let completedPreviewRecovery;
   const isReferenceInvocation = Array.isArray(arguments_)
     && (
@@ -1178,6 +1180,11 @@ export async function runCli({
     if (typeof handler !== "function") {
       throw usageError("cli.unsupported_verb", `No handler is registered for '${parsed.verb}'.`);
     }
+    progress = createProgressReporter({
+      stream: stderr,
+      interactive: stderr.isTTY === true && environment.TERM !== "dumb",
+      quiet: parsed.quiet,
+    });
     const result = await handler(Object.freeze({
       verb: parsed.verb,
       cwd,
@@ -1202,13 +1209,17 @@ export async function runCli({
             : parsed.positionals.values,
         }
         : {}),
-      onProgress: parsed.quiet ? () => {} : (message) => stderr.write(`${message}\n`),
+      // `endWait` lets a wait say it is over while the verb goes on (staging checks).
+      onProgress: Object.assign((message, event) => progress.report(message, event), {
+        endWait: () => progress.endWait(),
+      }),
       fetch,
       signal,
     }));
     if (parsed.verb === VERB_PREVIEW_PAGE && result?.ok === true) {
       completedPreviewRecovery = normalizePreviewRecovery(result);
     }
+    progress.stop();
     const json = serializeResult(result);
     if (!isValidationInvocation && environment.GITHUB_OUTPUT) {
       await writeGithubActionsOutput(environment.GITHUB_OUTPUT, result);
@@ -1216,6 +1227,7 @@ export async function runCli({
     stdout.write(`${json}\n`);
     return 0;
   } catch (unknownError) {
+    progress?.stop();
     const error = asSiteAuthoringError(unknownError);
     if (completedPreviewRecovery) error.withPreviewRecovery(completedPreviewRecovery);
     const result = failureResult(error);

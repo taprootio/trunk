@@ -318,16 +318,22 @@ export async function deploy(invocation) {
     const stagedPageIds = presentationOnly ? [] : selection.stagedPageIds ?? defaults.stagedPageIds;
     const selectedSettingsTypes = selection.selectedSettingsTypes ?? defaults.selectedSettingsTypes;
     const includeNavigation = presentationOnly ? false : selection.includeNavigation ?? defaults.includeNavigation;
-    if (stagedPageIds.length === 0 && selectedSettingsTypes.length === 0 && !includeNavigation) {
-      throw new SiteAuthoringError(
+    const nothingSelected = stagedPageIds.length === 0 && selectedSettingsTypes.length === 0 && !includeNavigation;
+    // A managed Docs site stages settings only, so an empty selection is final.
+    // Any other site may still have a publishable change no selection names: an
+    // edited redirect map. Readiness below says whether it does.
+    const emptySelectionError = () =>
+      new SiteAuthoringError(
         "deploy.empty_selection",
         presentationOnly
           ? "A staging deployment on a managed Docs site needs at least one settings change; it stages settings "
             + "only. Change a theme, brand, header, or footer setting first."
-          : "A staging deployment needs at least one approved page, settings group, or navigation change. "
-            + "Run 'taproot-site approve' or change staged settings/navigation first.",
+          : "A staging deployment needs at least one approved page, settings group, or navigation change, or an "
+            + "edited redirect map. Run 'taproot-site approve' or change staged settings/navigation first.",
         { field: "Candidate" },
       );
+    if (nothingSelected && presentationOnly) {
+      throw emptySelectionError();
     }
 
     const candidate = {
@@ -352,6 +358,9 @@ export async function deploy(invocation) {
         }': ${readiness.blockers[0].message || readiness.blockers[0].state}.`,
         { field: readiness.blockers[0].imageId || "blockers", status: readiness.blockers[0].state },
       );
+    }
+    if (nothingSelected && !readiness.hasCandidateChanges) {
+      throw emptySelectionError();
     }
     if (!readiness.hasCandidateChanges) {
       onProgress("Taproot reports this candidate contains no changes; deploying it anyway would be a no-op.");

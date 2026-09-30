@@ -7654,6 +7654,12 @@ test("deploy --staging refuses an empty candidate before it reaches the API", as
       pattern: DEPLOY_REVIEW,
       reply: {},
     },
+    // Nothing selected, and Taproot sees no other change (no edited redirect map).
+    {
+      method: "GET",
+      pattern: READINESS,
+      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
+    },
   ]);
   const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
   await assert.rejects(
@@ -7664,6 +7670,22 @@ test("deploy --staging refuses an empty candidate before it reaches the API", as
       && /approve/u.test(error.message),
   );
   assert.equal(wire.matching("POST", DEPLOY).length, 0);
+});
+
+test("deploy --staging stages an edited redirect map when nothing else is selected", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW, reply: {} },
+    ...deployRoutes({ readiness: { selectedPageCount: 0, approvedPageCount: 0, hasCandidateChanges: true } })
+      .filter((route) => route.pattern !== PAGES_LIST),
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  const result = await deploy(invocation);
+
+  assert.equal(result.ok, true);
+  assert.equal(wire.matching("POST", DEPLOY).length, 1);
+  assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
 });
 
 test("deploy --staging refuses a candidate Taproot reports media blockers on", async (site) => {
@@ -9830,6 +9852,113 @@ test("phase timings retain retries, omit unobserved durations and keep legacy ev
   assert.deepEqual(normalizeDeployment(deploymentRecord()).phaseTimings, { known: false });
   record.phaseHistory.phases[1].enteredAt = "2026-09-07T00:00:00Z";
   assert.throws(() => normalizeDeployment(record), (error) => error.code === "api.deployment_phase_contract");
+});
+
+function phasedDeployments(steps) {
+  // Each poll reads the next step; the last one repeats.
+  let read = 0;
+  return {
+    method: "GET",
+    pattern: DEPLOYMENTS,
+    reply: () => {
+      const step = steps[Math.min(read, steps.length - 1)];
+      read += 1;
+      return {
+        deployments: [deploymentRecord({
+          status: step.status,
+          errorMessage: step.errorMessage,
+          completedAt: step.status === "DEPLOYMENT_STATUS_COMPLETED" ? "2026-08-20T00:01:00Z" : "",
+          phaseHistory: {
+            phases: [{ enteredAt: "2026-09-08T00:00:00Z" }, ...step.phases.map(([status, enteredAt]) => ({
+              status,
+              enteredAt,
+            }))],
+          },
+        })],
+        nextPageToken: "",
+      };
+    },
+  };
+}
+
+const GENERATING = ["DEPLOYMENT_STATUS_GENERATING", "2026-09-08T00:00:01Z"];
+const DEPLOYING = ["DEPLOYMENT_STATUS_DEPLOYING", "2026-09-08T00:00:05Z"];
+const COMPLETED = ["DEPLOYMENT_STATUS_COMPLETED", "2026-09-08T00:00:09Z"];
+
+test("a deployment wait reports each phase once when entered and once when it ends, then ends the wait", async (site) => {
+  const workspace = await fixture(site);
+  const routes = deployRoutes().filter((route) => route.pattern !== DEPLOYMENTS);
+  const wire = api([
+    ...routes,
+    phasedDeployments([
+      { status: "DEPLOYMENT_STATUS_GENERATING", phases: [GENERATING] },
+      { status: "DEPLOYMENT_STATUS_GENERATING", phases: [GENERATING] },
+      { status: "DEPLOYMENT_STATUS_DEPLOYING", phases: [GENERATING, DEPLOYING] },
+      { status: "DEPLOYMENT_STATUS_DEPLOYING", phases: [GENERATING, DEPLOYING] },
+      { status: "DEPLOYMENT_STATUS_COMPLETED", phases: [GENERATING, DEPLOYING, COMPLETED] },
+    ]),
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  let waitEnded = 0;
+  const onProgress = Object.assign((message, event) => invocation.onProgress(message, event), {
+    endWait: () => {
+      waitEnded += 1;
+    },
+  });
+
+  await deploy({ ...invocation, onProgress });
+
+  const phaseLines = progress.filter((line) => line.startsWith("Deployment phase"));
+  assert.equal(new Set(phaseLines).size, phaseLines.length, "no phase line repeats");
+  const generating = phaseLines.filter((line) => line.includes("DEPLOYMENT_STATUS_GENERATING"));
+  assert.equal(generating.length, 2, "once while it runs, once when it ends");
+  assert.equal(generating.filter((line) => line.includes("ms until")).length, 1);
+  assert.ok(generating.some((line) => line.includes("4000ms until")));
+  assert.equal(waitEnded, 1);
+});
+
+test("a failed deployment still reports its phases and ends the wait before the failure surfaces", async (site) => {
+  const workspace = await fixture(site);
+  const routes = deployRoutes().filter((route) => route.pattern !== DEPLOYMENTS);
+  const wire = api([
+    ...routes,
+    phasedDeployments([
+      { status: "DEPLOYMENT_STATUS_GENERATING", phases: [GENERATING] },
+      { status: "DEPLOYMENT_STATUS_FAILED", errorMessage: "Files: The HTML inventory must contain its root page.", phases: [GENERATING, ["DEPLOYMENT_STATUS_FAILED", "2026-09-08T00:00:03Z"]] },
+    ]),
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  let waitEnded = 0;
+  const onProgress = Object.assign((message, event) => invocation.onProgress(message, event), {
+    endWait: () => {
+      waitEnded += 1;
+    },
+  });
+
+  await assert.rejects(
+    deploy({ ...invocation, onProgress }),
+    (error) => error.code === "deploy.failed" && error.message.includes("root page"),
+  );
+
+  assert.ok(progress.some((line) => line.includes("DEPLOYMENT_STATUS_FAILED entered")));
+  assert.equal(waitEnded, 1);
+});
+
+test("a deployment that never appears in the log ends the wait too", async (site) => {
+  const workspace = await fixture(site);
+  const routes = deployRoutes().filter((route) => route.pattern !== DEPLOYMENTS);
+  const wire = api([...routes, { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } }]);
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  let waitEnded = 0;
+  const onProgress = Object.assign((message, event) => invocation.onProgress(message, event), {
+    endWait: () => {
+      waitEnded += 1;
+    },
+  });
+
+  await assert.rejects(deploy({ ...invocation, onProgress }), (error) => error.code === "deploy.not_observable");
+
+  assert.equal(waitEnded, 1);
 });
 
 test("preview failure reports typed diagnostic context without renderer content", async (site) => {

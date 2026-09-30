@@ -141,6 +141,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/json-path-diff.js",
     "src/output.js",
     "src/presentation-reference.js",
+    "src/progress.js",
     "src/redirects-contract.js",
     "src/redirects-workspace.js",
     "src/reference-help.js",
