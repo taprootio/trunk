@@ -9,7 +9,7 @@ export async function redirectsCheck(invocation) {
     const checks = await checkStagingRedirects(client, siteId, onProgress, now);
     if (!checks.redirects.verified) {
       onProgress(
-        "Warning: staging redirects are not verified. Check the reported mismatches and retry after edge propagation.",
+        "Warning: staging redirects are not verified. Check the reported mismatches against the staged release and retry once its deployment has completed.",
       );
     }
     const handoff = await mintStagingPreviewHandoff(client, siteId, { now });

@@ -104,12 +104,12 @@ test("the refusal names the offending entry, not the first one", () => {
 test("a dot inside a segment is not a dot segment", () => {
   const { entries } = validate([
     { path: "/faqs.html", target: "/faq" },
-    { path: "/2019..2020-recap", target: "/journal" },
-    { path: "/a.b/c..d", target: "https://booking.example.test/riverbend" },
+    { path: "/2019.2020-recap", target: "/journal" },
+    { path: "/a.b/c.d", target: "https://booking.example.test/riverbend" },
   ]);
   assert.deepEqual(
     entries.map((entry) => entry.path),
-    ["/2019..2020-recap", "/a.b/c..d", "/faqs.html"],
+    ["/2019.2020-recap", "/a.b/c.d", "/faqs.html"],
   );
 });
 
@@ -152,4 +152,90 @@ test("an absolute http(s) target still passes", () => {
     { path: "/book", target: "https://booking.example.test/riverbend", status: 302 },
   ]);
   assert.equal(entries[0].target, "https://booking.example.test/riverbend");
+});
+
+// TR00968: a redirect is a marker file in the release. These vectors are the
+// same ones the API pins in SiteRedirectSourceRefusalTests (C#), so the offline
+// check and the server refuse the same sources.
+for (const path of [
+  "/index.html",
+  "/about/index.html",
+  "/About/INDEX.HTML",
+  "/404.html",
+  "/sitemap.xml",
+  "/Sitemap.xml/old",
+  "/robots.txt",
+  "/favicon.ico",
+  "/.well-known/old",
+  "/con",
+  "/a%25b",
+  "/%69ndex.html",
+  "/about/%69ndex.html",
+  "/%73itemap.xml",
+  "/old..page",
+  `/${"a".repeat(201)}`,
+  "/about/index.html/legacy",
+  "/404.html/old",
+  "/favicon.ico/old",
+  "/integrations/old",
+  "/Integrations",
+  "/%69ntegrations/old",
+  "/a%3Fb",
+  "/a%23b",
+  "/a%C2%85b",
+]) {
+  test(`a source that is a generated or unstorable path is refused: ${path}`, () => {
+    const error = refusal([{ path, kind: "redirect", target: "/x" }]);
+    assert.equal(error.code, "redirects.path_unpublishable");
+    assert.match(error.message, /entries\[0\]\.path/u);
+  });
+}
+
+test("an escaped dot or slash cannot hide a generated file or an empty segment", () => {
+  for (const path of ["/robots%2Etxt", "/a%2F%2Fb"]) {
+    assert.throws(() => validate([{ path, kind: "redirect", target: "/x" }]), (error) => error.name === "SiteAuthoringError", path);
+  }
+});
+
+for (const path of [
+  "/about",
+  "/faqs.html",
+  "/index.htm",
+  "/my-index.html.old",
+  "/caf%C3%A9",
+  "/old%20page",
+  "/favicon.ico.bak",
+  `/${"a".repeat(200)}`,
+]) {
+  test(`an ordinary source still passes, legacy percent spellings included: ${path}`, () => {
+    assert.equal(validate([{ path, kind: "redirect", target: "/x" }]).entries[0].path, path);
+  });
+}
+
+test("an encoded source that redirects to its own decoded spelling is a loop, and a chain through one is refused", () => {
+  assert.equal(refusal([{ path: "/%61", kind: "redirect", target: "/a" }]).code, "redirects.loop");
+  assert.equal(
+    refusal([
+      { path: "/b", kind: "redirect", target: "/x" },
+      { path: "/y", kind: "redirect", target: "/%62" },
+    ]).code,
+    "redirects.chain",
+  );
+});
+
+test("two sources that decode to one marker file are a duplicate", () => {
+  const error = refusal([
+    { path: "/a%41", kind: "redirect", target: "/x" },
+    { path: "/aA", kind: "redirect", target: "/y" },
+  ]);
+  assert.equal(error.code, "redirects.path_duplicate");
+});
+
+test("a gone entry at a generated file is refused the same way", () => {
+  assert.equal(refusal([{ path: "/robots.txt", kind: "gone" }]).code, "redirects.path_unpublishable");
+});
+
+test("a target too long to store as metadata is refused offline", () => {
+  const error = refusal([{ path: "/a", kind: "redirect", target: `https://elsewhere.example.test/?q=${"é".repeat(300)}` }]);
+  assert.equal(error.code, "redirects.target_too_long_to_store");
 });

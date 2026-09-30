@@ -6788,7 +6788,8 @@ test("redirects push sends a path_history entry over the path bound, because a r
   // would leave the site's own map failing 'validate' and unpushable without
   // dropping a live redirect, so the site decides: it alone knows whether the
   // push introduces that path or carries it back unchanged.
-  const overLong = `/${"a".repeat(REDIRECT_LIMITS.pathBytes)}`;
+  // Short segments, so only the total length (not a file-name limit) is over.
+  const overLong = `/${Array.from({ length: Math.floor(REDIRECT_LIMITS.pathBytes / 100) + 1 }, () => "a".repeat(99)).join("/")}`;
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": redirectsManifest(REDIRECT_REVISION, 1),
     "redirects.json": redirectsDocument([
@@ -6835,10 +6836,11 @@ test("redirects push carries back a pulled map already over the entry bound", as
 test("redirects push reads back a pulled map larger than the navigation tree's bound", async (site) => {
   // The map's own bound is sized from the redirect contract, not borrowed from
   // nav.json: five hundred entries pointing at long absolute targets are well
-  // inside every site-side limit and well past a megabyte on disk.
-  const entries = Array.from({ length: 500 }, (_ignored, index) => ({
+  // inside every site-side limit and well past a megabyte on disk. Targets stay
+  // under the length a redirect file can store as metadata.
+  const entries = Array.from({ length: 700 }, (_ignored, index) => ({
     path: `/legacy-${index}.html`,
-    target: `https://legacy.example.test/${"a".repeat(2_000)}?id=${index}`,
+    target: `https://legacy.example.test/${"a".repeat(1_700)}?id=${index}`,
     origin: "path_history",
   }));
   const workspace = await fixture(site, {
@@ -6863,7 +6865,7 @@ test("redirects pull and push read a map larger than the ordinary response bound
   const wireEntries = Array.from({ length: 600 }, (_ignored, index) => ({
     path: `/legacy-${index}.html`,
     kind: "SITE_REDIRECT_KIND_REDIRECT",
-    target: `https://legacy.example.test/${"a".repeat(1_900)}?id=${index}`,
+    target: `https://legacy.example.test/${"a".repeat(1_700)}?id=${index}`,
     status: 301,
     origin: "SITE_REDIRECT_ORIGIN_AUTHORED",
   }));
@@ -7000,19 +7002,16 @@ test("pull records the redirect baseline beside the navigation one", async (site
   });
 });
 
-test("deploy says redirect entries reach an eventually consistent store, and quotes no hold", async (site) => {
-  // A spot-check run the second a deploy reports success can still read the
-  // previous map, and taking that for "the redirect did not land" is the wrong
-  // conclusion in front of a customer waiting to cut DNS over. What the CLI
-  // must not do is report a coordinator-side hold: the propagation grace in the
-  // routing coordinator defers only the deletion of a superseded Docs pointer
-  // namespace, and a standard site's redirect rows are written immediately.
+test("deploy says redirect entries live inside the release, and quotes no hold", async (site) => {
+  // A redirect is a file inside the release the deploy publishes (TR00968), so
+  // it is live exactly when that release is served. There is no store to wait
+  // on, and the CLI must not invent a propagation hold.
   const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
   const wire = api(deployRoutes());
   const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
   const result = await deploy(invocation);
 
-  assert.ok(progress.some((line) => line.includes("eventually consistent")));
+  assert.ok(progress.some((line) => line.includes("no separate propagation delay")));
   assert.equal(result.redirects?.propagationGraceSeconds, undefined);
 });
 

@@ -251,7 +251,8 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["redirects", "check"],
     summary: "Check the current redirect map through the authenticated staging edge.",
-    note: "Reports path, HTTP status and Location without following redirects. Re-run after edge propagation. "
+    note: "Reports path, HTTP status and Location without following redirects. A redirect is live only with the release "
+      + "that carries it, so this reads the staged release. "
       + "The result includes a fresh single-use staging handoff; keep it private.",
   },
   {
@@ -275,7 +276,8 @@ const VERBS = Object.freeze([
     summary: "Validate redirects.json and replace the whole redirect map.",
     note: "Run 'redirects pull' first. The whole file is validated locally by entry index — path normalization, "
       + "targets, statuses, duplicates, chains, and loops — before anything is sent, and the site refuses a "
-      + "source a live page occupies. Entries take effect on the next deploy. "
+      + "source a live page occupies or a file the site generates. An entry is a file inside the next release, so it "
+      + "goes live with that deploy: staging first, production when promoted. "
       + "See 'taproot-site help redirects'.",
   },
   {

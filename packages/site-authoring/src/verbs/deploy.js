@@ -27,24 +27,18 @@ import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
 
 /**
- * What a deploy does not finish (TR00702).
+ * When a redirect goes live (TR00702, TR00968).
  *
- * A deploy writes the site's redirect and gone entries into the edge's
- * key-value store as part of syncing routing. That store is eventually
- * consistent, so a spot-check run the second a deploy reports success can
- * briefly read the previous map, and taking that for "the redirect did not
- * land" is the wrong conclusion to reach in front of a customer waiting to cut
- * DNS over.
- *
- * No number is quoted, because there is none to quote: the coordinator holds
- * nothing back for a standard site's redirects. Its propagation grace governs
- * only the *deletion* of a superseded Docs pointer namespace; a standard site's
- * rows are written and removed immediately.
+ * A redirect or gone entry is a file inside the release this deploy publishes.
+ * It goes live with that release and no other way: staging shows it as soon as
+ * the staged release is served, production shows it when the release is
+ * promoted. There is no separate store to wait on, so a check that does not see
+ * an entry is looking at a release that does not carry it yet.
  */
-const REDIRECT_PROPAGATION_NOTE =
-  "Redirect and gone entries are written to the edge's key-value store when this deploy syncs routing. That "
-  + "store is eventually consistent, so a spot-check run immediately afterwards can briefly still see the "
-  + "previous map; re-check before concluding an entry is missing.";
+const REDIRECT_ACTIVATION_NOTE =
+  "Redirect and gone entries live inside the release this deploy publishes: staging serves them with the staged "
+  + "release and production serves them once that release is promoted. There is no separate propagation delay; "
+  + "an entry a check does not see belongs to a release that is not being served yet.";
 
 /**
  * `deploy --staging` / `deploy --production` — readiness, deploy, poll to
@@ -158,7 +152,7 @@ async function inspectStagingPreview(client, siteId, onProgress, now) {
     checks = await checkStagingRedirects(client, siteId, onProgress, now);
     if (!checks.redirects.verified) {
       onProgress(
-        "Warning: staging redirects are not all verified. Edge propagation may still be pending; run 'taproot-site redirects check' again.",
+        "Warning: staging redirects are not all verified. Check the reported mismatches against the staged release; run 'taproot-site redirects check' again once the deployment has completed.",
       );
     }
   } catch {
@@ -288,7 +282,7 @@ export async function deploy(invocation) {
         now,
       });
       await recordDeployment(config, manifest, "production", completed);
-      if (!presentationOnly) onProgress(REDIRECT_PROPAGATION_NOTE);
+      if (!presentationOnly) onProgress(REDIRECT_ACTIVATION_NOTE);
       return successResult(VERB_DEPLOY, siteId, {
         target,
         environment: DEPLOYMENT_ENVIRONMENT_PRODUCTION,
@@ -398,7 +392,7 @@ export async function deploy(invocation) {
       });
     }
     const stagingPreview = await inspectStagingPreview(client, siteId, onProgress, now);
-    onProgress(REDIRECT_PROPAGATION_NOTE);
+    onProgress(REDIRECT_ACTIVATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {
       target,
       environment: DEPLOYMENT_ENVIRONMENT_STAGING,

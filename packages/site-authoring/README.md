@@ -501,7 +501,7 @@ fingerprint supply no gating evidence. Typed preview failure diagnostics contain
 only error class and known page/node/attribute labels, never renderer messages.
 
 Staging deploys check the current redirect map through the real staging edge.
-Run `taproot-site redirects check` to repeat after eventual edge propagation.
+Run `taproot-site redirects check` to repeat once the deployment has completed; a redirect is a file inside the release, so it is live exactly when its release is served.
 The Node CLI consumes a separate handoff, retains its short staging cookie in
 memory, and requests each map path without following redirects. Results report
 path, HTTP status and Location; `verified` requires all entries to match and the

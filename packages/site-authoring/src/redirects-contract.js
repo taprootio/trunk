@@ -42,13 +42,16 @@ export const REDIRECT_STATUSES = Object.freeze([301, 302, 307, 308]);
 
 /**
  * Bounds, mirrored from `SiteRedirectMapContract` on the server. The path bound
- * is what fits a Workers KV key beside its `redirect:{environment}:{site}:`
- * envelope; the target bound is the edge's own.
+ * is the map's own; the target bound is the edge's own, and a target must also
+ * fit as metadata on its redirect file once encoded.
  */
 export const REDIRECT_LIMITS = Object.freeze({
   entries: 2_000,
   pathBytes: 400,
   targetBytes: 2_048,
+  // Once percent-encoded, a target rides on its redirect file as object
+  // metadata; the server pins the same number (MaxMarkerTargetEncodedLength).
+  targetEncodedCharacters: 1_810,
 });
 
 // C0, DEL, and C1 — every code point the server's own `char.IsControl`
@@ -88,8 +91,7 @@ const UNSENDABLE_SPELLING = /[^!-~]|["<>`{}]|%(?![0-9a-fA-F]{2})/u;
  * between the API's .NET and the edge's WHATWG parser, so a spelling this pass
  * encoded would still not be the one the Worker computes and the layers would
  * go on comparing different strings. Write what a browser sends and every layer
- * compares it unchanged — and the byte bounds then measure the spelling the KV
- * key actually costs.
+ * compares it unchanged — and the byte bounds then measure that same spelling.
  */
 function isRequestSpelling(value) {
   return !UNSENDABLE_SPELLING.test(value);
@@ -152,6 +154,70 @@ export function normalizeRedirectPath(value) {
   const withSlash = candidate.startsWith("/") ? candidate : `/${candidate}`;
   const trimmed = withSlash.replace(/\/+$/u, "");
   return trimmed === "" ? "/" : trimmed;
+}
+
+// The root segment the published output reserves for integration data; the release
+// inventory leaves everything under it out.
+const RESERVED_INTEGRATION_DATA_SEGMENT = "integrations";
+
+// Root-level files the site generates. A redirect is a marker file inside the
+// published site (TR00968), so a source that names one has nowhere to live.
+const GENERATED_ROOT_FILES = Object.freeze(["404.html", "sitemap.xml", "robots.txt", "favicon.ico"]);
+// The longest decoded path segment a marker file name may have; the API rule and the
+// generator use the same 200 bytes.
+const MAX_MARKER_SEGMENT_BYTES = 200;
+const WINDOWS_DEVICE_STEMS = new Set(["con", "prn", "aux", "nul"]);
+
+function isWindowsDeviceSegment(segment) {
+  const stem = segment.split(".", 1)[0].toLowerCase();
+  return WINDOWS_DEVICE_STEMS.has(stem) || /^(?:com|lpt)[1-9]$/u.test(stem);
+}
+
+/**
+ * Why a normalized source path cannot be a redirect, or undefined when it can.
+ * A mirror of `SiteRedirectMapContract.SourceRefusalReason` on the server (the
+ * API is the authority; both run the same test vectors): `…/index.html` is
+ * answered by the platform for every page, the generator writes the files
+ * named above, and the marker is stored under the decoded spelling, so a path
+ * that cannot be stored once decoded (an escaped percent sign, a dot-prefixed
+ * segment, a reserved device name) is refused. The site root is left to the
+ * occupancy rule.
+ */
+export function redirectSourceRefusalReason(path) {
+  if (path === "/") return undefined;
+  // Every rule reads the decoded spelling: it is the name the marker is stored
+  // under, and the name the generator's own files use (`/%69ndex.html` is
+  // `/index.html`).
+  let decoded;
+  try {
+    decoded = path.replace(/^\/+|\/+$/gu, "").split("/").map(decodeURIComponent).join("/");
+  } catch {
+    return "it holds a percent escape that does not decode.";
+  }
+  const segments = decoded.split("/");
+  const first = segments[0].toLowerCase();
+  if (segments.some((segment) => segment.toLowerCase() === "index.html")) {
+    return "the platform already redirects every '…/index.html' address to its directory, so it cannot also be "
+      + "a redirect source, and the page or home file there is generated.";
+  }
+  if (first === RESERVED_INTEGRATION_DATA_SEGMENT) {
+    return `'/${segments[0]}' is reserved for integration data, so nothing under it can be a redirect source.`;
+  }
+  if (GENERATED_ROOT_FILES.includes(first)) {
+    return `'/${segments[0]}' is a file the site generates, so neither it nor anything under it can be a redirect source.`;
+  }
+  if (
+    decoded.includes("..")
+    || decoded !== decoded.normalize("NFC")
+    || segments.some((segment) =>
+      segment === "" || segment.startsWith(".") || /[%\\?#\u0000-\u001F\u007F-\u009F]/u.test(segment)
+      || isWindowsDeviceSegment(segment) || new TextEncoder().encode(segment).length > MAX_MARKER_SEGMENT_BYTES
+    )
+  ) {
+    return "a redirect is stored as a file in the published site, and this path cannot be one (no dot-prefixed "
+      + "segments, reserved device names, '..', escaped percent signs, or segments over 200 bytes).";
+  }
+  return undefined;
 }
 
 function looksAbsolute(value) {
@@ -235,14 +301,21 @@ function validateEntry(value, index, seen) {
       `${field}.path`,
     );
   }
-  if (seen.has(path.toLowerCase())) {
+  const sourceRefusal = redirectSourceRefusalReason(path);
+  if (sourceRefusal !== undefined) {
+    throw entryError("redirects.path_unpublishable", `'${path}': ${sourceRefusal}`, `${field}.path`);
+  }
+  // The marker is stored under the decoded spelling, so `/a%41` and `/aA` are one
+  // file, and the second would silently replace the first.
+  const markerKey = decodeURIComponent(path).toLowerCase();
+  if (seen.has(markerKey)) {
     throw entryError(
       "redirects.path_duplicate",
       `'${path}' appears more than once; one path has one entry.`,
       `${field}.path`,
     );
   }
-  seen.add(path.toLowerCase());
+  seen.add(markerKey);
 
   const kind = value.kind === undefined ? REDIRECT_KIND_REDIRECT : value.kind;
   if (!REDIRECT_KINDS.includes(kind)) {
@@ -296,6 +369,15 @@ function validateEntry(value, index, seen) {
     );
   }
 
+  if (encodeURIComponent(rawTarget).length > REDIRECT_LIMITS.targetEncodedCharacters) {
+    throw entryError(
+      "redirects.target_too_long_to_store",
+      "'target' is stored as metadata on the published site's redirect file and is too long to fit "
+        + `(${REDIRECT_LIMITS.targetEncodedCharacters} characters once percent-encoded).`,
+      `${field}.target`,
+    );
+  }
+
   let target;
   if (looksAbsolute(rawTarget)) {
     if (!isAbsoluteRedirectTarget(rawTarget)) {
@@ -341,13 +423,23 @@ function validateEntry(value, index, seen) {
   return { path, kind: REDIRECT_KIND_REDIRECT, target, status };
 }
 
+// The marker is stored under the decoded spelling, so `/%61` and `/a` are one route
+// and `/%61 -> /a` is a loop. A target's escape may not decode; it then compares raw.
+function routeIdentity(path) {
+  try {
+    return decodeURIComponent(path).toLowerCase();
+  } catch {
+    return path.toLowerCase();
+  }
+}
+
 function assertNoChains(entries) {
-  const sources = new Set(entries.map((entry) => entry.path.toLowerCase()));
+  const sources = new Set(entries.map((entry) => routeIdentity(entry.path)));
   entries.forEach((entry, index) => {
     const targetPath = internalRedirectTargetPath(entry);
-    if (targetPath === undefined || !sources.has(targetPath.toLowerCase())) return;
+    if (targetPath === undefined || !sources.has(routeIdentity(targetPath))) return;
     const field = `entries[${index}].target`;
-    if (targetPath.toLowerCase() === entry.path.toLowerCase()) {
+    if (routeIdentity(targetPath) === routeIdentity(entry.path)) {
       throw entryError("redirects.loop", `'${entry.path}' redirects to itself.`, field);
     }
     throw entryError(

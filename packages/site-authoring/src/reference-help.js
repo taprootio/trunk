@@ -602,8 +602,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "a separate staging handoff and checks the current map at the real edge, using an in-memory cookie and "
       + "manual redirects. It reports each path, HTTP status and Location without following targets.",
       "verified is true only if every entry matched and the map revision stayed unchanged during the check. "
-      + "The check proves the current map at staging, not a historical deployment. A mismatch can be propagation "
-      + "delay; re-run redirects check before promoting. Requests are bounded to 90 seconds, eight at a time; "
+      + "The check proves the current map at staging, not a historical deployment. A mismatch means the staged "
+      + "release does not carry the entry (yet); re-run redirects check after the deployment completes, before promoting. Requests are bounded to 90 seconds, eight at a time; "
       + "large JSON lists are truncated explicitly with failed entries first. Human output reports every entry.",
       "stagingPreview.url is a fresh, single-use two-minute handoff, minted after checks. It is emitted only "
       + "in final JSON, excluded from progress and GITHUB_OUTPUT; keep it private. The staging cookie lasts "
@@ -654,10 +654,15 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Converting an engagement's CSV into this file is the agent's job. The CLI's contract is JSON, on "
       + "purpose: a real migration list needs judgement about which old URLs still deserve a destination and "
       + "which are simply gone.",
-      "Entries take effect on the next deploy, staging first. They are written to the edge's key-value store "
-      + "when the deploy syncs routing, and that store is eventually consistent, so a spot-check run "
-      + "immediately afterwards can briefly still see the previous map. Re-check before concluding an entry "
-      + "did not land.",
+      "Entries take effect on the next deploy, staging first. Each is a file inside that release, so it goes live "
+      + "exactly when the release does: staging with the staged release, production when it is promoted. There is "
+      + "no separate propagation delay; an entry a check does not see belongs to a release that is not being "
+      + "served yet.",
+      "A source cannot name a file the site generates: '/index.html' or any page's own 'index.html', '/404.html', "
+      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', or a path under the sitemap or robots names. The platform "
+      + "already redirects every '…/index.html' address to its directory, so no entry is needed for one. A source "
+      + "that could not be stored as a file (a dot-prefixed segment, a reserved device name, an escaped percent "
+      + "sign) is refused too. 'validate' names the entry and the reason.",
     ]),
     example: Object.freeze({
       siteId: "<site-uuid>",
