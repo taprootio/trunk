@@ -536,10 +536,11 @@ the way a visitor does and reports each dimension separately: the latest
 completed deployment for the target, HTTP delivery of the authored routes and
 the favicon, images, module preloads and site bundle they declare (status and
 content type, no redirects followed), internal link targets, accidental
-local-only references, and the declared runtime — the major pointer's stream,
-entry and capability modules, and whether the pointer lags the fallback copy
-the site shipped with. The browser dimension (a fresh and a returning load
-compared against the pointer's entry, every document request in the browser,
+local-only references, and the pinned runtime — the version the page names,
+its entry module and the capability modules the page declares, with a page
+that still names the pre-pinning runtime pointer reported as unverified until it is republished. The
+browser dimension (a fresh and a returning load
+compared against the page's pinned entry, every document request in the browser,
 popups included, held to the site origin before it is sent, and cache reuse
 on the returning load observed rather than assumed)
 runs only when Playwright resolves from the CLI's own install (install

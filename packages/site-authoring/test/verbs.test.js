@@ -10142,24 +10142,31 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
 // ── delivery check (TR00824) ───────────────────────────────────────────────
 
 const PUBLIC_ORIGIN = "https://www.example.com";
-const RUNTIME_POINTER = /\/taproot\/5\/latest\.json$/u;
-const RUNTIME_FALLBACK = /\/taproot-runtime-fallback\/5\.0\.35\/manifest\.json$/u;
-const RUNTIME_ENTRY = /\/taproot\/5\/taproot-shared-runtime-abc\.esm\.js$/u;
+const RUNTIME_ENTRY = /\/taproot\/5\.0\.63\/taproot-shared-runtime-abc\.esm\.js$/u;
 
-function deliveredHtml(links = []) {
-  const bootstrap = JSON.stringify({
-    runtimeMajorVersion: "5",
-    runtimeManifestUrl: `${PUBLIC_ORIGIN}/taproot/5/latest.json`,
-    fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
-    siteBundleUrl: "/public/main.root-abc.js",
-    runtimeCapabilities: [],
-  });
+// A release published before runtime pinning names a mutable pointer instead.
+function deliveredHtml(links = [], { pinned = true } = {}) {
+  const bootstrap = JSON.stringify(pinned
+    ? {
+      version: "5.0.63",
+      entry: "/taproot/5.0.63/taproot-shared-runtime-abc.esm.js",
+      capabilities: {},
+      siteBundleUrl: "/public/main.root-abc.js",
+      runtimeCapabilities: [],
+    }
+    : {
+      runtimeMajorVersion: "5",
+      runtimeManifestUrl: `${PUBLIC_ORIGIN}/taproot/5/latest.json`,
+      fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
+      siteBundleUrl: "/public/main.root-abc.js",
+      runtimeCapabilities: [],
+    });
   return `<!doctype html><html><head><link rel="icon" href="/favicon.ico"><script type="application/json" id="taproot-runtime-bootstrap">${bootstrap}</script></head><body><esp-root>${
     links.map((href) => `<a href="${href}">x</a>`).join("")
   }</esp-root></body></html>`;
 }
 
-function deliveryRoutes({ pointerVersion = "5.0.35", environment = "DEPLOYMENT_ENVIRONMENT_PRODUCTION", completed = true } = {}) {
+function deliveryRoutes({ pinned = true, environment = "DEPLOYMENT_ENVIRONMENT_PRODUCTION", completed = true } = {}) {
   const html = (body) => new Response(body, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
   const asset = (type, body = "x") => new Response(body, { status: 200, headers: { "content-type": type } });
   return [
@@ -10173,13 +10180,11 @@ function deliveryRoutes({ pointerVersion = "5.0.35", environment = "DEPLOYMENT_E
         nextPageToken: "",
       },
     },
-    { method: "GET", pattern: RUNTIME_POINTER, reply: () => asset("application/json", JSON.stringify({ version: pointerVersion, majorVersion: "5", entry: "taproot-shared-runtime-abc.esm.js", capabilities: {} })) },
-    { method: "GET", pattern: RUNTIME_FALLBACK, reply: () => asset("application/json", JSON.stringify({ version: "5.0.35", majorVersion: "5", entry: "x.js", capabilities: {} })) },
     { method: "GET", pattern: RUNTIME_ENTRY, reply: () => asset("text/javascript", "export {};") },
     { method: "GET", pattern: /^\/public\/main\.root-abc\.js$/u, reply: () => asset("text/javascript", "export {};") },
     { method: "GET", pattern: /^\/favicon\.ico$/u, reply: () => asset("image/x-icon") },
-    { method: "GET", pattern: /^\/about\/$/u, reply: () => html(deliveredHtml(["/"])) },
-    { method: "GET", pattern: /^\/$/u, reply: () => html(deliveredHtml(["/about/"])) },
+    { method: "GET", pattern: /^\/about\/$/u, reply: () => html(deliveredHtml(["/"], { pinned })) },
+    { method: "GET", pattern: /^\/$/u, reply: () => html(deliveredHtml(["/about/"], { pinned })) },
   ];
 }
 
@@ -10249,13 +10254,13 @@ test("delivery check spends its route allowance on every template before repeati
   assert.deepEqual(checked.slice(0, 3), ["/", "/journal/post-0/", "/recipes/lemon-bars/"]);
 });
 
-test("delivery check reports a stale runtime pointer and a differing workspace record without changing the verdict semantics", async (site) => {
+test("delivery check reports a release that still names the runtime pointer as unverified, with a differing workspace record", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([], {
       deployments: { production: { id: STAGING_DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-19T00:00:00Z" } },
     }),
   });
-  const wire = api(deliveryRoutes({ pointerVersion: "5.0.15" }));
+  const wire = api(deliveryRoutes({ pinned: false }));
   const { invocation, progress } = invoke(workspace, wire, {
     verb: "delivery check",
     deployTarget: "production",
@@ -10264,11 +10269,35 @@ test("delivery check reports a stale runtime pointer and a differing workspace r
   });
   const result = await deliveryCheck(invocation);
   assert.equal(result.verdict, "degraded");
-  assert.equal(result.runtime.pointerBehindFallback, true);
+  assert.equal(result.runtime.pinned, false);
+  assert.equal(result.runtime.legacy, true);
   assert.equal(result.deployment.recordedInWorkspace, false);
   assert.equal(result.deployment.workspaceRecordedId, STAGING_DEPLOYMENT_ID);
-  assert.ok(result.failures.some((line) => /behind the fallback/u.test(line)));
+  assert.ok(result.failures.some((line) => /pre-pinning runtime pointer/u.test(line)));
   assert.ok(progress.some((line) => /latest completed production deployment is/u.test(line)));
+});
+
+test("delivery check does not probe a browser against a page that pins no entry", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([], {
+      deployments: { production: { id: DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-20T00:01:00Z" } },
+    }),
+  });
+  const wire = api(deliveryRoutes({ pinned: false }));
+  let imported = false;
+  const { invocation } = invoke(workspace, wire, {
+    verb: "delivery check",
+    deployTarget: "production",
+    deliveryUrl: `${PUBLIC_ORIGIN}/`,
+    importPlaywright: async () => {
+      imported = true;
+      throw new Error("must not be reached");
+    },
+  });
+  const result = await deliveryCheck(invocation);
+  assert.equal(result.browser.status, "unchecked");
+  assert.equal(result.browser.reason, "legacy_runtime_reference");
+  assert.equal(imported, false);
 });
 
 test("delivery check refuses without a completed deployment, and production without --url, before touching the target", async (testContext) => {

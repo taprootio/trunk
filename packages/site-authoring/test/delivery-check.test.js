@@ -2,19 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { BROWSER_INSTALL_HINT, probeDeliveryWithBrowser } from "../src/delivery-browser.js";
-import { checkDelivery, compareVersions, DELIVERY_LIMITS, discoverReferences, parseBootstrap } from "../src/delivery-check.js";
+import { checkDelivery, DELIVERY_LIMITS, discoverReferences, parseBootstrap } from "../src/delivery-check.js";
 
 const ORIGIN = "https://site.example.test";
-const RUNTIME = "https://static.example.test/taproot/5/latest.json";
-const FALLBACK = `${ORIGIN}/public/taproot-runtime-fallback/5.0.35/manifest.json`;
-const ENTRY = "https://static.example.test/taproot/5/taproot-shared-runtime-abc.esm.js";
-const CAPABILITY = "https://static.example.test/taproot/5/chunks/taproot-image-banner-1.js";
+const VERSION = "5.0.63";
+const ENTRY_PATH = `/taproot/${VERSION}/taproot-shared-runtime-abc.esm.js`;
+const CAPABILITY_PATH = `/taproot/${VERSION}/chunks/taproot-image-banner-1.js`;
+const ENTRY = `${ORIGIN}${ENTRY_PATH}`;
+const CAPABILITY = `${ORIGIN}${CAPABILITY_PATH}`;
 
 function bootstrap(overrides = {}) {
   return JSON.stringify({
-    runtimeMajorVersion: "5",
-    runtimeManifestUrl: RUNTIME,
-    fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
+    version: VERSION,
+    entry: ENTRY_PATH,
+    capabilities: { "taproot-image-banner": CAPABILITY_PATH },
     siteBundleUrl: "/public/main.root-DNz.js",
     runtimeCapabilities: ["taproot-image-banner"],
     ...overrides,
@@ -50,18 +51,8 @@ function server(entries, { failuresBeforeSuccess = {} } = {}) {
   return { calls, fetch: fetchImpl };
 }
 
-const manifests = (pointerVersion = "5.0.35", fallbackVersion = "5.0.35") => ({
-  [RUNTIME]: {
-    type: "application/json",
-    body: JSON.stringify({
-      version: pointerVersion,
-      majorVersion: "5",
-      entry: "taproot-shared-runtime-abc.esm.js",
-      capabilities: { "taproot-image-banner": "chunks/taproot-image-banner-1.js" },
-    }),
-    headers: { "cache-control": "public, max-age=0, s-maxage=60" },
-  },
-  [FALLBACK]: { type: "application/json", body: JSON.stringify({ version: fallbackVersion, majorVersion: "5", entry: "x.js", capabilities: {} }) },
+// The pinned runtime is served from the page's own origin.
+const runtimeFiles = () => ({
   [ENTRY]: { type: "text/javascript", body: "export {};" },
   [CAPABILITY]: { type: "text/javascript", body: "export {};" },
 });
@@ -73,7 +64,7 @@ function healthy(overrides = {}) {
     [`${ORIGIN}/favicon.ico`]: { type: "image/x-icon", body: "ico" },
     [`${ORIGIN}/public/main.root-DNz.js`]: { type: "text/javascript", body: "export {};" },
     [`${ORIGIN}/public/hero.webp`]: { type: "image/webp", body: "webp" },
-    ...manifests(),
+    ...runtimeFiles(),
     ...overrides,
   };
 }
@@ -91,14 +82,15 @@ test("a delivered deployment verifies routes, assets, links and the declared run
   assert.deepEqual(report.assets.items.map((item) => item.kind).sort(), ["favicon", "image", "site-bundle"]);
   assert.equal(report.assets.failed, 0);
   assert.equal(report.runtime.compatible, true);
-  assert.equal(report.runtime.majorStreamMatches, true);
-  assert.equal(report.runtime.pointerBehindFallback, false);
+  assert.equal(report.runtime.pinned, true);
+  assert.equal(report.runtime.version, VERSION);
   assert.equal(report.runtime.entry.ok, true);
-  assert.equal(report.runtime.majorPointer.cacheControl, "public, max-age=0, s-maxage=60");
+  assert.equal(report.runtime.entry.url, ENTRY);
+  assert.equal(report.runtime.capabilityModules.checked, 1);
   assert.equal(report.propagation.waitedSeconds, 0);
   assert.deepEqual(report.localOnlyReferences, []);
-  // Read-only: only GETs, nothing followed off the site or the static origin.
-  assert.ok(calls.every((call) => call.url.startsWith(ORIGIN) || call.url.startsWith("https://static.example.test/")));
+  // Read-only: only GETs, and nothing is fetched off the site's own origin.
+  assert.ok(calls.every((call) => call.url.startsWith(ORIGIN)));
 });
 
 test("a missing asset and a wrong content type are reported with observed and expected values", async () => {
@@ -120,29 +112,45 @@ test("a missing asset and a wrong content type are reported with observed and ex
   assert.ok(report.failures.some((line) => /image .*wrong_content_type/u.test(line)));
 });
 
-test("a stale major pointer is reported as behind the fallback the site shipped with", async () => {
-  const { fetch } = server(healthy(manifests("5.0.15", "5.0.35")));
+test("a missing entry or capability module makes the pinned runtime incompatible", async () => {
+  const { fetch } = server(healthy({ [ENTRY]: undefined, [CAPABILITY]: undefined }));
   const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
-  assert.equal(report.runtime.pointerBehindFallback, true);
-  assert.equal(report.runtime.compatible, true);
-  assert.equal(report.verdict, "degraded");
-  assert.ok(report.failures.some((line) => /major pointer \(5\.0\.15\) is behind the fallback .*\(5\.0\.35\)/u.test(line)));
-});
-
-test("a major stream mismatch, a missing capability module and a missing entry make the runtime incompatible", async () => {
-  const { fetch } = server(healthy({
-    [RUNTIME]: {
-      type: "application/json",
-      body: JSON.stringify({ version: "6.0.0", majorVersion: "6", entry: "missing.js", capabilities: {} }),
-    },
-  }));
-  const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
-  assert.equal(report.runtime.majorStreamMatches, false);
-  assert.equal(report.runtime.capabilitiesResolvable, false);
+  assert.equal(report.runtime.pinned, true);
   assert.equal(report.runtime.entry.ok, false);
+  assert.equal(report.runtime.capabilitiesResolvable, false);
   assert.equal(report.runtime.compatible, false);
   assert.equal(report.verdict, "failed");
-  assert.ok(report.failures.some((line) => /serves major 6, the page expects 5/u.test(line)));
+  assert.ok(report.failures.some((line) => /taproot-shared-runtime-abc.*\(version 5\.0\.63\): http_404/u.test(line)));
+});
+
+test("a page published before runtime pinning is unverified and degraded, not failed, until it is republished", async () => {
+  const old = JSON.stringify({
+    runtimeMajorVersion: "5",
+    runtimeManifestUrl: "https://static.example.test/taproot/5/latest.json",
+    fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
+    siteBundleUrl: "/public/main.root-DNz.js",
+    runtimeCapabilities: ["taproot-image-banner"],
+  });
+  const { fetch, calls } = server(healthy({ [`${ORIGIN}/`]: { body: html({ boot: old }) } }));
+  const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
+  assert.equal(report.runtime.declared, true);
+  assert.equal(report.runtime.pinned, false);
+  assert.equal(report.runtime.legacy, true);
+  assert.equal(report.runtime.compatible, false);
+  assert.equal(report.verdict, "degraded");
+  assert.ok(report.failures.some((line) => /pre-pinning runtime pointer.*republish/u.test(line)));
+  // Its declared capabilities are not reported as failed modules: no chunk URL is pinned to check.
+  assert.equal(report.runtime.capabilityModules.checked, 0);
+  assert.equal(report.runtime.capabilityModules.failed, 0);
+  assert.equal(report.failures.length, 1);
+  // A bootstrap that names neither a pinned runtime nor a pointer is a failure.
+  const bare = server(healthy({ [`${ORIGIN}/`]: { body: html({ boot: JSON.stringify({ siteBundleUrl: "/public/main.root-DNz.js", runtimeCapabilities: [] }) }) } }));
+  const failed = await checkDelivery({ fetch: bare.fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
+  assert.equal(failed.runtime.legacy, false);
+  assert.equal(failed.verdict, "failed");
+  assert.ok(failed.failures.some((line) => /does not pin a runtime version and entry/u.test(line)));
+  // Nothing the old bootstrap names is fetched.
+  assert.ok(!calls.some((call) => call.url.includes("latest.json") || call.url.includes("runtime-fallback")));
 });
 
 test("a route that redirects or answers an error is not delivered, and retries are truthful", async () => {
@@ -224,7 +232,7 @@ test("local-only references and the staging cookie boundary are enforced", async
 });
 
 test("a redirect Location that could reflect a credential is withheld and bodies are read within the bound", async () => {
-  const big = "x".repeat(DELIVERY_LIMITS.manifestBytes + 1);
+  const big = "x".repeat(DELIVERY_LIMITS.htmlBytes + 1);
   const { fetch } = server(healthy({
     [`${ORIGIN}/about/`]: {
       status: 302,
@@ -232,15 +240,16 @@ test("a redirect Location that could reflect a credential is withheld and bodies
       headers: { location: `${ORIGIN}/?__taproot_preview_handoff=${"A".repeat(43)}` },
     },
     // No Content-Length is declared by the fake, so only the streamed bound protects the reader.
-    [RUNTIME]: { type: "application/json", body: big },
+    [`${ORIGIN}/big/`]: { body: big },
   }));
-  const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, routes: ["/about/"], sleep: noSleep });
+  const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, routes: ["/about/", "/big/"], sleep: noSleep });
   const about = report.routes.items.find((item) => item.path === "/about/");
   assert.equal(about.failure, "redirected");
   assert.equal(about.location, "[withheld]");
   assert.ok(!JSON.stringify(report).includes("A".repeat(43)));
-  assert.equal(report.runtime.majorPointer.failure, "body_too_large");
-  assert.equal(report.runtime.majorPointer.ok, false);
+  const bigRoute = report.routes.items.find((item) => item.path === "/big/");
+  assert.equal(bigRoute.failure, "body_too_large");
+  assert.equal(bigRoute.ok, false);
 });
 
 test("sampling is bounded and reported", async () => {
@@ -282,27 +291,18 @@ test("references that could leave the origin are never reconstructed into anothe
   });
 });
 
-test("runtime delivery probes the declared capability modules and reports a broken fallback", async () => {
+test("runtime delivery probes the declared capability modules and fails one that does not load", async () => {
   const { fetch } = server(healthy({
-    [RUNTIME]: {
-      type: "application/json",
-      body: JSON.stringify({
-        version: "5.0.35",
-        majorVersion: "5",
-        entry: "taproot-shared-runtime-abc.esm.js",
-        capabilities: { "taproot-image-banner": "chunks/missing.js" },
-      }),
+    [`${ORIGIN}/`]: {
+      body: html({ boot: bootstrap({ capabilities: { "taproot-image-banner": `/taproot/${VERSION}/chunks/missing.js` } }) }),
     },
-    [FALLBACK]: undefined,
   }));
   const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
   assert.equal(report.runtime.capabilityModules.checked, 1);
   assert.equal(report.runtime.capabilityModules.failed, 1);
   assert.equal(report.runtime.capabilityModules.items[0].failure, "http_404");
   assert.equal(report.runtime.capabilitiesResolvable, false);
-  assert.equal(report.runtime.fallback.ok, false);
-  assert.ok(report.failures.some((line) => /fallback .*http_404/u.test(line)));
-  assert.ok(report.failures.some((line) => /did not load/u.test(line)));
+  assert.ok(report.failures.some((line) => /1 of 1 declared capability module\(s\) were undeclared, invalid or did not load/u.test(line)));
   assert.equal(report.verdict, "failed");
 });
 
@@ -371,10 +371,6 @@ test("an https origin is required and the bootstrap and reference parsers are de
   assert.deepEqual(parseBootstrap(html()).runtimeCapabilities, ["taproot-image-banner"]);
   const references = discoverReferences(html({ links: ["/a/", "/a/?x=1", "/_taproot/x", "mailto:a@b"] }), `${ORIGIN}/`);
   assert.deepEqual(references.internalLinks, [`${ORIGIN}/a/`]);
-  assert.equal(compareVersions("5.0.15", "5.0.35"), -1);
-  assert.equal(compareVersions("5.0.35", "5.0.35"), 0);
-  assert.equal(compareVersions("5.1.0", "5.0.35"), 1);
-  assert.equal(compareVersions("x", "5.0.35"), undefined);
 });
 
 /**
@@ -580,10 +576,10 @@ test("the reference scanner ignores comments and raw text, reads attributes in o
   assert.deepEqual(references.internalLinks, [`${ORIGIN}/about/`]);
   // A bootstrap inside a comment is not the page's bootstrap.
   assert.equal(parseBootstrap(`<!-- <script id="taproot-runtime-bootstrap">${bootstrap()}</script> -->`), undefined);
-  assert.equal(parseBootstrap(`<!-- old --><script id="taproot-runtime-bootstrap">${bootstrap()}</script>`).runtimeMajorVersion, "5");
+  assert.equal(parseBootstrap(`<!-- old --><script id="taproot-runtime-bootstrap">${bootstrap()}</script>`).version, VERSION);
   // Bootstrap strings are bounded.
-  const long = parseBootstrap(`<script id="taproot-runtime-bootstrap">${bootstrap({ runtimeMajorVersion: "9".repeat(100), runtimeCapabilities: ["x".repeat(500), "bad\u0007tag", "taproot-ok"] })}</script>`);
-  assert.equal(long.runtimeMajorVersion.length, 16);
+  const long = parseBootstrap(`<script id="taproot-runtime-bootstrap">${bootstrap({ version: "9".repeat(100), runtimeCapabilities: ["x".repeat(500), "bad\u0007tag", "taproot-ok"] })}</script>`);
+  assert.equal(long.version.length, 64);
   assert.deepEqual(long.runtimeCapabilities, ["taproot-ok"]);
   assert.equal(long.capabilitiesDropped, 2);
   // A quoted attribute value may hold ">" without ending the tag, and a
@@ -591,7 +587,7 @@ test("the reference scanner ignores comments and raw text, reads attributes in o
   const quoted = discoverReferences(html({ images: [], extra: "<img alt=\"A > B\" src=\"/missing.png\"><img alt='x' src=\"/next.png\">" }), page);
   assert.deepEqual(quoted.images, [`${ORIGIN}/missing.png`, `${ORIGIN}/next.png`]);
   assert.equal(parseBootstrap(`<textarea><script id="taproot-runtime-bootstrap">${bootstrap()}</script></textarea>`), undefined);
-  assert.equal(parseBootstrap(`<title><script id="taproot-runtime-bootstrap">${bootstrap()}</script></title><script id="taproot-runtime-bootstrap">${bootstrap({ runtimeMajorVersion: "7" })}</script>`).runtimeMajorVersion, "7");
+  assert.equal(parseBootstrap(`<title><script id="taproot-runtime-bootstrap">${bootstrap()}</script></title><script id="taproot-runtime-bootstrap">${bootstrap({ version: "7.0.0" })}</script>`).version, "7.0.0");
   // An unterminated comment or tag ends the live document rather than inventing a reference.
   assert.deepEqual(discoverReferences("<!-- <img src=\"/a.png\">", page).images, []);
   assert.deepEqual(discoverReferences("<img src=\"/a.png\"><img src=\"/b.png", page).images, [`${ORIGIN}/a.png`]);
@@ -612,14 +608,9 @@ test("the whole report stays inside its bound however large the runtime detail a
   const localLinks = Array.from({ length: 20 }, (_, index) => `<a href="https://dev-${index}.taproot.test/${"p".repeat(600)}">x</a>`);
   const links = Array.from({ length: DELIVERY_LIMITS.links }, (_, index) => `/gone-${"g".repeat(400)}-${index}/`);
   const declared = Array.from({ length: 64 }, (_, index) => `taproot-${"c".repeat(50)}-${index}`);
-  const capabilities = Object.fromEntries(declared.map((tag) => [tag, `chunks/${tag}-${"m".repeat(400)}.js`]));
+  const capabilities = Object.fromEntries(declared.map((tag) => [tag, `/taproot/${wide}/chunks/${tag}-${"m".repeat(400)}.js`]));
   const entries = healthy({
-    [`${ORIGIN}/`]: { body: html({ links, boot: bootstrap({ runtimeCapabilities: declared }), extra: localLinks.join("") }) },
-    [RUNTIME]: {
-      type: "application/json",
-      body: JSON.stringify({ version: wide, majorVersion: wide, entry: `${wide}.js`, capabilities }),
-      headers: { "cache-control": wide },
-    },
+    [`${ORIGIN}/`]: { body: html({ links, boot: bootstrap({ version: wide, entry: `/taproot/${wide}/entry.js`, capabilities, runtimeCapabilities: declared }), extra: localLinks.join("") }) },
   });
   const { fetch } = server(entries);
   const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, routes: Array.from({ length: 19 }, (_, index) => `/m-${"r".repeat(400)}-${index}/`), sleep: noSleep });
@@ -644,32 +635,29 @@ test("a redirect Location on an asset that carries a handoff is withheld in the 
 });
 
 test("a capability module with an invalid or disallowed URL is a failed observation, and modules past the bound are unchecked", async () => {
-  const declared = Array.from({ length: DELIVERY_LIMITS.capabilities + 2 }, (_, index) => `taproot-cap-${index}`);
-  const capabilities = Object.fromEntries(declared.map((tag) => [tag, `chunks/${tag}.js`]));
+  const declared = Array.from({ length: DELIVERY_LIMITS.capabilities + 3 }, (_, index) => `taproot-cap-${index}`);
+  const capabilities = Object.fromEntries(declared.map((tag) => [tag, `/taproot/${VERSION}/chunks/${tag}.js`]));
   capabilities["taproot-cap-0"] = "https://untrusted.example/evil.js";
-  capabilities["taproot-cap-1"] = "https://user:pw@static.example.test/creds.js";
+  capabilities["taproot-cap-1"] = "https://user:pw@site.example.test/creds.js";
+  delete capabilities["taproot-cap-2"];
   const entries = healthy({
-    [`${ORIGIN}/`]: { body: html({ boot: bootstrap({ runtimeCapabilities: declared }) }) },
-    [RUNTIME]: {
-      type: "application/json",
-      body: JSON.stringify({ version: "5.0.35", majorVersion: "5", entry: "taproot-shared-runtime-abc.esm.js", capabilities }),
-    },
+    [`${ORIGIN}/`]: { body: html({ boot: bootstrap({ capabilities, runtimeCapabilities: declared }) }) },
   });
-  for (const tag of declared) entries[`https://static.example.test/taproot/5/chunks/${tag}.js`] = { type: "text/javascript", body: "export {};" };
+  for (const tag of declared) entries[`${ORIGIN}/taproot/${VERSION}/chunks/${tag}.js`] = { type: "text/javascript", body: "export {};" };
   const { fetch, calls } = server(entries);
   const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
   assert.equal(report.verdict, "failed");
   assert.equal(report.runtime.capabilitiesResolvable, false);
-  assert.equal(report.runtime.majorPointer.declaredCapabilities, declared.length);
-  assert.equal(report.runtime.majorPointer.resolvableCapabilities, declared.length - 2);
   const failures = Object.fromEntries(report.runtime.capabilityModules.items.map((item) => [item.tag, item.failure]));
   assert.equal(failures["taproot-cap-0"], "origin_not_allowed");
   assert.equal(failures["taproot-cap-1"], "invalid_url");
-  assert.equal(report.runtime.capabilityModules.failed, 2);
+  assert.equal(failures["taproot-cap-2"], "undeclared");
+  assert.equal(report.runtime.capabilityModules.invalid, 3);
+  assert.equal(report.runtime.capabilityModules.failed, 3);
   assert.equal(report.runtime.capabilityModules.checked, DELIVERY_LIMITS.capabilities);
-  assert.equal(report.runtime.capabilityModules.unchecked, declared.length - 2 - DELIVERY_LIMITS.capabilities);
+  assert.equal(report.runtime.capabilityModules.unchecked, declared.length - 3 - DELIVERY_LIMITS.capabilities);
   assert.ok(!calls.some((call) => call.url.startsWith("https://untrusted.example/")));
-  assert.ok(report.failures.some((line) => /0 declared capability module\(s\) are missing .* 2 were invalid or did not load/u.test(line)));
+  assert.ok(report.failures.some((line) => /3 of \d+ declared capability module\(s\) were undeclared, invalid or did not load/u.test(line)));
 });
 
 test("the whole report stays inside the output budget when local-only references and failures pile up", async () => {

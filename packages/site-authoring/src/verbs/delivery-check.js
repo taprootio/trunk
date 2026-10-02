@@ -156,6 +156,13 @@ export async function deliveryCheck(invocation) {
     let browser;
     if (invocation.browser === false) {
       browser = { status: "unchecked", reason: "disabled", note: "Browser verification was not requested." };
+    } else if (report.runtime.legacy) {
+      // There is no pinned entry to compare a browser load against.
+      browser = {
+        status: "unchecked",
+        reason: "legacy_runtime_reference",
+        note: "The page names a pre-pinning runtime pointer, so no entry is pinned to compare a browser load against; republish the site and rerun.",
+      };
     } else {
       onProgress("Browser dimension: probing with Playwright when it is installed.");
       browser = await probeDeliveryWithBrowser({

@@ -7,9 +7,9 @@ import { withholdCredentialLocation } from "./staging-check.js";
  * A completed deployment job proves that Taproot wrote what it meant to
  * write. It does not prove that a visitor receives it: the edge may still
  * serve the previous route, an asset may 404 behind a 200 HTML error page, and
- * the shared runtime a browser loads comes from a mutable major pointer that
- * can lag or be cached. This module checks the public HTTP surface of a
- * deployment target with explicit bounds and reports each dimension on its
+ * the shared runtime a browser loads is the version the page pins, which has
+ * to be served for that exact version. This module checks the public HTTP
+ * surface of a deployment target with explicit bounds and reports each dimension on its
  * own: HTTP delivery is checked here, browser-observed behaviour is the
  * optional probe in `delivery-browser.js`, and a dimension nobody checked is
  * reported as unchecked, never as passed.
@@ -34,7 +34,6 @@ export const DELIVERY_LIMITS = Object.freeze({
   retryMilliseconds: 1_000,
   requestMilliseconds: 15_000,
   htmlBytes: 2 * 1024 * 1024,
-  manifestBytes: 256 * 1024,
   propagationWaitMaximumSeconds: 120,
   failures: 40,
   reportBytes: 24_000,
@@ -45,7 +44,6 @@ export const DELIVERY_LIMITS = Object.freeze({
 });
 
 const HTML_TYPES = /^text\/html\b/iu;
-const JSON_TYPES = /^application\/(?:json|manifest\+json)\b/iu;
 const SCRIPT_TYPES = /^(?:text|application)\/(?:javascript|ecmascript|x-javascript)\b/iu;
 const IMAGE_TYPES = /^image\//iu;
 const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0|[^/]*\.(?:test|local|localhost|internal))(?::\d+)?$/iu;
@@ -171,25 +169,10 @@ function typeOf(response) {
 
 function expectationFor(kind) {
   if (kind === "route" || kind === "link") return { name: "text/html", test: HTML_TYPES };
-  if (kind === "manifest") return { name: "application/json", test: JSON_TYPES };
   if (kind === "site-bundle" || kind === "runtime-entry" || kind === "module" || kind === "capability") {
     return { name: "javascript", test: SCRIPT_TYPES };
   }
   return { name: "image/*", test: IMAGE_TYPES };
-}
-
-export function compareVersions(left, right) {
-  const parse = (value) => {
-    const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(value ?? "");
-    return match ? match.slice(1).map(Number) : undefined;
-  };
-  const a = parse(left);
-  const b = parse(right);
-  if (!a || !b) return undefined;
-  for (let index = 0; index < 3; index += 1) {
-    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
-  }
-  return 0;
 }
 
 /** The runtime bootstrap a rendered page declares, or undefined when absent. */
@@ -208,12 +191,25 @@ export function parseBootstrap(html) {
   // capability this page could declare and is counted, never carried.
   const declared = Array.isArray(parsed.runtimeCapabilities) ? parsed.runtimeCapabilities : [];
   const runtimeCapabilities = declared.filter((value) => typeof value === "string" && CUSTOM_ELEMENT_NAME.test(value)).slice(0, 64);
+  // The page pins one runtime version: its entry and the module each declared
+  // capability resolves to. Only the declared tags are read from the map, so
+  // an oversized map costs nothing.
+  const capabilityMap = parsed.capabilities !== null && typeof parsed.capabilities === "object" && !Array.isArray(parsed.capabilities)
+    ? parsed.capabilities
+    : {};
+  const capabilities = Object.fromEntries(
+    runtimeCapabilities
+      .filter((tag) => Object.hasOwn(capabilityMap, tag))
+      .map((tag) => [tag, text(capabilityMap[tag])]),
+  );
   return {
-    runtimeMajorVersion: text(parsed.runtimeMajorVersion).slice(0, 16),
-    runtimeManifestUrl: text(parsed.runtimeManifestUrl),
-    fallbackRuntimeManifestUrl: text(parsed.fallbackRuntimeManifestUrl),
+    version: text(parsed.version).slice(0, 64),
+    entry: text(parsed.entry),
+    // A release published before runtime pinning named a mutable pointer instead.
+    legacyPointer: typeof parsed.runtimeManifestUrl === "string" && parsed.runtimeManifestUrl !== "",
     siteBundleUrl: text(parsed.siteBundleUrl),
     runtimeCapabilities,
+    capabilities,
     ...(declared.length > runtimeCapabilities.length ? { capabilitiesDropped: declared.length - runtimeCapabilities.length } : {}),
   };
 }
@@ -341,7 +337,7 @@ function bounded(value) {
  * read is part of the attempt, so a server that stalls or resets after its
  * headers is retried and recorded, never thrown.
  */
-async function probe(context, url, kind, { readBody = false, maximumBytes = DELIVERY_LIMITS.manifestBytes } = {}) {
+async function probe(context, url, kind, { readBody = false, maximumBytes = DELIVERY_LIMITS.htmlBytes } = {}) {
   const expectation = expectationFor(kind);
   const origin = new URL(url).origin;
   if (!context.allowedOrigins.has(origin)) {
@@ -485,14 +481,13 @@ async function observe(context, origin, sampledRoutes) {
     }
   }
 
-  // The runtime the page declares: the mutable major pointer a browser
-  // resolves, the immutable fallback copy shipped with the site, the entry
-  // module the pointer names and the capability modules it maps. The
-  // bootstrap is generator-authored, so its origins are trusted here and
-  // admitted for the runtime probes only.
+  // The runtime the page pins: one version, the entry module that version
+  // names and the module each declared capability maps to. The bootstrap is
+  // generator-authored, so its origins are trusted here and admitted for the
+  // runtime probes only.
   const runtime = {
     declared: bootstrap !== undefined,
-    expectedMajorVersion: bootstrap?.runtimeMajorVersion ?? "",
+    version: bootstrap?.version ?? "",
     capabilities: bootstrap?.runtimeCapabilities ?? [],
     ...(bootstrap?.capabilitiesDropped ? { capabilitiesDropped: bootstrap.capabilitiesDropped } : {}),
   };
@@ -510,72 +505,34 @@ async function observe(context, origin, sampledRoutes) {
       else addAsset(bundle.href, "site-bundle");
     }
   }
-  const manifests = [];
-  for (const [name, value] of [["majorPointer", bootstrap?.runtimeManifestUrl], ["fallback", bootstrap?.fallbackRuntimeManifestUrl]]) {
-    const url = admit(value);
-    if (url) manifests.push({ name, url: url.href });
-    else runtime[name] = { url: "", ok: false, failure: "undeclared" };
-  }
-  const manifestResults = await mapBounded(manifests, async ({ name, url }) => {
-    const { row, body } = await probe(context, url, "manifest", { readBody: true });
-    let parsed;
-    if (row.ok) {
-      try {
-        parsed = JSON.parse(body);
-      } catch {
-        row.ok = false;
-        row.failure = "invalid_json";
-      }
-    }
-    return { name, row, parsed, url };
-  });
-  const capabilityUrls = [];
-  for (const { name, row, parsed, url } of manifestResults) {
-    const capabilities = parsed?.capabilities && typeof parsed.capabilities === "object" && !Array.isArray(parsed.capabilities)
-      ? parsed.capabilities
-      : {};
-    const declared = runtime.capabilities.filter((tag) => typeof capabilities[tag] === "string" && capabilities[tag] !== "");
-    // Declared is not resolvable: a module URL that is invalid or points off
-    // the runtime's origin is a failed observation, not a silent omission.
-    const outcomes = declared.map((tag) => {
-      const module = resolveReference(capabilities[tag], url);
-      if (!module) return { tag, failure: "invalid_url" };
-      if (!context.allowedOrigins.has(module.origin)) return { tag, url: module.href, failure: "origin_not_allowed" };
-      return { tag, url: module.href };
-    });
-    const resolvable = outcomes.filter((outcome) => outcome.failure === undefined);
-    runtime[name] = {
-      url: bounded(row.url),
-      status: row.status,
-      ok: row.ok,
-      ...(row.failure ? { failure: row.failure } : {}),
-      version: typeof parsed?.version === "string" ? bounded(parsed.version) : "",
-      majorVersion: parsed?.majorVersion === undefined ? "" : bounded(String(parsed.majorVersion)),
-      entry: typeof parsed?.entry === "string" ? bounded(parsed.entry) : "",
-      cacheControl: row.cacheControl ?? "",
-      capabilities: Object.keys(capabilities).length,
-      declaredCapabilities: declared.length,
-      resolvableCapabilities: resolvable.length,
-    };
-    if (name === "majorPointer" && row.ok) {
-      for (const outcome of outcomes) {
-        if (outcome.failure) capabilityUrls.push({ tag: outcome.tag, url: outcome.url ?? "", failure: outcome.failure });
-        else if (capabilityUrls.filter((entry) => !entry.failure).length < DELIVERY_LIMITS.capabilities) capabilityUrls.push(outcome);
-        else capabilityUrls.push({ tag: outcome.tag, url: outcome.url, unchecked: true });
-      }
-    }
-  }
-  const pointer = runtime.majorPointer;
-  if (pointer?.ok && pointer.entry) {
-    const entry = resolveReference(pointer.entry, pointer.url);
-    if (entry && context.allowedOrigins.has(entry.origin)) {
-      const { row } = await probe(context, entry.href, "runtime-entry");
-      runtime.entry = { url: row.url, status: row.status, ok: row.ok, ...(row.failure ? { failure: row.failure } : {}) };
-    } else {
-      runtime.entry = { url: bounded(pointer.entry), ok: false, failure: "origin_not_allowed" };
-    }
+  runtime.pinned = runtime.version !== "" && Boolean(bootstrap?.entry);
+  // Such a page still loads in a browser, but this check no longer reads the
+  // pointer, so its runtime is reported unverified rather than as passed or failed.
+  runtime.legacy = !runtime.pinned && Boolean(bootstrap?.legacyPointer);
+  const entryUrl = runtime.pinned ? admit(bootstrap.entry) : undefined;
+  if (entryUrl) {
+    const { row } = await probe(context, entryUrl.href, "runtime-entry");
+    runtime.entry = { url: row.url, status: row.status, ok: row.ok, ...(row.failure ? { failure: row.failure } : {}) };
   } else {
-    runtime.entry = { url: "", ok: false, failure: "pointer_unavailable" };
+    runtime.entry = { url: bounded(bootstrap?.entry ?? ""), ok: false, failure: runtime.pinned ? "invalid_url" : "undeclared" };
+  }
+  // Declared is not resolvable: a module URL that is missing, invalid or
+  // points off an admitted origin is a failed observation, not a silent omission.
+  const capabilityUrls = [];
+  let resolvable = 0;
+  // A page that does not pin a runtime declares no chunk URLs to check.
+  for (const tag of runtime.pinned ? runtime.capabilities : []) {
+    const declared = bootstrap.capabilities[tag];
+    const module = declared ? resolveReference(declared, origin) : undefined;
+    if (!module) {
+      capabilityUrls.push({ tag, url: "", failure: declared ? "invalid_url" : "undeclared" });
+    } else if (!context.allowedOrigins.has(module.origin)) {
+      capabilityUrls.push({ tag, url: module.href, failure: "origin_not_allowed" });
+    } else {
+      resolvable += 1;
+      const checkable = capabilityUrls.filter((entry) => !entry.failure && !entry.unchecked).length;
+      capabilityUrls.push(checkable < DELIVERY_LIMITS.capabilities ? { tag, url: module.href } : { tag, url: module.href, unchecked: true });
+    }
   }
   const capabilityResults = await mapBounded(capabilityUrls, async ({ tag, url, failure, unchecked }) => {
     if (failure) return { tag: bounded(tag), url: bounded(url), kind: "capability", status: 0, ok: false, attempts: 0, failure };
@@ -592,13 +549,10 @@ async function observe(context, origin, sampledRoutes) {
     unchecked: uncheckedCapabilities,
     items: capabilityResults.filter((row) => !row.ok && !row.unchecked).slice(0, DELIVERY_LIMITS.capabilities),
   };
-  runtime.majorStreamMatches = Boolean(pointer?.ok) && pointer.majorVersion === runtime.expectedMajorVersion;
-  runtime.pointerBehindFallback = Boolean(pointer?.ok && runtime.fallback?.ok)
-    && compareVersions(pointer.version, runtime.fallback.version) === -1;
-  runtime.capabilitiesResolvable = Boolean(pointer?.ok)
-    && pointer.resolvableCapabilities === runtime.capabilities.length
+  runtime.capabilitiesResolvable = runtime.declared
+    && resolvable === runtime.capabilities.length
     && runtime.capabilityModules.failed === 0;
-  runtime.compatible = runtime.declared && runtime.majorStreamMatches && runtime.entry.ok && runtime.capabilitiesResolvable;
+  runtime.compatible = runtime.declared && runtime.pinned && runtime.entry.ok && runtime.capabilitiesResolvable;
 
   const assetResults = await mapBounded(assetRows, async ({ url, kind }) => {
     const { row } = await probe(context, url, kind);
@@ -616,18 +570,17 @@ async function observe(context, origin, sampledRoutes) {
     ...assetResults.filter((row) => !row.ok).map((row) => `${row.kind} ${row.url}: ${row.failure}`),
     ...linkResults.filter((row) => !row.ok).map((row) => `link ${row.path}: ${row.failure}`),
     ...(runtime.declared ? [] : ["runtime: the home page declares no runtime bootstrap"]),
-    ...(runtime.declared && !runtime.majorStreamMatches
-      ? [`runtime: the major pointer serves major ${pointer?.majorVersion || "unknown"}, the page expects ${runtime.expectedMajorVersion}`]
+    ...(runtime.declared && runtime.legacy
+      ? ["runtime: the page names a pre-pinning runtime pointer, which is not verified here; republish the site so it pins a runtime version"]
       : []),
-    ...(runtime.declared && !runtime.entry.ok ? [`runtime: entry ${runtime.entry.url || "(undeclared)"}: ${runtime.entry.failure}`] : []),
-    ...(runtime.declared && runtime.fallback && !runtime.fallback.ok
-      ? [`runtime: fallback ${runtime.fallback.url || "(undeclared)"}: ${runtime.fallback.failure}`]
+    ...(runtime.declared && !runtime.pinned && !runtime.legacy
+      ? ["runtime: the page does not pin a runtime version and entry"]
       : []),
-    ...(runtime.declared && !runtime.capabilitiesResolvable
-      ? [`runtime: ${runtime.capabilities.length - (pointer?.declaredCapabilities ?? 0)} declared capability module(s) are missing from the major pointer and ${runtime.capabilityModules.failed} were invalid or did not load`]
+    ...(runtime.declared && runtime.pinned && !runtime.entry.ok
+      ? [`runtime: entry ${runtime.entry.url || "(undeclared)"} (version ${runtime.version}): ${runtime.entry.failure}`]
       : []),
-    ...(runtime.pointerBehindFallback
-      ? [`runtime: the major pointer (${pointer.version}) is behind the fallback runtime this site shipped with (${runtime.fallback.version}); returning browsers may be on an older runtime until it is promoted`]
+    ...(runtime.declared && runtime.pinned && !runtime.capabilitiesResolvable
+      ? [`runtime: ${runtime.capabilityModules.failed} of ${runtime.capabilities.length} declared capability module(s) were undeclared, invalid or did not load`]
       : []),
     ...([...localOnly].slice(0, DELIVERY_LIMITS.localReferences).map((reference) => `local-only reference: ${bounded(reference)}`)),
   ].map((value) => [...sanitizeDiagnostic(value, "")].slice(0, DELIVERY_LIMITS.urlScalars).join(""));
@@ -714,7 +667,7 @@ export async function checkDelivery({
   let observed = await observe(context, origin, sampledRoutes);
   // One bounded re-observation of everything, for edge propagation: it waits
   // the caller's budget once and observes again from the home page down, so a
-  // recovered route, asset, pointer or bootstrap is seen fresh. It never loops.
+  // recovered route, asset or bootstrap is seen fresh. It never loops.
   let waited = 0;
   if (waitSeconds > 0 && observed.failures.length > 0) {
     await context.sleep(waitSeconds * 1000);
@@ -724,7 +677,7 @@ export async function checkDelivery({
 
   const verdict = observed.failuresTotal === 0
     ? "delivered"
-    : observed.routeRows.every((row) => row.ok) && observed.runtime.compatible
+    : observed.routeRows.every((row) => row.ok) && (observed.runtime.compatible || observed.runtime.legacy)
     ? "degraded"
     : "failed";
   const report = {
@@ -802,10 +755,10 @@ function withinOutputBudget(report, failuresTotal) {
       const { runtime } = report;
       report.runtime = {
         declared: runtime.declared,
-        expectedMajorVersion: runtime.expectedMajorVersion,
+        version: runtime.version,
+        pinned: runtime.pinned,
+        legacy: runtime.legacy,
         capabilities: runtime.capabilities.length,
-        majorStreamMatches: runtime.majorStreamMatches,
-        pointerBehindFallback: runtime.pointerBehindFallback,
         capabilitiesResolvable: runtime.capabilitiesResolvable,
         compatible: runtime.compatible,
         entryOk: Boolean(runtime.entry?.ok),

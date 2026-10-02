@@ -478,11 +478,11 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Assets are what the home page declares: favicon links, module preloads, the site bundle, and up to six "
       + "images. A 200 is not enough: the content type must match the kind, so an HTML error page served as an "
       + "image fails.",
-      "Runtime: the page's bootstrap declares the major stream, the mutable major pointer, the immutable fallback "
-      + "copy and the capability modules. The pointer's major must match, its entry must load as JavaScript, every "
-      + "declared capability must be resolvable, and a pointer behind the fallback's version is reported as a "
-      + "stale runtime pointer that returning browsers may still be on.",
-      "Browser: a fresh and a returning (same-context, cached) load are compared against the pointer's entry when "
+      "Runtime: the page's bootstrap pins one runtime version, its entry module and the module each declared "
+      + "capability resolves to. The entry must load as JavaScript and every declared capability must resolve and "
+      + "load. A page that still names the pre-pinning runtime pointer is reported as unverified, so the verdict is "
+      + "degraded, until the site is republished.",
+      "Browser: a fresh and a returning (same-context, cached) load are compared against the page's pinned entry when "
       + "Playwright resolves from the CLI's own install: npm install --global @taprootio/site-authoring@latest "
       + "playwright && npx playwright install chromium, then rerun through the installed taproot-site command (a "
       + "copy run through npx lives in npm's cache and cannot see a global Playwright). A DevTools "
@@ -505,8 +505,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "not delivery), local-only references (localhost, *.test, *.local) are reported rather than fetched, a "
       + "redirect Location that could reflect a credential is withheld, bodies are read up to a fixed bound, "
       + "member-only content is not exercised, and nothing is purged, republished or rolled back.",
-      "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible, but an asset, "
-      + "link, pointer or browser load did not match), failed (a route or the runtime did not deliver).",
+      "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible or a pre-pinning "
+      + "reference, but an asset, link or browser load did not match or the runtime could not be verified), failed (a route or the runtime did not deliver).",
     ]),
     example: Object.freeze({
       command: `${CLI_BINARY_NAME} delivery check --production --url https://www.example.com/ --wait 30`,

@@ -4,9 +4,9 @@ import { withholdCredentialLocation } from "./staging-check.js";
 /**
  * The optional browser dimension of delivery verification (TR00824).
  *
- * HTTP evidence cannot say what a visitor's browser loaded: the shared runtime
- * comes from a mutable major pointer that a returning browser may hold in its
- * cache. This probe drives a real browser at the target twice — a fresh
+ * HTTP evidence cannot say what a visitor's browser loaded: a returning
+ * browser may hold an older release's HTML and runtime in its cache. This
+ * probe drives a real browser at the target twice — a fresh
  * context, then a second navigation in the same context so the browser's own
  * cache participates — and reports which runtime entry each load evaluated,
  * whether the declared capability elements were defined, and whether the
@@ -188,7 +188,7 @@ function judge({ observed, strayed, finalUrl }, expectedEntryUrl, capabilityCoun
 
 /**
  * @param options.baseUrl The delivery origin.
- * @param options.expectedEntryUrl The runtime entry the major pointer names right now.
+ * @param options.expectedEntryUrl The runtime entry the freshly fetched page pins.
  * @param options.capabilities Custom-element tags the home page declares.
  * @param options.cookie Optional staging cookie, sent only to `baseUrl`'s host.
  * @param options.importPlaywright Test seam; defaults to a dynamic import.

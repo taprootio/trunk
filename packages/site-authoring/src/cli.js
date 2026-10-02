@@ -404,7 +404,7 @@ const VERBS = Object.freeze([
       + "visitor does and reports each dimension separately: the latest completed deployment for the target, HTTP "
       + "delivery of the authored routes (from the workspace manifest, bounded), the favicon, images, module "
       + "preloads and site bundle they reference, internal link targets, accidental local-only references, and the "
-      + "declared runtime (major pointer, fallback copy, entry module and capability modules), plus a browser "
+      + "pinned runtime (its version, entry module and capability modules), plus a browser "
       + "dimension that runs only when Playwright is installed and is reported as unchecked otherwise. --staging "
       + "resolves the acknowledged staging host and authorizes one preview session for the run (--url is refused "
       + "there); --production needs --url https://<published-domain>/ because a site-authoring key cannot read "
