@@ -659,7 +659,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "no separate propagation delay; an entry a check does not see belongs to a release that is not being "
       + "served yet.",
       "A source cannot name a file the site generates: '/index.html' or any page's own 'index.html', '/404.html', "
-      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', or a path under the sitemap or robots names. The platform "
+      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', or a path under the sitemap or robots names. Nothing under "
+      + "'/taproot/<version>/' (for example '/taproot/5.0.62/manifest.json') can be a source either: the platform "
+      + "serves the published-site runtime there before any redirect. The platform "
       + "already redirects every '…/index.html' address to its directory, so no entry is needed for one. A source "
       + "that could not be stored as a file (a dot-prefixed segment, a reserved device name, an escaped percent "
       + "sign) is refused too. 'validate' names the entry and the reason.",

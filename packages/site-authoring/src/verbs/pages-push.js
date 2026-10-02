@@ -1,6 +1,7 @@
 import { createPage, listSitePages, PAGE_STATUS_DELETED, updatePage, withRefusalGuidance } from "../api.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
+import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "../reserved-paths.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
 import {
@@ -480,6 +481,14 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
       `'${file}' declares page path '${pagePath}', but Taproot requires every path segment to match `
         + "[A-Za-z0-9][A-Za-z0-9._-]* — start with a letter or digit, and use only letters, digits, "
         + "'.', '_', and '-'.",
+      file,
+    );
+  }
+
+  if (isRuntimeMirrorPath(pagePath)) {
+    throw documentError(
+      "pages.path_unsupported",
+      `'${file}' declares page path '${pagePath}': ${RUNTIME_MIRROR_PATH_REASON}`,
       file,
     );
   }

@@ -145,6 +145,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/redirects-contract.js",
     "src/redirects-workspace.js",
     "src/reference-help.js",
+    "src/reserved-paths.js",
     "src/session.js",
     "src/settings-catalog.js",
     "src/settings.js",

@@ -180,6 +180,13 @@ for (const path of [
   "/integrations/old",
   "/Integrations",
   "/%69ntegrations/old",
+  // TR01144: the runtime mirror is answered before any redirect.
+  "/taproot/5.0.62/manifest.json",
+  "/taproot/5.0.62",
+  "/Taproot/5.0.62/old",
+  "/%74aproot/5.0.62/old",
+  "/taproot/5.1.0-rc.1/old",
+  "/taproot/5.1.0+build.7/old",
   "/a%3Fb",
   "/a%23b",
   "/a%C2%85b",
@@ -205,6 +212,11 @@ for (const path of [
   "/caf%C3%A9",
   "/old%20page",
   "/favicon.ico.bak",
+  "/taproot",
+  "/taproot/about",
+  "/taproot/5.0",
+  "/taproot/5.0.62x",
+  "/taproot/5.0.62-",
   `/${"a".repeat(200)}`,
 ]) {
   test(`an ordinary source still passes, legacy percent spellings included: ${path}`, () => {

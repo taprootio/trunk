@@ -5920,6 +5920,34 @@ test("pages push refuses a path the server's grammar rejects, in phase one", asy
     });
   }
 
+  // TR01144: the runtime mirror is answered before the Worker, so the server
+  // refuses these (PublishedOutputPaths.IsRuntimeMirrorPath) and so does phase one.
+  for (const pagePath of ["taproot/5.0.62", "taproot/5.0.62/manifest.json", "Taproot/10.20.30/x"]) {
+    await testContext.test(`the runtime mirror path ${pagePath} is refused before anything is sent`, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture([]),
+        "pages/one.md": "---\ntitle: First\npath: first\n---\n\nHi.\n",
+        "pages/two.md": `---\ntitle: Second\npath: ${pagePath}\n---\n\nHi.\n`,
+      });
+      const wire = api(pushRoutes({ live: [] }));
+      const { invocation } = invoke(workspace, wire, { verb: "pages push", content: contentStub().module });
+      await assert.rejects(pagesPush(invocation), (error) => error?.code === "pages.path_unsupported" && /published-site runtime/u.test(error.message));
+      assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+    });
+  }
+
+  await testContext.test("near misses of the runtime mirror path are ordinary pages", async (site) => {
+    const workspace = await fixture(site, {
+      ".taproot-site-manifest.json": manifestFixture([]),
+      "pages/a.md": "---\ntitle: A\npath: taproot/about\n---\n\nHi.\n",
+      "pages/b.md": "---\ntitle: B\npath: taproot/5.0\n---\n\nHi.\n",
+    });
+    const wire = api(pushRoutes({ live: [] }));
+    const { invocation } = invoke(workspace, wire, { verb: "pages push", content: contentStub().module });
+    const result = await pagesPush(invocation);
+    assert.deepEqual(result.pages.items.map((item) => item.file).sort(), ["pages/a.md", "pages/b.md"]);
+  });
+
   await testContext.test("the home page's empty path is still legal", async (site) => {
     const workspace = await fixture(site, {
       ".taproot-site-manifest.json": manifestFixture([]),

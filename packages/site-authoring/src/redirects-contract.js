@@ -1,4 +1,5 @@
 import { SiteAuthoringError } from "./errors.js";
+import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "./reserved-paths.js";
 
 /**
  * The redirect map's workspace contract (TR00702).
@@ -203,6 +204,7 @@ export function redirectSourceRefusalReason(path) {
   if (first === RESERVED_INTEGRATION_DATA_SEGMENT) {
     return `'/${segments[0]}' is reserved for integration data, so nothing under it can be a redirect source.`;
   }
+  if (isRuntimeMirrorPath(decoded)) return RUNTIME_MIRROR_PATH_REASON;
   if (GENERATED_ROOT_FILES.includes(first)) {
     return `'/${segments[0]}' is a file the site generates, so neither it nor anything under it can be a redirect source.`;
   }
