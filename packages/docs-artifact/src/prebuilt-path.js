@@ -3,6 +3,20 @@ import { PREBUILT_LIMITS, PREBUILT_MANIFEST_FILE_NAME } from "./prebuilt-constan
 const PORTABLE_SEGMENT = /^(?:[A-Za-z0-9]|[A-Za-z0-9_-][A-Za-z0-9._-]*[A-Za-z0-9])$/;
 const WINDOWS_DEVICE_SEGMENT = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 const PUBLISHED_SITE_ROUTING_CONTROL_ROUTE = "/__taproot/internal/published-site-routing";
+// The published-site Worker ships the immutable runtime as static assets at
+// /taproot/<semver>/..., and Cloudflare answers a matching request before the
+// Worker looks at the prebuilt tree, so nothing a tree or redirect declares there
+// could be reached (TR01144). The API mirrors this rule in
+// `PublishedOutputPaths.IsRuntimeMirrorPath`; both are pinned by the same vectors.
+const PUBLISHED_SITE_RUNTIME_ROUTE =
+  /^\/taproot\/[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\/|$)/iu;
+
+function runtimeRouteReserved(route) {
+  return failure(
+    "route.reserved",
+    `The route '${route}' is reserved for the published-site runtime (/taproot/<version>/).`,
+  );
+}
 
 function failure(code, message) {
   return { ok: false, code, message };
@@ -78,6 +92,7 @@ export function prebuiltFileRoute(value) {
       `The route '${PUBLISHED_SITE_ROUTING_CONTROL_ROUTE}' is reserved for Taproot routing control.`,
     );
   }
+  if (PUBLISHED_SITE_RUNTIME_ROUTE.test(route)) return runtimeRouteReserved(route);
   return { ok: true, value: route };
 }
 
@@ -112,6 +127,7 @@ export function normalizePrebuiltRedirectRoute(value) {
       `The route '${PUBLISHED_SITE_ROUTING_CONTROL_ROUTE}' is reserved for Taproot routing control.`,
     );
   }
+  if (PUBLISHED_SITE_RUNTIME_ROUTE.test(value)) return runtimeRouteReserved(value);
   if (value === "/") return { ok: true, value };
   const hasTrailingSlash = value.endsWith("/");
   const body = value.slice(1, hasTrailingSlash ? -1 : undefined);

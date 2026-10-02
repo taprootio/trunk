@@ -47,8 +47,11 @@ and every other file, empty/unneeded directory, link, socket, FIFO, or device is
 rejected.
 
 The authenticated platform control route
-`/__taproot/internal/published-site-routing` is matched first and is the only
-reserved request route in the prebuilt file namespace. The edge then resolves
+`/__taproot/internal/published-site-routing` is matched first and is one of two
+reserved request routes in the prebuilt file namespace; the other is the
+published-site runtime, `/taproot/<semver>/`, which the edge serves from static
+assets before any file (TR01144), so a file or redirect source there is refused
+with `route.reserved`. The edge then resolves
 the exact host, site, environment, immutable output pointer, and publication
 mode before applying public `/api/*` behavior. Managed mode retains the Taproot
 API proxy. Prebuilt files and redirects own the complete remaining namespace,

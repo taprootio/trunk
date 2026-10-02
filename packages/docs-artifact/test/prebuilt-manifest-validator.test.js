@@ -212,6 +212,23 @@ test("prebuilt routing reserves only the Worker's exact internal control route",
   assert.deepEqual(normalizePrebuiltRedirectRoute("/__taproot/assets/"), { ok: true, value: "/__taproot/assets/" });
 });
 
+// TR01144: the edge answers /taproot/<semver>/ from the runtime mirror first. The
+// vectors match the API's PublishedOutputPaths.IsRuntimeMirrorPath tests.
+test("prebuilt routing reserves the published-site runtime path and only that", () => {
+  for (const path of ["taproot/5.0.62/manifest.json", "Taproot/10.20.30/x/index.html", "taproot/5.0.62/index.html", "taproot/5.1.0-rc.1/index.html"]) {
+    assert.equal(prebuiltFileRoute(path).code, "route.reserved", path);
+  }
+  for (const route of ["/taproot/5.0.62", "/taproot/5.0.62/", "/Taproot/5.0.62/old", "/taproot/5.1.0-rc.1/old", "/taproot/5.1.0+build.7/old"]) {
+    assert.equal(normalizePrebuiltRedirectRoute(route).code, "route.reserved", route);
+  }
+  for (const path of ["taproot/index.html", "taproot/about/index.html", "taproot/5.0/index.html", "taproot/5.0.62x/index.html", "taproot/v5.0.62/index.html", "about/taproot/5.0.62/index.html"]) {
+    assert.equal(prebuiltFileRoute(path).ok, true, path);
+  }
+  for (const route of ["/taproot", "/taproot/about/", "/taproot/5.0/", "/taproot/5.0.62x"]) {
+    assert.equal(normalizePrebuiltRedirectRoute(route).ok, true, route);
+  }
+});
+
 test("oversized object manifests return the byte-bound error before options or schema diagnostics", async () => {
   let optionReads = 0;
   const options = Object.create(null, {

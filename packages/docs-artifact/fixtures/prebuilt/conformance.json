@@ -228,6 +228,24 @@
       ]
     },
     {
+      "name": "reject-runtime-path-file-route",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["files", 13, "path"], "value": "taproot/5.0.62/runtime.js" }
+      ]
+    },
+    {
+      "name": "reject-runtime-path-redirect-source",
+      "valid": false,
+      "expectedCodes": ["route.reserved"],
+      "baseManifest": "prebuilt/valid/espalier/taproot-docs-prebuilt-manifest.json",
+      "mutations": [
+        { "operation": "replace", "path": ["redirects", 0, "from"], "value": "/taproot/5.0.62/old" }
+      ]
+    },
+    {
       "name": "reject-missing-resource-target",
       "valid": false,
       "expectedCodes": ["redirect.unknown_resource"],
