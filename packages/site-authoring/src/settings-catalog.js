@@ -116,6 +116,9 @@ export const SETTINGS_GROUPS = Object.freeze([
       // exist is worse than one that omits the field.
       { name: "commentsMode", wireType: "enum", zero: "SITE_COMMENTS_MODE_UNSPECIFIED" },
       ...stringFields("tiptapImagePlacement"),
+      // One IANA zone id (TR01091). The server answers UTC for a site that
+      // never set one, so a pulled snapshot is never empty.
+      ...stringFields("timeZone"),
       { name: "allowSearch", wireType: "boolean" },
       { name: "showFollowButton", wireType: "boolean" },
       { name: "albumSeamless", wireType: "boolean" },

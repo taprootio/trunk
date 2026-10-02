@@ -44,6 +44,8 @@ const ROUTES = [
   { arguments_: ["nav", "push"], verb: "nav push" },
   { arguments_: ["redirects", "pull"], verb: "redirects pull" },
   { arguments_: ["redirects", "push"], verb: "redirects push" },
+  { arguments_: ["forms", "pull"], verb: "forms pull" },
+  { arguments_: ["forms", "push"], verb: "forms push" },
   { arguments_: ["theme", "push"], verb: "theme push" },
   { arguments_: ["footer", "push"], verb: "footer push" },
   { arguments_: ["media", "upload"], verb: "media upload" },
@@ -683,7 +685,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 4\.20\.1 complete site-theme contract/u,
+      match: /^Espalier 5\.0\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -781,6 +783,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "design", "professional-portfolio", "--json"], topic: "design", field: "design" },
     { arguments_: ["help", "nav", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "redirects", "--json"], topic: "workflow", field: "reference" },
+    { arguments_: ["help", "forms", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "media", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "preview", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "theme", "--json"], topic: "presentation", field: "reference" },
@@ -810,7 +813,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 28,
+          referenceVersion: 31,
           topic: scenario.topic,
         },
       );
@@ -885,6 +888,7 @@ test("reference help reports stable usage errors with valid alternatives", async
         "design",
         "nav",
         "redirects",
+        "forms",
         "media",
         "preview",
         "delivery",
@@ -913,6 +917,7 @@ test("reference help reports stable usage errors with valid alternatives", async
         "latest-posts",
         "card-grid",
         "image-banner",
+        "form",
       ],
     },
     {

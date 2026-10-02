@@ -188,7 +188,7 @@ Which verbs apply depends on the site:
   `pull` snapshots its four settings documents, `theme push`, `footer push`,
   and `media upload` author them, and `deploy` stages and promotes them.
   Its pages, navigation, and redirects come from the Docs artifact, so
-  `pages push`, `nav push`, the `redirects` verbs, `approve`, and the
+  `pages push`, `nav push`, the `redirects` and `forms` verbs, `approve`, and the
   `preview` verbs refuse with `surface.presentation_only` before any request.
 - A **prebuilt Docs** site (`none`) serves its artifact unchanged and takes no
   verb; each refuses with `surface.none`.
@@ -372,6 +372,16 @@ redirect map to `redirects.json` with a baseline, and `redirects push`
 validates the file offline and replaces the whole map; `help redirects`
 states the entry shape (`path`, `kind` redirect or gone, `target`, `status`
 defaulting to 301), the normalization rule, and every refusal.
+
+`forms pull` writes each live form to `forms/<key>.json` and records the
+version it read; `forms push` validates every file, refuses a form the site
+changed since (`forms.concurrent_modification`) and creates or updates the
+rest, appending a version when the definition changed. `forms validate` checks
+the files offline against the shared field schema with no credential. Both
+verbs write one canonical key order, so a pulled file pushed back is unchanged.
+Submissions are never pulled. `help forms` states the file shape and every
+refusal, and placing a form on a page is the free-form `form`
+component.
 
 `preview page <page-path-or-id>` renders one persisted draft behind the
 staging gate and mints a browser handoff URL, reported only in the final JSON

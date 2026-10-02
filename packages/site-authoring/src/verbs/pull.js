@@ -63,6 +63,7 @@ import {
   workspaceContentHash,
   workspaceFileExists,
   workspaceFileNameForPage,
+  readManifest,
   writeManifest,
   writeWorkspaceFile,
   writeWorkspaceJson,
@@ -1103,6 +1104,12 @@ export async function pull(invocation) {
       await writeWorkspaceJson(config.workspaceDir, document.file, document.value);
     }
 
+    // `forms pull` owns the forms baseline, and a plain pull does not read forms.
+    // Carrying it forward keeps the next `forms push` fenced instead of refusing
+    // it as never pulled. An unreadable old manifest has nothing to carry.
+    const formsBaseline = (await readManifest(config.workspaceDir, siteId, { required: false }).catch(() =>
+      undefined
+    ))?.forms;
     const manifest = {
       manifestVersion: MANIFEST_VERSION,
       siteId,
@@ -1123,6 +1130,7 @@ export async function pull(invocation) {
           : {}
       ),
       ...(presentationRevision === undefined ? {} : { presentation: presentationManifestEntry(presentationRevision) }),
+      ...(formsBaseline === undefined ? {} : { forms: formsBaseline }),
       pages: manifestPages,
     };
     await writeManifest(config.workspaceDir, manifest);

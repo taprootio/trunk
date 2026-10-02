@@ -178,3 +178,23 @@ test("a refused pull never announces planned revision adoptions", async (context
     });
   }
 });
+
+test("a plain pull keeps the forms baseline that forms pull recorded", async (context) => {
+  const site = await fixture(context, [{}]);
+  const manifestPath = path.join(site.workspace, MANIFEST_FILE_NAME);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const forms = {
+    items: {
+      contact: {
+        id: "bbbb2222-cccc-4222-8222-dddd22222222",
+        version: 3,
+        settings: { name: "Contact", sink: "none", retention_days: 365 },
+      },
+    },
+  };
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, forms }));
+
+  await pull(site.invocation);
+
+  assert.deepEqual((await site.readManifest()).forms, forms);
+});

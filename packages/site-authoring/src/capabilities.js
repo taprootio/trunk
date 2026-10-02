@@ -23,7 +23,7 @@ export const SITE_AUTHORING_CAPABILITIES = Object.freeze([
 
 /** What each capability lets an exchanged credential do, for help and `whoami`. */
 export const SITE_AUTHORING_CAPABILITY_SUMMARIES = Object.freeze({
-  "delegation.content": "write pages and media",
+  "delegation.content": "write pages, media, and form definitions",
   "delegation.design": "set the theme, navigation, and footer",
   "delegation.deployments": "stage and deploy",
 });

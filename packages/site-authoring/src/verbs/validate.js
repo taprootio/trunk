@@ -15,6 +15,8 @@ import {
 } from "../fixture-contract.js";
 import { initializeFixture } from "../fixture-init.js";
 import { appearanceManifestEntry, FOOTER_SETTINGS_FILE, footerManifestEntry } from "../footer-workspace.js";
+import { readWorkspaceForms } from "../forms-workspace.js";
+import { FORMS_DIRECTORY } from "../forms-contract.js";
 import {
   isRedirectMapRevision,
   normalizeRedirectPath,
@@ -405,6 +407,57 @@ function headerWidthHints(headerWidth, rootBandPages) {
   }];
 }
 
+/**
+ * The fixture's forms, when it carries any. The manifest binding and the files
+ * must name the same keys: a form file the manifest does not mention would be
+ * validated by no one, and a key with no file would be a baseline for nothing.
+ * Returns undefined for a fixture with no forms.
+ */
+async function validateFixtureForms(fixtureRoot, bound, onProgress) {
+  const files = await readWorkspaceForms(fixtureRoot);
+  if (bound === undefined) {
+    if (files.length > 0) {
+      fail(
+        "fixture.forms_unbound",
+        "The fixture carries form files but its manifest does not bind them in 'forms'.",
+        "forms",
+      );
+    }
+    return undefined;
+  }
+  const items = isPlainObject(bound) && isPlainObject(bound.items) ? bound.items : undefined;
+  const keys = items === undefined ? [] : Object.keys(items).sort();
+  if (
+    items === undefined
+    || Object.keys(bound).length !== 1
+    || keys.length === 0
+    || keys.some((key) =>
+      !isPlainObject(items[key])
+      || Object.keys(items[key]).sort().join() !== "id,version"
+      || !isCanonicalUuid(items[key].id)
+      || !Number.isSafeInteger(items[key].version)
+      || items[key].version < 1
+    )
+  ) {
+    fail(
+      "fixture.forms_invalid",
+      "The fixture manifest's 'forms' must be { items: { <key>: { id, version } } } with at least one form, "
+        + "a canonical UUID id, and a positive version.",
+      "forms",
+    );
+  }
+  const fileKeys = files.map((form) => form.key);
+  if (fileKeys.join() !== keys.join()) {
+    fail(
+      "fixture.forms_mismatch",
+      `The fixture manifest binds forms [${keys.join(", ")}] but ${FORMS_DIRECTORY}/ holds [${fileKeys.join(", ")}].`,
+      "forms",
+    );
+  }
+  onProgress(`Validated ${files.length} form file${files.length === 1 ? "" : "s"} against the shared field schema.`);
+  return files;
+}
+
 export async function validateFixture(invocation = {}) {
   if (invocation.init) return await initializeFixture(invocation, validateFixture);
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
@@ -597,6 +650,8 @@ export async function validateFixture(invocation = {}) {
     },
   );
 
+  const forms = await validateFixtureForms(fixtureRoot, manifest.forms, onProgress);
+
   const reportedPages = boundedList(validatedPages, MAXIMUM_REPORTED);
   onProgress(
     `Validated ${validatedPages.length} page(s), ${navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -620,6 +675,7 @@ export async function validateFixture(invocation = {}) {
         entries: redirects.entries.length,
         gone: redirects.entries.filter((entry) => entry.kind === REDIRECT_KIND_GONE).length,
       },
+      ...(forms === undefined ? {} : { forms: { count: forms.length } }),
       themes: 2,
       appearanceSettings: presentation.scalarOperations.length,
       footer: true,
@@ -636,6 +692,7 @@ export async function validateFixture(invocation = {}) {
       "navigation shape and local page-resource references",
       "redirect-map shape, normalization, chains, loops, and fixture-local path occupancy",
       "complete theme, appearance, header, brand, and footer semantics",
+      "form files, when the manifest binds any, against the shared field schema",
       "fixture-local image identities and reserved delivery origins",
     ],
     doesNotProve: [

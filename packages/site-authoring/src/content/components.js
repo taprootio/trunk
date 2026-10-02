@@ -286,6 +286,15 @@ const SPACER = Object.freeze({
   dividerWidth: num({ integer: true, minimum: 1 }),
 });
 
+/**
+ * A form defined under Site → Forms (or with `forms push`), placed by key. The
+ * key is checked against the site's forms when the page is published, not here:
+ * this table only knows the shape.
+ */
+const FORM = Object.freeze({
+  formKey: str(),
+});
+
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
@@ -554,6 +563,18 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       texture: "paper",
       imageMotion: "parallax-subtle",
     },
+  ),
+  "form": component(
+    FORM,
+    "Form",
+    "A form from Site → Forms that visitors fill in and submit.",
+    { formKey: "" },
+    [
+      "Set formKey to the key of an existing form ('forms push' creates it); an unknown or archived key fails the publish.",
+      "The button text and what happens after a response is sent belong to the form, not the page: set submit_label and after_submit in the form's file (see 'help forms').",
+      "The form's field labels are its accessible names; write each so it makes sense out of context.",
+    ],
+    { formKey: "contact" },
   ),
 });
 

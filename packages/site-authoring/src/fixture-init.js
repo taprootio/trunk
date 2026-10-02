@@ -6,6 +6,8 @@ import { loadSiteConfig } from "./config.js";
 import { isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import { FIXTURE_CONTRACT_VERSION, FIXTURE_MANIFEST_FILE_NAME } from "./fixture-contract.js";
 import { appearanceManifestEntry, footerManifestEntry } from "./footer-workspace.js";
+import { formFileName } from "./forms-contract.js";
+import { formsManifestEntry, readWorkspaceForms } from "./forms-workspace.js";
 import { SETTINGS_GROUPS, SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "./settings-catalog.js";
 import { validateWorkspacePageSource } from "./verbs/pages-push.js";
 import { validateThemeWorkspace } from "./verbs/theme-push.js";
@@ -194,6 +196,18 @@ export async function initializeFixture(invocation, validate) {
   // A fixture hash is a local placeholder, not authority to mutate the original site.
   const revision = createHash("sha256").update(JSON.stringify(redirects.entries)).digest("hex");
   if (Object.hasOwn(redirects, "revision")) redirects.revision = revision;
+  // Forms are optional in a workspace. The ones the pull manifest recorded are
+  // carried through the same sanitizer as every other document, so a consent
+  // text that links somewhere never leaves a real origin in a shared fixture.
+  const formItems = Object.keys(source.forms?.items ?? {}).sort();
+  const forms = formItems.length === 0 ? [] : await readWorkspaceForms(workspaceDir, formItems);
+  for (const form of forms) add(formFileName(form.key), sanitize(form.document));
+  const formsManifest = forms.length === 0
+    ? undefined
+    : formsManifestEntry(forms.map((form) => [form.key, {
+      id: identity(source.forms.items[form.key].id),
+      version: source.forms.items[form.key].version,
+    }]));
   const footer = footerManifestEntry(appearanceDocuments[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES].footerSettings);
   const appearance = appearanceManifestEntry(appearanceDocuments);
   for (const id of [...footer.imageIds, ...appearance.imageIds]) imageIds.add(id);
@@ -208,6 +222,7 @@ export async function initializeFixture(invocation, validate) {
     settingsSkipped: [],
     appearance,
     footer,
+    ...(formsManifest === undefined ? {} : { forms: formsManifest }),
     fixture: {
       contractVersion: FIXTURE_CONTRACT_VERSION,
       imageIds: [...imageIds].sort(),

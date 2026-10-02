@@ -21,6 +21,27 @@ import {
   shippedFixtureDirectory,
 } from "./fixture-contract.js";
 import {
+  DATE_ANCHORS,
+  FIELD_TYPES,
+  MAX_AFTER_SUBMIT_MESSAGE_LENGTH,
+  MAX_CONSENT_LABEL_LENGTH,
+  MAX_DATE_OFFSET_DAYS,
+  MAX_FIELDS,
+  MAX_HINT_LENGTH,
+  MAX_SUBMIT_LABEL_LENGTH,
+  MAX_LABEL_LENGTH,
+  MAX_SUBMISSION_BYTES,
+  RELATIVE_BOUND_GRACE_DAYS,
+} from "./field-validation.js";
+import {
+  FORM_FILE_EXTENSION,
+  FORM_KEY_MAXIMUM_LENGTH,
+  FORM_LIMITS,
+  FORM_RETENTION_DAYS,
+  FORM_SINKS,
+  FORMS_DIRECTORY,
+} from "./forms-contract.js";
+import {
   formatPresentationReference,
   getAppearanceReference,
   getFooterReference,
@@ -50,7 +71,23 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 28;
+export const REFERENCE_VERSION = 31;
+
+// The date-limit examples `help forms` prints; tests run them through the form validator.
+export const FORM_DATE_WINDOW_FIELD = Object.freeze({
+  id: "visit_day",
+  type: "date",
+  label: "Day of your visit",
+  min: Object.freeze({ from: "today" }),
+  max: Object.freeze({ from: "today", offset_days: 30 }),
+});
+export const FORM_NEXT_MONTH_FIELD = Object.freeze({
+  id: "start_day",
+  type: "date",
+  label: "A day next month",
+  min: Object.freeze({ from: "start_of_next_month" }),
+  max: Object.freeze({ from: "end_of_next_month" }),
+});
 export const PAGE_TYPES = Object.freeze(["free-form", ...TYPED_PAGE_TYPES]);
 
 function deepFreeze(value) {
@@ -364,6 +401,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Author redirects.json: entry shape, normalization, and the refusals.",
   }),
   Object.freeze({
+    name: "forms",
+    usage: `${CLI_BINARY_NAME} help forms`,
+    summary: "Author a form as forms/<key>.json: file shape, field types, validate, pull, push, and placing it on a page.",
+  }),
+  Object.freeze({
     name: "media",
     usage: `${CLI_BINARY_NAME} help media`,
     summary: "Describe media selection, naming, and component-ready output.",
@@ -526,7 +568,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `Pull the baseline: ${CLI_BINARY_NAME} pull writes settings/taproot-styles.json with both schemes' complete effective `
       + "themes (the stored theme resolved over the same defaults every consumer renders) beside brand.json, "
       + "site-header.json and site-publishing-preferences.json. Keep that pull as the baseline you edit; never build "
-      + "a theme from memory or from an example. semanticMappings holds only authored pins, listed in explicitMappingTokens.",
+      + "a theme from memory or from an example. semanticMappings holds only authored pins, listed in explicitMappingTokens. "
+      + "site-publishing-preferences.json also carries timeZone, the site's IANA zone (UTC until the owner sets it), "
+      + "which decides what \"today\" means for relative form date bounds; it is read-only here, so ask the owner to set "
+      + "it in the editor under Site settings.",
       "Edit both schemes: settings.lightTheme and settings.darkTheme are separate documents. Declare anchors, then roles "
       + "(help theme lists the role slots and how anchor references resolve), tune typography per scheme, and keep "
       + "contexts and intents paired across schemes. Set appearance scalars (default scheme, header, logos, favicon) "
@@ -681,6 +726,107 @@ const WORKFLOW_REFERENCES = Object.freeze({
       ]),
     }),
   }),
+  forms: Object.freeze({
+    title: "Form workspace contract",
+    summary: `A form is one JSON file, ${FORMS_DIRECTORY}/<key>${FORM_FILE_EXTENSION}. 'forms validate' proves it offline, `
+      + "'forms push' creates or updates it on the site, and 'forms pull' reads the site's copy back.",
+    usage: `${CLI_BINARY_NAME} forms validate [key...] | ${CLI_BINARY_NAME} forms pull | ${CLI_BINARY_NAME} forms push [key...]`,
+    details: Object.freeze([
+      `Run 'pull' once first: 'forms pull' and 'forms push' need the pulled workspace's manifest, which records the `
+      + "version of each form this workspace last saw. 'forms validate' needs only taproot-site.json.",
+      `The file is { key, name, sink, retention_days, definition }. key must equal the file's name `
+      + `and is lowercase letters, digits, and single hyphens, at most ${FORM_KEY_MAXIMUM_LENGTH} characters. name is `
+      + `1 to ${FORM_LIMITS.nameCharacters} characters. sink is one of ${FORM_SINKS.join(", ")} and defaults to `
+      + "'none' (store submissions only); 'newsletter' also subscribes the contact address to the site's newsletter. "
+      + `retention_days is ${FORM_RETENTION_DAYS.minimum} to ${FORM_RETENTION_DAYS.maximum} (a site's plan may cap it lower): `
+      + "submissions are deleted that many days after they arrive. Leave it out and the site chooses on creation (its "
+      + "plan's default, usually 365) and keeps the current value on an update. Shortening it deletes the submissions that fall outside it, "
+      + "so a key cannot do it; the site refuses it, and an owner or admin must make that change.",
+      `definition is { fields, contact_field?, submit_label?, after_submit? } (contact_field only with several email fields). Each field is { id, type, label, hint?, ...constraints }; the closed `
+      + `field types are ${FIELD_TYPES.join(", ")}. hint is optional helper text of up to ${MAX_HINT_LENGTH} `
+      + "characters, drawn under the field on the published form; it is the only author-defined text printed there, so a required "
+      + "field is not marked 'Required' and a visitor learns it from the error on submit. "
+      + `At most ${MAX_FIELDS} fields and ${MAX_SUBMISSION_BYTES} bytes `
+      + "per submission. There are no author-supplied regular expressions: use 'format' from its closed list. "
+      + "The exact constraints per type are in shared/field-schema.json, which 'forms validate' enforces by "
+      + "running the same validator the published form and the site use. Each refusal names the field path and a "
+      + "stable code such as duplicate_id or unknown_constraint.",
+      "A date field's min and max are each a fixed 'YYYY-MM-DD' date or a relative limit, { from, offset_days? }. "
+      + `from is one of ${DATE_ANCHORS.join(", ")}, the site's calendar date today or that day of this or next month; `
+      + `offset_days is a whole number of days from -${MAX_DATE_OFFSET_DAYS} to ${MAX_DATE_OFFSET_DAYS} (default 0; a `
+      + "year either way covers a leap year, and further out is a fixed date). There is no expression language. "
+      + "'Today' is the site's date in the site's time zone, which is UTC until the owner sets one in the editor's "
+      + "Site settings; 'pull' shows it as timeZone in settings/site-publishing-preferences.json, read-only here. "
+      + "The published form sets the date picker's limits when the page loads and checks them again when the visitor "
+      + `submits; the site lets a relative minimum reach back ${RELATIVE_BOUND_GRACE_DAYS} day so a visitor who loaded `
+      + "the page before midnight and submits after it is not refused for a date the page offered (a relative maximum "
+      + `and a fixed date are never loosened). Within the next 30 days: ${JSON.stringify(FORM_DATE_WINDOW_FIELD)}. `
+      + `A day next month: ${JSON.stringify(FORM_NEXT_MONTH_FIELD)}. A fixed and a relative limit may be mixed. 'forms `
+      + "validate' refuses an unknown anchor or an offset out of range as invalid_constraint, and a minimum after the "
+      + "maximum as min_exceeds_max only when both are fixed dates or both start from the same anchor; other pairs "
+      + "depend on the day and are not compared.",
+      `submit_label is the text on the submit button, up to ${MAX_SUBMIT_LABEL_LENGTH} characters; leave it out for "Send". `
+      + "after_submit says what the visitor sees once a response is sent. Leave it out, or write "
+      + `{ "show": "message" }, for Taproot's own confirmation; { "show": "message", "message": "..." } replaces `
+      + `its words (up to ${MAX_AFTER_SUBMIT_MESSAGE_LENGTH} characters, line breaks kept). { "show": "page", `
+      + `"page_path": "/thanks" } sends the visitor to that page on this site instead. The page is written as `
+      + "its path: a leading slash, no trailing slash, '/' for the home page. 'forms push' looks the page up "
+      + "and stores it by its resource id, so the form keeps pointing at the page if it is renamed, and 'forms "
+      + "pull' writes the page's current path back. A page_resource_id is accepted in place of page_path, and a "
+      + "pull keeps it only for a page that no longer exists. A file whose page_path names no page on the site is "
+      + "refused as forms.page_not_found, so push the page first. It need not be published to save the form, but "
+      + "a deploy whose release does not publish that page is refused, naming the form and the page. The path in "
+      + "each release is the one the page has in that release, so the published form never asks the site where "
+      + "to go. The page must be one you created, the home page included: a generated page (folder, tag or "
+      + "archive index), the 404 page, a legal page, a profile home and an integration-managed page are refused as forms.page_not_allowed. The button text and the confirmation belong to the form, not to the page that places it: "
+      + "the 'form' component takes only formKey.",
+      "A form's contact address is the value of one email field, stored with each submission. That is what lets the "
+      + "owner find and delete every row for a visitor who asks. With exactly one email field, that field is the "
+      + "contact address and the file leaves contact_field out (a file that names it anyway is accepted, and a pull "
+      + "writes it without). With two or more email fields, contact_field must name one of them; leaving it out is "
+      + "refused as contact_field_required. A form with no email field has no contact address, and contact_field "
+      + "there is refused as invalid_contact_field.",
+      `A consent field's label is the exact words the visitor agrees to, up to ${MAX_CONSENT_LABEL_LENGTH} characters `
+      + `(every other field's label is at most ${MAX_LABEL_LENGTH}); a form has no separate consent text. `
+      + "Each version freezes the labels, and every submission records the hash of each consent field's label as "
+      + "the visitor saw it, so a response shows what each box agreed to.",
+      "Editing a definition appends a version on the site; versions are never changed. A page keeps the form "
+      + "version it was published with until the next deploy, and a rollback restores the form it shipped with.",
+      "Both verbs write the file in one canonical key order, so a pulled file pushed back unchanged reports "
+      + "'unchanged' and leaves the bytes as they were. Write your own files in that order and a push rewrites "
+      + "nothing you did not change.",
+      "'forms push' validates every file and compares every form with the site before the first write. It refuses "
+      + "forms.concurrent_modification when the site's version moved since this workspace last read it, "
+      + "forms.pull_required when the site has a form with that key this workspace never pulled, and forms.archived "
+      + "when the form is archived on the site. Reconcile with 'forms pull' and retry; nothing was written.",
+      "Submissions are never pulled or pushed. They are visitors' personal data: read, mark, export and delete "
+      + "them on the site's Forms page.",
+      "To show a form, place the free-form component 'form' on a page (a component:form block) with formKey set "
+      + "to the form's key ('help component form' lists its properties). Push the form first and deploy: the release "
+      + "freezes the form it was built with.",
+      "The delegation.content capability carries site.forms.manage, which every forms verb needs: it covers "
+      + "definitions, settings and status. Visitors' submissions are in no capability: reading them "
+      + "(site.forms.submissions.read) and finding, marking or deleting them (site.forms.submissions.manage) belong "
+      + "to the site's owners and admins on the site's Forms page, never to a key. A refusal names the missing "
+      + "permission.",
+    ]),
+    example: Object.freeze({
+      key: "contact",
+      name: "Contact",
+      sink: "none",
+      retention_days: 365,
+      definition: Object.freeze({
+        fields: Object.freeze([
+          Object.freeze({ id: "name", type: "text", label: "Your name", required: true, max_length: 120 }),
+          Object.freeze({ id: "email", type: "email", label: "Email", required: true }),
+          Object.freeze({ id: "message", type: "long_text", label: "Message", required: true, max_length: 2000 }),
+          Object.freeze({ id: "agree", type: "consent", label: "I agree that you may store this message and reply to me." }),
+        ]),
+        submit_label: "Send message",
+        after_submit: Object.freeze({ show: "page", page_path: "/thanks" }),
+      }),
+    }),
+  }),
   media: Object.freeze({
     title: "Media upload contract",
     summary: "Upload workspace-root-relative raster files and receive component-ready media objects.",
@@ -746,6 +892,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `Required root fields: ${FIXTURE_REQUIRED_ROOT_FIELDS.join(", ")}.`,
       `Optional root fields: ${FIXTURE_OPTIONAL_ROOT_FIELDS.join(", ")}. Appearance and footer metadata, when present, `
       + "must match the local settings. Snapshot times and deployments are not live evidence. Other root fields are refused.",
+      `The optional forms root field is { items: { <key>: { id, version } } }: 'forms pull' also records a settings baseline, which a fixture does not carry. Each key `
+      + `names a ${FORMS_DIRECTORY}/<key>${FORM_FILE_EXTENSION} that must validate as in 'help forms', and no form file `
+      + "may sit beside them unbound.",
       `manifestVersion must be ${MANIFEST_VERSION}; fixture.contractVersion must be ${FIXTURE_CONTRACT_VERSION}.`,
       "siteId, every pageId and resourceId, every settings entityId, and every fixture.imageIds entry is a canonical "
       + "lowercase UUID. They are deterministic fixture identities, not identities from a live site.",

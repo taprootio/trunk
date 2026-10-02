@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taproot.io/schemas/field-definitions.json",
+  "title": "Taproot field definitions",
+  "description": "A flat, closed list of typed fields. shared/field-validation.ts and the API validator interpret it; shared/field-validation-corpus.json is the evidence they agree. Limits: 30 fields, 16 KB of submitted content. JSON Schema maxLength counts code points while the validators count UTF-16 code units, so the validators are authoritative and stricter for astral characters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fields"],
+  "properties": {
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": { "$ref": "#/$defs/field" }
+    },
+    "contact_field": {
+      "description": "The id of the email field whose value the API copies to subject_email. It must name an email field. Omit it when the form has one email field (that field is the contact); it is required with two or more.",
+      "$ref": "#/$defs/id"
+    },
+    "submit_label": {
+      "description": "The text on the submit button. Omit it for Taproot's default. Must contain more than whitespace; the validator also rejects a blank label, which a schema cannot express.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "after_submit": {
+      "description": "What a visitor sees once a response is sent. Omit it to show Taproot's default message. A page is named by its resource id and must belong to the same site; the release freezes the path the page has when it is built.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["show"],
+          "properties": {
+            "show": { "const": "message" },
+            "message": {
+              "description": "Omit it for Taproot's default. Must contain more than whitespace; the validator also rejects a blank message, which a schema cannot express.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["show", "page_resource_id"],
+          "properties": {
+            "show": { "const": "page" },
+            "page_resource_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+    "label": {
+      "description": "Must contain more than whitespace; the validator also rejects a blank label, which a schema cannot express.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "consentLabel": {
+      "description": "A consent field's label is the agreement the visitor accepts, so it is longer than any other label. Must contain more than whitespace; the validator also rejects a blank label.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "hint": {
+      "description": "Optional helper text drawn under the field. Must contain more than whitespace; the validator rejects a blank hint, which a schema cannot express.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "required": { "type": "boolean" },
+    "shortLength": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "shortMaxLength": { "type": "integer", "minimum": 1, "maximum": 500 },
+    "longLength": { "type": "integer", "minimum": 0, "maximum": 5000 },
+    "longMaxLength": { "type": "integer", "minimum": 1, "maximum": 5000 },
+    "choices": {
+      "description": "Each choice must contain more than whitespace; the validator rejects blank choices, which a schema cannot express.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+    },
+    "isoDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "relativeDateBound": {
+      "description": "A date measured from the site's calendar date, resolved when the page loads and again when a submission arrives. offset_days is bounded to a year either side (366 covers a leap year); further out is a fixed date. A fixed date is the other form of a date bound.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from"],
+      "properties": {
+        "from": {
+          "enum": ["today", "start_of_month", "end_of_month", "start_of_next_month", "end_of_next_month"]
+        },
+        "offset_days": { "type": "integer", "minimum": -366, "maximum": 366 }
+      }
+    },
+    "dateBound": {
+      "oneOf": [{ "$ref": "#/$defs/isoDate" }, { "$ref": "#/$defs/relativeDateBound" }]
+    },
+    "field": {
+      "type": "object",
+      "required": ["id", "type", "label"],
+      "oneOf": [
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "text" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "min_length": { "$ref": "#/$defs/shortLength" },
+            "max_length": { "$ref": "#/$defs/shortMaxLength" },
+            "format": { "enum": ["digits", "alphanumeric"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "long_text" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "min_length": { "$ref": "#/$defs/longLength" },
+            "max_length": { "$ref": "#/$defs/longMaxLength" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "enum": ["email", "tel", "url"] },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "max_length": { "$ref": "#/$defs/shortMaxLength" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "number" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "format": { "enum": ["integer"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "date" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "min": { "$ref": "#/$defs/dateBound" },
+            "max": { "$ref": "#/$defs/dateBound" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["choices"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "single_choice" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "choices": { "$ref": "#/$defs/choices" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["choices"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "multi_choice" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" },
+            "choices": { "$ref": "#/$defs/choices" },
+            "min": { "type": "integer", "minimum": 0, "maximum": 50 },
+            "max": { "type": "integer", "minimum": 0, "maximum": 50 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "checkbox" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "consent" },
+            "label": { "$ref": "#/$defs/consentLabel" },
+            "hint": { "$ref": "#/$defs/hint" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

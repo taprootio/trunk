@@ -4,6 +4,9 @@ import {
   VERB_DEPLOY,
   VERB_ENV,
   VERB_FOOTER_PUSH,
+  VERB_FORMS_PULL,
+  VERB_FORMS_PUSH,
+  VERB_FORMS_VALIDATE,
   VERB_LOGIN,
   VERB_LOGOUT,
   VERB_MEDIA_UPLOAD,
@@ -28,6 +31,9 @@ import { deliveryCheck } from "./delivery-check.js";
 import { deploy } from "./deploy.js";
 import { env } from "./env.js";
 import { footerPush } from "./footer-push.js";
+import { formsPull } from "./forms-pull.js";
+import { formsPush } from "./forms-push.js";
+import { formsValidate } from "./forms-validate.js";
 import { login } from "./login.js";
 import { logout } from "./logout.js";
 import { mediaUpload } from "./media-upload.js";
@@ -84,6 +90,8 @@ import { whoami } from "./whoami.js";
  *   fixturePath,   // validate: one offline authoring-fixture directory
  *   paths,         // media upload: files and/or directories to upload;
  *                  //   with none, the workspace's media/ directory is walked
+ *   formKeys,      // forms validate / push: narrow to these form keys;
+ *                  //   with none, every file under forms/
  *   pagePaths,     // approve: narrow to these page paths; with none, every
  *                  //   draft the workspace manifest tracks is staged
  *   pageId,        // preview page: the one persisted draft UUID to render
@@ -124,6 +132,9 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_REDIRECTS_PUSH]: redirectsPush,
   [VERB_THEME_PUSH]: themePush,
   [VERB_FOOTER_PUSH]: footerPush,
+  [VERB_FORMS_PULL]: formsPull,
+  [VERB_FORMS_PUSH]: formsPush,
+  [VERB_FORMS_VALIDATE]: formsValidate,
   [VERB_MEDIA_UPLOAD]: mediaUpload,
   [VERB_APPROVE]: approve,
   [VERB_DEPLOY]: deploy,

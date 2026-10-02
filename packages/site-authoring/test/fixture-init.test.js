@@ -175,3 +175,37 @@ test("init discovers an explicit source configuration without reading credential
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.result.initialized.pages, 6);
 });
+
+test("init carries recorded forms through the sanitizer and binds them in the fixture manifest", async (t) => {
+  const { source } = await sourceWorkspace(t);
+  const formId = "bbbb2222-cccc-4222-8222-dddd22222222";
+  const form = {
+    key: "contact",
+    name: "Contact",
+    sink: "none",
+    retention_days: 365,
+    definition: {
+      fields: [
+        { id: "email", type: "email", label: "Email", required: true },
+        { id: "agree", type: "consent", label: "I agree. Terms at https://live.invalid/terms?token=never-copy-this-token" },
+      ],
+      contact_field: "email",
+    },
+  };
+  await mkdir(path.join(source, "forms"));
+  await writeFile(path.join(source, "forms", "contact.json"), `${JSON.stringify(form)}\n`);
+  const manifestPath = path.join(source, ".taproot-site-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.forms = { items: { contact: { id: formId, version: 4 } } };
+  await writeFile(manifestPath, JSON.stringify(manifest));
+
+  const initialized = await invoke(source, ["validate", "--init", "../output"]);
+  assert.equal(initialized.exit, 0, initialized.stderr);
+  const output = initialized.result.initialized.directory;
+  assert.deepEqual(initialized.result.validated.forms, { count: 1 });
+  const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
+  assert.match(fixture.forms.items.contact.id, /^f0000000-0000-4000-8000-/u);
+  assert.equal(fixture.forms.items.contact.version, 4);
+  const copied = await readFile(path.join(output, "forms", "contact.json"), "utf8");
+  assert.ok(!copied.includes("live.invalid") && !copied.includes("never-copy-this-token"));
+});

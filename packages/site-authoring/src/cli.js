@@ -20,6 +20,9 @@ import {
   VERB_STAGING_REVIEW,
   VERB_ENV,
   VERB_FOOTER_PUSH,
+  VERB_FORMS_PULL,
+  VERB_FORMS_PUSH,
+  VERB_FORMS_VALIDATE,
   VERB_HELP,
   VERB_LOGIN,
   VERB_LOGOUT,
@@ -71,14 +74,14 @@ import { VERB_HANDLERS } from "./verbs/index.js";
 /**
  * The verbs the local version gate applies to (TR00703).
  *
- * Exactly the three that make no request. Every other verb reaches Taproot,
+ * Exactly the ones that make no request. Every other verb reaches Taproot,
  * whose own refusal is authoritative and better informed than this recording,
  * so gating them here would only duplicate an answer — and gating `login`,
  * `logout`, or `env` would take away the commands an operator needs while they
  * are outdated. `--help` and `--version` are outside it for the same reason:
  * they are how someone finds out what they have.
  */
-const VERSION_GATED_OFFLINE_VERBS = Object.freeze([VERB_HELP, VERB_VALIDATE, VERB_WHOAMI]);
+const VERSION_GATED_OFFLINE_VERBS = Object.freeze([VERB_HELP, VERB_VALIDATE, VERB_FORMS_VALIDATE, VERB_WHOAMI]);
 
 // One entry per verb, in help order. `tokens` is the exact leading positional
 // sequence; matching prefers the longest sequence, so a two-token family can
@@ -280,6 +283,47 @@ const VERBS = Object.freeze([
       + "source a live page occupies or a file the site generates. An entry is a file inside the next release, so it "
       + "goes live with that deploy: staging first, production when promoted. "
       + "See 'taproot-site help redirects'.",
+  },
+  {
+    name: VERB_FORMS_PULL,
+    surface: SURFACE_STANDARD,
+    // Forms are authored with the pages that place them, so they ride the
+    // content capability; the site's forms permissions decide what it may do.
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["forms", "pull"],
+    summary: "Write each live form to forms/<key>.json and record the versions read.",
+    note: "Needs a pulled workspace ('pull' first). It replaces a form's file with the site's copy and records the "
+      + "version, which 'forms push' uses to refuse a change made on the site since. An archived form is listed "
+      + "and not written. Submissions are never pulled: they are visitors' personal data and stay on the site. "
+      + "See 'taproot-site help forms'.",
+  },
+  {
+    name: VERB_FORMS_PUSH,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["forms", "push"],
+    positionals: "formKeys",
+    summary: "Validate forms/<key>.json and create or update each form on the site.",
+    note: "Every file is validated and compared with the site before anything is written. A form whose site "
+      + "version moved since the last pull is refused (forms.concurrent_modification), and a form the site has "
+      + "that this workspace never pulled is refused (forms.pull_required). Editing a definition appends a version; "
+      + "a page keeps the version it was published with until the next deploy. An after_submit page_path is looked "
+      + "up on the site, and a path that names no page is refused (forms.page_not_found), as is a generated, 404, legal, profile or integration page (forms.page_not_allowed). Name form keys to narrow "
+      + "the push. See 'taproot-site help forms'.",
+  },
+  {
+    name: VERB_FORMS_VALIDATE,
+    tokens: ["forms", "validate"],
+    offline: true,
+    // Offline, but it reads taproot-site.json to find the workspace.
+    readsLocalState: true,
+    positionals: "formKeys",
+    summary: "Validate the workspace's form files offline, against the shared field schema.",
+    note: "Reads forms/<key>.json and checks the file contract and every field definition with the same validator "
+      + "'forms push' and the published form use. Name form keys to narrow it; with none, every file under forms/ "
+      + "is checked. It cannot prove that the site accepts the key, that an after_submit page_path names a page, or "
+      + "that the caller may write forms. "
+      + "See 'taproot-site help forms'.",
   },
   {
     name: VERB_THEME_PUSH,
@@ -556,6 +600,8 @@ function verbHelp(verb) {
     ? " [production | local | <url>]"
     : verb.positionals === "siteSelector"
     ? " <site-name-or-id>"
+    : verb.positionals === "formKeys"
+    ? " [form-key...]"
     : verb.positionals
     ? ` [${verb.positionals === "paths" ? "path" : "page-path"}...]`
     : "";
@@ -706,6 +752,7 @@ function parseReferenceArguments(arguments_) {
       || topic === "footer"
       || topic === "fixture"
       || topic === "redirects"
+      || topic === "forms"
       || topic === "walkthrough"
       || topic === "delivery"
       || topic === "import"
@@ -773,6 +820,7 @@ function referenceResult(parsed) {
     }
     case "nav":
     case "redirects":
+    case "forms":
     case "media":
     case "preview":
     case "fixture":

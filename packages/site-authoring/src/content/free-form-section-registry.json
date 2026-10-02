@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 9,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -554,6 +554,11 @@
       "label": "Image Banner",
       "measure": "wide",
       "rootPlacement": "root-band"
+    },
+    "form": {
+      "label": "Form",
+      "measure": "wide",
+      "rootPlacement": "flow"
     }
   },
   "integrationPlacement": {

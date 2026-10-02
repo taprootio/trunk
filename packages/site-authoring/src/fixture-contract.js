@@ -33,7 +33,7 @@ export const FIXTURE_REQUIRED_ROOT_FIELDS = Object.freeze([
  * evidence. When appearance/footer are present, validate checks their local
  * image bindings and footer hashes against the fixture settings.
  */
-export const FIXTURE_OPTIONAL_ROOT_FIELDS = Object.freeze(["pulledAt", "deployments", "appearance", "footer"]);
+export const FIXTURE_OPTIONAL_ROOT_FIELDS = Object.freeze(["pulledAt", "deployments", "appearance", "footer", "forms"]);
 
 /** Every root field the manifest may declare. Anything else is refused. */
 export const FIXTURE_ROOT_FIELDS = Object.freeze(

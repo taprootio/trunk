@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "4.20.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "5.0.0" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -128,6 +128,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/delivery-browser.js",
     "src/delivery-check.js",
     "src/errors.js",
+    "src/field-schema.json",
+    "src/field-validation.js",
     // The one home for the offline fixture contract: validate enforces it and
     // 'help fixture' states it from the same constants (TR00647).
     "src/fixture-contract.js",
@@ -135,6 +137,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-workspace.js",
+    "src/forms-api.js",
+    "src/forms-contract.js",
+    "src/forms-workspace.js",
     "src/image-metadata.js",
     "src/index.js",
     "src/json-guard.js",
@@ -161,6 +166,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/deploy.js",
     "src/verbs/env.js",
     "src/verbs/footer-push.js",
+    "src/verbs/forms-pull.js",
+    "src/verbs/forms-push.js",
+    "src/verbs/forms-validate.js",
     "src/verbs/index.js",
     "src/verbs/login.js",
     "src/verbs/logout.js",
