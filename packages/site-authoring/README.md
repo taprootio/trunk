@@ -537,8 +537,8 @@ completed deployment for the target, HTTP delivery of the authored routes and
 the favicon, images, module preloads and site bundle they declare (status and
 content type, no redirects followed), internal link targets, accidental
 local-only references, and the pinned runtime — the version the page names,
-its entry module and the capability modules the page declares, with a page
-that still names the pre-pinning runtime pointer reported as unverified until it is republished. The
+its entry module and the capability modules the page declares (a page that
+pins no runtime version and entry fails the runtime check). The
 browser dimension (a fresh and a returning load
 compared against the page's pinned entry, every document request in the browser,
 popups included, held to the site origin before it is sent, and cache reuse

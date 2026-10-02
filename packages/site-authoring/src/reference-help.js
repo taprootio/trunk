@@ -480,8 +480,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "image fails.",
       "Runtime: the page's bootstrap pins one runtime version, its entry module and the module each declared "
       + "capability resolves to. The entry must load as JavaScript and every declared capability must resolve and "
-      + "load. A page that still names the pre-pinning runtime pointer is reported as unverified, so the verdict is "
-      + "degraded, until the site is republished.",
+      + "load. A page whose bootstrap does not pin a runtime version and entry fails the runtime check.",
       "Browser: a fresh and a returning (same-context, cached) load are compared against the page's pinned entry when "
       + "Playwright resolves from the CLI's own install: npm install --global @taprootio/site-authoring@latest "
       + "playwright && npx playwright install chromium, then rerun through the installed taproot-site command (a "
@@ -505,8 +504,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "not delivery), local-only references (localhost, *.test, *.local) are reported rather than fetched, a "
       + "redirect Location that could reflect a credential is withheld, bodies are read up to a fixed bound, "
       + "member-only content is not exercised, and nothing is purged, republished or rolled back.",
-      "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible or a pre-pinning "
-      + "reference, but an asset, link or browser load did not match or the runtime could not be verified), failed (a route or the runtime did not deliver).",
+      "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible, "
+      + "but an asset, link or browser load did not match), failed (a route or the runtime did not deliver).",
     ]),
     example: Object.freeze({
       command: `${CLI_BINARY_NAME} delivery check --production --url https://www.example.com/ --wait 30`,

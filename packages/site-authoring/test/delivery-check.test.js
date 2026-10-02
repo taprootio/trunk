@@ -123,34 +123,18 @@ test("a missing entry or capability module makes the pinned runtime incompatible
   assert.ok(report.failures.some((line) => /taproot-shared-runtime-abc.*\(version 5\.0\.63\): http_404/u.test(line)));
 });
 
-test("a page published before runtime pinning is unverified and degraded, not failed, until it is republished", async () => {
-  const old = JSON.stringify({
-    runtimeMajorVersion: "5",
-    runtimeManifestUrl: "https://static.example.test/taproot/5/latest.json",
-    fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
-    siteBundleUrl: "/public/main.root-DNz.js",
-    runtimeCapabilities: ["taproot-image-banner"],
-  });
-  const { fetch, calls } = server(healthy({ [`${ORIGIN}/`]: { body: html({ boot: old }) } }));
-  const report = await checkDelivery({ fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
+test("a page that does not pin a runtime version and entry fails the runtime check", async () => {
+  const bare = server(healthy({ [`${ORIGIN}/`]: { body: html({ boot: JSON.stringify({ siteBundleUrl: "/public/main.root-DNz.js", runtimeCapabilities: ["taproot-image-banner"] }) }) } }));
+  const report = await checkDelivery({ fetch: bare.fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
   assert.equal(report.runtime.declared, true);
   assert.equal(report.runtime.pinned, false);
-  assert.equal(report.runtime.legacy, true);
   assert.equal(report.runtime.compatible, false);
-  assert.equal(report.verdict, "degraded");
-  assert.ok(report.failures.some((line) => /pre-pinning runtime pointer.*republish/u.test(line)));
+  assert.equal(report.verdict, "failed");
+  assert.ok(report.failures.some((line) => /does not pin a runtime version and entry/u.test(line)));
   // Its declared capabilities are not reported as failed modules: no chunk URL is pinned to check.
   assert.equal(report.runtime.capabilityModules.checked, 0);
   assert.equal(report.runtime.capabilityModules.failed, 0);
   assert.equal(report.failures.length, 1);
-  // A bootstrap that names neither a pinned runtime nor a pointer is a failure.
-  const bare = server(healthy({ [`${ORIGIN}/`]: { body: html({ boot: JSON.stringify({ siteBundleUrl: "/public/main.root-DNz.js", runtimeCapabilities: [] }) }) } }));
-  const failed = await checkDelivery({ fetch: bare.fetch, timeoutSignal, baseUrl: `${ORIGIN}/`, sleep: noSleep });
-  assert.equal(failed.runtime.legacy, false);
-  assert.equal(failed.verdict, "failed");
-  assert.ok(failed.failures.some((line) => /does not pin a runtime version and entry/u.test(line)));
-  // Nothing the old bootstrap names is fetched.
-  assert.ok(!calls.some((call) => call.url.includes("latest.json") || call.url.includes("runtime-fallback")));
 });
 
 test("a route that redirects or answers an error is not delivered, and retries are truthful", async () => {

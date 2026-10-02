@@ -205,8 +205,6 @@ export function parseBootstrap(html) {
   return {
     version: text(parsed.version).slice(0, 64),
     entry: text(parsed.entry),
-    // A release published before runtime pinning named a mutable pointer instead.
-    legacyPointer: typeof parsed.runtimeManifestUrl === "string" && parsed.runtimeManifestUrl !== "",
     siteBundleUrl: text(parsed.siteBundleUrl),
     runtimeCapabilities,
     capabilities,
@@ -506,9 +504,6 @@ async function observe(context, origin, sampledRoutes) {
     }
   }
   runtime.pinned = runtime.version !== "" && Boolean(bootstrap?.entry);
-  // Such a page still loads in a browser, but this check no longer reads the
-  // pointer, so its runtime is reported unverified rather than as passed or failed.
-  runtime.legacy = !runtime.pinned && Boolean(bootstrap?.legacyPointer);
   const entryUrl = runtime.pinned ? admit(bootstrap.entry) : undefined;
   if (entryUrl) {
     const { row } = await probe(context, entryUrl.href, "runtime-entry");
@@ -570,10 +565,7 @@ async function observe(context, origin, sampledRoutes) {
     ...assetResults.filter((row) => !row.ok).map((row) => `${row.kind} ${row.url}: ${row.failure}`),
     ...linkResults.filter((row) => !row.ok).map((row) => `link ${row.path}: ${row.failure}`),
     ...(runtime.declared ? [] : ["runtime: the home page declares no runtime bootstrap"]),
-    ...(runtime.declared && runtime.legacy
-      ? ["runtime: the page names a pre-pinning runtime pointer, which is not verified here; republish the site so it pins a runtime version"]
-      : []),
-    ...(runtime.declared && !runtime.pinned && !runtime.legacy
+    ...(runtime.declared && !runtime.pinned
       ? ["runtime: the page does not pin a runtime version and entry"]
       : []),
     ...(runtime.declared && runtime.pinned && !runtime.entry.ok
@@ -677,7 +669,7 @@ export async function checkDelivery({
 
   const verdict = observed.failuresTotal === 0
     ? "delivered"
-    : observed.routeRows.every((row) => row.ok) && (observed.runtime.compatible || observed.runtime.legacy)
+    : observed.routeRows.every((row) => row.ok) && observed.runtime.compatible
     ? "degraded"
     : "failed";
   const report = {
@@ -757,7 +749,6 @@ function withinOutputBudget(report, failuresTotal) {
         declared: runtime.declared,
         version: runtime.version,
         pinned: runtime.pinned,
-        legacy: runtime.legacy,
         capabilities: runtime.capabilities.length,
         capabilitiesResolvable: runtime.capabilitiesResolvable,
         compatible: runtime.compatible,

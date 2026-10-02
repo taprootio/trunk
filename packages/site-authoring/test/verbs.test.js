@@ -10144,7 +10144,7 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
 const PUBLIC_ORIGIN = "https://www.example.com";
 const RUNTIME_ENTRY = /\/taproot\/5\.0\.63\/taproot-shared-runtime-abc\.esm\.js$/u;
 
-// A release published before runtime pinning names a mutable pointer instead.
+// An unpinned page declares a bootstrap that names no runtime version or entry.
 function deliveredHtml(links = [], { pinned = true } = {}) {
   const bootstrap = JSON.stringify(pinned
     ? {
@@ -10155,9 +10155,6 @@ function deliveredHtml(links = [], { pinned = true } = {}) {
       runtimeCapabilities: [],
     }
     : {
-      runtimeMajorVersion: "5",
-      runtimeManifestUrl: `${PUBLIC_ORIGIN}/taproot/5/latest.json`,
-      fallbackRuntimeManifestUrl: "/public/taproot-runtime-fallback/5.0.35/manifest.json",
       siteBundleUrl: "/public/main.root-abc.js",
       runtimeCapabilities: [],
     });
@@ -10254,7 +10251,7 @@ test("delivery check spends its route allowance on every template before repeati
   assert.deepEqual(checked.slice(0, 3), ["/", "/journal/post-0/", "/recipes/lemon-bars/"]);
 });
 
-test("delivery check reports a release that still names the runtime pointer as unverified, with a differing workspace record", async (site) => {
+test("delivery check fails a page that pins no runtime, with a differing workspace record", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([], {
       deployments: { production: { id: STAGING_DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-19T00:00:00Z" } },
@@ -10268,36 +10265,12 @@ test("delivery check reports a release that still names the runtime pointer as u
     browser: false,
   });
   const result = await deliveryCheck(invocation);
-  assert.equal(result.verdict, "degraded");
+  assert.equal(result.verdict, "failed");
   assert.equal(result.runtime.pinned, false);
-  assert.equal(result.runtime.legacy, true);
   assert.equal(result.deployment.recordedInWorkspace, false);
   assert.equal(result.deployment.workspaceRecordedId, STAGING_DEPLOYMENT_ID);
-  assert.ok(result.failures.some((line) => /pre-pinning runtime pointer/u.test(line)));
+  assert.ok(result.failures.some((line) => /does not pin a runtime version and entry/u.test(line)));
   assert.ok(progress.some((line) => /latest completed production deployment is/u.test(line)));
-});
-
-test("delivery check does not probe a browser against a page that pins no entry", async (site) => {
-  const workspace = await fixture(site, {
-    ".taproot-site-manifest.json": manifestFixture([], {
-      deployments: { production: { id: DEPLOYMENT_ID, status: "DEPLOYMENT_STATUS_COMPLETED", completedAt: "2026-08-20T00:01:00Z" } },
-    }),
-  });
-  const wire = api(deliveryRoutes({ pinned: false }));
-  let imported = false;
-  const { invocation } = invoke(workspace, wire, {
-    verb: "delivery check",
-    deployTarget: "production",
-    deliveryUrl: `${PUBLIC_ORIGIN}/`,
-    importPlaywright: async () => {
-      imported = true;
-      throw new Error("must not be reached");
-    },
-  });
-  const result = await deliveryCheck(invocation);
-  assert.equal(result.browser.status, "unchecked");
-  assert.equal(result.browser.reason, "legacy_runtime_reference");
-  assert.equal(imported, false);
 });
 
 test("delivery check refuses without a completed deployment, and production without --url, before touching the target", async (testContext) => {
