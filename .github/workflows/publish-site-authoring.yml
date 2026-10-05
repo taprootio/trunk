@@ -54,6 +54,7 @@ jobs:
           test "$repository_url" = "https://github.com/taprootio/trunk.git"
           test "$repository_directory" = "packages/site-authoring"
           node ../../scripts/npm-release.mjs exact-dependency @taprootio/espalier
+          node ../../scripts/npm-release.mjs exact-dependency mediabunny
 
       - name: Install the exact public Espalier contract and test the CLI
         working-directory: packages/site-authoring
