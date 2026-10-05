@@ -497,6 +497,9 @@ export async function mediaUpload(invocation) {
           uploadedVideos.push({
             file,
             videoId: video.videoId,
+            title: video.title,
+            caption: video.caption,
+            fileName: video.fileName,
             contentType,
             byteLength,
             deduplicated,
@@ -619,6 +622,10 @@ export async function mediaUpload(invocation) {
       uploadedVideos.map((entry) => ({
         file: entry.file,
         videoId: entry.videoId,
+        // Set on the Videos page; the placement shows them wherever the video goes.
+        title: entry.title,
+        caption: entry.caption,
+        fileName: entry.fileName,
         contentType: entry.contentType,
         byteLength: entry.byteLength,
         deduplicated: entry.deduplicated,

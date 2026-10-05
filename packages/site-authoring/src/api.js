@@ -841,6 +841,8 @@ export function normalizeVideo(value) {
   return {
     videoId: requireCanonicalUuid(video.videoId, "api.video_contract", "video.videoId"),
     title: text(video.title),
+    caption: text(video.caption),
+    fileName: text(video.fileName),
     bytes: safeCount(video.bytes),
     durationMilliseconds: safeCount(video.durationMs),
     width: safeCount(video.width),
@@ -1025,6 +1027,10 @@ export async function getPublishingReadiness(client, siteId, selection = {}) {
     blockedPageCount: safeCount(response.blockedPageCount),
     hasCandidateChanges: response.hasCandidateChanges === true,
     hasSuccessfulStagingDeployment: response.hasSuccessfulStagingDeployment === true,
+    // Site-wide inputs frozen with every release that differ from production's.
+    redirectsChanged: response.redirectsChanged === true,
+    formsChanged: response.formsChanged === true,
+    videosChanged: response.videosChanged === true,
     blockers,
   };
 }

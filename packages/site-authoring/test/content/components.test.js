@@ -622,6 +622,16 @@ test("a video embed block is validated against its provider's id rules and close
   assert.deepEqual(issues({ ...base, aspectRatio: "wide" }), ["/attrs/componentData/aspectRatio"]);
 });
 
+test("a video block names the video and refuses the poster, caption and ratio, which are the video's own", () => {
+  const issues = (data) => validateComponentBlock("video", JSON.stringify(data), "/attrs").map((e) => e.path);
+  const base = { videoId: "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d" };
+
+  assert.deepEqual(issues(getComponentDefinition("video").example), []);
+  assert.deepEqual(issues({ ...base, caption: "Tour" }), ["/attrs/componentData/caption"]);
+  assert.deepEqual(issues({ ...base, aspectRatio: "16:9" }), ["/attrs/componentData/aspectRatio"]);
+  assert.deepEqual(issues({ ...base, poster: null }), ["/attrs/componentData/poster"]);
+});
+
 test("the video embed example validates and canonicalizes in declaration order", () => {
   const { example } = getComponentDefinition("video-embed");
   assert.deepEqual(validateComponentBlock("video-embed", JSON.stringify(example), "/attrs"), []);

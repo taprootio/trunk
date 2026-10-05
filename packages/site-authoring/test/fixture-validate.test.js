@@ -495,7 +495,7 @@ async function placeVideoOnVisitPage(fixture, videoId) {
       type: "doc",
       content: [{
         type: "componentBlock",
-        attrs: { componentType: "video", componentData: JSON.stringify({ videoId, caption: "A tour" }) },
+        attrs: { componentType: "video", componentData: JSON.stringify({ videoId }) },
       }],
     }, undefined, 2)}\n`,
   );

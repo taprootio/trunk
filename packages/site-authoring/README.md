@@ -362,8 +362,10 @@ file that is not an MP4 with its index first as one (copying the tracks, never
 re-encoding), declares its codecs, and prints the server's one-line refusal as
 it came for anything it will not accept (a non-H.264 or non-AAC file, one over
 the licence's upload cap). A video is ready when its upload confirms; the CLI sets no poster (Node has no video decoder), so
-choose one on the Videos page, where an upload made there gets one automatically; the command
-reports its `videoId` for a `video` component (`help component video`), and
+choose one on the Videos page, where an upload made there gets one automatically, and set its
+title and caption there too: the poster, caption and shape are the video's own and show wherever
+it is placed. The command reports its `videoId`, title, caption and file name for a `video`
+component (`help component video`), and
 `pages push` refuses a page that places a video the site does not have. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
 settings, and the closed footer document. `pull` writes each scheme's

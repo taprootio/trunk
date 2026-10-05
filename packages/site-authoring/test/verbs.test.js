@@ -7328,6 +7328,8 @@ function unreadableMp4(size = 512) {
 const confirmedVideo = (id = VIDEO_ID) => ({
   videoId: id,
   title: "tour",
+  caption: "",
+  fileName: "tour.mp4",
   bytes: String(FASTSTART.byteLength),
   durationMs: 1000,
   width: 1280,
@@ -7397,6 +7399,9 @@ test("media upload sends a faststart H.264 MP4 as it is, declares its codecs and
   assert.deepEqual(result.videos.items[0], {
     file: "media/tour.mp4",
     videoId: VIDEO_ID,
+    title: "tour",
+    caption: "",
+    fileName: "tour.mp4",
     contentType: "video/mp4",
     byteLength: FASTSTART.byteLength,
     deduplicated: false,
@@ -7889,7 +7894,7 @@ function videoPage(videoId) {
   return {
     ...PUSH_WORKSPACE,
     "pages/about.md": "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nHello.\n\n"
-      + `\`\`\`component:video\n${JSON.stringify({ videoId, caption: "Tour" })}\n\`\`\`\n`,
+      + `\`\`\`component:video\n${JSON.stringify({ videoId })}\n\`\`\`\n`,
   };
 }
 
@@ -7911,7 +7916,7 @@ test("pages push places a ready video the site has", async (site) => {
   const sent = wire.matching("POST", PAGES_COLLECTION)[0].body.template.freeFormData.body;
   const block = sent.content.find((node) => node.type === "componentBlock");
   assert.equal(block.attrs.componentType, "video");
-  assert.deepEqual(JSON.parse(block.attrs.componentData), { videoId: VIDEO_ID, caption: "Tour" });
+  assert.deepEqual(JSON.parse(block.attrs.componentData), { videoId: VIDEO_ID });
 });
 
 test("pages push refuses a video the site does not have before anything is written", async (site) => {
@@ -8574,13 +8579,35 @@ test("deploy --staging stages an edited redirect map when nothing else is select
     ...deployRoutes({ readiness: { selectedPageCount: 0, approvedPageCount: 0, hasCandidateChanges: true } })
       .filter((route) => route.pattern !== PAGES_LIST),
   ]);
-  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
 
   const result = await deploy(invocation);
 
   assert.equal(result.ok, true);
   assert.equal(wire.matching("POST", DEPLOY).length, 1);
   assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
+  // Readiness here names no site-wide change, so the generic line is the fallback.
+  assert.ok(progress.includes("Your site has changed since the last release. Staging publishes the change."));
+});
+
+test("deploy --staging names the site-wide changes it publishes when nothing else is selected", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW, reply: {} },
+    ...deployRoutes({
+      readiness: { selectedPageCount: 0, approvedPageCount: 0, hasCandidateChanges: true, videosChanged: true, formsChanged: true },
+    }).filter((route) => route.pattern !== PAGES_LIST),
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  const result = await deploy(invocation);
+
+  assert.equal(result.ok, true);
+  assert.ok(progress.some((line) => line === "Staging publishes what changed since the last release: a form, a video's caption or poster."));
+  assert.deepEqual(
+    [result.readiness.redirectsChanged, result.readiness.formsChanged, result.readiness.videosChanged],
+    [false, true, true],
+  );
 });
 
 test("deploy --staging refuses a candidate Taproot reports media blockers on", async (site) => {
@@ -10995,6 +11022,11 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
 
   assert.equal(result.authoringSurface, "docs-presentation");
   assert.equal(result.readiness.state, "PAGE_PUBLISHING_READINESS_STATE_READY");
+  // Status reports readiness in the same shape deploy does, site-wide change flags included.
+  assert.deepEqual(
+    [result.readiness.redirectsChanged, result.readiness.formsChanged, result.readiness.videosChanged],
+    [false, false, false],
+  );
   assert.equal(result.images.covered, false);
   assert.equal(result.images.total, undefined);
   assert.equal(result.brokenReferences.covered, false);

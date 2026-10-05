@@ -132,6 +132,19 @@ async function resolveStagingDeploymentId(client, siteId, invocation, manifest, 
   return completed.id;
 }
 
+/**
+ * Names the site-wide changes a staging with nothing selected publishes, the way the
+ * Deployments page does (TR01184): an edited redirect map, form, or video caption or
+ * poster, each frozen with every release.
+ */
+export function siteWideChanges(readiness) {
+  return [
+    readiness.redirectsChanged ? "the redirect map" : "",
+    readiness.formsChanged ? "a form" : "",
+    readiness.videosChanged ? "a video's caption or poster" : "",
+  ].filter(Boolean);
+}
+
 function reportReadiness(readiness) {
   const blockers = boundedList(readiness.blockers, MAXIMUM_REPORTED_BLOCKERS);
   return {
@@ -141,6 +154,9 @@ function reportReadiness(readiness) {
     blockedPageCount: readiness.blockedPageCount,
     hasCandidateChanges: readiness.hasCandidateChanges,
     hasSuccessfulStagingDeployment: readiness.hasSuccessfulStagingDeployment,
+    redirectsChanged: readiness.redirectsChanged,
+    formsChanged: readiness.formsChanged,
+    videosChanged: readiness.videosChanged,
     blockers: blockers.items,
     ...(blockers.truncated ? { blockersTruncated: true } : {}),
   };
@@ -321,7 +337,8 @@ export async function deploy(invocation) {
     const nothingSelected = stagedPageIds.length === 0 && selectedSettingsTypes.length === 0 && !includeNavigation;
     // A managed Docs site stages settings only, so an empty selection is final.
     // Any other site may still have a publishable change no selection names: an
-    // edited redirect map. Readiness below says whether it does.
+    // edited redirect map, form, or video caption or poster. Readiness below says
+    // whether it does.
     const emptySelectionError = () =>
       new SiteAuthoringError(
         "deploy.empty_selection",
@@ -329,7 +346,8 @@ export async function deploy(invocation) {
           ? "A staging deployment on a managed Docs site needs at least one settings change; it stages settings "
             + "only. Change a theme, brand, header, or footer setting first."
           : "A staging deployment needs at least one approved page, settings group, or navigation change, or an "
-            + "edited redirect map. Run 'taproot-site approve' or change staged settings/navigation first.",
+            + "edited redirect map, form, or video caption or poster. Run 'taproot-site approve' or change "
+            + "staged settings/navigation first.",
         { field: "Candidate" },
       );
     if (nothingSelected && presentationOnly) {
@@ -361,6 +379,15 @@ export async function deploy(invocation) {
     }
     if (nothingSelected && !readiness.hasCandidateChanges) {
       throw emptySelectionError();
+    }
+    const siteWide = siteWideChanges(readiness);
+    if (nothingSelected && readiness.hasCandidateChanges) {
+      // An API that names none of them still knows the site changed; say so, as the web dialog does.
+      onProgress(
+        siteWide.length > 0
+          ? `Staging publishes what changed since the last release: ${siteWide.join(", ")}.`
+          : "Your site has changed since the last release. Staging publishes the change.",
+      );
     }
     if (!readiness.hasCandidateChanges) {
       onProgress("Taproot reports this candidate contains no changes; deploying it anyway would be a no-op.");

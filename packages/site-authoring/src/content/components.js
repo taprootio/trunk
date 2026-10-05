@@ -297,17 +297,12 @@ const MEDIA_PRESENTATION_HELP =
  * `VideoData`. The page names a library video by id and nothing about where it
  * is served: the generator resolves the id at publish time and refuses a video
  * that is not `ready` or not this site's own. Delivery URLs are not authorable
- * here, so a `delivery` key is refused like any other unknown field.
+ * here, so a `delivery` key is refused like any other unknown field. The poster,
+ * caption and ratio are the video's own (TR01184), so a block carrying one is
+ * refused the same way.
  */
 const VIDEO = Object.freeze({
   videoId: Object.freeze({ kind: "uuid", required: true }),
-  poster: image(),
-  caption: boundedStr(300),
-  aspectRatio: str({
-    pattern: VIDEO_ASPECT_RATIO_RE,
-    patternSource: VIDEO_ASPECT_RATIO_PATTERN,
-    patternDescription: "two whole numbers of at most three digits joined by a colon, such as 16:9",
-  }),
   maxHeight: cssLength({ allowNone: true }),
   borderWidth: cssLength(),
 });
@@ -639,17 +634,14 @@ const COMPONENT_DEFINITIONS = Object.freeze({
   "video": component(
     VIDEO,
     "Video",
-    "A video from the site's library that plays when the visitor presses play; nothing loads before then.",
+    "A video from the site's library that plays when the visitor presses play; the page reads only the start of the file before then.",
     {},
     [
-      "Add a caption that tells a visitor what the video is about; the caption is also the player's accessible name.",
+      "The poster, the caption and the shape are the video's own and show wherever it is placed: set the title, caption and poster on the site's Videos page. The caption tells a visitor what the video is about and is also the player's accessible name.",
       "A video with spoken content needs captions or a transcript in the page text; the player does not generate them.",
-      "Leave aspectRatio out to follow the video's own shape; set it only to crop the frame to a different one.",
     ],
     {
       videoId: "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d",
-      caption: "A walk through the studio before your first class.",
-      aspectRatio: "16:9",
     },
     { notes: [MEDIA_PRESENTATION_HELP] },
   ),
