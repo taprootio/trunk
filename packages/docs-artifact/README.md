@@ -35,7 +35,11 @@ stable `resources`, and direct `redirects`. It has no response headers, cache
 directives, CSP fragments, routes table, origin allowlist, or executable hook.
 
 Every payload file has one ASCII relative POSIX path, exact media type, byte
-length, and `sha256:<64 lowercase hex>` digest. Paths use portable filename
+length, and `sha256:<64 lowercase hex>` digest. The media type is the one the
+contract binds to the file's extension (`PREBUILT_MEDIA_TYPES`); since 1.2.0
+that includes `.mp4` (`video/mp4`), `.webm` (`video/webm`), and `.vtt`
+(`text/vtt; charset=utf-8`), and any unbound extension must be declared
+`application/octet-stream`. Paths use portable filename
 segments whose first character is a letter, digit, `-`, or `_` and whose last
 character is a letter or digit. They reject absolute paths, backslashes,
 percent escapes, controls, empty or dot segments, Windows device aliases, and

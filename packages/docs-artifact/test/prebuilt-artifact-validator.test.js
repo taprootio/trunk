@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -62,6 +63,28 @@ test("prebuilt textual media must contain exact valid UTF-8 bytes", async () => 
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((error) => error.code === "file.hash_drift"));
   assert.ok(result.errors.some((error) => error.code === "file.invalid_utf8"));
+});
+
+test("prebuilt WebVTT captions are textual media and must be valid UTF-8", async () => {
+  const [fixture] = await loadPrebuiltConformanceCases();
+  const files = fixture.files.map((file) => ({ path: file.path, content: new Uint8Array(file.content) }));
+  const content = new Uint8Array([0x57, 0x45, 0x42, 0x56, 0x54, 0x54, 0x0a, 0xff, 0x0a]);
+  const sha256 = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+  const manifest = JSON.parse(Buffer.from(fixture.manifest).toString("utf8"));
+  manifest.files = [
+    ...manifest.files,
+    { bytes: content.byteLength, mediaType: "text/vtt; charset=utf-8", path: "assets/captions.vtt", sha256 },
+  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  files.push({ path: "assets/captions.vtt", content });
+
+  const result = await validatePrebuiltArtifact(manifest, files);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(
+    result.errors.filter((error) => error.path?.includes("captions.vtt") || error.code === "file.invalid_utf8")
+      .map((error) => error.code),
+    ["file.invalid_utf8"],
+  );
 });
 
 test("prebuilt string content scanning stops at the smaller per-file bound", async () => {

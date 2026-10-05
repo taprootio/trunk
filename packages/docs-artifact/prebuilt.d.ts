@@ -28,7 +28,10 @@ export type PrebuiltMediaType =
   | "text/css; charset=utf-8"
   | "text/html; charset=utf-8"
   | "text/javascript; charset=utf-8"
-  | "text/plain; charset=utf-8";
+  | "text/plain; charset=utf-8"
+  | "text/vtt; charset=utf-8"
+  | "video/mp4"
+  | "video/webm";
 
 export interface PrebuiltArtifactCapabilities {
   required: string[];

@@ -13,6 +13,7 @@ import {
   PREBUILT_ARCHIVE_FORMAT,
   PREBUILT_LIMITS,
   PREBUILT_MANIFEST_FILE_NAME,
+  PREBUILT_MEDIA_TYPES,
   prebuiltFileRoute,
   serializePrebuiltManifest,
   validatePrebuiltManifest,
@@ -131,6 +132,33 @@ test("prebuilt paths enforce directory depth, USTAR representation, and exact me
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((error) => error.code === "file.media_type"));
   });
+
+  await testContext.test("video and caption files", async () => {
+    const media = [
+      { path: "assets/sample.en.vtt", mediaType: "text/vtt; charset=utf-8" },
+      { path: "assets/sample.mp4", mediaType: "video/mp4" },
+      { path: "assets/sample.webm", mediaType: "video/webm" },
+    ];
+    const manifest = await fixture();
+    manifest.files.splice(4, 0, ...media.map((file) => ({ ...file, bytes: 0, sha256: `sha256:${"0".repeat(64)}` })));
+    const result = validatePrebuiltManifest(manifest);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+
+    for (const index of [4, 5, 6]) {
+      const mistyped = structuredClone(manifest);
+      mistyped.files[index].mediaType = "application/octet-stream";
+      const mistypedResult = validatePrebuiltManifest(mistyped);
+      assert.equal(mistypedResult.ok, false);
+      assert.ok(mistypedResult.errors.some((error) => error.code === "file.media_type"));
+    }
+  });
+});
+
+test("prebuilt JSON Schema media types match the runtime's closed set", async () => {
+  const schema = JSON.parse(
+    await readFile(new URL("../schema/taproot-docs-prebuilt-manifest.schema.json", import.meta.url), "utf8"),
+  );
+  assert.deepEqual(schema.$defs.mediaType.enum, [...PREBUILT_MEDIA_TYPES]);
 });
 
 test("prebuilt paths and JSON Schema accept portable segments beginning with '-' or '_'", async () => {

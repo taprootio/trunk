@@ -168,6 +168,9 @@ function expectedMediaType(path) {
   if (lower.endsWith(".woff")) return "font/woff";
   if (lower.endsWith(".woff2")) return "font/woff2";
   if (lower.endsWith(".txt")) return "text/plain; charset=utf-8";
+  if (lower.endsWith(".vtt")) return "text/vtt; charset=utf-8";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
   return "application/octet-stream";
 }
 

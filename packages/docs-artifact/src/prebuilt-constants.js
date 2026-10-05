@@ -48,6 +48,9 @@ export const PREBUILT_MEDIA_TYPES = Object.freeze([
   "text/html; charset=utf-8",
   "text/javascript; charset=utf-8",
   "text/plain; charset=utf-8",
+  "text/vtt; charset=utf-8",
+  "video/mp4",
+  "video/webm",
 ]);
 
 export const PREBUILT_TEXT_MEDIA_TYPES = Object.freeze(
