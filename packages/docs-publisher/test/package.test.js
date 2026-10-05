@@ -33,8 +33,8 @@ test("accepts one npm 11 array or npm 12 keyed-object pack result", () => {
 test("package metadata preserves independent identity, exact artifact pin, and public provenance", () => {
   const packageJson = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
   assert.equal(packageJson.name, "@taprootio/docs-publisher");
-  assert.equal(packageJson.version, "1.3.0");
-  assert.equal(packageJson.dependencies["@taprootio/docs-artifact"], "1.1.0");
+  assert.equal(packageJson.version, "1.4.0");
+  assert.equal(packageJson.dependencies["@taprootio/docs-artifact"], "1.2.0");
   assert.equal(PUBLISHER_VERSION, packageJson.version);
   assert.equal(ARTIFACT_PACKAGE_VERSION, packageJson.dependencies["@taprootio/docs-artifact"]);
   assert.deepEqual(packageJson.bin, { taproot: "./bin/taproot.js" });

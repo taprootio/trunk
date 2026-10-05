@@ -21,7 +21,7 @@ does not create a catch-all Trunk package.
 First-party repositories pin the exact released CLI:
 
 ```bash
-npm install --save-dev --save-exact @taprootio/docs-publisher@1.3.0
+npm install --save-dev --save-exact @taprootio/docs-publisher@1.4.0
 ```
 
 Then build the configured site and publish its exact artifact:
@@ -192,9 +192,9 @@ adds `productionOrigin`. A version 1.2.0 consumer rejects that new closed key.
 
 | Surface                     | `mode: "managed"`                      | `mode: "prebuilt"`                       |
 | --------------------------- | -------------------------------------- | ---------------------------------------- |
-| Publisher package           | `@taprootio/docs-publisher@1.3.0`      | `@taprootio/docs-publisher@1.3.0`        |
+| Publisher package           | `@taprootio/docs-publisher@1.4.0`      | `@taprootio/docs-publisher@1.4.0`        |
 | Publisher config            | `configVersion: 1` or `2`              | `configVersion: 1` or `2`                |
-| Artifact package dependency | exact `@taprootio/docs-artifact@1.1.0` | exact `@taprootio/docs-artifact@1.1.0`   |
+| Artifact package dependency | exact `@taprootio/docs-artifact@1.2.0` | exact `@taprootio/docs-artifact@1.2.0`   |
 | Artifact manifest           | `taproot-docs-manifest.json`           | `taproot-docs-prebuilt-manifest.json`    |
 | Artifact schema             | `schemaVersion: 1`                     | `schemaVersion: 1`                       |
 | Upload archive              | `taproot-docs-tar-gzip-v1`             | `taproot-docs-prebuilt-tar-gzip-v1`      |

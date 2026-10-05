@@ -16,10 +16,10 @@ export interface DocsPublishSuccess {
   schemaVersion: 2;
   ok: true;
   outcome?: "published";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.3.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.4.0" };
   compatibility: {
     configVersion: 1 | 2;
-    artifactPackageVersion: "1.1.0";
+    artifactPackageVersion: "1.2.0";
     artifactSchemaVersion: 1;
     archiveFormat: "taproot-docs-tar-gzip-v1" | "taproot-docs-prebuilt-tar-gzip-v1";
   };
@@ -37,7 +37,7 @@ export interface DocsPublishSuperseded {
   schemaVersion: 2;
   ok: true;
   outcome: "superseded";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.3.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.4.0" };
   siteId: string;
   mode: DocsPublicationMode;
   release: { id: string; status: string; sourceRevision: string };

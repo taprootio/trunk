@@ -1,11 +1,11 @@
 export const PUBLISHER_NAME = "@taprootio/docs-publisher";
-export const PUBLISHER_VERSION = "1.3.0";
+export const PUBLISHER_VERSION = "1.4.0";
 export const PUBLISH_RESULT_SCHEMA_VERSION = 2;
 export const CONFIG_FILE_NAME = "taproot-docs-publisher.json";
 export const CONFIG_VERSION = 2;
 export const SUPPORTED_CONFIG_VERSIONS = Object.freeze([1, CONFIG_VERSION]);
 export const ARTIFACT_SCHEMA_VERSION = 1;
-export const ARTIFACT_PACKAGE_VERSION = "1.1.0";
+export const ARTIFACT_PACKAGE_VERSION = "1.2.0";
 
 // The two publication modes are selected explicitly and never inferred from an
 // artifact directory, a manifest field, a site, or a hostname. Managed remains

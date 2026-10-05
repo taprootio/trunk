@@ -16,10 +16,10 @@ function successResult() {
   return {
     schemaVersion: 2,
     ok: true,
-    publisher: { name: "@taprootio/docs-publisher", version: "1.3.0" },
+    publisher: { name: "@taprootio/docs-publisher", version: "1.4.0" },
     compatibility: {
       configVersion: 2,
-      artifactPackageVersion: "1.1.0",
+      artifactPackageVersion: "1.2.0",
       artifactSchemaVersion: 1,
       archiveFormat: "taproot-docs-prebuilt-tar-gzip-v1",
     },
@@ -123,7 +123,7 @@ test("exposes help and version at the binary and product-command levels", async 
   for (const arguments_ of [["--version"], ["docs", "publish", "--version"]]) {
     const stdout = sink();
     assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
-    assert.equal(stdout.read(), "1.3.0\n");
+    assert.equal(stdout.read(), "1.4.0\n");
   }
 });
 
