@@ -373,7 +373,28 @@ export async function openSession(invocation = {}) {
     // Deliberately swallowed; see above.
   }
 
-  const client = new SiteApiClient(buildClientOptions(invocation, apiBaseUrl, exchanged.key));
+  // The exchanged credential lasts about an hour. A long operation (a video
+  // upload and its encoding) re-exchanges the same stored sign-in for the same
+  // site and capabilities shortly before it lapses, rather than failing midway
+  // with the work already done.
+  const client = new SiteApiClient({
+    ...buildClientOptions(invocation, apiBaseUrl, exchanged.key),
+    credentialRenewal: {
+      expiresAtMilliseconds: Date.parse(exchanged.expiresAt),
+      renew: async () => {
+        const renewed = await withRefusalGuidance(
+          onProgress,
+          "sign-in token exchange",
+          async () =>
+            await exchangeSiteAuthoringToken(accountClient, {
+              siteId: config.siteId,
+              capabilities: narrowedCapabilities(invocation, config.authoringSurface),
+            }),
+        );
+        return { key: renewed.key, expiresAtMilliseconds: Date.parse(renewed.expiresAt) };
+      },
+    },
+  });
   return {
     config,
     client,

@@ -367,7 +367,7 @@ const VERBS = Object.freeze([
     // (TR00790).
     surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DESIGN] },
     tokens: ["media", "upload"],
-    summary: "Upload media and wait for processing to finish.",
+    summary: "Upload images and videos; images are waited on until processed, and a video is ready when it confirms.",
     positionals: "paths",
     note: "Positional arguments name the files or directories to upload;"
       + " with none, the workspace's media/ directory is walked.",

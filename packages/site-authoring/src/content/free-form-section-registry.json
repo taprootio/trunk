@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 12,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -557,6 +557,16 @@
     },
     "form": {
       "label": "Form",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "video": {
+      "label": "Video",
+      "measure": "wide",
+      "rootPlacement": "flow"
+    },
+    "video-embed": {
+      "label": "Video embed",
       "measure": "wide",
       "rootPlacement": "flow"
     }

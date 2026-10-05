@@ -43,7 +43,13 @@ import { validateFooterWorkspaceDocument } from "./footer-push.js";
 import { validateNavigationWorkspaceDocument } from "./nav-push.js";
 import { validateWorkspacePageDocument, validateWorkspacePageSource } from "./pages-push.js";
 import { validateThemeWorkspace } from "./theme-push.js";
-import { documentImageIds, documentTemplate, isAuthorableTemplateType, PAGE_TEMPLATES } from "../typed-pages.js";
+import {
+  documentImageIds,
+  documentTemplate,
+  isAuthorableTemplateType,
+  PAGE_TEMPLATES,
+  placedVideoIds,
+} from "../typed-pages.js";
 
 const MAXIMUM_REPORTED = 200;
 const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
@@ -194,6 +200,25 @@ function validateFixtureManifest(manifest) {
   if (imageIds.size !== manifest.fixture.imageIds.length) {
     fail("fixture.image_ids_invalid", "fixture.imageIds must not contain duplicates.", "fixture.imageIds");
   }
+  // Optional: a fixture that places no video omits the list. Whatever is listed
+  // is a `ready` video a page may place, the offline stand-in for the library
+  // read a live push makes.
+  const declaredVideoIds = manifest.fixture.videoIds ?? [];
+  if (
+    !Array.isArray(declaredVideoIds)
+    || declaredVideoIds.length > WORKSPACE_LIMITS.files
+    || declaredVideoIds.some((value) => !isCanonicalUuid(value))
+  ) {
+    fail(
+      "fixture.video_ids_invalid",
+      "fixture.videoIds must be a bounded list of deterministic canonical UUIDs.",
+      "fixture.videoIds",
+    );
+  }
+  const videoIds = new Set(declaredVideoIds);
+  if (videoIds.size !== declaredVideoIds.length) {
+    fail("fixture.video_ids_invalid", "fixture.videoIds must not contain duplicates.", "fixture.videoIds");
+  }
   if (
     !Array.isArray(manifest.fixture.deliveryOrigins)
     || manifest.fixture.deliveryOrigins.length > FIXTURE_MAXIMUM_DELIVERY_ORIGINS
@@ -317,7 +342,7 @@ function validateFixtureManifest(manifest) {
     files.add(entry.file);
     paths.add(pagePath);
   }
-  return { manifest, imageIds, deliveryOrigins, pageIds, resourceIds, files, settingsEntityIds };
+  return { manifest, imageIds, videoIds, deliveryOrigins, pageIds, resourceIds, files, settingsEntityIds };
 }
 
 function validateDeliveryUrl(value, field, deliveryOrigins) {
@@ -469,6 +494,7 @@ export async function validateFixture(invocation = {}) {
   const {
     manifest,
     imageIds,
+    videoIds,
     deliveryOrigins,
     pageIds,
     resourceIds,
@@ -574,6 +600,14 @@ export async function validateFixture(invocation = {}) {
         file,
       );
     }
+    const unknownVideo = [...placedVideoIds(page.document)].find((videoId) => !videoIds.has(videoId));
+    if (unknownVideo !== undefined) {
+      fail(
+        "fixture.video_reference_unknown",
+        `Fixture video '${unknownVideo}' is not declared in fixture.videoIds, so it is not a ready video of this site.`,
+        file,
+      );
+    }
     validatedPages.push({ file, path: page.pagePath });
     if (pageUsesRootBand(page.document)) rootBandPages.push(file);
   }
@@ -662,6 +696,7 @@ export async function validateFixture(invocation = {}) {
       contractVersion: FIXTURE_CONTRACT_VERSION,
       manifest: FIXTURE_MANIFEST_FILE_NAME,
       imageIds: imageIds.size,
+      videoIds: videoIds.size,
       deliveryOrigins: deliveryOrigins.size,
     },
     validated: {

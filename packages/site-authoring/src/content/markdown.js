@@ -1,5 +1,10 @@
 import { SiteAuthoringError } from "../errors.js";
-import { canonicalizeComponentData, isComponentType, validateComponentBlock } from "./components.js";
+import {
+  canonicalizeComponentData,
+  expandComponentAuthoringShorthand,
+  isComponentType,
+  validateComponentBlock,
+} from "./components.js";
 import {
   FREE_FORM_SECTION_REGISTRY,
   normalizeFreeFormSectionBackground,
@@ -869,7 +874,12 @@ function componentNode(componentType, body, line) {
       line.number,
     );
   }
-  const source = body.trim() === "" ? "{}" : body;
+  const authored = body.trim() === "" ? "{}" : body;
+  const expanded = expandComponentAuthoringShorthand(componentType, authored);
+  if (expanded.error !== undefined) {
+    throw fail(CODES.componentData, "component block", expanded.error, line.number);
+  }
+  const source = expanded.source;
   const errors = validateComponentBlock(componentType, source, "");
   if (errors.length > 0) {
     throw fail(errors[0].code, "component block", errors[0].message, line.number);

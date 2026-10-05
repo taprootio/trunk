@@ -16,7 +16,7 @@ import { MARK_TYPES, NODE_TYPES, RETIRED_NODE_TYPES } from "../../src/content/vo
 import { MONOREPO_ONLY, MONOREPO_ROOT } from "../monorepo.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const IMPLEMENTATION_MARKER = "export const TIPTAP_SITE_DEFAULT";
+const IMPLEMENTATION_MARKER = "export const TIPTAP_IMAGE_NARROW_CONTENT_REM";
 
 function read(...segments) {
   // taproot-allow-source-read: cross-service parity contract (see above).

@@ -1,17 +1,25 @@
+import { Readable } from "node:stream";
+
 import {
   confirmImageUpload,
+  confirmVideoUpload,
   IMAGE_OWNERSHIP_SCOPE_SITE,
   IMAGE_PROCESSING_STATE_COMPLETE,
   IMAGE_PROCESSING_STATE_FAILED,
   listSiteImages,
+  listVideos,
   normalizeImage,
   poll,
   requestImageUpload,
+  requestVideoUpload,
   withRefusalGuidance,
 } from "../api.js";
 import { LIMITS, VERB_MEDIA_UPLOAD } from "../constants.js";
-import { SiteAuthoringError } from "../errors.js";
+import { SiteAuthoringError, sanitizeDiagnostic } from "../errors.js";
 import { contentHash, inspectImageBytes } from "../image-metadata.js";
+import { ApiError } from "../transport.js";
+import { sniffVideoContentType, VIDEO_EXTENSIONS, videoTooLarge } from "../video-metadata.js";
+import { mp4Name, prepareVideoFile } from "../video-prepare.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import {
   ensureWorkspaceRoot,
@@ -19,8 +27,10 @@ import {
   MEDIA_DIRECTORY,
   MEDIA_MANIFEST_FILE_NAME,
   MEDIA_MANIFEST_VERSION,
+  openWorkspaceFileStream,
   readMediaManifest,
   readWorkspaceFile,
+  resolveWorkspacePath,
   SAFE_MEDIA_SEGMENT,
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
@@ -29,6 +39,14 @@ import {
 
 /**
  * `media upload` — hash, request, PUT, confirm, then wait for processing.
+ *
+ * A file whose container is MP4, MOV or WebM takes the video path instead. Taproot does
+ * not encode, so the file is read with mediabunny first: an H.264 and AAC file that is not
+ * an MP4 with its index first is rewritten as one (copying the tracks, never re-encoding),
+ * and the real codec strings are declared. `RequestVideoUpload`, a presigned PUT, and
+ * `ConfirmVideoUpload` follow; the video is ready when confirm returns, with nothing to
+ * wait for. The server decides what is accepted and its one-line refusal is printed as it
+ * came. The container is read from the file's bytes, not its extension.
  *
  * The client computes the SHA-256 and the pixel dimensions before it asks for
  * anything, because `RequestImageUpload` needs all three: the hash drives the
@@ -56,7 +74,7 @@ import {
 
 const MAXIMUM_REPORTED = 200;
 const MAXIMUM_FILES = 500;
-const MEDIA_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+const MEDIA_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ...VIDEO_EXTENSIONS];
 const MEDIA_WALK_OPTIONS = Object.freeze({
   segmentPattern: SAFE_MEDIA_SEGMENT,
   segmentDescription: "letters, digits, '.', '_', '-', and '@'",
@@ -76,6 +94,14 @@ function requireUploadCapability(response, fileName) {
     );
   }
   return { url: response.presignedUrl, requiredHeaders: response.requiredHeaders };
+}
+
+function videoComponent(videoId) {
+  const componentData = JSON.stringify({ videoId });
+  return {
+    markdown: `\`\`\`component:video\n${componentData}\n\`\`\``,
+    block: { type: "componentBlock", attrs: { componentType: "video", componentData } },
+  };
 }
 
 function fileNameOf(relativePath) {
@@ -134,33 +160,253 @@ async function resolveUploadTargets(workspaceDir, positionals) {
   return files;
 }
 
-async function waitForProcessing(client, siteId, imageIds, { onProgress, now }) {
-  const pending = new Set(imageIds);
+/**
+ * Waits until every uploaded item has reached a terminal state in its library
+ * listing, and returns what was last observed for each. One wait serves images
+ * and videos: only what is read, how an entry is identified and which states
+ * end the wait differ.
+ */
+async function waitForTerminalStates(client, ids, {
+  read,
+  idOf,
+  stateOf,
+  terminalStates,
+  timeoutMilliseconds,
+  timeoutCode,
+  waitingMessage,
+  onProgress,
+  now,
+}) {
+  const pending = new Set(ids);
   if (pending.size === 0) return new Map();
   const observed = new Map();
-  return await poll({
-    client,
-    now,
-    onProgress,
+  try {
+    return await poll({
+      client,
+      now,
+      onProgress,
+      timeoutMilliseconds,
+      // The poller's `{ deadline, now }` travels into every page of the listing,
+      // so the bound holds *within* one read of a large library and not only
+      // between reads.
+      read,
+      evaluate: (entries) => {
+        for (const entry of entries) {
+          if (pending.has(idOf(entry))) observed.set(idOf(entry), entry);
+        }
+        const waiting = [...pending].filter((id) => !terminalStates.includes(stateOf(observed.get(id))));
+        if (waiting.length === 0) return { done: true, value: observed };
+        return { done: false, progress: waitingMessage(waiting.length) };
+      },
+      timeoutCode,
+    });
+  } catch (error) {
+    // What was observed before the deadline travels with the refusal, so a
+    // caller can still record the items that did reach a terminal state.
+    if (error instanceof SiteAuthoringError) error.observed = observed;
+    throw error;
+  }
+}
+
+/**
+ * `byId` reads the named images directly instead of paging the library, for an image
+ * the library never lists (a copied embed poster).
+ */
+export function waitForProcessing(client, siteId, imageIds, { onProgress, now, byId = false }) {
+  return waitForTerminalStates(client, imageIds, {
+    read: async (requestOptions) =>
+      (await listSiteImages(client, siteId, requestOptions, byId ? { imageIds } : {})).images,
+    idOf: (image) => image.imageId,
+    stateOf: (image) => image?.processingState,
+    terminalStates: [IMAGE_PROCESSING_STATE_COMPLETE, IMAGE_PROCESSING_STATE_FAILED],
     timeoutMilliseconds: LIMITS.uploadMilliseconds,
-    // The poller's `{ deadline, now }` travels into every page of the listing,
-    // so the bound holds *within* one read of a large library and not only
-    // between reads.
-    read: async (requestOptions) => (await listSiteImages(client, siteId, requestOptions)).images,
-    evaluate: (images) => {
-      for (const image of images) {
-        if (!pending.has(image.imageId)) continue;
-        observed.set(image.imageId, image);
-      }
-      const waiting = [...pending].filter((imageId) => {
-        const state = observed.get(imageId)?.processingState;
-        return state !== IMAGE_PROCESSING_STATE_COMPLETE && state !== IMAGE_PROCESSING_STATE_FAILED;
-      });
-      if (waiting.length === 0) return { done: true, value: observed };
-      return { done: false, progress: `Waiting for ${waiting.length} image(s) to finish processing.` };
-    },
     timeoutCode: "media.processing_timeout",
+    waitingMessage: (count) => `Waiting for ${count} image(s) to finish processing.`,
+    onProgress,
+    now,
   });
+}
+
+/** Where the server words a refusal of a video upload; the line is printed as it came. */
+const VIDEO_REFUSAL_FIELDS = Object.freeze([
+  "VideoCodec",
+  "AudioCodec",
+  "FileName",
+  "SiteId",
+  "UploadId",
+  "ContentType",
+  "SizeBytes",
+  "Video",
+  "UpgradePrompt",
+  "VideoNotIncluded",
+  "VideoPendingDowngrade",
+]);
+
+/**
+ * The server is the single authority for refusing a video, so its one-line message is shown
+ * rather than the generic "rejected the request field" the transport would give. Anything
+ * that is not such a refusal is rethrown unchanged.
+ */
+function surfaceVideoRefusal(error, file) {
+  if (error instanceof ApiError) {
+    for (const field of VIDEO_REFUSAL_FIELDS) {
+      const description = error.descriptionFor?.(field);
+      if (typeof description === "string" && description !== "") {
+        return new SiteAuthoringError(
+          "media.video_refused",
+          `'${file}': ${sanitizeDiagnostic(description, "Taproot refused this video.")}`,
+          { field: file },
+        );
+      }
+    }
+  }
+  return error;
+}
+
+/**
+ * Uploads one video: prepare it, request, a PUT, confirm. Returns null when the file is not a
+ * video container, so the caller takes the image path. The file is opened once for the size
+ * and the prefix and held open across the PUT's retries, each of which streams it again from
+ * the start; a file that had to be remuxed is sent from memory (it is at most the largest
+ * licence cap).
+ *
+ * Unlike an image, a video has no content hash to short-circuit on, and a re-run would upload
+ * every file again, each a new library entry and a new quota reservation. So an unchanged file
+ * this workspace already uploaded (the recorded size and modification time match) is reused when
+ * the site's library still holds that video.
+ *
+ * The upload id is recorded before the bytes are sent, and confirming an upload id twice returns
+ * the same video. So a PUT or a confirm whose answer was lost is resumed by the next run (the
+ * confirm says whether the object arrived; if it did not, the file is sent again), not repeated
+ * as a second reservation. A 412 on a retried create-only PUT means it had already landed.
+ */
+async function uploadVideoFile({
+  client,
+  config,
+  siteId,
+  file,
+  fileName,
+  recorded,
+  readLibrary,
+  recordPending,
+  onProgress,
+}) {
+  // Opened with no size bound of its own: the video limit is checked below, once
+  // the container says this is a video, so an oversized video is named as one and
+  // not as a generic file that is too large.
+  const source = await openWorkspaceFileStream(config.workspaceDir, file, Number.MAX_SAFE_INTEGER);
+  try {
+    if (sniffVideoContentType(source.header) === undefined) return null;
+    if (source.byteLength > WORKSPACE_LIMITS.videoBytes) {
+      throw videoTooLarge(file, WORKSPACE_LIMITS.videoBytes);
+    }
+    const contentType = "video/mp4";
+    const base = {
+      contentType,
+      byteLength: source.byteLength,
+      modifiedMilliseconds: source.modifiedMilliseconds,
+    };
+    if (
+      recorded?.byteLength === source.byteLength
+      && recorded?.modifiedMilliseconds === source.modifiedMilliseconds
+      && typeof recorded?.videoId === "string"
+    ) {
+      if (recorded.pendingConfirm === true) {
+        // The recorded id is an upload that may never have become a video, so
+        // the library cannot be asked about it: confirming is the only check.
+        try {
+          const video = await confirmVideoUpload(client, siteId, recorded.videoId);
+          onProgress(`Confirmed the earlier upload of '${file}'; the video is ready.`);
+          return { video, deduplicated: false, ...base };
+        } catch (error) {
+          // A client-side refusal (the reservation expired, say) means that upload
+          // cannot be confirmed any more, so the file is sent again; a server
+          // error, a throttle or a lost connection is transient or ambiguous and
+          // is left for the next run.
+          const refused = error instanceof ApiError
+            && error.httpStatus >= 400
+            && error.httpStatus < 500
+            && ![408, 425, 429].includes(error.httpStatus);
+          if (!refused) throw error;
+        }
+      } else {
+        const { byId, truncated } = await readLibrary();
+        const existing = byId.get(recorded.videoId);
+        if (existing !== undefined) {
+          onProgress(`'${file}' is unchanged since it was uploaded as video ${existing.videoId}; skipping the upload.`);
+          return { video: existing, deduplicated: true, ...base };
+        }
+        // A listing cut short cannot say the video is gone, and uploading again
+        // would spend storage on a video that may well be there.
+        if (truncated) {
+          throw new SiteAuthoringError(
+            "media.video_library_unverifiable",
+            `'${file}' was uploaded as video ${recorded.videoId}, which is not among the first ${byId.size} videos of this `
+              + "site's library, and the library is larger than one run can check. Remove the file's entry from "
+              + `${MEDIA_MANIFEST_FILE_NAME} to upload it again, or leave it.`,
+            { field: file },
+          );
+        }
+      }
+    }
+    onProgress(`Checking '${file}' (${source.byteLength} bytes).`);
+    const prepared = await prepareVideoFile({
+      filePath: resolveWorkspacePath(config.workspaceDir, file),
+      byteLength: source.byteLength,
+    });
+    // The prepare step reopened the file by path, so prove it is still the file that was opened
+    // before anything is requested or sent.
+    await source.verifyUnchanged();
+    const sent = prepared.remuxed === null
+      ? { byteLength: source.byteLength, stream: source.stream }
+      : { byteLength: prepared.remuxed.byteLength, stream: () => Readable.from([prepared.remuxed]) };
+    if (prepared.remuxed !== null) {
+      onProgress(`Rewrote '${file}' as an MP4 with its index first, without re-encoding (${sent.byteLength} bytes).`);
+    }
+    let response;
+    try {
+      response = await requestVideoUpload(client, siteId, {
+        fileName: mp4Name(fileName),
+        contentType,
+        sizeBytes: sent.byteLength,
+        videoCodec: prepared.videoCodec,
+        audioCodec: prepared.audioCodec,
+      });
+    } catch (error) {
+      throw surfaceVideoRefusal(error, file);
+    }
+    const capability = requireUploadCapability(response, file);
+    // Recorded before the bytes are sent: a PUT can land while its answer is lost, and the
+    // next run must find this upload id and confirm it, not reserve and send the file again.
+    await recordPending(response.uploadId, base);
+    try {
+      await client.upload(capability, {
+        byteLength: sent.byteLength,
+        stream: sent.stream,
+        timeoutMilliseconds: LIMITS.videoUploadMilliseconds,
+      });
+    } catch (error) {
+      // The upload is create-only, so a retry after a PUT that landed is refused with 412: the
+      // object is in place, and confirm checks it.
+      if (!(error instanceof SiteAuthoringError && error.code === "upload.rejected" && error.status === "http:412")) {
+        throw error;
+      }
+      onProgress(`The upload of '${file}' had already landed; confirming it.`);
+    }
+    // The PUT streamed the opened length. If the file grew or was rewritten
+    // meanwhile, what Taproot holds is not the file on disk, so it is not confirmed.
+    await source.verifyUnchanged();
+    let video;
+    try {
+      video = await confirmVideoUpload(client, siteId, response.uploadId);
+    } catch (error) {
+      throw surfaceVideoRefusal(error, file);
+    }
+    onProgress(`Uploaded and confirmed '${file}'; the video is ready.`);
+    return { video, deduplicated: false, ...base };
+  } finally {
+    await source.close();
+  }
 }
 
 export async function mediaUpload(invocation) {
@@ -188,8 +434,10 @@ export async function mediaUpload(invocation) {
     throw new SiteAuthoringError(
       "media.none_found",
       selected.length > 0
-        ? `No PNG, JPEG, GIF, or WebP files were found under ${selected.map((value) => `'${value}'`).join(", ")}.`
-        : `No PNG, JPEG, GIF, or WebP files were found under '${MEDIA_DIRECTORY}/' in the workspace.`,
+        ? `No PNG, JPEG, GIF, WebP, MP4, MOV, or WebM files were found under ${
+          selected.map((value) => `'${value}'`).join(", ")
+        }.`
+        : `No PNG, JPEG, GIF, WebP, MP4, MOV, or WebM files were found under '${MEDIA_DIRECTORY}/' in the workspace.`,
       { field: selected.length > 0 ? normalizePositional(selected[0]) : MEDIA_DIRECTORY },
     );
   }
@@ -202,11 +450,66 @@ export async function mediaUpload(invocation) {
   }
 
   const uploaded = [];
+  const uploadedVideos = [];
+  mediaManifest.videos ??= {};
+  // One read of the site's videos serves every unchanged file in the run, and
+  // only when there is a recorded upload to check.
+  let library;
+  const readLibrary = async () => {
+    if (library === undefined) {
+      const listing = await listVideos(client, siteId);
+      library = {
+        byId: new Map(listing.videos.map((video) => [video.videoId, video])),
+        truncated: listing.truncated,
+      };
+    }
+    return library;
+  };
 
   return await withRefusalGuidance(onProgress, "upload", async () => {
     try {
       for (const file of files) {
         const fileName = fileNameOf(file);
+        const videoUpload = await uploadVideoFile({
+          client,
+          config,
+          siteId,
+          file,
+          fileName,
+          recorded: mediaManifest.videos[file],
+          readLibrary,
+          recordPending: async (videoId, base) => {
+            mediaManifest.videos[file] = { videoId, ...base, pendingConfirm: true };
+            mediaManifest.mediaManifestVersion = MEDIA_MANIFEST_VERSION;
+            mediaManifest.siteId = siteId;
+            await writeMediaManifest(config.workspaceDir, mediaManifest);
+          },
+          onProgress,
+        });
+        if (videoUpload !== null) {
+          const { video, contentType, byteLength, modifiedMilliseconds, deduplicated } = videoUpload;
+          mediaManifest.videos[file] = {
+            videoId: video.videoId,
+            contentType,
+            byteLength,
+            modifiedMilliseconds,
+          };
+          uploadedVideos.push({
+            file,
+            videoId: video.videoId,
+            contentType,
+            byteLength,
+            deduplicated,
+            durationMilliseconds: video.durationMilliseconds,
+          });
+          // Recorded as soon as it is confirmed: a later original can take an
+          // hour to send, and an interrupt then must not forget this id, which a
+          // re-run would answer by uploading the video again.
+          mediaManifest.mediaManifestVersion = MEDIA_MANIFEST_VERSION;
+          mediaManifest.siteId = siteId;
+          await writeMediaManifest(config.workspaceDir, mediaManifest);
+          continue;
+        }
         const bytes = await readWorkspaceFile(config.workspaceDir, file, WORKSPACE_LIMITS.mediaBytes);
         const { contentType, width, height } = inspectImageBytes(bytes, file);
         const hash = contentHash(bytes);
@@ -260,7 +563,9 @@ export async function mediaUpload(invocation) {
       // with it, because an image id means nothing without one.
       mediaManifest.mediaManifestVersion = MEDIA_MANIFEST_VERSION;
       mediaManifest.siteId = siteId;
-      if (uploaded.length > 0) await writeMediaManifest(config.workspaceDir, mediaManifest);
+      if (uploaded.length > 0 || uploadedVideos.length > 0) {
+        await writeMediaManifest(config.workspaceDir, mediaManifest);
+      }
     }
 
     onProgress("Waiting for image processing to finish.");
@@ -291,7 +596,6 @@ export async function mediaUpload(invocation) {
       manifestEntry.urls = image.responsiveUrls;
     }
     await writeMediaManifest(config.workspaceDir, mediaManifest);
-
     const reported = boundedList(
       uploaded.map((entry) => ({
         file: entry.file,
@@ -311,6 +615,21 @@ export async function mediaUpload(invocation) {
       })),
       MAXIMUM_REPORTED,
     );
+    const reportedVideos = boundedList(
+      uploadedVideos.map((entry) => ({
+        file: entry.file,
+        videoId: entry.videoId,
+        contentType: entry.contentType,
+        byteLength: entry.byteLength,
+        deduplicated: entry.deduplicated,
+        durationMilliseconds: entry.durationMilliseconds,
+        // Both forms that place it on a page, each accepted as written: a
+        // `component:video` fence for Markdown sources, and the ProseMirror
+        // block for `.pm.json` sources.
+        component: videoComponent(entry.videoId),
+      })),
+      MAXIMUM_REPORTED,
+    );
     return successResult(VERB_MEDIA_UPLOAD, siteId, {
       mediaManifestFile: MEDIA_MANIFEST_FILE_NAME,
       media: {
@@ -318,6 +637,11 @@ export async function mediaUpload(invocation) {
         deduplicated: uploaded.filter((entry) => entry.deduplicated).length,
         items: reported.items,
         ...(reported.truncated ? { itemsTruncated: true } : {}),
+      },
+      videos: {
+        total: uploadedVideos.length,
+        items: reportedVideos.items,
+        ...(reportedVideos.truncated ? { itemsTruncated: true } : {}),
       },
     });
   });

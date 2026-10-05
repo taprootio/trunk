@@ -606,3 +606,60 @@ test("reaches the component tables through a whole document", () => {
   assert.deepEqual(errors.map((error) => error.code), ["content.component_data"]);
   assert.deepEqual(errors.map((error) => error.path), ["/content/0/attrs/componentData/height"]);
 });
+
+test("a video embed block is validated against its provider's id rules and closed shape", () => {
+  const issues = (data) => validateComponentBlock("video-embed", JSON.stringify(data), "/attrs").map((e) => e.path);
+  const base = { provider: "youtube", videoId: "dQw4w9WgXcQ", title: "Studio tour" };
+
+  assert.deepEqual(issues({ ...base, aspectRatio: "16:9" }), []);
+  assert.deepEqual(issues({ provider: "vimeo", videoId: "76979871", title: "t" }), []);
+  assert.deepEqual(issues({ ...base, url: "https://youtu.be/dQw4w9WgXcQ" }), ["/attrs/componentData/url"]);
+  assert.deepEqual(issues({ ...base, provider: "dailymotion" }), ["/attrs/componentData/provider"]);
+  assert.deepEqual(issues({ ...base, videoId: "../x" }), ["/attrs/componentData/videoId"]);
+  assert.deepEqual(issues({ ...base, provider: "vimeo" }), ["/attrs/componentData/videoId"]);
+  assert.deepEqual(issues({ provider: "youtube", videoId: "dQw4w9WgXcQ" }), ["/attrs/componentData/title"]);
+  assert.deepEqual(issues({ ...base, title: "x".repeat(201) }), ["/attrs/componentData/title"]);
+  assert.deepEqual(issues({ ...base, aspectRatio: "wide" }), ["/attrs/componentData/aspectRatio"]);
+});
+
+test("the video embed example validates and canonicalizes in declaration order", () => {
+  const { example } = getComponentDefinition("video-embed");
+  assert.deepEqual(validateComponentBlock("video-embed", JSON.stringify(example), "/attrs"), []);
+  assert.deepEqual(Object.keys(JSON.parse(canonicalizeComponentData("video-embed", { ...example, aspectRatio: "4:3" }))), [
+    "provider",
+    "videoId",
+    "title",
+    "aspectRatio",
+  ]);
+});
+
+test("video and video embed blocks take the same optional max height and border width as images", () => {
+  const video = { videoId: "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d" };
+  const embed = { provider: "youtube", videoId: "dQw4w9WgXcQ", title: "Studio tour" };
+  const issues = (type, data) => validateComponentBlock(type, JSON.stringify(data), "/attrs").map((e) => e.path);
+
+  for (const [type, base] of [["video", video], ["video-embed", embed]]) {
+    assert.deepEqual(issues(type, base), []);
+    assert.deepEqual(issues(type, { ...base, maxHeight: "50vh", borderWidth: "4px" }), []);
+    assert.deepEqual(issues(type, { ...base, maxHeight: "none", borderWidth: "0" }), []);
+    assert.deepEqual(issues(type, { ...base, maxHeight: "calc(100vh - 4rem)" }), []);
+    assert.deepEqual(issues(type, { ...base, maxHeight: "tall" }), ["/attrs/componentData/maxHeight"]);
+    assert.deepEqual(issues(type, { ...base, maxHeight: 50 }), ["/attrs/componentData/maxHeight"]);
+    assert.deepEqual(issues(type, { ...base, borderWidth: "none" }), ["/attrs/componentData/borderWidth"]);
+    assert.deepEqual(issues(type, { ...base, borderWidth: "2px; color: red" }), ["/attrs/componentData/borderWidth"]);
+    assert.deepEqual(issues(type, { ...base, maxHeight: "site-default" }), ["/attrs/componentData/maxHeight"]);
+  }
+});
+
+test("the video blocks describe the two fields and keep them last in declaration order", () => {
+  for (const type of ["video", "video-embed"]) {
+    const definition = getComponentDefinition(type);
+    assert.deepEqual(Object.keys(definition.fields).slice(-2), ["maxHeight", "borderWidth"]);
+    assert.ok(definition.authoring.notes.some((line) => line.includes("maxHeight") && line.includes("borderWidth")));
+  }
+  const { example } = getComponentDefinition("video");
+  assert.deepEqual(
+    Object.keys(JSON.parse(canonicalizeComponentData("video", { ...example, borderWidth: "2px", maxHeight: "50vh" }))).slice(-2),
+    ["maxHeight", "borderWidth"],
+  );
+});

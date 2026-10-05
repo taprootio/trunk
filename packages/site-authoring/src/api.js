@@ -801,10 +801,85 @@ export function normalizeImage(value) {
   };
 }
 
+export async function requestVideoUpload(client, siteId, body) {
+  return requireObject(
+    await client.request(sitePath(siteId, "videos/request-upload"), { method: "POST", body }),
+    "api.video_contract",
+    "video upload request",
+  );
+}
+
+export async function confirmVideoUpload(client, siteId, uploadId) {
+  return normalizeVideo(
+    await client.request(sitePath(siteId, "videos/confirm-upload"), { method: "POST", body: { uploadId } }),
+  );
+}
+
+/**
+ * Copies a YouTube or Vimeo thumbnail into the site's images and returns that image,
+ * which is still being processed (TR01109). `posterFromImage` shapes it for a component.
+ */
+export async function importVideoEmbedPoster(client, siteId, provider, videoId) {
+  const response = requireObject(
+    await client.request(sitePath(siteId, "videos/import-embed-poster"), {
+      method: "POST",
+      body: { provider, videoId },
+    }),
+    "api.video_contract",
+    "video embed poster",
+  );
+  return normalizeImage(response.image);
+}
+
+/** The object a component's poster field holds, from an image whose processing is complete. */
+export function posterFromImage(image) {
+  return { imageId: image.imageId, src: image.url, urls: image.responsiveUrls, width: image.width, height: image.height, alt: "" };
+}
+
+export function normalizeVideo(value) {
+  const video = requireObject(value, "api.video_contract", "video");
+  return {
+    videoId: requireCanonicalUuid(video.videoId, "api.video_contract", "video.videoId"),
+    title: text(video.title),
+    bytes: safeCount(video.bytes),
+    durationMilliseconds: safeCount(video.durationMs),
+    width: safeCount(video.width),
+    height: safeCount(video.height),
+    sourceUrl: text(video.sourceUrl),
+  };
+}
+
+/**
+ * The site's videos through `ListVideos`, paged like the image library and
+ * bounded the same way. A video is ready the moment it is listed.
+ */
+export async function listVideos(client, siteId, requestOptions = {}) {
+  const videos = [];
+  let pageToken = "";
+  for (let request = 0; request < MAXIMUM_LIST_REQUESTS; request += 1) {
+    const search = query([["pageSize", LIST_PAGE_SIZE], ["pageToken", pageToken]]);
+    const response = requireObject(
+      await client.request(sitePath(siteId, `videos${search}`), requestOptions),
+      "api.video_contract",
+      "site videos",
+    );
+    const batch = Array.isArray(response.videos) ? response.videos : [];
+    for (const entry of batch) videos.push(normalizeVideo(entry));
+    pageToken = typeof response.nextPageToken === "string" ? response.nextPageToken : "";
+    if (pageToken === "" || batch.length === 0) return { videos, truncated: false };
+    if (videos.length >= MAXIMUM_IMAGES) break;
+  }
+  return { videos, truncated: true };
+}
+
 /**
  * Processing is observed through `ListSiteImages`; `GetImageById` is
  * session-only under TR00602's read list, so a key-authorized client watches
  * the library rather than one image.
+ *
+ * `imageIds` (at most 100) reads exactly those images instead of the library, in any
+ * purpose: the way to watch an image the library never lists, such as the embed
+ * poster the server copied for a push.
  *
  * `requestOptions` carries a poller's `{ deadline, now }` into *every* page of
  * the listing. Without it a single read of a large library could spend far more
@@ -812,12 +887,16 @@ export function normalizeImage(value) {
  * requests, each with its own request timeout and retry budget — and the
  * deadline would only be noticed once the read finally returned.
  */
-export async function listSiteImages(client, siteId, requestOptions = {}) {
+export async function listSiteImages(client, siteId, requestOptions = {}, { imageIds = [] } = {}) {
   const images = [];
   let pageToken = "";
   let summary = { totalImages: 0, processingImages: 0 };
   for (let request = 0; request < MAXIMUM_LIST_REQUESTS; request += 1) {
-    const search = query([["pageSize", LIST_PAGE_SIZE], ["pageToken", pageToken]]);
+    // Asking by id reads exactly those images, whatever their purpose. The library lists the
+    // owner's own images only, so a copied embed poster is never in it.
+    const search = imageIds.length > 0
+      ? query([["imageIds", imageIds]])
+      : query([["pageSize", LIST_PAGE_SIZE], ["pageToken", pageToken]]);
     const response = requireObject(
       await client.request(sitePath(siteId, `images${search}`), requestOptions),
       "api.image_contract",

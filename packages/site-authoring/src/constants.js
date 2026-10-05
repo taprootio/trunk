@@ -225,6 +225,9 @@ export const LIMITS = Object.freeze({
   redirectMapResponseBytes: 8 * 1024 * 1024,
   requestMilliseconds: 60_000,
   uploadMilliseconds: 5 * 60_000,
+  // A video is up to the licence's upload cap (at most 250 MB) over one PUT, which
+  // takes minutes where an image takes seconds.
+  videoUploadMilliseconds: 2 * 60 * 60_000,
   deploymentMilliseconds: 30 * 60_000,
   previewMilliseconds: 5 * 60_000,
   pollIntervalMilliseconds: 2_000,

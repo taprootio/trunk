@@ -1,7 +1,8 @@
 import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -288,12 +289,18 @@ function api(routes) {
     const target = new URL(url);
     const method = init.method ?? "GET";
     const bodyText = typeof init.body === "string" ? init.body : undefined;
+    // A streamed upload body (a video original) is read to the end here, as the
+    // object store would, so a test can assert what was actually sent.
+    const streamedBytes = init.body !== null && typeof init.body === "object" && typeof init.body.getReader === "function"
+      ? new Uint8Array(await new Response(init.body).arrayBuffer())
+      : undefined;
     const call = {
       method,
       pathname: target.pathname,
       query: target.searchParams,
       body: bodyText === undefined ? undefined : JSON.parse(bodyText),
-      bytes: ArrayBuffer.isView(init.body) ? init.body : undefined,
+      bytes: ArrayBuffer.isView(init.body) ? init.body : streamedBytes,
+      duplex: init.duplex,
       headers: init.headers,
     };
     calls.push(call);
@@ -479,6 +486,10 @@ const BROKEN_REFERENCES = /\/sites\/[^/]+\/broken-references$/u;
 const REQUEST_UPLOAD = /\/images\/request-upload$/u;
 const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
 const PRESIGNED_PUT = /^\/upload$/u;
+const SITE_VIDEOS = /\/sites\/[^/]+\/videos$/u;
+const REQUEST_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/request-upload$/u;
+const CONFIRM_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/confirm-upload$/u;
+const IMPORT_VIDEO_EMBED_POSTER = /\/sites\/[^/]+\/videos\/import-embed-poster$/u;
 const PREVIEW_CREATE = /\/authoring-previews\/pages\/[^/]+$/u;
 const PREVIEW_STATUS = /\/authoring-previews\/pages\/[^/]+\/[^/:]+$/u;
 const PREVIEW_MINT = /\/authoring-previews\/pages\/[^/]+\/[^/]+:mint-handoff$/u;
@@ -548,6 +559,10 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: DEPLOYMENTS, permission: "site.deployments.view_any" },
   { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
   { method: "GET", pattern: SITE_IMAGES, permission: "site.media.manage" },
+  { method: "GET", pattern: SITE_VIDEOS, permission: "site.media.manage" },
+  { method: "POST", pattern: REQUEST_VIDEO_UPLOAD, permission: "site.media.manage" },
+  { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, permission: "site.media.manage" },
+  { method: "POST", pattern: IMPORT_VIDEO_EMBED_POSTER, permission: "site.media.manage" },
   { method: "GET", pattern: BROKEN_REFERENCES, permission: "site.pages.edit_any" },
   { method: "POST", pattern: REQUEST_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: CONFIRM_UPLOAD, permission: "site.media.manage" },
@@ -7264,6 +7279,858 @@ test("media upload holds the processing deadline inside one paginated read", asy
   // page bound would mean the deadline was not reaching the requests.
   assert.ok(wire.matching("GET", SITE_IMAGES).length <= 6, "the paginated read must stop at the deadline");
 });
+
+// ---------------------------------------------------------------------------
+// media upload: video
+// ---------------------------------------------------------------------------
+
+const VIDEO_ID = "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d";
+const OTHER_VIDEO_ID = "0a1b2c3d-0a1b-4c3d-8a1b-0a1b2c3d4e5f";
+
+// Real, small H.264 files (no audio) written once with mediabunny from a sample: an MP4
+// with its index first, the same file with its index last, and a MOV. Taproot does not
+// encode, so these are what the CLI reads, remuxes and declares.
+const videoFixture = (name) => readFileSync(new URL(`./fixtures/video/${name}`, import.meta.url));
+const FASTSTART = videoFixture("faststart.mp4");
+const INDEX_AT_END = videoFixture("index-at-end.mp4");
+const QUICKTIME = videoFixture("quick.mov");
+const HEVC_REFUSAL = "This video uses HEVC (H.265). Export it as H.264 and upload again.";
+
+/** The index (`moov`) before the media data (`mdat`) among a file's top-level boxes. */
+function indexComesFirstIn(bytes) {
+  let offset = 0;
+  while (offset + 8 <= bytes.byteLength) {
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    if (type === "moov") return true;
+    if (type === "mdat") return false;
+    offset += bytes.readUInt32BE(offset);
+  }
+  return false;
+}
+
+/** An EBML header declaring `docType`, enough for the container sniffer. */
+function ebml(docType, size = 1024) {
+  const bytes = Buffer.alloc(size, 0x11);
+  Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x82, docType.length + 0x80]).copy(bytes, 0);
+  bytes.write(docType, 8, "ascii");
+  return bytes;
+}
+
+/** Bytes that carry an MP4 `ftyp` brand and nothing a reader can use. */
+function unreadableMp4(size = 512) {
+  const bytes = Buffer.alloc(size, 0x5a);
+  bytes.writeUInt32BE(24, 0);
+  bytes.write("ftyp", 4, "ascii");
+  bytes.write("isom", 8, "ascii");
+  return bytes;
+}
+
+const confirmedVideo = (id = VIDEO_ID) => ({
+  videoId: id,
+  title: "tour",
+  bytes: String(FASTSTART.byteLength),
+  durationMs: 1000,
+  width: 1280,
+  height: 720,
+  sourceUrl: `https://video.example.test/site/${id}/video.mp4`,
+});
+
+function videoUploadRoutes() {
+  return [
+    {
+      method: "POST",
+      pattern: REQUEST_VIDEO_UPLOAD,
+      reply: (call) => ({
+        presignedUrl: PRESIGNED_URL,
+        uploadId: VIDEO_ID,
+        requiredHeaders: {
+          "Content-Type": call.body.contentType,
+          "Content-Length": String(call.body.sizeBytes),
+          "If-None-Match": "*",
+        },
+      }),
+    },
+    { method: "PUT", pattern: PRESIGNED_PUT, reply: () => new Response(null, { status: 200 }) },
+    { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, reply: () => confirmedVideo() },
+    { method: "GET", pattern: SITE_VIDEOS, reply: { videos: [confirmedVideo()], nextPageToken: "" } },
+  ];
+}
+
+test("media upload sends a faststart H.264 MP4 as it is, declares its codecs and confirms it ready", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+  const result = await mediaUpload(invocation);
+
+  const request = wire.matching("POST", REQUEST_VIDEO_UPLOAD)[0];
+  assert.deepEqual(request.body, {
+    fileName: "tour.mp4",
+    contentType: "video/mp4",
+    sizeBytes: FASTSTART.byteLength,
+    videoCodec: request.body.videoCodec,
+    audioCodec: "",
+  });
+  assert.match(request.body.videoCodec, /^avc[13]\./u);
+  assert.equal(wire.matching("POST", REQUEST_UPLOAD).length, 0);
+
+  // Sent as it is, with the signed length, type and create-only header echoed verbatim and no bearer.
+  const put = wire.matching("PUT", PRESIGNED_PUT)[0];
+  assert.equal(put.duplex, "half");
+  assert.equal(put.headers.get("content-type"), "video/mp4");
+  assert.equal(put.headers.get("content-length"), String(FASTSTART.byteLength));
+  assert.equal(put.headers.get("if-none-match"), "*");
+  assert.equal(put.headers.get("authorization"), null);
+  assert.ok(Buffer.from(put.bytes).equals(FASTSTART));
+  assert.equal(wire.matching("POST", CONFIRM_VIDEO_UPLOAD)[0].body.uploadId, VIDEO_ID);
+  // Ready on confirm: nothing is read back to wait for it.
+  assert.equal(wire.matching("GET", SITE_VIDEOS).length, 0);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.deepEqual(manifest.videos["media/tour.mp4"], {
+    videoId: VIDEO_ID,
+    contentType: "video/mp4",
+    byteLength: FASTSTART.byteLength,
+    modifiedMilliseconds: manifest.videos["media/tour.mp4"].modifiedMilliseconds,
+  });
+  assert.equal(result.media.total, 0);
+  assert.equal(result.videos.total, 1);
+  assert.deepEqual(result.videos.items[0], {
+    file: "media/tour.mp4",
+    videoId: VIDEO_ID,
+    contentType: "video/mp4",
+    byteLength: FASTSTART.byteLength,
+    deduplicated: false,
+    durationMilliseconds: 1000,
+    component: {
+      markdown: `\`\`\`component:video\n${JSON.stringify({ videoId: VIDEO_ID })}\n\`\`\``,
+      block: {
+        type: "componentBlock",
+        attrs: { componentType: "video", componentData: JSON.stringify({ videoId: VIDEO_ID }) },
+      },
+    },
+  });
+  // Each form is accepted as reported, and both mean the same block.
+  const { component } = result.videos.items[0];
+  assert.deepEqual(validateDocument({ type: "doc", content: [component.block] }).errors, []);
+  const converted = await markdownToProseMirror(component.markdown, { resolveImage: async () => assert.fail() });
+  assert.deepEqual(converted.doc.content, [component.block]);
+});
+
+test("media upload rewrites an MP4 whose index is at the end with the index first, without re-encoding", async (site) => {
+  assert.equal(indexComesFirstIn(INDEX_AT_END), false);
+  const workspace = await fixture(site, { "media/tour.mp4": INDEX_AT_END });
+  const wire = api(videoUploadRoutes());
+  const { invocation, progress } = invoke(workspace, wire, { verb: "media upload" });
+  await mediaUpload(invocation);
+
+  const request = wire.matching("POST", REQUEST_VIDEO_UPLOAD)[0];
+  const put = wire.matching("PUT", PRESIGNED_PUT)[0];
+  // What was declared is what was sent: the rewritten file, with its index first.
+  assert.equal(request.body.sizeBytes, put.bytes.byteLength);
+  assert.equal(indexComesFirstIn(Buffer.from(put.bytes)), true);
+  assert.equal(put.headers.get("content-length"), String(put.bytes.byteLength));
+  // Copied, not re-encoded: the video's codec string is unchanged.
+  assert.match(request.body.videoCodec, /^avc[13]\./u);
+  assert.ok(progress.some((line) => line.includes("without re-encoding")));
+  // The record keeps the source file's size, which is what an unchanged re-run compares.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(manifest.videos["media/tour.mp4"].byteLength, INDEX_AT_END.byteLength);
+});
+
+test("media upload rewrites a MOV as an MP4 and names the upload .mp4", async (site) => {
+  const workspace = await fixture(site, { "media/quick.mov": QUICKTIME });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+  await mediaUpload(invocation);
+
+  const request = wire.matching("POST", REQUEST_VIDEO_UPLOAD)[0];
+  assert.equal(request.body.fileName, "quick.mp4");
+  assert.equal(request.body.contentType, "video/mp4");
+  const sent = Buffer.from(wire.matching("PUT", PRESIGNED_PUT)[0].bytes);
+  assert.equal(sent.toString("latin1", 4, 8), "ftyp");
+  assert.equal(indexComesFirstIn(sent), true);
+});
+
+test("media upload reads a video's container from its bytes, not its name", async (site) => {
+  const workspace = await fixture(site, { "media/quick.dat": QUICKTIME, "media/clip.bin": ebml("webm") });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, {
+    verb: "media upload",
+    paths: ["media/quick.dat", "media/clip.bin"],
+  });
+  await mediaUpload(invocation);
+
+  // Both are declared as MP4: the MOV after its rewrite, the WebM with no usable codecs so
+  // the server, which decides, refuses it by name.
+  assert.deepEqual(
+    wire.matching("POST", REQUEST_VIDEO_UPLOAD).map((call) => [call.body.fileName, call.body.contentType]),
+    [["quick.mp4", "video/mp4"], ["clip.mp4", "video/mp4"]],
+  );
+});
+
+test("media upload does not claim a Matroska file as WebM", async (site) => {
+  const workspace = await fixture(site, { "media/clip.mkv": ebml("matroska") });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload", paths: ["media/clip.mkv"] });
+
+  await assert.rejects(
+    mediaUpload(invocation),
+    (error) => error?.code === "media.unsupported_format" && error?.field === "media/clip.mkv",
+  );
+  assert.equal(wire.calls.length, 0);
+});
+
+test("media upload prints the server's one-line refusal as it came and sends nothing", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const wire = api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== REQUEST_VIDEO_UPLOAD),
+    {
+      method: "POST",
+      pattern: REQUEST_VIDEO_UPLOAD,
+      reply: () => jsonResponse(violation("VideoCodec", HEVC_REFUSAL), 400),
+    },
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+
+  await assert.rejects(
+    mediaUpload(invocation),
+    (error) =>
+      error?.code === "media.video_refused"
+      && error?.field === "media/tour.mp4"
+      && error.message === `'media/tour.mp4': ${HEVC_REFUSAL}`,
+  );
+  assert.equal(wire.matching("PUT", PRESIGNED_PUT).length, 0);
+});
+
+test("media upload prints a refusal the server words under the file, site or upload field", async (site) => {
+  for (const field of ["FileName", "SiteId", "UploadId"]) {
+    const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+    const wire = api([
+      ...videoUploadRoutes().filter((route) => route.pattern !== REQUEST_VIDEO_UPLOAD),
+      {
+        method: "POST",
+        pattern: REQUEST_VIDEO_UPLOAD,
+        reply: () => jsonResponse(violation(field, "The file name is not usable."), 400),
+      },
+    ]);
+
+    await assert.rejects(
+      mediaUpload(invoke(workspace, wire, { verb: "media upload" }).invocation),
+      (error) =>
+        error?.code === "media.video_refused" && error.message === "'media/tour.mp4': The file name is not usable.",
+      field,
+    );
+  }
+});
+
+test("media upload declares a file it cannot read with no codecs and lets the server refuse it", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": unreadableMp4() });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+  await mediaUpload(invocation);
+
+  const request = wire.matching("POST", REQUEST_VIDEO_UPLOAD)[0];
+  assert.deepEqual([request.body.videoCodec, request.body.audioCodec], ["", ""]);
+  assert.equal(request.body.sizeBytes, 512);
+});
+
+test("media upload prints the server's refusal of a confirm whose stored file failed the check", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const line = "This video's index is at the end of the file, so it cannot start playing at once.";
+  const wire = api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== CONFIRM_VIDEO_UPLOAD),
+    { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, reply: () => jsonResponse(violation("Video", line), 400) },
+  ]);
+
+  await assert.rejects(
+    mediaUpload(invoke(workspace, wire, { verb: "media upload" }).invocation),
+    (error) => error?.code === "media.video_refused" && error.message.includes(line),
+  );
+});
+
+test("media upload reuses an unchanged video it already uploaded instead of uploading it again", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const first = api(videoUploadRoutes());
+  await mediaUpload(invoke(workspace, first, { verb: "media upload" }).invocation);
+  assert.equal(first.matching("PUT", PRESIGNED_PUT).length, 1);
+
+  const second = api(videoUploadRoutes());
+  const { invocation, progress } = invoke(workspace, second, { verb: "media upload" });
+  const result = await mediaUpload(invocation);
+
+  assert.equal(second.matching("POST", REQUEST_VIDEO_UPLOAD).length, 0);
+  assert.equal(second.matching("PUT", PRESIGNED_PUT).length, 0);
+  assert.equal(result.videos.items[0].deduplicated, true);
+  assert.equal(result.videos.items[0].videoId, VIDEO_ID);
+  assert.ok(progress.some((line) => line.includes("unchanged since it was uploaded")));
+});
+
+test("media upload resumes a confirm whose answer was lost instead of uploading the video again", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const lostConfirm = api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== CONFIRM_VIDEO_UPLOAD),
+    // The confirm reached the server and committed, but its answer never arrived.
+    { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, reply: () => new Response("bad gateway", { status: 502 }) },
+  ]);
+  await assert.rejects(mediaUpload(invoke(workspace, lostConfirm, { verb: "media upload" }).invocation));
+  const pending = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(pending.videos["media/tour.mp4"].videoId, VIDEO_ID);
+  assert.equal(pending.videos["media/tour.mp4"].pendingConfirm, true);
+
+  const rerun = api(videoUploadRoutes());
+  const { invocation, progress } = invoke(workspace, rerun, { verb: "media upload" });
+  const result = await mediaUpload(invocation);
+
+  assert.equal(rerun.matching("POST", REQUEST_VIDEO_UPLOAD).length, 0);
+  assert.equal(rerun.matching("PUT", PRESIGNED_PUT).length, 0);
+  assert.equal(rerun.matching("POST", CONFIRM_VIDEO_UPLOAD)[0].body.uploadId, VIDEO_ID);
+  assert.equal(result.videos.items[0].videoId, VIDEO_ID);
+  assert.ok(progress.some((line) => line.includes("Confirmed the earlier upload")));
+  const settled = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(Object.hasOwn(settled.videos["media/tour.mp4"], "pendingConfirm"), false);
+});
+
+test("media upload sends a video again when its earlier upload can no longer be confirmed", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  await assert.rejects(mediaUpload(invoke(workspace, api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== CONFIRM_VIDEO_UPLOAD),
+    { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, reply: () => new Response("bad gateway", { status: 502 }) },
+  ]), { verb: "media upload" }).invocation));
+
+  let confirms = 0;
+  const rerun = api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== CONFIRM_VIDEO_UPLOAD),
+    {
+      method: "POST",
+      pattern: CONFIRM_VIDEO_UPLOAD,
+      // The reservation expired: the first confirm is refused, the new upload's is accepted.
+      reply: () => {
+        confirms += 1;
+        return confirms === 1 ? jsonResponse({ code: 3, message: "Pending upload has expired." }, 400) : confirmedVideo();
+      },
+    },
+  ]);
+  await mediaUpload(invoke(workspace, rerun, { verb: "media upload" }).invocation);
+
+  assert.equal(rerun.matching("POST", REQUEST_VIDEO_UPLOAD).length, 1);
+  assert.equal(rerun.matching("PUT", PRESIGNED_PUT).length, 1);
+});
+
+test("media upload does not upload an unchanged video again when the library is too large to check", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  await mediaUpload(invoke(workspace, api(videoUploadRoutes()), { verb: "media upload" }).invocation);
+
+  const wire = api([
+    ...videoUploadRoutes().filter((route) => route.pattern !== SITE_VIDEOS),
+    {
+      method: "GET",
+      pattern: SITE_VIDEOS,
+      // Never stops paginating and never lists the recorded video: truncated.
+      reply: () => ({ videos: [confirmedVideo(OTHER_VIDEO_ID)], nextPageToken: "more" }),
+    },
+  ]);
+  await assert.rejects(
+    mediaUpload(invoke(workspace, wire, { verb: "media upload" }).invocation),
+    (error) => error?.code === "media.video_library_unverifiable" && error?.field === "media/tour.mp4",
+  );
+  assert.equal(wire.matching("POST", REQUEST_VIDEO_UPLOAD).length, 0);
+  assert.equal(wire.matching("PUT", PRESIGNED_PUT).length, 0);
+});
+
+test("media upload uploads a video again when the file changed or the site no longer has it", async (testContext) => {
+  await testContext.test("the file changed", async (site) => {
+    const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+    await mediaUpload(invoke(workspace, api(videoUploadRoutes()), { verb: "media upload" }).invocation);
+    await writeWorkspaceFile(workspace.workspaceDir, "media/tour.mp4", INDEX_AT_END);
+
+    const wire = api(videoUploadRoutes());
+    await mediaUpload(invoke(workspace, wire, { verb: "media upload" }).invocation);
+
+    assert.equal(wire.matching("PUT", PRESIGNED_PUT).length, 1);
+  });
+
+  await testContext.test("the library no longer holds the video", async (site) => {
+    const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+    await mediaUpload(invoke(workspace, api(videoUploadRoutes()), { verb: "media upload" }).invocation);
+
+    const wire = api([
+      ...videoUploadRoutes().filter((route) => route.pattern !== SITE_VIDEOS),
+      { method: "GET", pattern: SITE_VIDEOS, reply: { videos: [], nextPageToken: "" } },
+    ]);
+    await mediaUpload(invoke(workspace, wire, { verb: "media upload" }).invocation);
+
+    assert.equal(wire.matching("PUT", PRESIGNED_PUT).length, 1);
+  });
+});
+
+test("media upload renews the exchanged credential when a long upload outlasts it", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const RENEWED = "tr_live_renewed_site_credential_never_logged";
+  let exchanges = 0;
+  let timing;
+  const routes = videoUploadRoutes().map((route) =>
+    route.method === "PUT"
+      ? {
+        ...route,
+        // The send takes almost the whole hour the exchanged credential lives.
+        reply: () => {
+          timing.advance(58 * 60_000);
+          return new Response(null, { status: 200 });
+        },
+      }
+      : route
+  );
+  const wire = api([
+    {
+      method: "POST",
+      pattern: TOKEN_EXCHANGE,
+      reply: () => {
+        exchanges += 1;
+        return {
+          rawKey: exchanges === 1 ? EXCHANGED_KEY : RENEWED,
+          keyId: "cccc3333-dddd-4333-8333-eeee33333333",
+          keyPrefix: "tr_live_ex99ab88...",
+          siteId: SITE_ID,
+          // One hour after the suite's fixed clock.
+          expiresAt: exchanges === 1 ? "2023-11-14T23:13:20.000Z" : "2023-11-15T00:11:20.000Z",
+          capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
+        };
+      },
+    },
+    ...routes,
+  ]);
+  await saveCredential(
+    { XDG_CONFIG_HOME: workspace.configHome },
+    {
+      apiOrigin: "https://app.taproot.test",
+      accountId: "eeee5555-ffff-4555-8555-aaaa55555555",
+      key: "tr_live_stored_sign_in_that_must_never_be_logged",
+      keyId: "dddd4444-eeee-4444-8444-ffff44444444",
+      keyPrefix: "tr_live_ab12cd34...",
+    },
+    { now: () => 1_700_000_000_000 },
+  );
+  const invoked = invoke(workspace, wire, {
+    verb: "media upload",
+    environment: { XDG_CONFIG_HOME: workspace.configHome },
+  });
+  timing = invoked.timing;
+
+  await mediaUpload(invoked.invocation);
+
+  assert.equal(exchanges, 2);
+  const bearerOf = (call) => call.headers.authorization;
+  assert.equal(bearerOf(wire.matching("POST", REQUEST_VIDEO_UPLOAD)[0]), `Bearer ${EXCHANGED_KEY}`);
+  // Confirm comes after the upload outlasted the first credential.
+  assert.equal(bearerOf(wire.matching("POST", CONFIRM_VIDEO_UPLOAD)[0]), `Bearer ${RENEWED}`);
+  // The object store never sees either credential.
+  assert.equal(wire.matching("PUT", PRESIGNED_PUT)[0].headers.get("authorization"), null);
+});
+
+test("media upload keeps a confirmed video's id when a later upload in the run fails", async (site) => {
+  const workspace = await fixture(site, { "media/a.mp4": FASTSTART, "media/b.mp4": INDEX_AT_END });
+  const ids = [VIDEO_ID, OTHER_VIDEO_ID];
+  let requested = 0;
+  let sent = 0;
+  const wire = api([
+    {
+      method: "POST",
+      pattern: REQUEST_VIDEO_UPLOAD,
+      reply: (call) => {
+        const uploadId = ids[requested];
+        requested += 1;
+        return {
+          presignedUrl: PRESIGNED_URL,
+          uploadId,
+          requiredHeaders: { "Content-Type": call.body.contentType, "Content-Length": String(call.body.sizeBytes) },
+        };
+      },
+    },
+    {
+      method: "PUT",
+      pattern: PRESIGNED_PUT,
+      reply: () => {
+        sent += 1;
+        return new Response(null, { status: sent === 1 ? 200 : 403 });
+      },
+    },
+    { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, reply: (call) => confirmedVideo(call.body.uploadId) },
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+
+  await assert.rejects(mediaUpload(invocation), (error) => error?.code === "upload.rejected");
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(manifest.videos["media/a.mp4"].videoId, VIDEO_ID);
+  assert.equal(Object.hasOwn(manifest.videos["media/a.mp4"], "pendingConfirm"), false);
+  // The failed one is recorded as an unconfirmed upload, so a re-run confirms or resends it.
+  assert.deepEqual(
+    [manifest.videos["media/b.mp4"].videoId, manifest.videos["media/b.mp4"].pendingConfirm],
+    [OTHER_VIDEO_ID, true],
+  );
+});
+
+test("media upload confirms a video whose PUT landed but whose answer was lost", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  let puts = 0;
+  const wire = api([
+    ...videoUploadRoutes().filter((route) => route.method !== "PUT"),
+    {
+      method: "PUT",
+      pattern: PRESIGNED_PUT,
+      // The first PUT is stored but its answer never arrives; the retry meets the create-only
+      // condition and is refused with 412.
+      reply: () => {
+        puts += 1;
+        return puts === 1 ? new Response("bad gateway", { status: 502 }) : new Response(null, { status: 412 });
+      },
+    },
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "media upload" });
+
+  const result = await mediaUpload(invocation);
+
+  assert.equal(puts, 2);
+  assert.equal(wire.matching("POST", CONFIRM_VIDEO_UPLOAD).length, 1);
+  assert.equal(result.videos.items[0].videoId, VIDEO_ID);
+  assert.ok(progress.some((line) => line.includes("had already landed")));
+});
+
+test("media upload does not confirm a video whose file changed while it was being sent", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const routes = videoUploadRoutes().map((route) =>
+    route.method === "PUT"
+      ? {
+        ...route,
+        // A recorder still appending to the file while the PUT runs.
+        reply: async () => {
+          await writeWorkspaceFile(workspace.workspaceDir, "media/tour.mp4", INDEX_AT_END);
+          return new Response(null, { status: 200 });
+        },
+      }
+      : route
+  );
+  const wire = api(routes);
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+
+  await assert.rejects(
+    mediaUpload(invocation),
+    (error) => error?.code === "workspace.file_changed" && error?.field === "media/tour.mp4",
+  );
+  assert.equal(wire.matching("POST", CONFIRM_VIDEO_UPLOAD).length, 0);
+});
+
+test("media upload does not confirm a video that was appended to in place while it was being sent", async (site) => {
+  const workspace = await fixture(site, { "media/tour.mp4": FASTSTART });
+  const routes = videoUploadRoutes().map((route) =>
+    route.method === "PUT"
+      ? {
+        ...route,
+        reply: async () => {
+          await appendFile(path.join(workspace.workspaceDir, "media/tour.mp4"), Buffer.alloc(64));
+          return new Response(null, { status: 200 });
+        },
+      }
+      : route
+  );
+  const wire = api(routes);
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+
+  await assert.rejects(mediaUpload(invocation), (error) => error?.code === "workspace.file_changed");
+  assert.equal(wire.matching("POST", CONFIRM_VIDEO_UPLOAD).length, 0);
+});
+
+test("media upload names a video over the upload ceiling as a video, before sending anything", async (site) => {
+  const workspace = await fixture(site, { "media/huge.mp4": FASTSTART });
+  // Sparse: the file claims one byte past the ceiling without writing it.
+  await truncate(path.join(workspace.workspaceDir, "media/huge.mp4"), 5 * 1024 * 1024 * 1024 + 1);
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+
+  await assert.rejects(
+    mediaUpload(invocation),
+    (error) => error?.code === "media.video_too_large" && error?.field === "media/huge.mp4",
+  );
+  assert.equal(wire.calls.length, 0);
+});
+
+test("media upload uploads images and videos in one run", async (site) => {
+  const workspace = await fixture(site, { "media/hero.png": png(1200, 800), "media/tour.mp4": FASTSTART });
+  const wire = api([...uploadRoutes(), ...videoUploadRoutes()]);
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+  const result = await mediaUpload(invocation);
+
+  assert.equal(result.media.total, 1);
+  assert.equal(result.videos.total, 1);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(manifest.media["media/hero.png"].imageId, IMAGE_ID);
+  assert.equal(manifest.videos["media/tour.mp4"].videoId, VIDEO_ID);
+});
+
+test("a media manifest written before video upload reads as holding no videos", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-media.json": { mediaManifestVersion: 2, siteId: SITE_ID, media: {} },
+    "media/tour.mp4": FASTSTART,
+  });
+  const wire = api(videoUploadRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "media upload" });
+  await mediaUpload(invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(manifest.mediaManifestVersion, 2);
+  assert.equal(Object.keys(manifest.videos).length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// pages push: a page that places a video
+// ---------------------------------------------------------------------------
+
+function videoPage(videoId) {
+  return {
+    ...PUSH_WORKSPACE,
+    "pages/about.md": "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nHello.\n\n"
+      + `\`\`\`component:video\n${JSON.stringify({ videoId, caption: "Tour" })}\n\`\`\`\n`,
+  };
+}
+
+function videoLibraryRoute(videos) {
+  return { method: "GET", pattern: SITE_VIDEOS, reply: { videos, nextPageToken: "" } };
+}
+
+test("pages push places a ready video the site has", async (site) => {
+  const workspace = await fixture(site, videoPage(VIDEO_ID));
+  const wire = api([
+    ...pushRoutes(),
+    videoLibraryRoute([{ videoId: VIDEO_ID }]),
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  const result = await pagesPush(invocation);
+
+  assert.equal(result.pages.created, 1);
+  assert.equal(wire.matching("GET", SITE_VIDEOS).length, 1);
+  const sent = wire.matching("POST", PAGES_COLLECTION)[0].body.template.freeFormData.body;
+  const block = sent.content.find((node) => node.type === "componentBlock");
+  assert.equal(block.attrs.componentType, "video");
+  assert.deepEqual(JSON.parse(block.attrs.componentData), { videoId: VIDEO_ID, caption: "Tour" });
+});
+
+test("pages push refuses a video the site does not have before anything is written", async (site) => {
+  const workspace = await fixture(site, videoPage(OTHER_VIDEO_ID));
+  const wire = api([
+    ...pushRoutes(),
+    videoLibraryRoute([{ videoId: VIDEO_ID }]),
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  await assert.rejects(
+    pagesPush(invocation),
+    (error) => error?.code === "pages.video_unknown" && error?.field === "pages/about.md",
+  );
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+test("pages push does not call a video unknown when the library was too large to read in full", async (site) => {
+  const workspace = await fixture(site, videoPage(OTHER_VIDEO_ID));
+  const wire = api([
+    ...pushRoutes(),
+    {
+      method: "GET",
+      pattern: SITE_VIDEOS,
+      // A library that never stops paginating: the listing is truncated.
+      reply: () => ({ videos: [{ videoId: VIDEO_ID }], nextPageToken: "more" }),
+    },
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  await assert.rejects(pagesPush(invocation), (error) => error?.code === "pages.video_library_unverifiable");
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("pages push asks the video library nothing when no page places a video", async (site) => {
+  const workspace = await fixture(site, PUSH_WORKSPACE);
+  const wire = api(pushRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  assert.equal(wire.matching("GET", SITE_VIDEOS).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// pages push: a video embed with no poster gets the provider's thumbnail
+// ---------------------------------------------------------------------------
+
+const EMBED_FENCE = (data) => `\`\`\`component:video-embed\n${JSON.stringify(data)}\n\`\`\`\n`;
+
+function embedPage(...fences) {
+  return {
+    ...PUSH_WORKSPACE,
+    "pages/about.md": "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nHello.\n\n" + fences.join("\n"),
+  };
+}
+
+function importedPosterImage() {
+  return {
+    imageId: IMAGE_ID,
+    url: "https://img.example/poster-low.webp",
+    responsiveUrls: [{ minWidth: 640, url: "https://img.example/poster-640.webp" }],
+    width: 1280,
+    height: 720,
+    uploadedName: "youtube dQw4w9WgXcQ poster",
+    processingState: "IMAGE_PROCESSING_STATE_PENDING",
+  };
+}
+
+function importPosterRoute(reply = () => ({ imageId: IMAGE_ID, width: 1280, height: 720, image: importedPosterImage() })) {
+  return { method: "POST", pattern: IMPORT_VIDEO_EMBED_POSTER, reply };
+}
+
+/**
+ * The listing the CLI polls for the copied image's processing state, one state per read.
+ * An embed poster is owned media: the server's library never lists it, so only a read that
+ * names the image's id returns it, as the real listing does.
+ */
+function posterLibraryRoute(states = ["IMAGE_PROCESSING_STATE_COMPLETE"]) {
+  let read = 0;
+  return {
+    method: "GET",
+    pattern: SITE_IMAGES,
+    reply: (call) => {
+      if (!call.query.getAll("imageIds").includes(IMAGE_ID)) {
+        return { images: [], nextPageToken: "", totalImages: 0, processingImages: 0 };
+      }
+      const state = states[Math.min(read, states.length - 1)];
+      read += 1;
+      return {
+        images: [{ image: importedPosterImage(), processingState: state }],
+        nextPageToken: "",
+        totalImages: 1,
+        processingImages: state === "IMAGE_PROCESSING_STATE_COMPLETE" ? 0 : 1,
+      };
+    },
+  };
+}
+
+const sentEmbeds = (wire) =>
+  wire.matching("POST", PAGES_COLLECTION)[0].body.template.freeFormData.body.content
+    .filter((node) => node.type === "componentBlock")
+    .map((node) => JSON.parse(node.attrs.componentData));
+
+test("pages push copies the provider thumbnail for an embed with no poster, once per video", async (site) => {
+  const workspace = await fixture(site, embedPage(
+    EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour" }),
+    EMBED_FENCE({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "Tour again" }),
+  ));
+  const wire = api([...pushRoutes(), importPosterRoute(), posterLibraryRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  const imports = wire.matching("POST", IMPORT_VIDEO_EMBED_POSTER);
+  assert.equal(imports.length, 1);
+  assert.deepEqual(imports[0].body, { provider: "youtube", videoId: "dQw4w9WgXcQ" });
+  const poster = {
+    imageId: IMAGE_ID,
+    src: "https://img.example/poster-low.webp",
+    urls: [{ minWidth: 640, url: "https://img.example/poster-640.webp" }],
+    width: 1280,
+    height: 720,
+    alt: "",
+  };
+  assert.deepEqual(sentEmbeds(wire).map((data) => data.poster), [poster, poster]);
+});
+
+test("pages push leaves an embed that already has a poster alone", async (site) => {
+  const kept = { imageId: OTHER_VIDEO_ID, src: "x", urls: [], width: 1, height: 1, alt: "" };
+  const workspace = await fixture(site, embedPage(
+    EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour", poster: kept }),
+  ));
+  const wire = api([...pushRoutes(), importPosterRoute(), posterLibraryRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  assert.equal(wire.matching("POST", IMPORT_VIDEO_EMBED_POSTER).length, 0);
+  assert.deepEqual(sentEmbeds(wire)[0].poster, kept);
+});
+
+test("pages push sends an embed with no poster when the thumbnail cannot be copied", async (site) => {
+  const workspace = await fixture(site, embedPage(
+    EMBED_FENCE({ url: "https://vimeo.com/76979871", title: "Tour" }),
+  ));
+  const wire = api([
+    ...pushRoutes(),
+    importPosterRoute(() => jsonResponse(violation("Poster", "That video's thumbnail could not be copied."), 400)),
+    posterLibraryRoute(),
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  const result = await pagesPush(invocation);
+
+  assert.equal(result.pages.created, 1);
+  assert.equal(sentEmbeds(wire)[0].poster, undefined);
+  assert.ok(progress.some((line) => line.includes("keeps no poster for vimeo video 76979871")));
+});
+
+test("pages push waits for the copied thumbnail to finish processing before using it", async (site) => {
+  const workspace = await fixture(site, embedPage(
+    EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour" }),
+  ));
+  const wire = api([
+    ...pushRoutes(),
+    importPosterRoute(),
+    posterLibraryRoute(["IMAGE_PROCESSING_STATE_PENDING", "IMAGE_PROCESSING_STATE_COMPLETE"]),
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  assert.equal(wire.matching("GET", SITE_IMAGES).length, 2);
+  assert.equal(sentEmbeds(wire)[0].poster.imageId, IMAGE_ID);
+});
+
+test("pages push sends an embed with no poster when the copied thumbnail fails processing", async (site) => {
+  const workspace = await fixture(site, embedPage(
+    EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour" }),
+  ));
+  const wire = api([...pushRoutes(), importPosterRoute(), posterLibraryRoute(["IMAGE_PROCESSING_STATE_FAILED"])]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  const result = await pagesPush(invocation);
+
+  assert.equal(result.pages.created, 1);
+  assert.equal(sentEmbeds(wire)[0].poster, undefined);
+  assert.ok(progress.some((line) => line.includes("keeps no poster for youtube video dQw4w9WgXcQ")));
+});
+
+test("pages push copies nothing when no page places an embed", async (site) => {
+  const workspace = await fixture(site, PUSH_WORKSPACE);
+  const wire = api([...pushRoutes(), importPosterRoute(), posterLibraryRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  assert.equal(wire.matching("POST", IMPORT_VIDEO_EMBED_POSTER).length, 0);
+});
+
+test("a video component refuses fields the page may not author", async () => {
+  const errors = validateDocument({
+    type: "doc",
+    content: [{
+      type: "componentBlock",
+      attrs: {
+        componentType: "video",
+        componentData: JSON.stringify({
+          videoId: VIDEO_ID,
+          aspectRatio: "wide",
+          caption: "x".repeat(301),
+          delivery: { sourceUrl: "https://evil.example/x.mp4" },
+        }),
+      },
+    }],
+  }).errors.map((error) => error.path).sort();
+
+  assert.deepEqual(errors, [
+    "/content/0/attrs/componentData/aspectRatio",
+    "/content/0/attrs/componentData/caption",
+    "/content/0/attrs/componentData/delivery",
+  ]);
+});
+
 
 test("media upload takes files and directories as positional arguments", async (testContext) => {
   const mediaWorkspace = {

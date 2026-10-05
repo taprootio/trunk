@@ -969,6 +969,30 @@ test("refuses every construct outside the subset by name", async (testContext) =
       "component block",
     ],
     [
+      "a video embed link that is not YouTube or Vimeo",
+      "```component:video-embed\n{\"url\":\"https://example.com/watch?v=dQw4w9WgXcQ\",\"title\":\"Tour\"}\n```",
+      "content.component_data",
+      "component block",
+    ],
+    [
+      "a video embed given both a link and a pair",
+      "```component:video-embed\n{\"url\":\"https://youtu.be/dQw4w9WgXcQ\",\"provider\":\"youtube\",\"videoId\":\"dQw4w9WgXcQ\",\"title\":\"Tour\"}\n```",
+      "content.component_data",
+      "component block",
+    ],
+    [
+      "a video embed stored with an id that is not the provider's",
+      "```component:video-embed\n{\"provider\":\"vimeo\",\"videoId\":\"dQw4w9WgXcQ\",\"title\":\"Tour\"}\n```",
+      "content.component_data",
+      "component block",
+    ],
+    [
+      "a video embed with no title",
+      "```component:video-embed\n{\"url\":\"https://youtu.be/dQw4w9WgXcQ\"}\n```",
+      "content.component_data",
+      "component block",
+    ],
+    [
       "invalid inline-facts JSON",
       "```inline-facts\n{\"value\":\"no array\"}\n```",
       "content.attr_invalid",
@@ -1183,4 +1207,28 @@ test("gates its own output on the validator", () => {
   assert.doesNotThrow(() =>
     assertConvertedDocument({ type: "doc", content: [{ type: "paragraph", content: [text("x")] }] })
   );
+});
+
+test("a video embed fence names the video by link and stores only its provider and id", async () => {
+  const { doc } = await convert(
+    "```component:video-embed\n{\"title\":\"Studio tour\",\"aspectRatio\":\"4:3\","
+      + "\"url\":\"https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=9s\"}\n```",
+  );
+  assert.deepEqual(doc, {
+    type: "doc",
+    content: [{
+      type: "componentBlock",
+      attrs: {
+        componentType: "video-embed",
+        componentData: "{\"provider\":\"youtube\",\"videoId\":\"dQw4w9WgXcQ\",\"title\":\"Studio tour\",\"aspectRatio\":\"4:3\"}",
+      },
+    }],
+  });
+  assert.equal(JSON.stringify(doc).includes("http"), false);
+});
+
+test("a pulled video embed fence, already a provider and id, converts unchanged", async () => {
+  const data = "{\"provider\":\"vimeo\",\"videoId\":\"76979871\",\"title\":\"Opening night\"}";
+  const { doc } = await convert(`\`\`\`component:video-embed\n${data}\n\`\`\``);
+  assert.equal(doc.content[0].attrs.componentData, data);
 });

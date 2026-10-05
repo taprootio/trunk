@@ -72,9 +72,9 @@ test("decoration normalization preserves the processed-image delivery shape and 
   assert.ok(Object.isFrozen(result.decoration.image.urls));
 });
 
-test("decoration normalization derives every enum, bound, and tint token from registry version 9", () => {
+test("decoration normalization derives every enum, bound, and tint token from registry version 12", () => {
   const decoration = FREE_FORM_SECTION_REGISTRY.section.attrs.decoration;
-  assert.equal(FREE_FORM_SECTION_REGISTRY.version, 9);
+  assert.equal(FREE_FORM_SECTION_REGISTRY.version, 12);
   assert.equal(decoration.closed, true);
   assert.deepEqual(decoration.fields.anchor.values, [
     "top-start",

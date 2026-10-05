@@ -44,7 +44,10 @@ export const CONSTRAINTS_BY_TYPE = {
     text: ["required", "min_length", "max_length", "format"],
     long_text: ["required", "min_length", "max_length"],
     email: ["required", "max_length"],
-    tel: ["required", "max_length"],
+    // A published phone field submits E.164, which the visitor did not type, so a
+    // character limit could refuse a number they cannot shorten; the 7–15 digit
+    // check bounds it instead (TR01090).
+    tel: ["required"],
     url: ["required", "max_length"],
     number: ["required", "min", "max", "format"],
     date: ["required", "min", "max"],
@@ -653,7 +656,10 @@ function validateValue(field, value, context) {
 const isTextType = (type) => type === "text" || type === "long_text" || type === "email" || type === "tel" || type === "url";
 function maxLengthOf(field) {
     const ceiling = field.type === "long_text" ? MAX_LONG_TEXT_LENGTH : MAX_SHORT_TEXT_LENGTH;
-    return Math.min(field.max_length ?? ceiling, ceiling);
+    // A definition stored before tel lost max_length (TR01090) may still carry
+    // one; only a type that accepts the constraint is held to it.
+    const limit = CONSTRAINTS_BY_TYPE[field.type].includes("max_length") ? field.max_length : undefined;
+    return Math.min(limit ?? ceiling, ceiling);
 }
 function validateString(field, value) {
     if (field.min_length !== undefined && value.length < field.min_length)

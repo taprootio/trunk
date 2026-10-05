@@ -270,6 +270,10 @@ export const WORKSPACE_LIMITS = Object.freeze({
   settingsBytes: 256 * 1024,
   manifestBytes: 8 * 1024 * 1024,
   mediaBytes: 32 * 1024 * 1024,
+  // A video is streamed unless it must be remuxed: this mirrors the API's own
+  // single-PUT ceiling (`VideoUploadLimits.MaxSingleUploadMb`, 5 GiB). The licence's
+  // upload cap, which the server enforces, is far lower.
+  videoBytes: 5 * 1024 * 1024 * 1024,
   // Pull holds the bodies of the pages this workspace already tracks until it
   // knows whether any of them conflict, because a refusal has to leave `pages/`
   // untouched. Generous for any real authoring workspace, and an explicit
@@ -760,6 +764,106 @@ export async function readWorkspaceFile(workspaceDir, relativePath, maximumBytes
   }
 }
 
+/** How much of a file's start `openWorkspaceFileStream` hands back for container sniffing. */
+const STREAM_HEADER_BYTES = 4096;
+
+/**
+ * Opens one workspace file for streaming under the same discipline as
+ * `readWorkspaceFile` — no link anywhere on the way, a regular file, a byte
+ * bound — without reading it into memory. Returns its size, a bounded prefix
+ * for container sniffing, and a factory for a fresh read stream, because an
+ * upload that is retried reads the file again from the start. The caller must
+ * `close()`.
+ */
+export async function openWorkspaceFileStream(workspaceDir, relativePath, maximumBytes) {
+  const filePath = resolveWorkspacePath(workspaceDir, relativePath);
+  if (!await requireRealDirectoryChain(workspaceDir, relativePath)) {
+    throw new SiteAuthoringError(
+      "workspace.file_missing",
+      `Workspace file '${relativePath}' does not exist.`,
+      { field: relativePath },
+    );
+  }
+  let handle;
+  try {
+    handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const stats = await handle.stat({ bigint: true });
+    if (!stats.isFile()) {
+      throw new SiteAuthoringError(
+        "workspace.not_regular",
+        `Workspace file '${relativePath}' is not a regular file.`,
+        { field: relativePath },
+      );
+    }
+    if (stats.size > BigInt(maximumBytes)) {
+      throw new SiteAuthoringError(
+        "workspace.file_too_large",
+        `Workspace file '${relativePath}' exceeds ${maximumBytes} bytes.`,
+        { field: relativePath },
+      );
+    }
+    const byteLength = Number(stats.size);
+    const modifiedMilliseconds = Math.floor(Number(stats.mtimeMs));
+    const header = Buffer.allocUnsafe(Math.min(byteLength, STREAM_HEADER_BYTES));
+    let total = 0;
+    while (total < header.byteLength) {
+      const { bytesRead } = await handle.read(header, total, header.byteLength - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    const opened = handle;
+    return {
+      byteLength,
+      modifiedMilliseconds,
+      header: header.subarray(0, total),
+      // Exactly the size that was inspected. A file that shrinks under the
+      // upload fails the signed length check; one that grows would not, since
+      // only its first `byteLength` bytes are read, so `verifyUnchanged` is how
+      // the caller proves what it sent is still the file on disk.
+      stream: () => opened.createReadStream({ start: 0, end: byteLength - 1, autoClose: false }),
+      verifyUnchanged: async () => {
+        // The held handle catches an in-place append or rewrite; the path is
+        // checked too, because an editor that saves by renaming a new file over
+        // the old one leaves the handle looking untouched.
+        const current = await opened.stat({ bigint: true });
+        const onDisk = await lstat(filePath, { bigint: true }).catch(() => undefined);
+        if (
+          current.size !== stats.size
+          || current.mtimeMs !== stats.mtimeMs
+          || onDisk === undefined
+          || onDisk.ino !== stats.ino
+          || onDisk.dev !== stats.dev
+        ) {
+          throw new SiteAuthoringError(
+            "workspace.file_changed",
+            `Workspace file '${relativePath}' changed while it was being read, so what was sent is not the file on disk. `
+              + "Wait for whatever is writing it to finish and run the command again.",
+            { field: relativePath },
+          );
+        }
+      },
+      close: async () => {
+        await opened.close().catch(() => {});
+      },
+    };
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    if (error instanceof SiteAuthoringError) throw error;
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      throw new SiteAuthoringError(
+        "workspace.file_missing",
+        `Workspace file '${relativePath}' does not exist.`,
+        { field: relativePath },
+      );
+    }
+    throw new SiteAuthoringError(
+      "workspace.unreadable",
+      `Could not read workspace file '${relativePath}'.`,
+      { field: relativePath },
+    );
+  }
+}
+
 export async function readWorkspaceJson(workspaceDir, relativePath, maximumBytes) {
   const bytes = await readWorkspaceFile(workspaceDir, relativePath, maximumBytes);
   try {
@@ -1180,7 +1284,7 @@ export async function readMediaManifest(workspaceDir, expectedSiteId) {
         { field: MEDIA_MANIFEST_FILE_NAME },
       );
     }
-    return { mediaManifestVersion: MEDIA_MANIFEST_VERSION, siteId: expectedSiteId, media: {} };
+    return { mediaManifestVersion: MEDIA_MANIFEST_VERSION, siteId: expectedSiteId, media: {}, videos: {} };
   }
   const parsed = requireManifestObject(
     await readWorkspaceJson(workspaceDir, MEDIA_MANIFEST_FILE_NAME, WORKSPACE_LIMITS.manifestBytes),
@@ -1207,6 +1311,14 @@ export async function readMediaManifest(workspaceDir, expectedSiteId) {
       parsed.media ?? {},
       "workspace.media_manifest_invalid",
       "media map",
+      MEDIA_MANIFEST_FILE_NAME,
+    ),
+    // Videos uploaded from this workspace, by file: absent in a manifest
+    // written before video upload, which reads as none.
+    videos: requireManifestObject(
+      parsed.videos ?? {},
+      "workspace.media_manifest_invalid",
+      "video map",
       MEDIA_MANIFEST_FILE_NAME,
     ),
   };

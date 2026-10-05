@@ -209,3 +209,39 @@ test("init carries recorded forms through the sanitizer and binds them in the fi
   const copied = await readFile(path.join(output, "forms", "contact.json"), "utf8");
   assert.ok(!copied.includes("live.invalid") && !copied.includes("never-copy-this-token"));
 });
+
+test("init declares the videos its pages place as fixture videos under fixture identities", async (t) => {
+  const { source } = await sourceWorkspace(t);
+  const page = path.join(source, "pages/index.md");
+  const realVideoId = "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d";
+  await writeFile(
+    page,
+    `${await readFile(page, "utf8")}\n\n\`\`\`component:video\n${JSON.stringify({ videoId: realVideoId })}\n\`\`\`\n`,
+  );
+
+  const initialized = await invoke(source, ["validate", "--init", "../output"]);
+
+  assert.equal(initialized.exit, 0, initialized.stderr);
+  const output = initialized.result.initialized.directory;
+  const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
+  assert.equal(fixture.fixture.videoIds.length, 1);
+  assert.match(fixture.fixture.videoIds[0], /^f0000000-0000-4000-8000-[0-9a-f]{12}$/u);
+  const names = await readdir(output, { recursive: true });
+  for (const name of names.filter((name) => name.endsWith(".json") || name.endsWith(".md"))) {
+    assert.ok(!(await readFile(path.join(output, name), "utf8")).includes(realVideoId));
+  }
+  const validated = await invoke(source, ["validate", output]);
+  assert.equal(validated.exit, 0, validated.stderr);
+  assert.equal(validated.result.fixture.videoIds, 1);
+});
+
+test("init leaves the video list out for a workspace that places no video", async (t) => {
+  const { source } = await sourceWorkspace(t);
+
+  const initialized = await invoke(source, ["validate", "--init", "../output"]);
+
+  const fixture = JSON.parse(
+    await readFile(path.join(initialized.result.initialized.directory, "manifest.fixture.json"), "utf8"),
+  );
+  assert.equal(Object.hasOwn(fixture.fixture, "videoIds"), false);
+});

@@ -813,7 +813,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 31,
+          referenceVersion: 32,
           topic: scenario.topic,
         },
       );
@@ -918,6 +918,8 @@ test("reference help reports stable usage errors with valid alternatives", async
         "card-grid",
         "image-banner",
         "form",
+        "video",
+        "video-embed",
       ],
     },
     {

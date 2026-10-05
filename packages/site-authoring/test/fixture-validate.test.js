@@ -472,6 +472,36 @@ test("the canonical SHY composition document executes through the same quiet off
   assert.ok(json.validated.pages.items.some((entry) => entry.path === "shy-composition"));
 });
 
+const FIXTURE_VIDEO_ID = "a0000000-0000-4000-8000-0000000000b0";
+
+async function declareFixtureVideos(fixture, videoIds) {
+  const manifestPath = path.join(fixture, "manifest.fixture.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.fixture.videoIds = videoIds;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
+}
+
+/** Replaces the visit page with one document that places `videoId` as a video component. */
+async function placeVideoOnVisitPage(fixture, videoId) {
+  const manifestPath = path.join(fixture, "manifest.fixture.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const page = manifest.pages.find((entry) => entry.path === "visit");
+  await unlink(path.join(fixture, page.file));
+  page.file = "pages/visit.pm.json";
+  page.sourceFormat = "prosemirror";
+  await writeFile(
+    path.join(fixture, page.file),
+    `${JSON.stringify({
+      type: "doc",
+      content: [{
+        type: "componentBlock",
+        attrs: { componentType: "video", componentData: JSON.stringify({ videoId, caption: "A tour" }) },
+      }],
+    }, undefined, 2)}\n`,
+  );
+  await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
+}
+
 test("offline failures retain the push validators' stable code and field", async (context) => {
   const cases = [
     {
@@ -560,6 +590,30 @@ test("offline failures retain the push validators' stable code and field", async
       field: "taproot-styles.fontMenu",
     },
     {
+      label: "video component the fixture does not declare",
+      mutate: async (fixture) => {
+        await placeVideoOnVisitPage(fixture, FIXTURE_VIDEO_ID);
+      },
+      code: "fixture.video_reference_unknown",
+      field: "pages/visit.pm.json",
+    },
+    {
+      label: "fixture video ids that are not canonical UUIDs",
+      mutate: async (fixture) => {
+        await declareFixtureVideos(fixture, ["not-a-uuid"]);
+      },
+      code: "fixture.video_ids_invalid",
+      field: "fixture.videoIds",
+    },
+    {
+      label: "fixture video ids with a duplicate",
+      mutate: async (fixture) => {
+        await declareFixtureVideos(fixture, [FIXTURE_VIDEO_ID, FIXTURE_VIDEO_ID]);
+      },
+      code: "fixture.video_ids_invalid",
+      field: "fixture.videoIds",
+    },
+    {
       label: "navigation page reference",
       mutate: async (fixture) => {
         const file = path.join(fixture, "nav.json");
@@ -613,4 +667,25 @@ test("offline failures retain the push validators' stable code and field", async
       for (const text of scenario.humanExcludes ?? []) assert.ok(!result.stderr.includes(text), `unexpected '${text}'`);
     });
   }
+});
+
+test("validate accepts a video component whose video the fixture declares ready", async (context) => {
+  const { fixture } = await copiedFixture(context, "declared-video");
+  await declareFixtureVideos(fixture, [FIXTURE_VIDEO_ID]);
+  await placeVideoOnVisitPage(fixture, FIXTURE_VIDEO_ID);
+
+  const result = await runValidation(fixture);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(result.requests, 0);
+  assert.equal(JSON.parse(result.stdout).fixture.videoIds, 1);
+});
+
+test("validate counts no videos for a fixture that declares none", async (context) => {
+  const { fixture } = await copiedFixture(context, "no-videos");
+
+  const result = await runValidation(fixture);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).fixture.videoIds, 0);
 });

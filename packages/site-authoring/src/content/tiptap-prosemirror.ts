@@ -8,8 +8,16 @@
  */
 
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
+import {
+  explicitImageMaxHeight,
+  mediaOverrideStyleParts,
+  normalizeBorderWidthOverride,
+  normalizeCssLengthOverride,
+  normalizeMaxHeightOverride,
+  TIPTAP_SITE_DEFAULT,
+  type TiptapImageMaxHeightVh,
+} from "./media-presentation.js";
 
-export const TIPTAP_SITE_DEFAULT = "site-default";
 export const DEFAULT_TIPTAP_IMAGE_MAX_IMAGES_PER_ROW = 2;
 export const TIPTAP_IMAGE_MAX_IMAGES_PER_ROW_OPTIONS = [1, 2, 3] as const;
 export const TIPTAP_IMAGE_NARROW_CONTENT_REM = 40;
@@ -21,15 +29,11 @@ export function normalizeTiptapImageMaxImagesPerRow(value: unknown): number {
     : DEFAULT_TIPTAP_IMAGE_MAX_IMAGES_PER_ROW;
 }
 
-export const DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH = 60;
-export const TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS = [45, 60, 75, 90] as const;
 const SECTION_CONTEXT_PATTERN = new RegExp(
   freeFormSectionRegistry.section.attrs.context.pattern,
   "u",
 );
 
-export type TiptapSiteDefault = typeof TIPTAP_SITE_DEFAULT;
-export type TiptapImageMaxHeightVh = typeof TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS[number];
 export type TiptapImagePresentationPlacement =
   | "left"
   | "left-text-right"
@@ -1202,13 +1206,11 @@ function resolveImagePresentation(
   defaults: RenderProseMirrorOptions["imageDefaults"],
 ): Record<string, string | number | undefined> {
   const explicitMaxHeight = explicitImageMaxHeight(attrs.maxHeightVh);
-  const maxHeightOverride = normalizeCssLengthOverride(attrs.maxHeight, { allowNone: true });
-  const borderWidthOverride = normalizeCssLengthOverride(attrs.borderWidth);
+  const maxHeightOverride = normalizeMaxHeightOverride(attrs.maxHeight);
+  const borderWidthOverride = normalizeBorderWidthOverride(attrs.borderWidth);
   const placement = resolvePlacement(attrs, defaults?.placement);
   const placementAttrs = imagePresentationAttributesForPlacement(placement);
-  const styleParts: string[] = [];
-  if (maxHeightOverride) styleParts.push(`--taproot-article-image-max-height: ${maxHeightOverride}`);
-  if (borderWidthOverride) styleParts.push(`--esp-image-border: ${imageBorderValue(borderWidthOverride)}`);
+  const styleParts = mediaOverrideStyleParts({ maxHeight: maxHeightOverride, borderWidth: borderWidthOverride });
   return {
     "data-tiptap-image": normalizeTiptapImageMaxImagesPerRow(defaults?.maxImagesPerRow),
     // The page shell owns the inherited site default so HTML and structured
@@ -1224,11 +1226,6 @@ function resolveImagePresentation(
     ...(placementAttrs.imageAlign ? { "data-image-align": placementAttrs.imageAlign } : {}),
     ...(placementAttrs.imagePlacement ? { "data-image-placement": placementAttrs.imagePlacement } : {}),
   };
-}
-
-function explicitImageMaxHeight(value: unknown): TiptapImageMaxHeightVh | null {
-  if (value === TIPTAP_SITE_DEFAULT || value === undefined || value === null) return null;
-  return isImageMaxHeightOption(value) ? imageMaxHeightOption(value) : null;
 }
 
 function resolvePlacement(
@@ -1255,55 +1252,6 @@ function resolvePlacement(
 
 function isAbsentPresentationValue(value: unknown): boolean {
   return value === undefined || value === null;
-}
-
-export function normalizeImageMaxHeight(value: unknown): TiptapImageMaxHeightVh {
-  return isImageMaxHeightOption(value) ? imageMaxHeightOption(value) : DEFAULT_TIPTAP_IMAGE_MAX_HEIGHT_VH;
-}
-
-function isImageMaxHeightOption(value: unknown): boolean {
-  return TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS.includes(imageMaxHeightOption(value));
-}
-
-function imageMaxHeightOption(value: unknown): TiptapImageMaxHeightVh {
-  return (typeof value === "number" ? value : Number(value)) as TiptapImageMaxHeightVh;
-}
-
-const CSS_LENGTH_UNITS = "px|em|rem|ch|ex|vw|vh|svh|lvh|dvh|svw|lvw|dvw|vmin|vmax|%";
-const CSS_LENGTH_RE = new RegExp(`^\\d+(?:\\.\\d+)?(?:${CSS_LENGTH_UNITS})$`, "i");
-const CSS_VAR_RE = /^var\(--[a-z0-9-]+\)$/i;
-const CSS_CALC_TERM = `(?:\\d+(?:\\.\\d+)?(?:${CSS_LENGTH_UNITS})|\\d+(?:\\.\\d+)?|var\\(--[a-z0-9-]+\\))`;
-const CSS_CALC_RE = new RegExp(
-  `^calc\\(\\s*${CSS_CALC_TERM}(?:\\s*[+\\-*/]\\s*${CSS_CALC_TERM})*\\s*\\)$`,
-  "i",
-);
-
-/**
- * Validate a user-supplied CSS length for per-image presentation overrides
- * (max height, border width). These values are emitted into inline styles on
- * published pages, so anything outside this strict grammar is rejected:
- * unitless `0`, a non-negative length, `var(--token)`, `calc(...)` of those
- * terms, and — when `allowNone` is set — the `none` keyword (max-height).
- * Returns the trimmed value, or null when invalid or set to the site default.
- */
-export function normalizeCssLengthOverride(
-  value: unknown,
-  options?: { allowNone?: boolean },
-): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === TIPTAP_SITE_DEFAULT) return null;
-  if (trimmed === "0") return trimmed;
-  if (options?.allowNone && trimmed.toLowerCase() === "none") return "none";
-  if (CSS_LENGTH_RE.test(trimmed)) return trimmed;
-  if (CSS_VAR_RE.test(trimmed)) return trimmed;
-  if (CSS_CALC_RE.test(trimmed)) return trimmed;
-  return null;
-}
-
-/** CSS value for the esp-image border hook given a width; zero collapses to none. */
-export function imageBorderValue(width: string): string {
-  return /^0(?:\.0+)?(?:[a-z%]+)?$/i.test(width) ? "none" : `${width} solid var(--esp-color-border)`;
 }
 
 export function normalizeImagePresentationPlacement(value: unknown): TiptapImagePresentationPlacement {

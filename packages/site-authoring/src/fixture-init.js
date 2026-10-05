@@ -70,6 +70,7 @@ export async function initializeFixture(invocation, validate) {
 
   const identities = new Map();
   const imageIds = new Set();
+  const videoIds = new Set();
   const origins = new Map();
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu;
   function identity(value) {
@@ -105,6 +106,7 @@ export async function initializeFixture(invocation, validate) {
         }
         const result = sanitize(child, depth + 1);
         if (/(?:imageId|logoId|canvasImageId|faviconId)$/iu.test(key) && isCanonicalUuid(result)) imageIds.add(result);
+        if (key === "videoId" && isCanonicalUuid(result)) videoIds.add(result);
         return [key, result];
       }),
     );
@@ -226,6 +228,7 @@ export async function initializeFixture(invocation, validate) {
     fixture: {
       contractVersion: FIXTURE_CONTRACT_VERSION,
       imageIds: [...imageIds].sort(),
+      ...(videoIds.size > 0 ? { videoIds: [...videoIds].sort() } : {}),
       deliveryOrigins: [...origins.values()],
     },
   });

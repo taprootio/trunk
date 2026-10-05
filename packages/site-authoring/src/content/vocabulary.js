@@ -1,6 +1,11 @@
 import { isContactOrWebUrl } from "../contact-url.js";
 import { sanitizeDiagnostic } from "../errors.js";
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
+import {
+  normalizeCssLengthOverride,
+  TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS,
+  TIPTAP_SITE_DEFAULT,
+} from "./media-presentation.js";
 
 /**
  * The primitives the content module shares: the accepted ProseMirror
@@ -186,11 +191,12 @@ export const CONTENT_LIMITS = Object.freeze({
 // Renderer-mirrored constants and predicates
 // ---------------------------------------------------------------------------
 
-/** `TIPTAP_SITE_DEFAULT` — the "no explicit choice" sentinel. */
-export const TIPTAP_SITE_DEFAULT = "site-default";
+// The sentinel, the max height options and the CSS length grammar are the
+// renderer's own, from the shared media presentation module.
+export { normalizeCssLengthOverride, TIPTAP_SITE_DEFAULT };
 
 /** `TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS` — anything else normalises to 60 (silent). */
-export const IMAGE_MAX_HEIGHT_OPTIONS = Object.freeze([45, 60, 75, 90]);
+export const IMAGE_MAX_HEIGHT_OPTIONS = Object.freeze([...TIPTAP_IMAGE_MAX_HEIGHT_OPTIONS]);
 
 /** The canonical `TiptapImagePresentationPlacement` union. */
 export const IMAGE_PRESENTATION_PLACEMENTS = Object.freeze([
@@ -242,35 +248,6 @@ export function isSafeUrl(url) {
   } catch {
     return true;
   }
-}
-
-// The renderer's CSS grammar, character for character. These values are
-// emitted into inline styles on published pages, which is why the grammar is
-// this narrow — and why a value outside it is dropped rather than escaped.
-const CSS_LENGTH_UNITS = "px|em|rem|ch|ex|vw|vh|svh|lvh|dvh|svw|lvw|dvw|vmin|vmax|%";
-const CSS_LENGTH_RE = new RegExp(`^\\d+(?:\\.\\d+)?(?:${CSS_LENGTH_UNITS})$`, "i");
-const CSS_VAR_RE = /^var\(--[a-z0-9-]+\)$/i;
-const CSS_CALC_TERM = `(?:\\d+(?:\\.\\d+)?(?:${CSS_LENGTH_UNITS})|\\d+(?:\\.\\d+)?|var\\(--[a-z0-9-]+\\))`;
-const CSS_CALC_RE = new RegExp(
-  `^calc\\(\\s*${CSS_CALC_TERM}(?:\\s*[+\\-*/]\\s*${CSS_CALC_TERM})*\\s*\\)$`,
-  "i",
-);
-
-/**
- * Mirrors the renderer's `normalizeCssLengthOverride`: returns the trimmed
- * value, or null when the value is invalid *or* is the site-default sentinel.
- * Callers that need to tell those two apart check the sentinel themselves.
- */
-export function normalizeCssLengthOverride(value, options) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === TIPTAP_SITE_DEFAULT) return null;
-  if (trimmed === "0") return trimmed;
-  if (options?.allowNone && trimmed.toLowerCase() === "none") return "none";
-  if (CSS_LENGTH_RE.test(trimmed)) return trimmed;
-  if (CSS_VAR_RE.test(trimmed)) return trimmed;
-  if (CSS_CALC_RE.test(trimmed)) return trimmed;
-  return null;
 }
 
 /**

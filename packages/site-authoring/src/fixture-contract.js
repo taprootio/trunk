@@ -40,8 +40,19 @@ export const FIXTURE_ROOT_FIELDS = Object.freeze(
   [...FIXTURE_REQUIRED_ROOT_FIELDS, ...FIXTURE_OPTIONAL_ROOT_FIELDS].sort(),
 );
 
-/** Every field the versioned `fixture` block may declare. All are required. */
-export const FIXTURE_METADATA_FIELDS = Object.freeze(["contractVersion", "imageIds", "deliveryOrigins"]);
+/** Fields of the versioned `fixture` block that must be present. */
+export const FIXTURE_REQUIRED_METADATA_FIELDS = Object.freeze(["contractVersion", "imageIds", "deliveryOrigins"]);
+
+/**
+ * Fields of the `fixture` block that may be omitted. `videoIds` lists the
+ * `ready` videos a fixture's pages may place; a fixture that places none omits it.
+ */
+export const FIXTURE_OPTIONAL_METADATA_FIELDS = Object.freeze(["videoIds"]);
+
+/** Every field the versioned `fixture` block may declare. */
+export const FIXTURE_METADATA_FIELDS = Object.freeze(
+  [...FIXTURE_REQUIRED_METADATA_FIELDS, ...FIXTURE_OPTIONAL_METADATA_FIELDS],
+);
 
 /**
  * Delivery origins are restricted to the reserved example domain rather than

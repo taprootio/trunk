@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   COMPONENT_SHAPES,
   COMPONENT_TYPES,
+  expandComponentAuthoringShorthand,
   getComponentDefinition,
   getComponentPropertyReference,
 } from "../../src/content/components.js";
@@ -52,7 +53,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 31);
+  assert.equal(REFERENCE_VERSION, 32);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -121,7 +122,16 @@ test("every component reference exposes its validator schema and validates its e
       assert.deepEqual(reference.example, definition.example);
       assert.ok(reference.accessibility.length > 0);
 
-      assert.deepEqual(validateDocument(componentDocument(componentType, reference.editorInitialData)).errors, []);
+      // A component whose required field names a library item (a video) starts
+      // without one: the editor offers a choice instead of a placeholder, so its
+      // initial data is incomplete in exactly that field and no other.
+      const requiredWithoutDefault = Object.entries(COMPONENT_SHAPES[componentType])
+        .filter(([name, spec]) => spec.required && !Object.hasOwn(definition.defaultData, name))
+        .map(([name]) => `/content/0/attrs/componentData/${name}`);
+      assert.deepEqual(
+        validateDocument(componentDocument(componentType, reference.editorInitialData)).errors.map((error) => error.path),
+        requiredWithoutDefault,
+      );
       assert.deepEqual(validateDocument(componentDocument(componentType, reference.example)).errors, []);
       assert.deepEqual(
         validateDocument({ type: "doc", content: [reference.componentBlockExample] }).errors,
@@ -740,4 +750,38 @@ test("a fixture reference whose shipped file is unavailable still states the who
   assert.ok(!human.includes("Example:"));
   assert.ok(!human.includes("Shipped example:"));
   for (const detail of pruned.details) assert.ok(human.includes(`  - ${detail}`), detail);
+});
+
+test("the media upload help describes the ready-to-play flow with no encoding or state", () => {
+  const text = JSON.stringify(getWorkflowReference("media"));
+
+  assert.match(text, /media\.video_refused/u);
+  assert.match(text, /durationMilliseconds/u);
+  assert.doesNotMatch(text, /(?<!re-)encod/iu);
+  assert.doesNotMatch(text, /waits for/iu);
+  assert.doesNotMatch(text, /\bstate\b/iu);
+  assert.doesNotMatch(text, /not ready/iu);
+  assert.doesNotMatch(text, /5 GiB/u);
+});
+
+test("the video embed reference documents the link form and its link example expands to the stored pair", () => {
+  const reference = getComponentReference("video-embed");
+  const notes = reference.authoringNotes.join("\n");
+  const printed = formatReferenceResult({ topic: "component", component: reference });
+
+  assert.match(printed, /"url"/u);
+  assert.match(notes, /\burl\b/u);
+  assert.match(notes, /provider and videoId/u);
+  assert.match(notes, /one-line refusal/u);
+  const fence = reference.authoringMarkdownExample.split("\n")[1];
+  const expanded = expandComponentAuthoringShorthand("video-embed", fence);
+  assert.deepEqual(JSON.parse(expanded.source), {
+    provider: "youtube",
+    videoId: "dQw4w9WgXcQ",
+    title: "A walk through the studio before your first class.",
+  });
+  assert.match(notes, /maxHeight and borderWidth/u);
+  const videoNotes = getComponentReference("video").authoringNotes;
+  assert.equal(videoNotes.length, 1);
+  assert.match(videoNotes[0], /site's image max height and border/u);
 });

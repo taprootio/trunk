@@ -133,11 +133,21 @@
         {
           "properties": {
             "id": { "$ref": "#/$defs/id" },
-            "type": { "enum": ["email", "tel", "url"] },
+            "type": { "enum": ["email", "url"] },
             "label": { "$ref": "#/$defs/label" },
             "hint": { "$ref": "#/$defs/hint" },
             "required": { "$ref": "#/$defs/required" },
             "max_length": { "$ref": "#/$defs/shortMaxLength" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "tel" },
+            "label": { "$ref": "#/$defs/label" },
+            "hint": { "$ref": "#/$defs/hint" },
+            "required": { "$ref": "#/$defs/required" }
           },
           "additionalProperties": false
         },

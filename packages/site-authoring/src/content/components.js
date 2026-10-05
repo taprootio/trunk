@@ -15,6 +15,8 @@ import {
   isUuid,
   pointerSegment,
 } from "./vocabulary.js";
+import { normalizeCssLengthOverride } from "./media-presentation.js";
+import { isVideoEmbedId, parseVideoEmbedUrl, VIDEO_EMBED_REFUSAL } from "./video-embed-url.js";
 
 /**
  * The eight canonical `componentBlock` data shapes. Seven remain mirrored
@@ -54,6 +56,8 @@ const LATEST_POST_PAGE_TYPES = Object.freeze([
 const REGISTERED_TEXTURE_NAME_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 const str = (options = {}) => Object.freeze({ kind: "string", ...options });
+/** A string bounded in length, optionally constrained to a pattern the published renderer also applies. */
+const boundedStr = (maximumLength, options = {}) => str({ maximumLength, ...options });
 const bool = () => Object.freeze({ kind: "boolean" });
 const num = (options = {}) => Object.freeze({ kind: "number", ...options });
 const enumOf = (...values) => Object.freeze({ kind: "enum", values: Object.freeze(values) });
@@ -61,6 +65,8 @@ const list = (item) => Object.freeze({ kind: "array", item });
 const shape = (fields, options = {}) => Object.freeze({ kind: "object", fields: Object.freeze(fields), ...options });
 const image = () => Object.freeze({ kind: "image" });
 const safeUrl = (options = {}) => Object.freeze({ kind: "safe-url", ...options });
+/** A CSS length the published renderer accepts as a per-block override; `allowNone` adds `none` (a max height). */
+const cssLength = (options = {}) => Object.freeze({ kind: "css-length", ...options });
 const textureName = () => Object.freeze({ kind: "texture-name", maximumLength: 64 });
 const withOmission = (spec, whenOmitted) => Object.freeze({ ...spec, whenOmitted: Object.freeze(whenOmitted) });
 
@@ -279,6 +285,52 @@ const IMAGE_BANNER = Object.freeze({
   imageMotion: enumOf("none", "slow-zoom", "drift-start", "drift-end", "parallax-subtle", "parallax"),
 });
 
+/** The `W:H` form of a video's aspect ratio, as the published renderer and the editor accept it. */
+const VIDEO_ASPECT_RATIO_PATTERN = "^[1-9][0-9]{0,2}:[1-9][0-9]{0,2}$";
+const VIDEO_ASPECT_RATIO_RE = new RegExp(VIDEO_ASPECT_RATIO_PATTERN, "u");
+
+/** Shown with both video blocks: the two optional fields follow the same site settings images use. */
+const MEDIA_PRESENTATION_HELP =
+  "Leave maxHeight and borderWidth out to follow the site's image max height and border; set maxHeight (a viewport or fixed height such as 50vh or 30rem, or none) or borderWidth (such as 4px, or 0 for no border) to override them for this block. The frame is never wider than the video's own pixel size.";
+
+/**
+ * `VideoData`. The page names a library video by id and nothing about where it
+ * is served: the generator resolves the id at publish time and refuses a video
+ * that is not `ready` or not this site's own. Delivery URLs are not authorable
+ * here, so a `delivery` key is refused like any other unknown field.
+ */
+const VIDEO = Object.freeze({
+  videoId: Object.freeze({ kind: "uuid", required: true }),
+  poster: image(),
+  caption: boundedStr(300),
+  aspectRatio: str({
+    pattern: VIDEO_ASPECT_RATIO_RE,
+    patternSource: VIDEO_ASPECT_RATIO_PATTERN,
+    patternDescription: "two whole numbers of at most three digits joined by a colon, such as 16:9",
+  }),
+  maxHeight: cssLength({ allowNone: true }),
+  borderWidth: cssLength(),
+});
+
+/**
+ * `VideoEmbedData`. A YouTube or Vimeo video is stored as its provider and id,
+ * never as a link: the published page builds the player URL from the pair. A
+ * Markdown component fence may name the video by `url` instead, and
+ * `expandComponentAuthoringShorthand` reduces it to the pair before validation.
+ */
+const VIDEO_EMBED = Object.freeze({
+  provider: Object.freeze({ ...enumOf("youtube", "vimeo"), required: true }),
+  videoId: boundedStr(32, { required: true, nonWhitespace: true }),
+  title: boundedStr(200, { required: true, nonWhitespace: true }),
+  poster: image(),
+  aspectRatio: str({
+    pattern: VIDEO_ASPECT_RATIO_RE,
+    patternSource: VIDEO_ASPECT_RATIO_PATTERN,
+    patternDescription: "two whole numbers of at most three digits joined by a colon, such as 16:9",
+  }),
+  maxHeight: cssLength({ allowNone: true }),
+  borderWidth: cssLength(),
+});
 const SPACER = Object.freeze({
   height: enumOf("small", "medium", "large"),
   showDivider: bool(),
@@ -301,8 +353,16 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
-function component(fields, displayName, summary, defaultData, accessibility, example) {
-  return deepFreeze({ fields, displayName, summary, defaultData, accessibility, example });
+function component(fields, displayName, summary, defaultData, accessibility, example, authoring) {
+  return deepFreeze({
+    fields,
+    displayName,
+    summary,
+    defaultData,
+    accessibility,
+    example,
+    ...(authoring ? { authoring } : {}),
+  });
 }
 
 /**
@@ -576,6 +636,50 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     ],
     { formKey: "contact" },
   ),
+  "video": component(
+    VIDEO,
+    "Video",
+    "A video from the site's library that plays when the visitor presses play; nothing loads before then.",
+    {},
+    [
+      "Add a caption that tells a visitor what the video is about; the caption is also the player's accessible name.",
+      "A video with spoken content needs captions or a transcript in the page text; the player does not generate them.",
+      "Leave aspectRatio out to follow the video's own shape; set it only to crop the frame to a different one.",
+    ],
+    {
+      videoId: "7c5e2b1a-9d3f-4a68-b0c4-1e2f3a4b5c6d",
+      caption: "A walk through the studio before your first class.",
+      aspectRatio: "16:9",
+    },
+    { notes: [MEDIA_PRESENTATION_HELP] },
+  ),
+  "video-embed": component(
+    VIDEO_EMBED,
+    "Video embed",
+    "A YouTube or Vimeo video shown as a poster and a play button; nothing from the provider loads until the visitor presses play.",
+    {},
+    [
+      "Set title to what the video is about; it names the play button and the player for assistive technology.",
+      "A video with spoken content needs captions turned on at the provider or a transcript in the page text.",
+      "Leave poster out and 'pages push' copies the provider's thumbnail into the site's images and sets it (once per video), or set poster to one of the site's images. The published page never loads anything from the provider before the visitor presses play; if the copy is refused the block is sent with no poster.",
+    ],
+    {
+      provider: "youtube",
+      videoId: "dQw4w9WgXcQ",
+      title: "A walk through the studio before your first class.",
+      aspectRatio: "16:9",
+    },
+    {
+      notes: [
+        MEDIA_PRESENTATION_HELP,
+        "In a Markdown fence, give the video as url (a YouTube or Vimeo link) and title instead of provider and videoId; the CLI reduces the link to provider and videoId before it validates or sends the page.",
+        "A link that is not an accepted YouTube or Vimeo video gets a one-line refusal that names the links it accepts.",
+        "url together with provider or videoId is refused: give the video one way.",
+        "Stored blocks and .pm.json sources hold only provider and videoId; url is never stored.",
+      ],
+      markdownExample: "```component:video-embed\n{\"url\": \"https://youtu.be/dQw4w9WgXcQ\", \"title\": \"A walk through the studio before your first class.\"}\n```",
+    },
+  ),
 });
 
 export const COMPONENT_TYPES = Object.freeze(Object.keys(COMPONENT_DEFINITIONS));
@@ -597,6 +701,10 @@ function referenceSchema(spec) {
       return {
         type: "string",
         ...(spec.nonWhitespace ? { minLength: 1, description: "Must contain non-whitespace text." } : {}),
+        ...(spec.maximumLength !== undefined ? { maxLength: spec.maximumLength } : {}),
+        ...(spec.patternSource !== undefined
+          ? { pattern: spec.patternSource, description: `Must be ${spec.patternDescription}.` }
+          : {}),
       };
     case "safe-url":
       return {
@@ -606,6 +714,8 @@ function referenceSchema(spec) {
           spec.allowEmpty === false ? "An" : "Empty, or an"
         } explicit HTTP(S), mailto, or tel URL; a root-relative path that does not begin with //; a fragment; a query; or a relative URL. Backslashes and ASCII control characters are rejected. Contact URLs require a non-empty body and refuse tel:// and mailto:// authority forms.`,
       };
+    case "css-length":
+      return { type: "string", description: `Must be ${describe(spec)}.` };
     case "texture-name":
       return {
         type: "string",
@@ -710,6 +820,10 @@ function describe(spec) {
       return `${
         spec.allowEmpty === false ? "a" : "an empty string or a"
       } safe HTTP(S), mailto, tel, non-protocol-relative root path, fragment, query, or relative URL; backslashes and ASCII control characters are rejected`;
+    case "css-length":
+      return spec.allowNone
+        ? "a CSS height such as 60vh or 32rem, or none"
+        : "a CSS width such as 2px or 0.25rem, or 0 for no border";
     case "texture-name":
       return "a lowercase hyphenated texture identifier of at most 64 characters";
     default:
@@ -730,6 +844,9 @@ function validateValue(spec, value, path, errors) {
     case "string":
       if (typeof value !== "string") fail("a string");
       else if (spec.nonWhitespace && value.trim() === "") fail("a string containing non-whitespace text");
+      else if (spec.maximumLength !== undefined && value.length > spec.maximumLength) {
+        fail(`a string of at most ${spec.maximumLength} characters`);
+      } else if (spec.pattern !== undefined && !spec.pattern.test(value)) fail(spec.patternDescription);
       return;
     case "safe-url":
       if (
@@ -743,6 +860,10 @@ function validateValue(spec, value, path, errors) {
       ) {
         fail(describe(spec));
       }
+      return;
+    case "css-length":
+      // The renderer drops a value outside this grammar silently, so it is refused here instead.
+      if (normalizeCssLengthOverride(value, { allowNone: spec.allowNone === true }) === null) fail(describe(spec));
       return;
     case "texture-name":
       if (
@@ -848,6 +969,31 @@ function validateFields(fields, value, path, errors) {
 }
 
 /**
+ * Lets a Markdown component fence name a video embed by link. Returns the
+ * fence's JSON source with `url` replaced by the `provider` and `videoId` it
+ * reduces to, or `{ error }` with the one-line reason a link is refused. Any
+ * other component, and a source that is not a JSON object, comes back as it was
+ * so validation reports it in its usual words.
+ */
+export function expandComponentAuthoringShorthand(componentType, source) {
+  if (componentType !== "video-embed") return { source };
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return { source };
+  }
+  if (!isPlainObject(parsed) || !Object.hasOwn(parsed, "url")) return { source };
+  if (Object.hasOwn(parsed, "provider") || Object.hasOwn(parsed, "videoId")) {
+    return { error: "Give the video as url, or as provider and videoId, not both." };
+  }
+  const target = parseVideoEmbedUrl(parsed.url);
+  if (!target) return { error: VIDEO_EMBED_REFUSAL };
+  const { url: _url, ...rest } = parsed;
+  return { source: JSON.stringify({ provider: target.provider, videoId: target.videoId, ...rest }) };
+}
+
+/**
  * Validates a `componentBlock`'s `componentType` and `componentData` pair.
  *
  * `basePath` is the JSON pointer of the owning node's `attrs`; findings inside
@@ -914,6 +1060,17 @@ export function validateComponentBlock(componentType, componentData, basePath) {
         ));
       }
     }
+  }
+  if (
+    componentType === "video-embed" && typeof parsed.provider === "string" && typeof parsed.videoId === "string"
+    && (parsed.provider === "youtube" || parsed.provider === "vimeo")
+    && !isVideoEmbedId(parsed.provider, parsed.videoId)
+  ) {
+    errors.push(contentError(
+      `${dataPath}/videoId`,
+      CODES.componentData,
+      `Component data field 'videoId' must be a valid ${parsed.provider} video id. ${VIDEO_EMBED_REFUSAL}`,
+    ));
   }
   return errors;
 }

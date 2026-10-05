@@ -22,6 +22,8 @@ import {
   REFUSAL_UNCLASSIFIED,
   ROLLOUT_REFUSAL_FIELD,
 } from "./constants.js";
+import { Readable } from "node:stream";
+
 import { validateApiBaseUrl } from "./config.js";
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
@@ -42,6 +44,9 @@ const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 // answers a replay rather than duplicating work: see
 // `REPLACEABLE_POST_PATHS` below.
 const IDEMPOTENT_METHODS = new Set(["GET"]);
+
+/** An exchanged credential is renewed once it is this close to expiring. */
+const CREDENTIAL_RENEWAL_MARGIN_MILLISECONDS = 5 * 60_000;
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_RESPONSE_ERRORS = new Set([
@@ -611,9 +616,20 @@ export class SiteApiClient {
    */
   #authorization;
 
+  /**
+   * How an exchanged credential is replaced before it expires, or `undefined`
+   * for a credential that is not exchanged (a key in the environment). The
+   * exchanged credential lives about an hour, and a video upload plus its
+   * encoding can outlast that.
+   */
+  #renewCredential;
+  #credentialExpiresAtMilliseconds;
+  #renewing;
+
   constructor({
     apiBaseUrl,
     token,
+    credentialRenewal,
     fetch = globalThis.fetch,
     sleep = defaultSleep,
     signal,
@@ -643,6 +659,12 @@ export class SiteApiClient {
     this.apiPathPrefix = new URL(this.apiBaseUrl).pathname;
     this.anonymous = anonymous;
     this.#authorization = anonymous ? undefined : `Bearer ${token}`;
+    // A renewal whose first expiry is not a real time could never say when it
+    // is due, and would exchange on every request, so it is not installed.
+    if (!anonymous && credentialRenewal !== undefined && Number.isFinite(credentialRenewal.expiresAtMilliseconds)) {
+      this.#renewCredential = credentialRenewal.renew;
+      this.#credentialExpiresAtMilliseconds = credentialRenewal.expiresAtMilliseconds;
+    }
     this.fetch = fetch;
     this.sleep = sleep;
     this.signal = signal;
@@ -663,6 +685,42 @@ export class SiteApiClient {
 
   async request(path, options = {}) {
     return await this.#request(path, options, false);
+  }
+
+  /**
+   * Replaces an exchanged credential that is within five minutes of expiring,
+   * once however many requests ask at the same time, before the request that
+   * would have carried the old one. A failed renewal is the request's failure:
+   * sending a credential known to be expiring would only be refused later.
+   */
+  async #renewCredentialIfDue() {
+    if (
+      this.#renewCredential === undefined
+      || this.now() < this.#credentialExpiresAtMilliseconds - CREDENTIAL_RENEWAL_MARGIN_MILLISECONDS
+    ) return;
+    this.#renewing ??= (async () => {
+      try {
+        const renewed = await this.#renewCredential();
+        if (!isWellFormedCredential(renewed?.key) || !Number.isFinite(renewed?.expiresAtMilliseconds)) {
+          throw new SiteAuthoringError(
+            "auth.renewal_invalid",
+            "Taproot returned an invalid renewed credential.",
+          );
+        }
+        this.#authorization = `Bearer ${renewed.key}`;
+        this.#credentialExpiresAtMilliseconds = renewed.expiresAtMilliseconds;
+        // A credential that is due again the moment it arrives (a lifetime
+        // shorter than the margin, or a clock far ahead of the server's) would
+        // be exchanged for on every request, each minting a key. It is used as
+        // it is, and the server's own refusal speaks if it has truly lapsed.
+        if (renewed.expiresAtMilliseconds - CREDENTIAL_RENEWAL_MARGIN_MILLISECONDS <= this.now()) {
+          this.#renewCredential = undefined;
+        }
+      } finally {
+        this.#renewing = undefined;
+      }
+    })();
+    await this.#renewing;
   }
 
   /**
@@ -711,6 +769,7 @@ export class SiteApiClient {
     }
     const replayable = IDEMPOTENT_METHODS.has(method) || replaceableMutation;
     const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+    await this.#renewCredentialIfDue();
     // Whether any attempt of a mutation has ended without an authoritative
     // outcome. Accumulated, not read off the final attempt: a claim whose first
     // send committed the mint and died on the reply, and whose retry then failed
@@ -843,10 +902,19 @@ export class SiteApiClient {
    * shape that may be replayed.
    */
   async upload({ url: uploadUrl, requiredHeaders } = {}, bodyBytes) {
+    // A video original is streamed from disk: `{ byteLength, stream, timeoutMilliseconds }`,
+    // where `stream()` returns a fresh readable of exactly `byteLength` bytes so a
+    // retried attempt reads the file again from the start.
+    const streamed = bodyBytes !== null
+      && typeof bodyBytes === "object"
+      && !ArrayBuffer.isView(bodyBytes)
+      && typeof bodyBytes.stream === "function"
+      && Number.isSafeInteger(bodyBytes.byteLength)
+      && bodyBytes.byteLength >= 0;
     if (
       typeof uploadUrl !== "string"
       || uploadUrl.length === 0
-      || !ArrayBuffer.isView(bodyBytes)
+      || !(streamed || ArrayBuffer.isView(bodyBytes))
     ) {
       throw new SiteAuthoringError("upload.contract_invalid", "Taproot returned an invalid upload capability.");
     }
@@ -920,9 +988,15 @@ export class SiteApiClient {
         response = await this.fetch(url, {
           method: "PUT",
           redirect: "error",
-          signal: operationSignal(this.signal, LIMITS.uploadMilliseconds, this.timeoutSignal),
+          signal: operationSignal(
+            this.signal,
+            (streamed ? bodyBytes.timeoutMilliseconds : undefined) ?? LIMITS.uploadMilliseconds,
+            this.timeoutSignal,
+          ),
           headers,
-          body: bodyBytes,
+          ...(streamed
+            ? { body: Readable.toWeb(bodyBytes.stream()), duplex: "half" }
+            : { body: bodyBytes }),
         });
       } catch {
         if (attempt + 1 < LIMITS.uploadAttempts && !this.signal?.aborted) {

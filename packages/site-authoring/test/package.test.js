@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "5.0.0" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "5.0.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -118,8 +118,11 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/content/index.js",
     "src/content/inline-facts.js",
     "src/content/markdown.js",
+    "src/content/media-presentation.js",
     "src/content/tiptap-prosemirror.ts",
     "src/content/validate-document.js",
+    // The video embed card's link rules, generated from shared/ (TR01109).
+    "src/content/video-embed-url.js",
     "src/content/vocabulary.js",
     // The browser sign-in flow TR00634 added and TR00645 made account-level:
     // the credential store that lives outside every repository, and the verbs
@@ -188,6 +191,12 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/use.js",
     "src/verbs/validate.js",
     "src/verbs/whoami.js",
+    // The MP4, MOV and WebM container sniffer `media upload` reads before it
+    // decides a file is a video rather than an image (TR01110).
+    "src/video-metadata.js",
+    // Reads a video's codecs and rewrites it as an MP4 with its index first, without
+    // re-encoding, before `media upload` sends it (TR01110).
+    "src/video-prepare.js",
     "src/workspace.js",
   ]);
 });

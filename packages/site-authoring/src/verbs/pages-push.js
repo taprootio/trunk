@@ -1,5 +1,16 @@
-import { createPage, listSitePages, PAGE_STATUS_DELETED, updatePage, withRefusalGuidance } from "../api.js";
+import {
+  createPage,
+  importVideoEmbedPoster,
+  listSitePages,
+  listVideos,
+  IMAGE_PROCESSING_STATE_COMPLETE,
+  PAGE_STATUS_DELETED,
+  posterFromImage,
+  updatePage,
+  withRefusalGuidance,
+} from "../api.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
+import { waitForProcessing } from "./media-upload.js";
 import { SiteAuthoringError } from "../errors.js";
 import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "../reserved-paths.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
@@ -8,6 +19,8 @@ import {
   contentDocuments,
   COVER_IMAGE_UNUSED_MESSAGE,
   documentTemplate,
+  placedVideoIds,
+  posterlessVideoEmbeds,
   FRONT_MATTER_KEYS,
   PAGE_TEMPLATES,
   requireTemplateName,
@@ -708,9 +721,84 @@ export async function validateWorkspacePageDocument({
   }
 }
 
+/**
+ * Refuses a push that places a video the site's library does not hold; every
+ * library video is ready to play. Pages that will not be sent are not asked about.
+ */
+async function requirePlacedVideosExist(client, siteId, planned) {
+  const placements = new Map();
+  for (const page of planned) {
+    if (page.unchanged) continue;
+    for (const videoId of placedVideoIds(page.document)) {
+      if (!placements.has(videoId)) placements.set(videoId, page.file);
+    }
+  }
+  if (placements.size === 0) return;
+
+  const library = await listVideos(client, siteId);
+  const knownIds = new Set(library.videos.map((video) => video.videoId));
+  for (const [videoId, file] of placements) {
+    const known = knownIds.has(videoId);
+    if (!known && library.truncated) {
+      throw documentError(
+        "pages.video_library_unverifiable",
+        `'${file}' places video ${videoId}, which is not among the first ${library.videos.length} videos of this `
+          + "site's library, and the library is larger than one push can check. Reduce the library or place the video "
+          + "from the editor.",
+        file,
+      );
+    }
+    if (!known) {
+      throw documentError(
+        "pages.video_unknown",
+        `'${file}' places video ${videoId}, which is not in this site's video library. Upload it with `
+          + "'taproot-site media upload' and use the videoId it reports.",
+        file,
+      );
+    }
+  }
+}
+
+/**
+ * Gives each `video-embed` block that has no poster the provider's thumbnail,
+ * copied into the site's images by the server (TR01109). One request per provider
+ * and id for the whole push. A refusal leaves that block without a poster, since
+ * an embed plays without one, and the push goes on; pages that will not be sent
+ * are not touched. Offline `validate` never reaches this.
+ */
+async function copyVideoEmbedPosters(client, siteId, planned, { onProgress, now }) {
+  const posters = new Map();
+  for (const page of planned) {
+    if (page.unchanged) continue;
+    for (const embed of posterlessVideoEmbeds(page.document)) {
+      const key = `${embed.provider}:${embed.videoId}`;
+      if (!posters.has(key)) {
+        onProgress(`Copying the ${embed.provider} thumbnail for video ${embed.videoId} into the site's images.`);
+        try {
+          const imported = await importVideoEmbedPoster(client, siteId, embed.provider, embed.videoId);
+          // The copy is processed like an upload; a poster that cannot be delivered is no poster.
+          // It is an embed poster, which no library lists, so its state is read by id.
+          const observed = await waitForProcessing(client, siteId, [imported.imageId], { onProgress, now, byId: true });
+          const image = observed.get(imported.imageId);
+          if (image?.processingState !== IMAGE_PROCESSING_STATE_COMPLETE) {
+            throw new SiteAuthoringError("media.processing_failed", "Taproot could not process the copied thumbnail.");
+          }
+          posters.set(key, posterFromImage(image));
+        } catch (error) {
+          if (!(error instanceof SiteAuthoringError)) throw error;
+          onProgress(`'${page.file}' keeps no poster for ${embed.provider} video ${embed.videoId}: ${error.message}`);
+          posters.set(key, undefined);
+        }
+      }
+      const poster = posters.get(key);
+      if (poster !== undefined) embed.setPoster(poster);
+    }
+  }
+}
+
 export async function pagesPush(invocation) {
   const session = await openSession(invocation);
-  const { client, config, siteId, onProgress } = session;
+  const { client, config, siteId, now, onProgress } = session;
   // One advisory line before this verb does any work, and only when the
   // exchange said the platform is paused. It changes nothing else: the write
   // still runs and its refusal still classifies as platform_paused (TR00692).
@@ -1000,6 +1088,13 @@ export async function pagesPush(invocation) {
         action: target === undefined ? "created" : "updated",
       });
     }
+
+    // A page that places a video names it by id, and only the library knows
+    // whether that id is one of this site's videos. Asked once for the whole
+    // push, before anything is written, so a page cannot be sent that
+    // publishing would then refuse.
+    await requirePlacedVideosExist(client, siteId, planned);
+    await copyVideoEmbedPosters(client, siteId, planned, { onProgress, now });
 
     // Phase two: send. The manifest is written back even if a later page fails,
     // so a retry updates the pages this run created rather than duplicating them.

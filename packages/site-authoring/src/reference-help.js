@@ -71,7 +71,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 31;
+export const REFERENCE_VERSION = 32;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -829,7 +829,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
   }),
   media: Object.freeze({
     title: "Media upload contract",
-    summary: "Upload workspace-root-relative raster files and receive component-ready media objects.",
+    summary: "Upload workspace-root-relative raster files and videos and receive component-ready media objects and video ids.",
     usage: `${CLI_BINARY_NAME} media upload [path...]`,
     details: Object.freeze([
       "Paths are relative to the configured workspace root, not the shell's current directory.",
@@ -838,6 +838,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Prepare variants locally with any image tool before uploading: a transparent logo, its @2x copy, a scheme-specific dark logo when one asset does not read on both headers, and a square favicon. The CLI uploads what you give it; it has no recolor, crop, or SVG upload command.",
       "Assign both schemes after uploading: lightLogoId and darkLogoId in settings/taproot-styles.json and brand.faviconId in settings/brand.json take the returned image ids; theme push writes them. See help walkthrough for the full design pass.",
       "Each result item includes media: { imageId, src, urls, width, height, alt }.",
+      "MP4, MOV, and WebM files are uploaded as videos (up to 250 MB each; the site's licence sets the cap, and the container is read from the file's bytes, not its name). The CLI reads each file with mediabunny. A file that is H.264 and AAC but not already an MP4 with its index first is rewritten as one without re-encoding; anything else is sent as it is and judged by the server. When the server refuses a file, its one-line message is printed as media.video_refused. A video is ready to play as soon as the upload is confirmed. The CLI sets no poster, because Node has no video decoder: the Videos page picks one automatically for a video uploaded there, and lets the owner choose another frame, so set a CLI-uploaded video's poster there. The command reports videos.items: { file, videoId, contentType, byteLength, deduplicated, durationMilliseconds, component }, where component.markdown is the component:video fence and component.block the componentBlock node that place it. Needs the site's licence to include video.",
+      "Place an uploaded video on a page with a video component: a component:video fence in Markdown or a componentBlock of type video, with the returned videoId and optional poster, caption, and aspectRatio. See help component video. pages push refuses a video that is not in the site's library; validate checks it against fixture.videoIds.",
       "The same src/urls delivery fields are saved in .taproot-site-media.json for page and component authoring.",
     ]),
     example: Object.freeze({
@@ -925,7 +927,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
         SETTINGS_GROUPS.map((group) => `${group.settingsType} to '${SETTINGS_DIRECTORY}/${group.file}'`).join("; ")
       }.`,
       `The fixture block carries ${FIXTURE_METADATA_FIELDS.join(", ")}. Every image a page references by imageId must `
-      + "be listed in fixture.imageIds, and every absolute delivery URL a page uses must sit on a declared origin.",
+      + "be listed in fixture.imageIds, and every absolute delivery URL a page uses must sit on a declared origin. "
+      + "videoIds is optional: list the ready videos a page may place with a video component, and validate refuses a "
+      + "video component whose videoId is not listed. A live push makes the same check against the site's video library.",
       `Each deliveryOrigins entry is an origin-only HTTPS URL (no path, query, fragment, or credentials) on `
       + `${FIXTURE_DELIVERY_ORIGIN_DOMAIN} or a subdomain of it, at most ${FIXTURE_MAXIMUM_DELIVERY_ORIGINS} of them, `
       + "with no duplicates. Fixtures are copied and shipped, so a real delivery host in one would be a live "
@@ -1025,6 +1029,12 @@ export function getComponentReference(type) {
     accessibility: definition.accessibility,
     example,
     markdownExample,
+    ...(definition.authoring
+      ? {
+        authoringNotes: definition.authoring.notes,
+        authoringMarkdownExample: definition.authoring.markdownExample,
+      }
+      : {}),
     componentBlockExample: {
       type: "componentBlock",
       attrs: {
@@ -1841,7 +1851,11 @@ export function formatReferenceResult(result) {
         component.accessibility.map((note) => `  - ${note}`).join("\n")
       }\n\nValid componentData object:\n${
         JSON.stringify(component.example, null, 2)
-      }\n\nMarkdown component fence:\n${component.markdownExample}\n\nRemember: componentData stores JSON.stringify(the object), not the object itself. Use --json for the exact nested schema and a complete componentBlock example.\n`;
+      }\n\nMarkdown component fence:\n${component.markdownExample}${
+        component.authoringNotes === undefined
+          ? ""
+          : `\n\nAuthoring by link:\n${component.authoringNotes.map((note) => `  - ${note}`).join("\n")}\n${component.authoringMarkdownExample}`
+      }\n\nRemember: componentData stores JSON.stringify(the object), not the object itself. Use --json for the exact nested schema and a complete componentBlock example.\n`;
     }
     case "workflow": {
       const reference = result.reference;

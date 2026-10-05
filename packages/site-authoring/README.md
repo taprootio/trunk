@@ -356,7 +356,15 @@ closed with `pages.push_conflict` when a page's stored-state revision has
 moved since this workspace last reconciled with it, naming both revisions;
 `pull` first, or push after a refused pull has shown you the site's version.
 `media upload [path...]` uploads raster files and records component-ready
-delivery fields. `nav push`, `theme push`, and `footer push` replace the whole
+delivery fields; MP4, MOV, and WebM files are uploaded as videos. Taproot does not
+encode: the command reads each file with mediabunny, rewrites an H.264 and AAC
+file that is not an MP4 with its index first as one (copying the tracks, never
+re-encoding), declares its codecs, and prints the server's one-line refusal as
+it came for anything it will not accept (a non-H.264 or non-AAC file, one over
+the licence's upload cap). A video is ready when its upload confirms; the CLI sets no poster (Node has no video decoder), so
+choose one on the Videos page, where an upload made there gets one automatically; the command
+reports its `videoId` for a `video` component (`help component video`), and
+`pages push` refuses a page that places a video the site does not have. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
 settings, and the closed footer document. `pull` writes each scheme's
 complete effective theme — the stored theme resolved over the same defaults

@@ -36,7 +36,7 @@ const JPEG_SOI = Buffer.from([0xff, 0xd8]);
 function unsupportedFormat(fileName) {
   return new SiteAuthoringError(
     "media.unsupported_format",
-    `'${fileName}' is not a PNG, JPEG, GIF, or WebP image. Taproot accepts raster uploads only.`,
+    `'${fileName}' is not a PNG, JPEG, GIF, or WebP image, or an MP4, MOV, or WebM video. Taproot accepts raster images and those video containers only.`,
     { field: fileName },
   );
 }

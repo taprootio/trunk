@@ -1,4 +1,5 @@
 import { FREE_FORM_TEMPLATE_VERSION, TEMPLATE_TYPE_FREE_FORM } from "./api.js";
+import { isVideoEmbedId } from "./content/video-embed-url.js";
 import { SiteAuthoringError } from "./errors.js";
 
 /**
@@ -596,6 +597,26 @@ export const COVER_IMAGE_UNUSED_MESSAGE = "The selected cover image must be used
  * wrongly thinks unused would be refused for nothing, and the server has the
  * final say.
  */
+/**
+ * The parsed JSON of a `componentData` string, or `undefined` when it is not
+ * JSON. The server decodes HTML entities (up to three rounds) before reading
+ * component JSON, so a string that only parses once decoded is read the way the
+ * server reads it.
+ */
+function parseComponentData(text) {
+  let decoded = text;
+  for (let round = 0; round < 3 && /&(?:quot|amp|#39|lt|gt);/u.test(decoded); round += 1) {
+    decoded = decoded.replace(/&quot;/gu, "\"").replace(/&#39;/gu, "'").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")
+      .replace(/&amp;/gu, "&");
+  }
+  for (const candidate of [text, decoded]) {
+    try {
+      return JSON.parse(candidate);
+    } catch { /* not JSON: try the decoded form, then nothing to read */ }
+  }
+  return undefined;
+}
+
 export function usedImageIds(document_) {
   const found = new Set();
   const visit = (value) => {
@@ -607,25 +628,74 @@ export function usedImageIds(document_) {
         else if (key === "imageIds" && Array.isArray(child)) {
           child.filter((id) => typeof id === "string").forEach((id) => found.add(id.toLowerCase()));
         } else if (key === "componentData" && typeof child === "string") {
-          // The server decodes HTML entities (up to three rounds) before reading component JSON.
-          let text = child;
-          for (let round = 0; round < 3 && /&(?:quot|amp|#39|lt|gt);/u.test(text); round += 1) {
-            text = text.replace(/&quot;/gu, "\"").replace(/&#39;/gu, "'").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")
-              .replace(/&amp;/gu, "&");
-          }
-          try {
-            visit(JSON.parse(child));
-          } catch {
-            try {
-              visit(JSON.parse(text));
-            } catch { /* not JSON: nothing to read */ }
-          }
+          const parsed = parseComponentData(child);
+          if (parsed !== undefined) visit(parsed);
         } else visit(child);
       }
     }
   };
   for (const { doc } of contentDocuments(document_)) visit(doc);
   for (const image of document_.data?.images ?? []) found.add(image.imageId.toLowerCase());
+  return found;
+}
+
+/**
+ * Every video id the page places: the `videoId` of each `video` component block
+ * in any of its documents. Block-scoped on purpose — a `videoId` anywhere else
+ * is author prose, not a reference the publisher resolves.
+ */
+export function placedVideoIds(document_) {
+  const found = new Set();
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+    } else if (isPlainObject(value)) {
+      if (value.type === "componentBlock" && isPlainObject(value.attrs) && value.attrs.componentType === "video") {
+        const data = typeof value.attrs.componentData === "string"
+          ? parseComponentData(value.attrs.componentData)
+          : undefined;
+        if (isPlainObject(data) && typeof data.videoId === "string") found.add(data.videoId.toLowerCase());
+        return;
+      }
+      Object.values(value).forEach(visit);
+    }
+  };
+  for (const { doc } of contentDocuments(document_)) visit(doc);
+  return found;
+}
+
+/**
+ * The `video-embed` blocks in any of the page's documents that name a video and
+ * hold no poster, each with a way to set one. `pages push` copies the provider's
+ * thumbnail into the site's images for these (TR01109). Block-scoped like
+ * `placedVideoIds`.
+ */
+export function posterlessVideoEmbeds(document_) {
+  const found = [];
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+    } else if (isPlainObject(value)) {
+      if (value.type === "componentBlock" && isPlainObject(value.attrs) && value.attrs.componentType === "video-embed") {
+        const data = typeof value.attrs.componentData === "string"
+          ? parseComponentData(value.attrs.componentData)
+          : undefined;
+        if (isPlainObject(data) && (data.poster === undefined || data.poster === null)
+          && isVideoEmbedId(data.provider, data.videoId)) {
+          found.push({
+            provider: data.provider,
+            videoId: data.videoId,
+            setPoster: (poster) => {
+              value.attrs.componentData = JSON.stringify({ ...data, poster });
+            },
+          });
+        }
+        return;
+      }
+      Object.values(value).forEach(visit);
+    }
+  };
+  for (const { doc } of contentDocuments(document_)) visit(doc);
   return found;
 }
 

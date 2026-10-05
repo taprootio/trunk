@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -835,6 +836,210 @@ test("uploads exact bytes with only the signed headers and never forwards the be
     ["content-length", "content-type", "x-amz-meta-width"],
   );
   assert.equal(calls[0].init.body, bytes);
+});
+
+const RENEWED_TOKEN = "tr_live_renewed_site_credential_never_logged";
+
+function renewalClient({ renew, fetch, expiresInMilliseconds = 3_600_000 } = {}) {
+  let clock = 1_700_000_000_000;
+  const client = makeClient(fetch, {
+    now: () => clock,
+    credentialRenewal: { expiresAtMilliseconds: clock + expiresInMilliseconds, renew },
+  });
+  return { client, advance: (milliseconds) => { clock += milliseconds; } };
+}
+
+test("renews an exchanged credential shortly before it expires and sends the renewed one", async () => {
+  const bearers = [];
+  let renewals = 0;
+  const { client, advance } = renewalClient({
+    fetch: async (url, init) => {
+      bearers.push(init.headers.authorization);
+      return jsonResponse({});
+    },
+    renew: async () => {
+      renewals += 1;
+      return { key: RENEWED_TOKEN, expiresAtMilliseconds: 1_700_000_000_000 + 2 * 3_600_000 };
+    },
+  });
+
+  await client.request("v1/sites/a/videos");
+  advance(55 * 60_000 - 1);
+  await client.request("v1/sites/a/videos");
+  assert.equal(renewals, 0);
+
+  advance(2);
+  await client.request("v1/sites/a/videos");
+  await client.request("v1/sites/a/videos");
+
+  assert.equal(renewals, 1);
+  assert.deepEqual(bearers, [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`, `Bearer ${RENEWED_TOKEN}`, `Bearer ${RENEWED_TOKEN}`]);
+});
+
+test("renews once however many requests find the credential due", async () => {
+  let renewals = 0;
+  const bearers = [];
+  const { client, advance } = renewalClient({
+    fetch: async (url, init) => {
+      bearers.push(init.headers.authorization);
+      return jsonResponse({});
+    },
+    renew: async () => {
+      renewals += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { key: RENEWED_TOKEN, expiresAtMilliseconds: 1_700_000_000_000 + 2 * 3_600_000 };
+    },
+  });
+  advance(3_600_000);
+
+  await Promise.all([1, 2, 3].map(() => client.request("v1/sites/a/videos")));
+
+  assert.equal(renewals, 1);
+  assert.deepEqual(bearers, Array(3).fill(`Bearer ${RENEWED_TOKEN}`));
+});
+
+test("a failed renewal fails the request without sending the expiring credential", async () => {
+  let sent = 0;
+  const { client, advance } = renewalClient({
+    fetch: async () => {
+      sent += 1;
+      return jsonResponse({});
+    },
+    renew: async () => {
+      throw new SiteAuthoringError("exchange.contract", "renewal refused");
+    },
+  });
+  advance(3_600_000);
+
+  await assert.rejects(client.request("v1/sites/a/videos"), (error) => error?.code === "exchange.contract");
+  assert.equal(sent, 0);
+});
+
+test("refuses a renewed credential that is malformed", async () => {
+  const { client, advance } = renewalClient({
+    fetch: async () => jsonResponse({}),
+    renew: async () => ({ key: "tr_live_has_a_control\ncharacter", expiresAtMilliseconds: Date.now() }),
+  });
+  advance(3_600_000);
+
+  await assert.rejects(client.request("v1/sites/a/videos"), (error) => error?.code === "auth.renewal_invalid");
+});
+
+test("a renewed credential that is already due is used as it is, without exchanging on every request", async () => {
+  let renewals = 0;
+  const bearers = [];
+  const { client, advance } = renewalClient({
+    fetch: async (url, init) => {
+      bearers.push(init.headers.authorization);
+      return jsonResponse({});
+    },
+    renew: async () => {
+      renewals += 1;
+      // Expires one minute from now: inside the margin the moment it arrives.
+      return { key: RENEWED_TOKEN, expiresAtMilliseconds: 1_700_000_000_000 + 3_600_000 + 60_000 };
+    },
+  });
+  advance(3_600_000);
+
+  for (let request = 0; request < 3; request += 1) await client.request("v1/sites/a/videos");
+
+  assert.equal(renewals, 1);
+  assert.deepEqual(bearers, Array(3).fill(`Bearer ${RENEWED_TOKEN}`));
+});
+
+test("a renewal with no real first expiry is not installed", async () => {
+  let renewals = 0;
+  const client = makeClient(async () => jsonResponse({}), {
+    now: () => 9_999_999_999_999,
+    credentialRenewal: {
+      expiresAtMilliseconds: Number.NaN,
+      renew: async () => {
+        renewals += 1;
+        return { key: RENEWED_TOKEN, expiresAtMilliseconds: 0 };
+      },
+    },
+  });
+
+  await client.request("v1/sites/a/videos");
+  await client.request("v1/sites/a/videos");
+
+  assert.equal(renewals, 0);
+});
+
+test("a client with no renewal never calls one, and an anonymous client ignores it", async () => {
+  let renewals = 0;
+  const renew = async () => {
+    renewals += 1;
+    return { key: RENEWED_TOKEN, expiresAtMilliseconds: 0 };
+  };
+  const plain = makeClient(async () => jsonResponse({}), { now: () => 9_999_999_999_999 });
+  await plain.request("v1/sites/a/videos");
+  const anonymous = SiteApiClient.anonymous({
+    apiBaseUrl: API_BASE_URL,
+    fetch: async () => jsonResponse({}),
+    now: () => 9_999_999_999_999,
+    credentialRenewal: { expiresAtMilliseconds: 0, renew },
+  });
+  await anonymous.request("v1/sites/a/videos");
+
+  assert.equal(renewals, 0);
+});
+
+test("streams a video original with its declared length, and reads the file again on a retry", async () => {
+  const content = Buffer.from("not-really-a-video-but-bytes");
+  let opened = 0;
+  const bodies = [];
+  const duplexes = [];
+  const client = makeClient(async (url, init) => {
+    bodies.push(Buffer.from(await new Response(init.body).arrayBuffer()));
+    duplexes.push(init.duplex);
+    return new Response(null, { status: bodies.length === 1 ? 503 : 200 });
+  });
+
+  await client.upload({
+    url: "https://objects.example/presigned?signature=secret",
+    requiredHeaders: { "Content-Type": "video/mp4", "Content-Length": String(content.byteLength) },
+  }, {
+    byteLength: content.byteLength,
+    stream: () => {
+      opened += 1;
+      return Readable.from([content.subarray(0, 10), content.subarray(10)]);
+    },
+    timeoutMilliseconds: 7_200_000,
+  });
+
+  assert.equal(opened, 2);
+  assert.deepEqual(bodies, [content, content]);
+  assert.deepEqual(duplexes, ["half", "half"]);
+});
+
+test("refuses a streamed upload whose length is not the signed one before sending anything", async () => {
+  let calls = 0;
+  const client = makeClient(async () => {
+    calls += 1;
+    return new Response(null, { status: 200 });
+  });
+  await assert.rejects(
+    client.upload({
+      url: "https://objects.example/presigned",
+      requiredHeaders: { "Content-Type": "video/mp4", "Content-Length": "10" },
+    }, { byteLength: 11, stream: () => Readable.from([Buffer.alloc(11)]) }),
+    (error) => error?.code === "upload.content_length_invalid",
+  );
+  assert.equal(calls, 0);
+});
+
+test("refuses a body that is neither bytes nor a stream description", async () => {
+  const client = makeClient(async () => new Response(null, { status: 200 }));
+  for (const body of [{ byteLength: 3 }, { stream: () => Readable.from([]) }, { byteLength: -1, stream: () => null }]) {
+    await assert.rejects(
+      client.upload({
+        url: "https://objects.example/presigned",
+        requiredHeaders: { "Content-Type": "video/mp4", "Content-Length": "3" },
+      }, body),
+      (error) => error?.code === "upload.contract_invalid",
+    );
+  }
 });
 
 test("refuses a signed upload capability it cannot honor exactly", async (testContext) => {
