@@ -6,9 +6,18 @@ import {
   COMPONENT_TYPES,
   getComponentDefinition,
   getComponentPropertyReference,
+  mapComponentImages,
 } from "./content/components.js";
 import { FREE_FORM_SECTION_REGISTRY } from "./content/free-form-sections.js";
-import { CONTENT_ERROR_CODES, CONTENT_LIMITS, MARK_TYPES, NODE_TYPES } from "./content/vocabulary.js";
+import { formatFontCatalog } from "./font-catalog.js";
+import {
+  CONTENT_ERROR_CODES,
+  CONTENT_LIMITS,
+  LINK_REL_TOKENS,
+  LINK_TARGETS,
+  MARK_TYPES,
+  NODE_TYPES,
+} from "./content/vocabulary.js";
 import {
   FIXTURE_CONTRACT_VERSION,
   FIXTURE_DELIVERY_ORIGIN_DOMAIN,
@@ -71,7 +80,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 33;
+export const REFERENCE_VERSION = 34;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -408,7 +417,7 @@ export const REFERENCE_TOPICS = Object.freeze([
   Object.freeze({
     name: "media",
     usage: `${CLI_BINARY_NAME} help media`,
-    summary: "Describe media selection, naming, and component-ready output.",
+    summary: "Describe media selection, naming, and where the uploaded media is recorded.",
   }),
   Object.freeze({
     name: "preview",
@@ -446,6 +455,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Import an existing WordPress site from its export: mapping rules, order of work, and what to report.",
   }),
   Object.freeze({
+    name: "fonts",
+    usage: `${CLI_BINARY_NAME} help fonts [category]`,
+    summary: "List the font families a published site can load, for the theme's font fields.",
+  }),
+  Object.freeze({
     name: "fixture",
     usage: `${CLI_BINARY_NAME} help fixture`,
     summary: "State the offline fixture manifest contract and locate the shipped example.",
@@ -462,15 +476,20 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "has said you may; the export names every media URL but carries no image bytes, so downloading originals from "
       + "the old site also needs that permission. Work in a fresh workspace: 'use' the site, then 'pull'.",
       "Order of work: 1 parse the export; 2 classify every item; 3 stage media; 4 write page sources; 5 check every "
-      + "source; 6 pages push; 7 nav.json and nav push; 8 redirects.json and redirects push; 9 approve, deploy "
+      + "source with validate and pages push --dry-run; 6 pages push; 7 nav.json and nav push; 8 redirects.json and redirects push; 9 approve, deploy "
       + "--staging, review it; 10 redirects check and delivery check --staging; 11 deploy --production; 12 delivery "
       + "check --production --url <the origin 'sites' reports as primaryDomain>. Do not promote until the account of unmapped content has been read by the owner.",
       "Classify. Published post: article (the default); recipe when it has an Ingredients list and a Steps list "
       + "(help page recipe); album when it is a gallery with little text (help page album). Published page: a free-form "
-      + "page at its path, children under their parent's path. Never guess a place review: it needs a Taproot "
-      + "placeId this CLI cannot look up, so import the post as an article and list it. Not imported, and always "
+      + "page at its path, children under their parent's path. Never guess a place review: see Place reviews "
+      + "below. Not imported, and always "
       + "listed: drafts, pending, private, scheduled and password-protected items; custom post types; comments; the WordPress front "
       + "page (Taproot seeds its own home page: ask the owner what belongs there).",
+      "Place reviews. A post with a rating and a place becomes a place review when the place can be found: run "
+      + "'places search <name and city>', and if one prediction is plainly the same place, 'places select "
+      + "<googlePlaceId> <sessionToken>' gives the placeId for its front matter (rating: will-return, might-return or "
+      + "wont-return, mapped from the post's own scale). When nothing matches, import it as an article and list it. A travel "
+      + "or food article, or an album, about one place can carry place: <placeId> in its front matter.",
       "Paths and dates. A post's path is '<first category slug, ignoring the default Uncategorized>/<post name>' ('journal/' with no category; a post or page whose slug has no ASCII letters gets a name like post-<id>, listed), a "
       + "page's is its post name under its parents. Keep the original publication date in displayDate (the date "
       + "part of wp:post_date). Categories beyond the first, and all tags, have no Taproot equivalent (tags are "
@@ -488,13 +507,14 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "album when they are the post), links to content you did not import (keep the absolute old link), and images "
       + "on other hosts. Every item goes in the account with its page and what happened to it.",
       "Media. Save each original in the workspace's media/ directory (PNG, JPEG, GIF or WebP up to 32 MiB each; list SVG, AVIF, HEIC and oversized files, which cannot be uploaded; use the original, not "
-      + "the -300x200 thumbnail WordPress also stores), then upload in batches of at most 10 files (conservative: the limit depends on how long the delivery URLs are, and was measured only with short stand-in URLs): 'media upload' "
-      + "prints every file's delivery URLs into a result capped at 64 KiB, and a longer batch uploads everything, "
-      + "writes .taproot-site-media.json, then exits 1 with output.too_large. If that happens the files are already "
-      + "uploaded; run the same paths again (they deduplicate) in smaller batches.",
-      "Check before sending. 'pages push' validates every source before it sends anything but stops at the first "
-      + "problem. On a large import, validate the sources yourself first so you see every problem at once: run the "
-      + "package's validators over each file, or push one page at a time ('pages push <path>').",
+      + "the -300x200 thumbnail WordPress also stores), then run 'media upload' once for the whole media/ directory (at most 500 "
+      + "files a run). It records every file in .taproot-site-media.json and reports counts and a bounded item list; "
+      + "a run that stopped partway is safe to repeat, because identical files deduplicate.",
+      "Check before sending. 'validate' (no credential, no request) checks every page source, media reference and "
+      + "setting in the workspace at once and lists every problem in error.problems with its file, code and field. "
+      + "'pages push --dry-run' then checks the pages against the live site — paths taken, templates, revisions, "
+      + "videos — and sends nothing. 'plan' checks the whole workspace against the site and orders what is left "
+      + "(media, pages, footer, theme, navigation); 'apply --plan <planHash>' runs exactly that plan.",
       "Navigation. A site can have several menus (header, footer): ask which is primary and list the rest. Rebuild it as nav.json after 'pages push', at most three levels deep with canonical UUID ids, 1000 items and 200-character titles (help nav); a label-only dropdown heading (a WordPress '#' link) is a GROUP_HEADER, and a child of an item you cannot map is listed, not promoted (page items carry the resourceId from the "
       + "manifest; a custom link is an EXTERNAL_URL item; a category or tag item has no target, so list it).",
       "Redirects. At most 2000 entries; never redirect to a page you did not push. Every imported page's old path (from its <link>) becomes a 301 to its new path, unless the two "
@@ -568,7 +588,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `Pull the baseline: ${CLI_BINARY_NAME} pull writes settings/taproot-styles.json with both schemes' complete effective `
       + "themes (the stored theme resolved over the same defaults every consumer renders) beside brand.json, "
       + "site-header.json and site-publishing-preferences.json. Keep that pull as the baseline you edit; never build "
-      + "a theme from memory or from an example. semanticMappings holds only authored pins, listed in explicitMappingTokens. "
+      + "a theme from memory or from an example. semanticMappings holds only authored pins, listed in explicitMappingTokens "
+      + "at the root; a context's pins need no marker. "
       + "site-publishing-preferences.json also carries timeZone, the site's IANA zone (UTC until the owner sets it), "
       + "which decides what \"today\" means for relative form date bounds; it is read-only here, so ask the owner to set "
       + "it in the editor under Site settings.",
@@ -579,10 +600,16 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Prepare media locally: PNG, JPEG, GIF and WebP raster files only, addressed relative to the workspace root. Make "
       + "the variants yourself with any image tool (a transparent logo, a @2x copy, a square favicon); there is no "
       + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
-      + "(and brand.faviconId) from the returned image ids so each scheme carries the artwork that reads on its header.",
-      `Validate offline: ${CLI_BINARY_NAME} validate checks the complete pair, the appearance files and the footer against `
-      + "the contracts the site enforces, and warns when a semanticMappings pin repeats the default on a token your "
-      + "roles would have moved (the pin would keep the role from rendering).",
+      + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header.",
+      `Validate offline: ${CLI_BINARY_NAME} validate checks the whole workspace at once — the complete pair, the `
+      + "appearance files, the footer, every page, navigation and redirects — against the contracts the site enforces, "
+      + "lists every problem in error.problems, and warns when a semanticMappings pin repeats the default on a token "
+      + "your roles would have moved (the pin would keep the role from rendering).",
+      `Plan a combined change: when pages, the footer, the theme and navigation all changed, ${CLI_BINARY_NAME} plan `
+      + "checks them against the live site and lists the steps in the order they must run, each ready, blocked or "
+      + `nothing to do; ${CLI_BINARY_NAME} apply --plan <planHash> runs them through the ordinary push verbs and refuses `
+      + "a plan the workspace or the site has moved past. After a failed step, plan again: finished steps read as "
+      + "nothing to do.",
       `Push: ${CLI_BINARY_NAME} theme push --dry-run first: it reads the site and lists the JSON paths at which each `
       + "settings file differs from it, and says whether the baseline pull recorded is still current. Then "
       + `${CLI_BINARY_NAME} theme push saves both themes, the appearance scalars and the ten footer scheme colours in `
@@ -829,22 +856,23 @@ const WORKFLOW_REFERENCES = Object.freeze({
   }),
   media: Object.freeze({
     title: "Media upload contract",
-    summary: "Upload workspace-root-relative raster files and videos and receive component-ready media objects and video ids.",
+    summary: "Upload workspace-root-relative raster files and videos; images are recorded in .taproot-site-media.json and videos report their ids.",
     usage: `${CLI_BINARY_NAME} media upload [path...]`,
     details: Object.freeze([
       "Paths are relative to the configured workspace root, not the shell's current directory.",
       "PNG, JPEG, GIF, and WebP are accepted; retina names such as logo@2x.png and logo@3x.png are supported.",
       "For header logos prefer genuine transparent PNG/WebP, check contrast in both themes, and include a simplified square favicon. See help appearance for branding guidance.",
       "Prepare variants locally with any image tool before uploading: a transparent logo, its @2x copy, a scheme-specific dark logo when one asset does not read on both headers, and a square favicon. The CLI uploads what you give it; it has no recolor, crop, or SVG upload command.",
-      "Assign both schemes after uploading: lightLogoId and darkLogoId in settings/taproot-styles.json and brand.faviconId in settings/brand.json take the returned image ids; theme push writes them. See help walkthrough for the full design pass.",
-      "Each result item includes media: { imageId, src, urls, width, height, alt }.",
+      "Assign both schemes after uploading: lightLogoId and darkLogoId in settings/taproot-styles.json and brand.faviconId in settings/brand.json take the image ids .taproot-site-media.json records for those files; theme push writes them. See help walkthrough for the full design pass.",
+      "Each result item reports file, imageId, deduplicated, width, height and processingState; the delivery URLs (src, urls) are in .taproot-site-media.json, not the result, so an upload of any size reports within its bound. media.total and videos.total count every file, and media.itemsTruncated or videos.itemsTruncated says that list stopped short.",
       "MP4, MOV, and WebM files are uploaded as videos (up to 250 MB each; the site's licence sets the cap, and the container is read from the file's bytes, not its name). The CLI reads each file with mediabunny. A file that is H.264 and AAC but not already an MP4 with its index first is rewritten as one without re-encoding; anything else is sent as it is and judged by the server. When the server refuses a file, its one-line message is printed as media.video_refused. A video is ready to play as soon as the upload is confirmed. The CLI sets no poster, because Node has no video decoder: the Videos page picks one automatically for a video uploaded there, and lets the owner choose another frame, so set a CLI-uploaded video's poster there, with its title and caption. The command reports videos.items: { file, videoId, title, caption, fileName, contentType, byteLength, deduplicated, durationMilliseconds, component }, where component.markdown is the component:video fence and component.block the componentBlock node that place it. Needs the site's licence to include video.",
       "Place an uploaded video on a page with a video component: a component:video fence in Markdown or a componentBlock of type video, with the returned videoId and optional maxHeight and borderWidth; the poster, caption and shape are the video's own. See help component video. pages push refuses a video that is not in the site's library; validate checks it against fixture.videoIds.",
-      "The same src/urls delivery fields are saved in .taproot-site-media.json for page and component authoring.",
+      "In Markdown, name an uploaded image by its path (such as media/photo.webp) wherever an image goes: body images, coverImage, album images, component image fields and section images. pages push resolves each path through .taproot-site-media.json, which also keeps the src/urls delivery fields a .pm.json image record carries.",
     ]),
     example: Object.freeze({
       command: `${CLI_BINARY_NAME} media upload media/logo@2x.png`,
-      componentMedia: Object.freeze({
+      markdownImage: "media/logo@2x.png",
+      pmJsonImageRecord: Object.freeze({
         imageId: "<image-uuid>",
         src: "<preferred-delivery-url>",
         urls: Object.freeze([Object.freeze({ minWidth: 640, url: "<responsive-delivery-url>" })]),
@@ -872,6 +900,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "(staging.host_unavailable, staging.authority_denied, staging.surface_refused, or staging.handoff_unavailable) "
       + "and a recovery step; run staging review to mint another (it works on every surface). Never verify a theme "
       + "on production instead.",
+      "A preview is served on the site's staging address: its own address under Taproot's user-content domain "
+      + "(ontaproot.io in production), or its customer staging domain once that is active. The address has to be "
+      + "live, so a site that has never deployed to staging, or whose staging host is changing, answers "
+      + "preview.staging_unavailable; run 'deploy --staging' once, or wait for the change to finish.",
       "A page path resolves through .taproot-site-manifest.json; a canonical page UUID works directly.",
       "The homepage's manifest path is empty; address it as '/', which resolves to that empty root path.",
       "Preview before approving: approve consumes the draft, so an approved page has no draft left to render and answers preview.no_draft. Review it on staging after a deploy instead.",
@@ -889,7 +921,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
     summary:
       `${FIXTURE_MANIFEST_FILE_NAME} binds a directory laid out like a pulled workspace to deterministic identities, `
       + "so validate can prove it with no credential, no network, and no write.",
-    usage: `${CLI_BINARY_NAME} validate <fixture-directory>`,
+    usage: `${CLI_BINARY_NAME} validate [<fixture-directory>]`,
     details: Object.freeze([
       `Required root fields: ${FIXTURE_REQUIRED_ROOT_FIELDS.join(", ")}.`,
       `Optional root fields: ${FIXTURE_OPTIONAL_ROOT_FIELDS.join(", ")}. Appearance and footer metadata, when present, `
@@ -928,6 +960,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       }.`,
       `The fixture block carries ${FIXTURE_METADATA_FIELDS.join(", ")}. Every image a page references by imageId must `
       + "be listed in fixture.imageIds, and every absolute delivery URL a page uses must sit on a declared origin. "
+      + "A Markdown media path resolves through the fixture's own .taproot-site-media.json, as in a workspace; "
+      + "without one, no media path resolves. "
       + "videoIds is optional: list the ready videos a page may place with a video component, and validate refuses a "
       + "video component whose videoId is not listed. A live push makes the same check against the site's video library.",
       `Each deliveryOrigins entry is an origin-only HTTPS URL (no path, query, fragment, or credentials) on `
@@ -1011,11 +1045,15 @@ export function listComponentTypeReferences() {
   return COMPONENT_TYPES.map(componentSummary);
 }
 
+const EXAMPLE_MEDIA_PATH = "media/photo.webp";
+
 export function getComponentReference(type) {
   const definition = getComponentDefinition(type);
   if (!definition) return undefined;
   const example = definition.example;
-  const markdownExample = `\`\`\`component:${type}\n${JSON.stringify(example, null, 2)}\n\`\`\``;
+  // Markdown names each image by its media path; pages push resolves it (TR01187).
+  const markdownData = mapComponentImages(type, example, (value) => (value === null ? null : EXAMPLE_MEDIA_PATH));
+  const markdownExample = `\`\`\`component:${type}\n${JSON.stringify(markdownData, null, 2)}\n\`\`\``;
   return {
     type,
     displayName: definition.displayName,
@@ -1150,12 +1188,14 @@ function backgroundReference() {
     }),
     scrimOpacityByValue: Object.freeze({ ...BACKGROUND_DEFINITION.fields.scrimStrength.opacityByValue }),
     deliveryUrlPolicy:
-      "Use complete site-owned processed-image results for image and portraitImage. src and every urls[].url must be HTTPS or non-protocol-relative root-relative delivery URLs; credentials, whitespace, controls, and backslashes are rejected.",
+      "In Markdown, give image and portraitImage as media paths recorded by media upload (such as \"media/photo.webp\"); pages push stores the image records. In a .pm.json document they are complete site-owned processed-image records: src and every urls[].url must be HTTPS or non-protocol-relative root-relative delivery URLs; credentials, whitespace, controls, and backslashes are rejected.",
     compactBehavior:
       "At the shared compact breakpoint, portraitImage and portraitFocus replace the landscape image and focus when supplied.",
     example: BACKGROUND_EXAMPLE,
     markdownExample: `:::section ${
-      JSON.stringify({ background: BACKGROUND_EXAMPLE })
+      JSON.stringify({
+        background: { ...BACKGROUND_EXAMPLE, image: "media/class.webp", portraitImage: "media/class-portrait.webp" },
+      })
     }\n## Practice with us\n\nFind your next class.\n:::`,
   });
 }
@@ -1185,11 +1225,11 @@ function decorationReference() {
     additionalProperties: false,
     fields: sectionAttributeReference().find((attr) => attr.name === "decoration").fields,
     deliveryUrlPolicy:
-      "Use the complete site-owned processed-image result from media upload. src and every urls[].url must be HTTPS or non-protocol-relative root-relative delivery URLs; credentials, whitespace, controls, and backslashes are rejected.",
+      "In Markdown, give image as a media path recorded by media upload (such as \"media/starburst.webp\"); pages push stores the image record. In a .pm.json document it is the complete site-owned processed-image record: src and every urls[].url must be HTTPS or non-protocol-relative root-relative delivery URLs; credentials, whitespace, controls, and backslashes are rejected.",
     tintTokens: Object.freeze({ ...DECORATION_DEFINITION.fields.tint.tokenByValue }),
     example: DECORATION_EXAMPLE,
     markdownExample: `:::section ${
-      JSON.stringify({ decoration: DECORATION_EXAMPLE })
+      JSON.stringify({ decoration: { ...DECORATION_EXAMPLE, image: "media/starburst.webp" } })
     }\n## Rooted in warmth\n\nMove with confidence.\n:::`,
     maskGuidance:
       "Use a transparent PNG or WebP whose alpha channel contains only the mark. The active section context supplies the tint in both schemes.",
@@ -1556,6 +1596,25 @@ const FREE_FORM_REFERENCE = Object.freeze({
     root: Object.freeze({ type: "doc", content: "array of supported block nodes" }),
     nodes: NODE_TYPES,
     marks: MARK_TYPES,
+    // TR01190: what a link mark's rel and target publish as.
+    links: Object.freeze({
+      markdown: '[Shop](https://shop.example){rel="sponsored nofollow" target="_blank"}',
+      rel: LINK_REL_TOKENS,
+      target: LINK_TARGETS,
+      default:
+        "A link with no rel is followed, whether it goes to this site or another. Choose nofollow, sponsored "
+        + "(paid or affiliate), or ugc (written by someone else) for a link that should not pass endorsement; the "
+        + "choice is per link, internal links included.",
+      markdownRule:
+        'Write {rel="…" target="…"} directly after the link\'s closing parenthesis: either attribute alone or both, '
+        + 'each double-quoted once. rel is space-separated; target="_blank" opens a new tab.',
+      pmJson:
+        'In .pm.json, a link mark carries attrs.rel (a space-separated string, or null) and attrs.target ("_blank" '
+        + 'opens a new tab and publishes with noopener noreferrer added, "_self" or null keeps the same tab).',
+      refusals:
+        `Any other rel token, opener included, is refused (${CONTENT_ERROR_CODES.linkRel}); so is another target `
+        + `(${CONTENT_ERROR_CODES.linkTarget}). The editor's old default, "noopener noreferrer nofollow", reads as no choice.`,
+    }),
     componentNode: Object.freeze({
       type: "componentBlock",
       attrs: Object.freeze({
@@ -1665,7 +1724,8 @@ function schemaConstraints(schema) {
 
 function formatSchemaLine(name, schema, required, indent) {
   const constraints = schemaConstraints(schema);
-  return `${indent}${name.padEnd(Math.max(1, 28 - indent.length))} ${schemaLabel(schema)}; ${
+  const label = schema.markdownType ? "media path | null in Markdown; object | null in .pm.json" : schemaLabel(schema);
+  return `${indent}${name.padEnd(Math.max(1, 28 - indent.length))} ${label}; ${
     required ? "required" : "optional"
   }${constraints.length > 0 ? `; ${constraints.join("; ")}` : ""}`;
 }
@@ -1675,7 +1735,7 @@ function nestedSchemaLines(schema, path, indent = "    ") {
   const valuePath = schema.type === "array" ? `${path}[]` : path;
   if (!valueSchema?.properties) return [];
 
-  const lines = [];
+  const lines = valueSchema.markdownType ? [`${indent}${valuePath} in a .pm.json document:`] : [];
   for (const property of valueSchema.properties) {
     const propertyPath = `${valuePath}.${property.name}`;
     lines.push(formatSchemaLine(propertyPath, property.schema, property.required, indent));
@@ -1719,9 +1779,11 @@ function formatSectionAttr(attr) {
 
 function formatRegistryField(field, indent = "  ") {
   if (field.type === "processed-image") {
-    return `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} processed-image${
+    return `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} media path${
       field.nullable ? " | null" : ""
-    }; ${field.required ? "required" : `default ${JSON.stringify(field.default)}`}; required keys ${
+    } in Markdown; processed-image${
+      field.nullable ? " | null" : ""
+    } in .pm.json; ${field.required ? "required" : `default ${JSON.stringify(field.default)}`}; .pm.json required keys ${
       field.requiredKeys.join(", ")
     }; optional keys ${
       field.optionalKeys.join(", ")
@@ -1761,6 +1823,8 @@ function formatDesignRecipe(recipe) {
 
 export function formatReferenceResult(result) {
   switch (result.topic) {
+    case "fonts":
+      return formatFontCatalog(result.fonts);
     case "topics":
       return `Usage: ${CLI_BINARY_NAME} help <topic> [name] [--json]\n\nReference topics:\n${
         result.topics.map((topic) => `  ${topic.usage.padEnd(48)} ${topic.summary}`).join("\n")
@@ -1808,7 +1872,9 @@ export function formatReferenceResult(result) {
         page.document.nodes.join(", ")
       }\nSupported marks: ${
         page.document.marks.join(", ")
-      }\n\nTop-level section container:\n${page.sections.example}\n\nSection attributes:\n${
+      }\n\nLinks:\n  markdown              ${page.document.links.markdown}\n  rel                   ${
+        page.document.links.rel.join(", ")
+      }\n  default               ${page.document.links.default}\n  in Markdown           ${page.document.links.markdownRule}\n  in .pm.json           ${page.document.links.pmJson}\n  refusals              ${page.document.links.refusals}\n\nTop-level section container:\n${page.sections.example}\n\nSection attributes:\n${
         page.document.sectionNode.attrs.map(formatSectionAttr).join("\n")
       }\n\nSection photo background (closed object):\n${
         page.sections.background.fields.map((field) => formatRegistryField(field)).join("\n")

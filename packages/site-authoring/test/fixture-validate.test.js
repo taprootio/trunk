@@ -398,7 +398,7 @@ test("validate refuses a redirect source that a fixture page occupies under any 
 
   assert.equal(result.exitCode, 1, result.stderr);
   const { error } = JSON.parse(result.stdout);
-  assert.equal(error.code, "fixture.redirect_path_occupied");
+  assert.equal(error.code, "redirects.path_occupied");
   assert.equal(error.field, `entries[${redirects.entries.length - 1}].path`);
 });
 
@@ -413,7 +413,7 @@ test("validate ignores GITHUB_OUTPUT on both success and usage failure", async (
   assert.equal(await readFile(outputPath, "utf8"), initialOutput);
 
   const failure = await runValidation(fixture, {
-    arguments_: ["validate"],
+    arguments_: ["validate", "one", "two"],
     environment: { GITHUB_OUTPUT: outputPath },
   });
   assert.equal(failure.exitCode, 2);
@@ -534,7 +534,7 @@ test("offline failures retain the push validators' stable code and field", async
           "TEMPLATE_TYPE_ARTICLE";
         await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
       },
-      code: "fixture.page_template_mismatch",
+      code: "pages.template_immutable",
       field: "pages/green-smoothie.md",
     },
     {
@@ -661,7 +661,10 @@ test("offline failures retain the push validators' stable code and field", async
       assert.equal(result.exitCode, 1);
       assert.equal(result.requests, 0);
       assert.equal(await treeDigest(fixture), before);
-      assert.deepEqual(JSON.parse(result.stdout).error, { code: scenario.code, field });
+      // A refusal may also list every problem it found (TR01002); its code and
+      // field stay the first problem's.
+      const { problems: _problems, problemCount: _problemCount, ...error } = JSON.parse(result.stdout).error;
+      assert.deepEqual(error, { code: scenario.code, field });
       assert.match(result.stderr, new RegExp(`^taproot-site failed \\[${scenario.code.replaceAll(".", "\\.")}\\]`, "u"));
       for (const text of scenario.humanIncludes ?? []) assert.ok(result.stderr.includes(text), `missing '${text}'`);
       for (const text of scenario.humanExcludes ?? []) assert.ok(!result.stderr.includes(text), `unexpected '${text}'`);
@@ -688,4 +691,35 @@ test("validate counts no videos for a fixture that declares none", async (contex
 
   assert.equal(result.exitCode, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).fixture.videoIds, 0);
+});
+
+test("a valid page source the fixture manifest does not bind is reported as untracked", async (context) => {
+  const { fixture } = await copiedFixture(context, "untracked-page");
+  await writeFile(path.join(fixture, "pages/extra.md"), "---\ntitle: Extra\npath: extra\n---\n\nText.\n");
+
+  const result = await runValidation(fixture);
+
+  assert.equal(result.exitCode, 1, result.stderr);
+  const { error } = JSON.parse(result.stdout);
+  assert.equal(error.code, "fixture.page_untracked");
+  assert.equal(error.field, "pages/extra.md");
+});
+
+test("a fixture's media manifest must be the fixture's own, and media paths it does not record are refused", async (context) => {
+  const { fixture } = await copiedFixture(context);
+  const mediaPath = path.join(fixture, ".taproot-site-media.json");
+  const media = JSON.parse(await readFile(mediaPath, "utf8"));
+  await writeFile(mediaPath, `${JSON.stringify({ ...media, siteId: "a0000000-0000-4000-8000-0000000000ff" })}\n`);
+
+  const mismatched = await runValidation(fixture);
+  assert.equal(mismatched.exitCode, 1, mismatched.stderr);
+  const codes = JSON.stringify(JSON.parse(mismatched.stdout).error);
+  assert.match(codes, /fixture\.media_manifest_site/u);
+
+  await unlink(mediaPath);
+  const missing = await runValidation(fixture);
+  assert.equal(missing.exitCode, 1, missing.stderr);
+  assert.equal(JSON.parse(missing.stdout).error.code, "content.markdown_image");
+  assert.match(missing.stderr, /media\/riverbend-studio\.webp/u);
+  assert.match(missing.stderr, /a fixture lists it in its own copy/u);
 });

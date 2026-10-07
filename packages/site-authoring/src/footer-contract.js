@@ -235,7 +235,7 @@ function target(value, path, knownPageResourceIds, tolerateStoredValues) {
     if (knownPageResourceIds && !knownPageResourceIds.has(value.pageResourceId)) {
       fail(
         "footer.page_reference_unknown",
-        `${path}.pageResourceId must identify a page tracked by the pull manifest.`,
+        `${path}.pageResourceId must identify a page tracked by the pull manifest that the site still holds.`,
         `${path}.pageResourceId`,
       );
     }

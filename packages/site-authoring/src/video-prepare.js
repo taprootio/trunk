@@ -62,19 +62,10 @@ export async function prepareVideoFile({ filePath, byteLength, maxRemuxBytes = D
   const input = new Input({ source: new FilePathSource(filePath), formats: ALL_FORMATS });
   try {
     const format = await input.getFormat();
-    const video = await input.getPrimaryVideoTrack();
-    const audio = await input.getPrimaryAudioTrack();
-    // The server refuses a file if any track is not H.264 or AAC, so the first track that is
-    // not is the one declared and named. A track whose codec mediabunny cannot name is
-    // "unknown", not absent: an absent audio track is fine, a silent copy of one that exists is not.
-    const videoCodec = await declaredCodec(await input.getVideoTracks(), isH264);
-    const audioCodec = await declaredCodec(await input.getAudioTracks(), isAac);
+    const tracks = await inspectTracks(input);
+    const { video, audio, videoCodec, audioCodec, primaryVideo, primaryAudio } = tracks;
     const described = { videoCodec, audioCodec, remuxed: null };
-
-    // A remux keeps only the primary tracks, so they are what must be accepted for it to help.
-    const primaryVideo = video ? await codecOf(video) : "";
-    const primaryAudio = audio ? await codecOf(audio) : "";
-    if (!isH264(primaryVideo) || !isAac(primaryAudio)) return described;
+    if (!primariesAccepted(tracks)) return described;
 
     const everyTrackAccepted = isH264(videoCodec) && isAac(audioCodec);
     if (everyTrackAccepted && format.mimeType === "video/mp4" && await indexComesFirst(filePath)) return described;
@@ -95,6 +86,51 @@ export async function prepareVideoFile({ filePath, byteLength, maxRemuxBytes = D
   } finally {
     input.dispose();
   }
+}
+
+/**
+ * Whether the upload would send this file in a form the server accepts (TR00823): H.264
+ * and AAC as it is, or primaries a remux can keep within the ceiling. Read only; `plan`
+ * uses it so an unsupported video blocks before anything is uploaded. A remux that fails
+ * at upload time is still refused then.
+ */
+export async function videoAcceptance({ filePath, byteLength, maxRemuxBytes = DEFAULT_MAX_REMUX_BYTES }) {
+  const input = new Input({ source: new FilePathSource(filePath), formats: ALL_FORMATS });
+  try {
+    const tracks = await inspectTracks(input);
+    const { videoCodec, audioCodec } = tracks;
+    const asItIs = isH264(videoCodec) && isAac(audioCodec);
+    const remuxable = primariesAccepted(tracks) && byteLength <= maxRemuxBytes;
+    return { accepted: asItIs || remuxable, videoCodec, audioCodec };
+  } catch {
+    return { accepted: false, videoCodec: "", audioCodec: "" };
+  } finally {
+    input.dispose();
+  }
+}
+
+/**
+ * The server refuses a file if any track is not H.264 or AAC, so the first track that is
+ * not is the one declared and named. A track whose codec mediabunny cannot name is
+ * "unknown", not absent: an absent audio track is fine, a silent copy of one that exists is
+ * not. A remux keeps only the primary tracks, so they are what must be accepted for it to help.
+ */
+async function inspectTracks(input) {
+  const video = await input.getPrimaryVideoTrack();
+  const audio = await input.getPrimaryAudioTrack();
+  return {
+    video,
+    audio,
+    videoCodec: await declaredCodec(await input.getVideoTracks(), isH264),
+    audioCodec: await declaredCodec(await input.getAudioTracks(), isAac),
+    primaryVideo: video ? await codecOf(video) : "",
+    primaryAudio: audio ? await codecOf(audio) : "",
+  };
+}
+
+/** Whether a remux, which keeps only the primary tracks, would produce a file the server accepts. */
+function primariesAccepted({ primaryVideo, primaryAudio }) {
+  return isH264(primaryVideo) && isAac(primaryAudio);
 }
 
 async function codecOf(track) {

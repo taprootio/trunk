@@ -91,6 +91,8 @@ export function sanitizeDiagnostic(value, fallback = "The operation failed.") {
   return [...clean].slice(0, LIMITS.diagnosticScalars).join("") || fallback;
 }
 
+const MAXIMUM_PROBLEMS = 5_000;
+
 /**
  * The fixed wording every `theme.setting_missing` detail carries. A required
  * key that is absent is exactly that: absence alone says nothing about when
@@ -172,6 +174,26 @@ export class SiteAuthoringError extends Error {
         .slice(0, 100)
         .map((value) => sanitizeDiagnostic(value, "path"))
       : undefined;
+    return this;
+  }
+
+  /**
+   * Attach every problem a whole-workspace check found (TR01002). The JSON
+   * result carries a bounded prefix and the count; stderr lists them all.
+   */
+  withProblems(problems) {
+    const list = Array.isArray(problems) ? problems : [];
+    this.problems = list
+      .slice(0, MAXIMUM_PROBLEMS)
+      .filter((problem) => typeof problem?.code === "string")
+      .map((problem) => ({
+        ...(typeof problem.area === "string" ? { area: sanitizeDiagnostic(problem.area, "") } : {}),
+        ...(typeof problem.file === "string" ? { file: sanitizeDiagnostic(problem.file, "") } : {}),
+        code: /^[a-z0-9_.-]+$/u.test(problem.code) ? problem.code : "site.failed",
+        ...(typeof problem.field === "string" ? { field: sanitizeDiagnostic(problem.field, "") } : {}),
+        message: sanitizeDiagnostic(problem.message),
+      }));
+    this.problemCount = list.length;
     return this;
   }
 

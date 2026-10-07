@@ -12,8 +12,10 @@ import {
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { waitForProcessing } from "./media-upload.js";
 import { SiteAuthoringError } from "../errors.js";
+import { stableJson } from "../footer-draft-hash.js";
+import { CHECK_AREA, collectProblems, planStale, problemsOf, refuseProblems } from "../problems.js";
 import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "../reserved-paths.js";
-import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
+import { boundedByBytes, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
 import {
   contentDocuments,
@@ -109,7 +111,40 @@ import {
  *   ambiguous outcome surfaces as ambiguous.
  */
 
-const MAXIMUM_REPORTED = 200;
+// Shares of the result's 64 KiB for its lists, whose entries carry page paths
+// of any length.
+const ITEMS_BYTES = 32 * 1024;
+const LIST_BYTES = 8 * 1024;
+// A send that ended this way may still have written the page.
+const OUTCOME_UNKNOWN_CODES = new Set([
+  "transport.mutation_ambiguous",
+  "transport.response_read",
+  "transport.response_too_large",
+  "transport.invalid_json",
+  "api.page_contract",
+]);
+
+function outcomeUnknown(error) {
+  // A cancelled retry of a write, and a server error on a write the transport
+  // does not replay, leave the same question open.
+  return OUTCOME_UNKNOWN_CODES.has(error.code) || error.ambiguousMutation === true || error.httpStatus >= 500;
+}
+
+/** The creates this workspace sent without hearing back, by page path. */
+function pendingCreates(manifest) {
+  const recorded = manifest.pendingCreates;
+  return recorded !== null && typeof recorded === "object" && !Array.isArray(recorded) ? recorded : {};
+}
+
+function pendingCreateFor(manifest, pagePath) {
+  return Object.hasOwn(pendingCreates(manifest), pagePath);
+}
+
+/** A result list bounded by bytes, as `<name>` plus `<name>Truncated` when cut. */
+function reportedList(name, values, budget) {
+  const shown = boundedByBytes(values, budget);
+  return { [name]: shown.items, ...(shown.truncated ? { [`${name}Truncated`]: true } : {}) };
+}
 const FRONT_MATTER_FENCE = "---";
 const FRONT_MATTER_ENTRY = /^([A-Za-z][A-Za-z0-9_]*)[ \t]*:[ \t]*(.*)$/u;
 
@@ -379,14 +414,22 @@ function assertValid(content, document_, file, { mayBeEmpty = false } = {}) {
   const errors = mayBeEmpty ? reported.filter((error) => error?.code !== CONTENT_ERROR_CODES.emptyDocument) : reported;
   if (errors.length === 0) return;
   const first = errors[0] ?? {};
-  const location = typeof first.path === "string" && first.path !== "" ? first.path : "doc";
+  const locate = (error) => typeof error?.path === "string" && error.path !== "" ? error.path : "doc";
+  const describe = (error) =>
+    typeof error?.message === "string" ? error.message : "the node or mark is outside the accepted vocabulary.";
+  // Every finding travels with the refusal, so a whole-workspace check reports
+  // all of a page's problems and not only the first (TR01002).
   throw documentError(
     first.code === CONTENT_ERROR_CODES.rawHtmlForbidden ? CONTENT_ERROR_CODES.rawHtmlForbidden : "pages.document_invalid",
-    `'${file}' is not a valid Taproot document: ${errors.length} problem(s), first at ${location} (${
+    `'${file}' is not a valid Taproot document: ${errors.length} problem(s), first at ${locate(first)} (${
       typeof first.code === "string" ? first.code : "invalid"
-    }): ${typeof first.message === "string" ? first.message : "the node or mark is outside the accepted vocabulary."}`,
-    `${file}:${location}`,
-  );
+    }): ${describe(first)}`,
+    `${file}:${locate(first)}`,
+  ).withProblems(errors.map((error) => ({
+    code: typeof error?.code === "string" ? error.code : "pages.document_invalid",
+    field: `${file}:${locate(error)}`,
+    message: describe(error),
+  })));
 }
 
 function systemPageKind(pagePath) {
@@ -708,6 +751,9 @@ export async function validateWorkspacePageDocument({
       const contexts = typeof getSharedThemeContexts === "function"
         ? await getSharedThemeContexts()
         : await readSharedThemeContexts(workspaceDir, siteId);
+      // No contexts means the theme itself failed validation and was reported
+      // as its own problem; a context cannot be checked against it.
+      if (contexts === undefined) continue;
       const contextErrors = validateFreeFormSectionContexts(doc, contexts).errors;
       if (contextErrors.length > 0) {
         const first = contextErrors[0];
@@ -722,10 +768,10 @@ export async function validateWorkspacePageDocument({
 }
 
 /**
- * Refuses a push that places a video the site's library does not hold; every
+ * The pages that place a video the site's library does not hold; every
  * library video is ready to play. Pages that will not be sent are not asked about.
  */
-async function requirePlacedVideosExist(client, siteId, planned) {
+export async function placedVideoProblems(client, siteId, planned) {
   const placements = new Map();
   for (const page of planned) {
     if (page.unchanged) continue;
@@ -733,30 +779,32 @@ async function requirePlacedVideosExist(client, siteId, planned) {
       if (!placements.has(videoId)) placements.set(videoId, page.file);
     }
   }
-  if (placements.size === 0) return;
+  if (placements.size === 0) return [];
 
   const library = await listVideos(client, siteId);
   const knownIds = new Set(library.videos.map((video) => video.videoId));
+  const problems = [];
   for (const [videoId, file] of placements) {
-    const known = knownIds.has(videoId);
-    if (!known && library.truncated) {
-      throw documentError(
-        "pages.video_library_unverifiable",
-        `'${file}' places video ${videoId}, which is not among the first ${library.videos.length} videos of this `
-          + "site's library, and the library is larger than one push can check. Reduce the library or place the video "
-          + "from the editor.",
-        file,
-      );
-    }
-    if (!known) {
-      throw documentError(
-        "pages.video_unknown",
-        `'${file}' places video ${videoId}, which is not in this site's video library. Upload it with `
-          + "'taproot-site media upload' and use the videoId it reports.",
-        file,
-      );
-    }
+    if (knownIds.has(videoId)) continue;
+    problems.push(...problemsOf(
+      library.truncated
+        ? documentError(
+          "pages.video_library_unverifiable",
+          `'${file}' places video ${videoId}, which is not among the first ${library.videos.length} videos of this `
+            + "site's library, and the library is larger than one push can check. Reduce the library or place the video "
+            + "from the editor.",
+          file,
+        )
+        : documentError(
+          "pages.video_unknown",
+          `'${file}' places video ${videoId}, which is not in this site's video library. Upload it with `
+            + "'taproot-site media upload' and use the videoId it reports.",
+          file,
+        ),
+      { area: CHECK_AREA.pages, file },
+    ));
   }
+  return problems;
 }
 
 /**
@@ -796,49 +844,41 @@ async function copyVideoEmbedPosters(client, siteId, planned, { onProgress, now 
   }
 }
 
-export async function pagesPush(invocation) {
-  const session = await openSession(invocation);
-  const { client, config, siteId, now, onProgress } = session;
-  // One advisory line before this verb does any work, and only when the
-  // exchange said the platform is paused. It changes nothing else: the write
-  // still runs and its refusal still classifies as platform_paused (TR00692).
-  warnIfExternalWritesPaused(session, VERB_PAGES_PUSH);
-  // Both manifests are bound to the site before anything is planned or sent:
-  // every id in them is site-scoped, and a workspace pulled from another site
-  // reads as entirely valid until phase two is already writing.
-  const manifest = await readManifest(config.workspaceDir, siteId);
-  const mediaManifest = await readMediaManifest(config.workspaceDir, siteId);
-  const content = requireContentFunctions(await loadContentModule(invocation.content));
-  const requestedPaths = Array.isArray(invocation.pagePaths)
-    ? new Set(invocation.pagePaths.map((value) => {
-      const normalized = normalizePagePath(value);
-      if (normalized === undefined) {
-        throw new SiteAuthoringError(
-          "pages.page_path_invalid",
-          `'${typeof value === "string" ? value : String(value)}' is not a usable page path.`,
-          { field: typeof value === "string" ? value : undefined, exitCode: 2 },
-        );
-      }
-      return normalized;
-    }))
-    : undefined;
-  // Manifest integrity is never scoped: a registry that contradicts itself
-  // describes some other workspace, and a selection cannot make that safe.
-  requireManifestSourceRegistry(pageSourceRegistry(manifest));
+/**
+ * Phase one over the workspace's page sources (TR01002): resolve which file is
+ * each page's one source, convert and validate it, and decide create, update,
+ * or unchanged — collecting every problem rather than stopping at the first.
+ *
+ * `livePages` is what the sources are checked against. A push passes the
+ * site's own list with `online`; the offline workspace check passes the pull
+ * manifest's pages, which is what the site held when the workspace was pulled,
+ * and skips the two guards only a live read can arm (a moved revision or
+ * display date). `getSharedThemeContexts` names the theme's contexts when
+ * the caller has already validated the theme.
+ */
+export async function planPages({
+  workspaceDir,
+  siteId,
+  manifest,
+  mediaManifest,
+  content,
+  files,
+  livePages,
+  online,
+  requestedPaths,
+  getSharedThemeContexts,
+  onProgress = () => {},
+}) {
+  const problems = [];
+  const area = { area: CHECK_AREA.pages };
   const targeted = requestedPaths !== undefined;
-
-  // The shared list, so the set `pull` refuses to write over is exactly the set
-  // this walks: a file one counted and the other ignored would be a page pushed
-  // from a workspace nothing proved the ownership of.
-  const files = await walkWorkspaceFiles(config.workspaceDir, PAGES_DIRECTORY, PAGE_SOURCE_EXTENSIONS);
-  if (files.length === 0) {
-    throw new SiteAuthoringError(
-      "pages.none_found",
-      `No Markdown or ProseMirror page files were found under '${PAGES_DIRECTORY}/' in the workspace.`,
-      { field: PAGES_DIRECTORY },
-    );
-  }
-  let sharedThemeContexts;
+  // Manifest integrity is never scoped: a registry that contradicts itself
+  // describes some other workspace, so nothing in it can be planned.
+  await collectProblems(problems, area, () => requireManifestSourceRegistry(pageSourceRegistry(manifest)));
+  if (problems.length > 0) return { targeted, sources: [], selected: [], planned: [], unresolved: [], problems };
+  const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
+  const liveById = new Map(live.map((summary) => [summary.pageId, summary]));
+  const liveByPath = new Map(live.map((summary) => [normalizePagePath(summary.path) ?? summary.path, summary]));
   const manifestByFile = new Map(
     manifest.pages.filter((entry) => typeof entry?.file === "string").map((entry) => [entry.file, entry]),
   );
@@ -850,118 +890,109 @@ export async function pagesPush(invocation) {
   const manifestByPageId = new Map(
     manifest.pages.filter((entry) => typeof entry?.pageId === "string").map((entry) => [entry.pageId, entry]),
   );
+  let sharedThemeContexts;
 
-  return await withRefusalGuidance(onProgress, "push", async () => {
-    onProgress("Listing the site's pages to resolve creates from updates.");
-    const { pages: livePages, truncated } = await listSitePages(client, siteId, { onProgress });
-    if (truncated) {
-      // Every create-or-update decision below is made against this list. A
-      // partial one turns a tracked page into a create, which the server then
-      // refuses for a duplicate path — mid-phase-two, after earlier pages have
-      // already been written.
-      throw new SiteAuthoringError(
-        "pages.live_list_truncated",
-        "The site has more pages than this CLI can enumerate, so an update cannot be told from a create. "
-          + "No page was pushed.",
-        { field: PAGES_DIRECTORY },
-      );
-    }
-    const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
-    const liveById = new Map(live.map((summary) => [summary.pageId, summary]));
-    const liveByPath = new Map(live.map((summary) => [normalizePagePath(summary.path) ?? summary.path, summary]));
-
-    // Resolution: which file is each page path's one authoritative source.
-    // This reads metadata only — a manifest entry, or a front-matter block —
-    // so no document is converted, no media reference is resolved, and no
-    // component contract is checked until the selection is known.
-    const sources = [];
-    const claimants = [];
-    const unresolved = [];
-    for (const file of files) {
-      const manifestEntry = manifestByFile.get(file);
-      try {
-        const source = await readWorkspacePageSource({ workspaceDir: config.workspaceDir, file, manifestEntry });
-        if (source.pagePath === undefined) {
-          // A file whose page identity is ambiguous. A whole-workspace push
-          // reports every authored page, so it is a refusal there; a targeted
-          // one refuses only if the selection touches a path it might be.
-          if (!targeted) throw source.fault;
-          claimants.push(source);
-          continue;
-        }
-        sources.push(source);
-      } catch (error) {
-        // A source whose metadata cannot be read declares no page path, so it
-        // cannot be the page a selection asked for. A whole-workspace push is
-        // the command that reports it; a targeted one names it and carries on.
-        // Anything that is not a metadata fault — a containment refusal, an
-        // oversized file, an unreadable one — still fails closed.
-        if (!targeted || !(error instanceof SiteAuthoringError) || !RESOLUTION_METADATA_CODES.has(error.code)) {
-          throw error;
-        }
-        unresolved.push({ file, code: error.code });
-        onProgress(`'${file}' declares no readable page path (${error.code}); it is outside this selection.`);
-      }
-    }
-
-    // Two editable sources for one page path. Whichever push would touch that
-    // path refuses: choosing between them is exactly the ambiguity one source
-    // per page exists to remove, and it is also how the documented format
-    // change — remove the old source, author the other beside it — is proved
-    // to have actually removed the old one.
-    const sourcesByPath = new Map();
-    for (const source of sources) {
-      const existing = sourcesByPath.get(source.pagePath);
-      if (existing === undefined) {
-        sourcesByPath.set(source.pagePath, source);
+  // Resolution: which file is each page path's one authoritative source.
+  // This reads metadata only — a manifest entry, or a front-matter block —
+  // so no document is converted, no media reference is resolved, and no
+  // component contract is checked until the selection is known.
+  const sources = [];
+  const claimants = [];
+  const unresolved = [];
+  for (const file of files) {
+    const manifestEntry = manifestByFile.get(file);
+    try {
+      const source = await readWorkspacePageSource({ workspaceDir, file, manifestEntry });
+      if (source.pagePath === undefined) {
+        // A file whose page identity is ambiguous. A whole-workspace check
+        // reports it; a targeted one refuses only if the selection touches a
+        // path it might be.
+        if (targeted) claimants.push(source);
+        else problems.push(...problemsOf(source.fault ?? missingPathError(file), { ...area, file }));
         continue;
       }
-      if (!targeted || requestedPaths.has(source.pagePath)) {
-        throw documentError(
+      sources.push(source);
+    } catch (error) {
+      if (!(error instanceof SiteAuthoringError)) throw error;
+      // A source whose metadata cannot be read declares no page path, so it
+      // cannot be the page a selection asked for: a targeted push names it and
+      // carries on. Anything that is not a metadata fault — a containment
+      // refusal, an oversized file, an unreadable one — still fails closed.
+      if (targeted && RESOLUTION_METADATA_CODES.has(error.code)) {
+        unresolved.push({ file, code: error.code });
+        onProgress(`'${file}' declares no readable page path (${error.code}); it is outside this selection.`);
+        continue;
+      }
+      if (targeted) throw error;
+      problems.push(...problemsOf(error, { ...area, file }));
+    }
+  }
+
+  // Two editable sources for one page path. Whichever check touches that path
+  // refuses: choosing between them is exactly the ambiguity one source per
+  // page exists to remove, and it is also how the documented format change —
+  // remove the old source, author the other beside it — is proved to have
+  // actually removed the old one.
+  const sourcesByPath = new Map();
+  const conflicted = new Set();
+  for (const source of sources) {
+    const existing = sourcesByPath.get(source.pagePath);
+    if (existing === undefined) {
+      sourcesByPath.set(source.pagePath, source);
+      continue;
+    }
+    if (!targeted || requestedPaths.has(source.pagePath)) {
+      conflicted.add(source.pagePath);
+      problems.push(...problemsOf(
+        documentError(
           "pages.path_conflict",
           `'${source.file}' and '${existing.file}' both claim page path '${source.pagePath}'.`,
           source.pagePath,
-        );
-      }
-      onProgress(
-        `'${source.file}' and '${existing.file}' both claim page path '${source.pagePath}'; `
-          + "neither is in this selection.",
+        ),
+        { ...area, file: source.file },
+      ));
+      continue;
+    }
+    onProgress(
+      `'${source.file}' and '${existing.file}' both claim page path '${source.pagePath}'; `
+        + "neither is in this selection.",
+    );
+  }
+
+  const selected = (targeted ? sources.filter((source) => requestedPaths.has(source.pagePath)) : sources)
+    .filter((source) => !conflicted.has(source.pagePath));
+  if (targeted) {
+    // Before deciding what the selection resolved to: a file that might be
+    // one of the selected pages makes the selection unprovable, so its own
+    // fault is what this push reports.
+    const claimant = claimants.find((source) => source.pathClaims.some((claim) => requestedPaths.has(claim)));
+    if (claimant !== undefined) throw claimant.fault;
+    const matched = new Set([...selected.map((source) => source.pagePath), ...conflicted]);
+    const missing = [...requestedPaths].filter((pagePath) => !matched.has(pagePath)).sort();
+    if (missing.length > 0) {
+      // The homepage normalizes to the empty path, which the result emitters
+      // drop as falsy; name it by its documented '/' spelling so the stable
+      // error contract keeps a field for every unknown path.
+      throw new SiteAuthoringError(
+        "pages.page_not_found",
+        `No workspace page was found for page path '${missing[0] || "/"}'.`,
+        { field: missing[0] || "/" },
       );
     }
+    onProgress(
+      `Selected ${selected.length} of ${sources.length} page source(s) by path; `
+        + "only the selection is validated and sent.",
+    );
+  } else {
+    onProgress(`Validating every one of the ${sources.length} page source(s) in this workspace.`);
+  }
 
-    const selected = targeted ? sources.filter((source) => requestedPaths.has(source.pagePath)) : sources;
-    if (targeted) {
-      // Before deciding what the selection resolved to: a file that might be
-      // one of the selected pages makes the selection unprovable, so its own
-      // fault is what this push reports.
-      const claimant = claimants.find((source) => source.pathClaims.some((claim) => requestedPaths.has(claim)));
-      if (claimant !== undefined) throw claimant.fault;
-    }
-    if (targeted) {
-      const matched = new Set(selected.map((source) => source.pagePath));
-      const missing = [...requestedPaths].filter((pagePath) => !matched.has(pagePath)).sort();
-      if (missing.length > 0) {
-        // The homepage normalizes to the empty path, which the result emitters
-        // drop as falsy; name it by its documented '/' spelling so the stable
-        // error contract keeps a field for every unknown path.
-        throw new SiteAuthoringError(
-          "pages.page_not_found",
-          `No workspace page was found for page path '${missing[0] || "/"}'.`,
-          { field: missing[0] || "/" },
-        );
-      }
-      onProgress(
-        `Selected ${selected.length} of ${sources.length} page source(s) by path; `
-          + "only the selection is validated and sent.",
-      );
-    } else {
-      onProgress(`Validating every one of the ${sources.length} page source(s) in this workspace.`);
-    }
-
-    // Phase one: convert and validate the selection. No mutation is sent until
-    // every document that will be sent has passed.
-    const planned = [];
-    for (const source of selected) {
+  // Phase one proper: convert and validate the selection. Each source's first
+  // refusal is collected and the next source is checked; nothing is sent
+  // until the whole list is empty.
+  const planned = [];
+  for (const source of selected) {
+    await collectProblems(problems, { ...area, file: source.file }, async () => {
       const { file, pagePath, title, declaredDescription } = source;
       onProgress(`Validating '${file}'.`);
       const manifestEntry = manifestByFile.get(file);
@@ -972,6 +1003,15 @@ export async function pagesPush(invocation) {
       const target = manifestEntry?.pageId !== undefined
         ? liveById.get(manifestEntry.pageId)
         : liveByPath.get(pagePath);
+      if (manifestEntry?.pageId === undefined && target !== undefined && pendingCreateFor(manifest, pagePath)) {
+        throw documentError(
+          "pages.create_unconfirmed",
+          `An earlier push tried to create page '${pagePath || "/"}' from '${file}' without hearing back, and the site now has a `
+            + "page at that path. It may be that create or someone else's page, so nothing will write over it: run "
+            + "'taproot-site pull' to record the site's page, then reconcile it with this source and push again.",
+          file,
+        );
+      }
       const workspaceSystemKind = systemPageKind(pagePath);
       if (target === undefined) {
         if (workspaceSystemKind !== undefined) {
@@ -1008,18 +1048,20 @@ export async function pagesPush(invocation) {
         // a directory or a symlink at its path is refused here, before any
         // page is written, rather than discovered after the site has changed.
         const observedRecordFile = internalPageObservedRevisionFile(target.pageId);
-        if (observedRecordFile !== undefined) await workspaceFileExists(config.workspaceDir, observedRecordFile);
-        const observed = await readObservedPageRecord(config.workspaceDir, target.pageId);
+        if (observedRecordFile !== undefined) await workspaceFileExists(workspaceDir, observedRecordFile);
+        const observed = await readObservedPageRecord(workspaceDir, target.pageId);
         observedRecord = observed;
-        const guard = {
-          file,
-          pagePath,
-          target,
-          entry: manifestByPageId.get(target.pageId),
-          observedRevision: observed?.revision,
-        };
-        requireReconciledRevision(guard);
-        requireReconciledDisplayDate({ ...guard, document_, observed });
+        if (online) {
+          const guard = {
+            file,
+            pagePath,
+            target,
+            entry: manifestByPageId.get(target.pageId),
+            observedRevision: observed?.revision,
+          };
+          requireReconciledRevision(guard);
+          requireReconciledDisplayDate({ ...guard, document_, observed });
+        }
       }
 
       // The duplicate-source check above only catches two workspace files
@@ -1047,15 +1089,15 @@ export async function pagesPush(invocation) {
       const description = declaredDescription ?? targetEntry?.description ?? "";
 
       await validateWorkspacePageDocument({
-        workspaceDir: config.workspaceDir,
+        workspaceDir,
         siteId,
         file,
         document: document_,
         content,
-        getSharedThemeContexts: async () => {
-          sharedThemeContexts ??= await readSharedThemeContexts(config.workspaceDir, siteId);
+        getSharedThemeContexts: getSharedThemeContexts ?? (async () => {
+          sharedThemeContexts ??= await readSharedThemeContexts(workspaceDir, siteId);
           return sharedThemeContexts;
-        },
+        }),
       });
 
       const sentDescription = typeof description === "string" ? description : "";
@@ -1084,22 +1126,159 @@ export async function pagesPush(invocation) {
         sourceFormat: source.sourceFormat,
         sourceHash: source.sourceHash,
         pageId: target?.pageId,
+        // The live revision this page would be sent against; `plan` binds it
+        // into its hash so a concurrent edit invalidates the plan.
+        revision: target?.bodyRevision,
         templateType: PAGE_TEMPLATES[documentTemplate(document_)].wireType,
         action: target === undefined ? "created" : "updated",
       });
-    }
+    });
+  }
 
+  return { targeted, sources, selected, planned, unresolved, problems };
+}
+
+function missingPathError(file) {
+  return documentError(
+    "pages.path_missing",
+    `'${file}' does not declare a usable page path. Add 'path:' to its front-matter (use an empty value for the home page).`,
+    file,
+  );
+}
+
+/** What a dry run or a plan reports for one planned page. */
+export function plannedPageItem(page) {
+  return { file: page.file, path: page.pagePath || "/", action: page.unchanged ? "unchanged" : page.action };
+}
+
+export async function pagesPush(invocation) {
+  const session = await openSession(invocation);
+  const { client, config, siteId, now, onProgress } = session;
+  const dryRun = invocation.dryRun === true;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  if (!dryRun) warnIfExternalWritesPaused(session, VERB_PAGES_PUSH);
+  // Both manifests are bound to the site before anything is planned or sent:
+  // every id in them is site-scoped, and a workspace pulled from another site
+  // reads as entirely valid until phase two is already writing.
+  const manifest = await readManifest(config.workspaceDir, siteId);
+  const mediaManifest = await readMediaManifest(config.workspaceDir, siteId);
+  const content = requireContentFunctions(await loadContentModule(invocation.content));
+  const requestedPaths = Array.isArray(invocation.pagePaths)
+    ? new Set(invocation.pagePaths.map((value) => {
+      const normalized = normalizePagePath(value);
+      if (normalized === undefined) {
+        throw new SiteAuthoringError(
+          "pages.page_path_invalid",
+          `'${typeof value === "string" ? value : String(value)}' is not a usable page path.`,
+          { field: typeof value === "string" ? value : undefined, exitCode: 2 },
+        );
+      }
+      return normalized;
+    }))
+    : undefined;
+  // Refused before any request: a registry that contradicts itself describes
+  // some other workspace, and a selection cannot make that safe.
+  requireManifestSourceRegistry(pageSourceRegistry(manifest));
+
+  // The shared list, so the set `pull` refuses to write over is exactly the set
+  // this walks: a file one counted and the other ignored would be a page pushed
+  // from a workspace nothing proved the ownership of.
+  const files = await walkWorkspaceFiles(config.workspaceDir, PAGES_DIRECTORY, PAGE_SOURCE_EXTENSIONS);
+  if (files.length === 0) {
+    throw new SiteAuthoringError(
+      "pages.none_found",
+      `No Markdown or ProseMirror page files were found under '${PAGES_DIRECTORY}/' in the workspace.`,
+      { field: PAGES_DIRECTORY },
+    );
+  }
+
+  return await withRefusalGuidance(onProgress, "push", async () => {
+    onProgress("Listing the site's pages to resolve creates from updates.");
+    const { pages: livePages, truncated } = await listSitePages(client, siteId, { onProgress });
+    if (truncated) {
+      // Every create-or-update decision below is made against this list. A
+      // partial one turns a tracked page into a create, which the server then
+      // refuses for a duplicate path — mid-phase-two, after earlier pages have
+      // already been written.
+      throw new SiteAuthoringError(
+        "pages.live_list_truncated",
+        "The site has more pages than this CLI can enumerate, so an update cannot be told from a create. "
+          + "No page was pushed.",
+        { field: PAGES_DIRECTORY },
+      );
+    }
+    const plan = await planPages({
+      workspaceDir: config.workspaceDir,
+      siteId,
+      manifest,
+      mediaManifest,
+      content,
+      files,
+      livePages,
+      online: true,
+      requestedPaths,
+      onProgress,
+    });
+    const { planned, targeted, unresolved } = plan;
     // A page that places a video names it by id, and only the library knows
     // whether that id is one of this site's videos. Asked once for the whole
     // push, before anything is written, so a page cannot be sent that
     // publishing would then refuse.
-    await requirePlacedVideosExist(client, siteId, planned);
+    plan.problems.push(...await placedVideoProblems(client, siteId, planned));
+
+    // Under apply, the workspace read ledger has already held every source and
+    // manifest to the plan. What it cannot see is the site: every page the plan
+    // would send must still be the page, revision and action it listed, and
+    // nothing it did not list may be sent. A planned page can still turn out
+    // unchanged, when an upload deduplicates to the image it already shows, and
+    // is then skipped.
+    if (invocation.plannedPages !== undefined) {
+      const byFile = new Map(planned.map((page) => [page.file, page]));
+      for (const [file, expected] of invocation.plannedPages) {
+        const page = byFile.get(file);
+        if (page === undefined || stableJson([page.pageId ?? "", page.revision ?? "", page.action]) !== expected) {
+          throw planStale(`'${file}'`, file);
+        }
+      }
+      const unplanned = planned.find((page) => !page.unchanged && !invocation.plannedPages.has(page.file));
+      if (unplanned !== undefined) throw planStale(`'${unplanned.file}'`, unplanned.file);
+    }
+    // What this run actually looked at, so automation can tell a targeted
+    // push from a whole-workspace one without inferring it from counts.
+    const selection = {
+      selection: targeted ? "targeted" : "workspace",
+      ...(targeted
+        ? reportedList("selectedPaths", [...requestedPaths].sort().map((pagePath) => pagePath || "/"), LIST_BYTES)
+        : {}),
+      discovered: files.length,
+    };
+    if (dryRun) {
+      refuseProblems(plan.problems, "pages push --dry-run found problems and sent nothing");
+      onProgress("Dry run: nothing was sent.");
+      return successResult(VERB_PAGES_PUSH, siteId, {
+        dryRun: true,
+        pages: {
+          total: planned.length,
+          unchanged: planned.filter((page) => page.unchanged).length,
+          wouldCreate: planned.filter((page) => !page.unchanged && page.action === "created").length,
+          wouldUpdate: planned.filter((page) => !page.unchanged && page.action === "updated").length,
+          ...selection,
+          validated: planned.length,
+          ...reportedList("items", planned.map(plannedPageItem), ITEMS_BYTES),
+        },
+      });
+    }
+    refuseProblems(plan.problems, "pages push sent nothing");
     await copyVideoEmbedPosters(client, siteId, planned, { onProgress, now });
 
     // Phase two: send. The manifest is written back even if a later page fails,
     // so a retry updates the pages this run created rather than duplicating them.
     const applied = [];
     let manifestDirty = false;
+    // The page whose request is in flight, so a failure names it and not the next one.
+    let attempting;
     try {
       for (const page of planned) {
         if (page.unchanged) {
@@ -1114,10 +1293,23 @@ export async function pagesPush(invocation) {
           template: wireTemplate(page.document),
           ...wirePageFields(page.document),
         };
+        // A create whose answer is lost may still have made the page. Recorded
+        // first, so a later push or plan that finds a page at this path refuses
+        // to treat it as this workspace's own until a pull adopts it.
+        if (page.action === "created") {
+          manifest.pendingCreates = { ...pendingCreates(manifest), [page.pagePath]: page.file };
+          await writeManifest(config.workspaceDir, manifest);
+        }
+        attempting = page;
         const summary = page.action === "created"
           ? await createPage(client, { siteId, ...fields })
           : await updatePage(client, page.pageId, { pageId: page.pageId, ...fields });
+        attempting = undefined;
         manifestDirty = true;
+        if (page.action === "created") {
+          delete manifest.pendingCreates[page.pagePath];
+          if (Object.keys(manifest.pendingCreates).length === 0) delete manifest.pendingCreates;
+        }
         applied.push({
           file: page.file,
           path: summary.path,
@@ -1185,33 +1377,48 @@ export async function pagesPush(invocation) {
           await deleteWorkspaceFile(config.workspaceDir, observedRevisionFile);
         }
       }
+    } catch (error) {
+      // Each page is its own request, so a failure partway leaves earlier
+      // pages written. Name every page's outcome; the manifest below records
+      // the written ones, so a retry updates rather than duplicates them.
+      // The labels are bounded, so the failure and the count of what was not
+      // sent come first and the written pages after.
+      if (error instanceof SiteAuthoringError) {
+        // A create the site refused outright made nothing, so it leaves no marker.
+        if (attempting?.action === "created" && !outcomeUnknown(error)) {
+          delete manifest.pendingCreates[attempting.pagePath];
+          if (Object.keys(manifest.pendingCreates).length === 0) delete manifest.pendingCreates;
+          manifestDirty = true;
+        }
+        const sent = new Set(applied.map((entry) => entry.file));
+        const unsent = planned.filter((page) => !page.unchanged && !sent.has(page.file) && page !== attempting);
+        error.withCompletedWrites([
+          ...(attempting === undefined
+            ? []
+            // An ambiguous or unreadable answer may have committed; the next pull or plan tells.
+            : [`page ${attempting.pagePath || "/"}: ${outcomeUnknown(error) ? "unknown" : "failed"}`]),
+          ...(unsent.length === 0 ? [] : [`${unsent.length} more page(s): not sent`]),
+          ...(error.completedWrites ?? []),
+          ...applied.map((entry) => `page ${entry.path || "/"}: ${entry.action}`),
+        ]);
+      }
+      throw error;
     } finally {
       if (manifestDirty) await writeManifest(config.workspaceDir, manifest);
     }
 
-    const reported = boundedList(applied, MAXIMUM_REPORTED);
-    const reportedUnresolved = boundedList(unresolved, MAXIMUM_REPORTED);
     return successResult(VERB_PAGES_PUSH, siteId, {
       pages: {
         total: planned.length,
         unchanged: planned.filter((page) => page.unchanged).length,
         created: applied.filter((entry) => entry.action === "created").length,
         updated: applied.filter((entry) => entry.action === "updated").length,
-        // What this run actually looked at, so automation can tell a targeted
-        // push from a whole-workspace one without inferring it from counts.
-        selection: targeted ? "targeted" : "workspace",
-        ...(targeted ? { selectedPaths: [...requestedPaths].sort().map((pagePath) => pagePath || "/") } : {}),
-        discovered: files.length,
+        ...selection,
         validated: planned.length,
         ...(unresolved.length > 0
-          ? {
-            unresolved: unresolved.length,
-            unresolvedItems: reportedUnresolved.items,
-            ...(reportedUnresolved.truncated ? { unresolvedItemsTruncated: true } : {}),
-          }
+          ? { unresolved: unresolved.length, ...reportedList("unresolvedItems", unresolved, LIST_BYTES) }
           : {}),
-        items: reported.items,
-        ...(reported.truncated ? { itemsTruncated: true } : {}),
+        ...reportedList("items", applied, ITEMS_BYTES),
       },
       // `pages push` writes drafts. Nothing reaches an audience until `approve`
       // stages them and `deploy` publishes the site.

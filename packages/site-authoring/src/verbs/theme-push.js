@@ -286,6 +286,69 @@ function describeDifferences(validated, presentation) {
   });
 }
 
+/** The refusal for a workspace pulled before the presentation baseline existed. */
+export function presentationPullRequired() {
+  return new SiteAuthoringError(
+    "theme.pull_required",
+    "The pull manifest records no presentation baseline, so this push has no revision to be fenced by. Run "
+      + "'taproot-site pull' against a Taproot that serves the atomic presentation save, then retry 'theme push'.",
+    { field: "presentation.revision" },
+  );
+}
+
+/** The refusal for a presentation that moved since the pull, naming where the two differ. */
+export function presentationMovedRefusal({ baseline, current, differences }) {
+  return new SiteAuthoringError(
+    "theme.concurrent_modification",
+    `The site's presentation changed after this workspace was pulled (revision ${baseline.revision} → `
+      + `${current.revision}), so nothing was written. Keep copies of the edited settings files, run `
+      + "'taproot-site pull' to refresh the baseline, re-apply the edits, and push again; the paths below name "
+      + "where the workspace and the site now differ.",
+    { field: "revision", alternatives: differences.filter((entry) => entry.paths.length > 0).map((entry) => entry.file) },
+  ).withDifferences(differences.flatMap((entry) => entry.paths.map((path) => `${entry.file}:${path}`)));
+}
+
+/**
+ * What pushing this validated presentation would do, from one fresh read of
+ * the site: the JSON paths that differ, whether the pull's baseline is still
+ * current, and whether a save whose response was lost would be replayed.
+ * `theme push` and `plan` both decide from this (TR00823).
+ */
+export async function comparePresentation(client, siteId, validated, manifest) {
+  const baseline = readPresentationBaseline(manifest);
+  let current;
+  try {
+    current = await getSitePresentation(client, siteId);
+  } catch (error) {
+    throw translateServerSupport(error, "read");
+  }
+  const stale = baseline !== undefined && baseline.revision !== current.revision;
+  // A save this workspace sent and never heard back from (TR00807). When the
+  // change set about to go is the same one, a moved revision is not evidence
+  // of a concurrent edit: it is what that save leaves behind when it
+  // committed. Replaying it under the baseline it was sent with lets the site
+  // answer already-current, or apply it if it never committed; anything else
+  // it refuses itself. A pending record for a different change set proves
+  // nothing about the site and takes the ordinary path.
+  const changeSet = buildChangeSet(validated);
+  const changeSetHash = computePresentationChangeSetHash(changeSet);
+  const pending = readPendingPresentationSave(manifest);
+  const replayable = pending !== undefined && pending.changeSetHash === changeSetHash;
+  const differences = describeDifferences(validated, current);
+  return {
+    baseline,
+    current,
+    stale,
+    changeSet,
+    changeSetHash,
+    pending,
+    replayable,
+    replaying: stale && replayable,
+    differences,
+    changed: differences.some((entry) => entry.paths.length > 0 || entry.truncated === true),
+  };
+}
+
 export async function themePush(invocation) {
   const session = await openSession(invocation);
   const { client, config, siteId, onProgress } = session;
@@ -307,12 +370,7 @@ export async function themePush(invocation) {
   requireFooterContentPushed(appearanceContext.footer, publishing.footerSettings);
   const baseline = readPresentationBaseline(appearanceContext.manifest);
   if (!dryRun && baseline === undefined) {
-    throw new SiteAuthoringError(
-      "theme.pull_required",
-      "The pull manifest records no presentation baseline, so this push has no revision to be fenced by. Run "
-        + "'taproot-site pull' against a Taproot that serves the atomic presentation save, then retry 'theme push'.",
-      { field: "presentation.revision" },
-    );
+    throw presentationPullRequired();
   }
   onProgress(`Validated the complete light/dark theme pair and ${scalarOperations.length} appearance settings.`);
   for (const warning of themes.warnings) onProgress(`Espalier warning: ${warning}`);
@@ -329,29 +387,11 @@ export async function themePush(invocation) {
   // The fresh read serves both modes: the dry run compares against it, and
   // the push takes the footer document's draft token from it. Nothing before
   // this point, and nothing in a dry run after it, writes to the site.
-  let current;
-  try {
-    current = await withRefusalGuidance(onProgress, "theme push", async () => await getSitePresentation(client, siteId));
-  } catch (error) {
-    throw translateServerSupport(error, "read");
-  }
-  const stale = baseline !== undefined && baseline.revision !== current.revision;
-  // A save this workspace sent and never heard back from (TR00807). When the
-  // change set about to go is the same one, a moved revision is not evidence
-  // of a concurrent edit: it is what that save leaves behind when it
-  // committed. Replaying it under the baseline it was sent with lets the site
-  // answer already-current, or apply it if it never committed; anything else
-  // it refuses itself. A pending record for a different change set proves
-  // nothing about the site and takes the ordinary path.
-  const changeSet = buildChangeSet(validated);
-  const changeSetHash = computePresentationChangeSetHash(changeSet);
-  const pending = readPendingPresentationSave(appearanceContext.manifest);
-  const replayable = pending !== undefined && pending.changeSetHash === changeSetHash;
-  const replaying = stale && replayable;
+  const comparison = await withRefusalGuidance(onProgress, "theme push", async () =>
+    await comparePresentation(client, siteId, validated, appearanceContext.manifest));
+  const { current, stale, changeSet, changeSetHash, pending, replayable, replaying, differences, changed } = comparison;
 
   if (dryRun) {
-    const differences = describeDifferences(validated, current);
-    const changed = differences.some((entry) => entry.paths.length > 0 || entry.truncated === true);
     for (const entry of differences) {
       if (entry.paths.length === 0 && entry.truncated !== true) continue;
       onProgress(`${entry.file} differs at: ${entry.paths.join(", ")}${entry.truncated ? ", and more" : ""}.`);
@@ -401,15 +441,7 @@ export async function themePush(invocation) {
           + "it. The pull that refreshes the baseline shows what the site holds now.",
       );
     }
-    const differences = describeDifferences(validated, current);
-    throw new SiteAuthoringError(
-      "theme.concurrent_modification",
-      `The site's presentation changed after this workspace was pulled (revision ${baseline.revision} → `
-        + `${current.revision}), so nothing was written. Keep copies of the edited settings files, run `
-        + "'taproot-site pull' to refresh the baseline, re-apply the edits, and push again; the paths below name "
-        + "where the workspace and the site now differ.",
-      { field: "revision", alternatives: differences.filter((entry) => entry.paths.length > 0).map((entry) => entry.file) },
-    ).withDifferences(differences.flatMap((entry) => entry.paths.map((path) => `${entry.file}:${path}`)));
+    throw presentationMovedRefusal(comparison);
   }
 
   const expectedRevision = replaying ? pending.expectedRevision : baseline.revision;

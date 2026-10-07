@@ -1,4 +1,4 @@
-import { CLI_VERSION } from "../src/constants.js";
+import { CLI_VERSION, LIMITS } from "../src/constants.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -270,7 +270,7 @@ test("usage faults exit 2 with stable codes", async (testContext) => {
     // A silenced login can never be approved: the URL and code exist only as
     // progress, and the JSON result arrives only after the approval completes.
     { arguments_: ["login", "--quiet"], code: "cli.quiet_option", field: "quiet" },
-    { arguments_: ["validate"], code: "validate.fixture_path_invalid", field: "fixturePath" },
+    { arguments_: ["validate", "--init"], code: "validate.fixture_path_invalid", field: "fixturePath" },
     {
       arguments_: ["validate", "one", "two"],
       code: "validate.fixture_path_invalid",
@@ -448,7 +448,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   assert.equal(await runCli({ arguments_: ["--help"], stdout, stderr: sink() }), 0);
   assert.match(stdout.read(), /^Usage: taproot-site \[--config <path>\] <verb>/u);
   assert.match(stdout.read(), /^  help\s+Show offline authoring reference help/mu);
-  assert.match(stdout.read(), /^  validate\s+Validate an offline fixture/mu);
+  assert.match(stdout.read(), /^  validate\s+Check a whole workspace or offline fixture at once/mu);
   assert.match(stdout.read(), /validate,\nhelp, whoami, and env are offline and read-only/u);
   assert.match(stdout.read(), /^  login\s+Authorize this CLI against a Taproot account/mu);
   assert.match(stdout.read(), /^  logout\s+Discard the stored Taproot sign-in/mu);
@@ -472,14 +472,14 @@ test("exposes help and version at the binary and verb levels", async (testContex
   await testContext.test("validate", async () => {
     const verbStdout = sink();
     assert.equal(await runCli({ arguments_: ["validate", "--help"], stdout: verbStdout, stderr: sink() }), 0);
-    assert.match(verbStdout.read(), /^Usage: taproot-site validate <fixture-directory>/u);
-    assert.match(verbStdout.read(), /Validation uses no credential, configuration, network or write/u);
+    assert.match(verbStdout.read(), /^Usage: taproot-site validate \[<directory>\]/u);
+    assert.match(verbStdout.read(), /Validation uses no credential, network or write/u);
     // The version gate is the one thing this verb reads that is not its own
     // input, so the boundary sentence has to state it (TR00703).
     assert.match(verbStdout.read(), /recorded a newer published release/u);
     assert.match(verbStdout.read(), /does not prove authorization, live site ownership, concurrency/u);
     assert.doesNotMatch(verbStdout.read(), /TAPROOT_SITE_KEY/u);
-    assert.match(verbStdout.read(), /source configuration for --init only/u);
+    assert.match(verbStdout.read(), /the configuration naming the workspace \(no\n\s+directory\) or the --init source/u);
   });
   // What login and logout help must say. They mention TAPROOT_SITE_KEY like
   // every other config-reading verb — the precedence rule is exactly what a
@@ -685,7 +685,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 5\.0\.0 complete site-theme contract/u,
+      match: /^Espalier 6\.2\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -813,7 +813,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 33,
+          referenceVersion: 34,
           topic: scenario.topic,
         },
       );
@@ -897,8 +897,14 @@ test("reference help reports stable usage errors with valid alternatives", async
         "appearance",
         "footer",
         "import",
+        "fonts",
         "fixture",
       ],
+    },
+    {
+      arguments_: ["help", "fonts", "gothic", "--json"],
+      code: "help.font_category_unknown",
+      alternatives: ["sans-serif", "display", "serif", "handwriting", "monospace"],
     },
     {
       arguments_: ["help", "page", "poem", "--json"],
@@ -956,6 +962,39 @@ test("reference help reports stable usage errors with valid alternatives", async
   }
 });
 
+test("help fonts lists the catalog's categories, then one category's families within the output bound", async () => {
+  const capture = async (arguments_) => {
+    const stdout = sink();
+    assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
+    return stdout.read();
+  };
+  const overview = JSON.parse(await capture(["help", "fonts", "--json"])).fonts;
+  assert.equal(
+    overview.categories.reduce((total, entry) => total + entry.familyCount, 0),
+    overview.familyCount,
+  );
+  for (const { category, familyCount, helpCommand } of overview.categories) {
+    assert.equal(helpCommand, `taproot-site help fonts ${category}`);
+    // The largest category has to fit one result, whose bound is the
+    // step-output limit; an Espalier catalog update that outgrows it fails
+    // here, not for an agent.
+    const json = await capture(["help", "fonts", category, "--json"]);
+    assert.ok(
+      Buffer.byteLength(json, "utf8") <= LIMITS.githubOutputBytes,
+      `${category} is ${Buffer.byteLength(json, "utf8")} bytes`,
+    );
+    const { fonts } = JSON.parse(json);
+    assert.equal(fonts.category, category);
+    assert.equal(fonts.families.length, familyCount);
+  }
+  const inter = JSON.parse(await capture(["help", "fonts", "sans-serif", "--json"])).fonts.families
+    .find((entry) => entry.family === "Inter");
+  assert.deepEqual(inter, { family: "Inter", weights: [100, 200, 300, 400, 500, 600, 700, 800, 900] });
+  assert.match(await capture(["help", "fonts", "monospace"]), /Azeret Mono\s+100 200 300 400/u);
+  assert.match(await capture(["help", "fonts", "handwriting"]), /Molle\s+none \(italic only; cannot be used\)/u);
+  assert.match(await capture(["help", "theme"]), /help fonts/u);
+});
+
 test("reference help rejects malformed topic shapes with help.usage", async (context) => {
   for (
     const arguments_ of [
@@ -965,6 +1004,7 @@ test("reference help rejects malformed topic shapes with help.usage", async (con
       ["help", "components", "hero-section"],
       ["help", "footer", "extra"],
       ["help", "redirects", "gone"],
+      ["help", "fonts", "serif", "display"],
       ["help", "components", "--json", "--json"],
       ["help", "components", "--quiet"],
     ]

@@ -533,3 +533,204 @@ test("validate and theme push report Espalier's fit lints on every surface, in b
   // survive (generator/src/site-authoring-content-isolation.test.ts).
   assert.equal(globalThis.customElements, undefined);
 });
+
+/** The value a warning proposes, applied the way the warning says to. */
+function applyProposedPin(theme, warning, surface) {
+  const match = /Nearest passing value: ([A-Za-z]+) at lightness ([0-9.]+) — .*tones\["([a-z-]+)"\] .*"source":"([^"]+)"/u.exec(warning);
+  assert.ok(match, warning);
+  const [, token, lightness, tone, source] = match;
+  const mapping = { source, lightness: `tone:${tone}` };
+  if (surface === undefined) {
+    const listed = warning.includes(`list ${token} in explicitMappingTokens`);
+    return {
+      ...theme,
+      tones: { ...theme.tones, [tone]: Number(lightness) },
+      semanticMappings: { ...theme.semanticMappings, [token]: mapping },
+      ...(listed ? { explicitMappingTokens: [...new Set([...(theme.explicitMappingTokens ?? []), token])] } : {}),
+    };
+  }
+  const context = theme.contexts[surface];
+  return {
+    ...theme,
+    contexts: {
+      ...theme.contexts,
+      [surface]: {
+        ...context,
+        tones: { ...context.tones, [tone]: Number(lightness) },
+        semanticMappings: { ...context.semanticMappings, [token]: mapping },
+      },
+    },
+  };
+}
+
+test("contrast and status-color warnings name a passing value that clears them (TR01189)", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const light = defaults.light.theme;
+  const dark = defaults.dark.theme;
+
+  // Two status families given one color: the warning names an intents color
+  // for one of them, and that color clears the collision.
+  const collided = { ...light, intents: { ...light.intents, danger: "#b0005a", warning: "#b0005a" } };
+  const status = (await validateAndLintThemePair(collided, dark)).warnings
+    .find((warning) => /Status colors "danger" and "warning"/u.test(warning));
+  const intent = /Nearest passing value: lightTheme\.intents\.([a-z]+) = "([^"]+)"\./u.exec(status);
+  assert.ok(intent, status);
+  const retuned = { ...collided, intents: { ...collided.intents, [intent[1]]: intent[2] } };
+  assert.ok((await validateAndLintThemePair(retuned, dark)).warnings
+    .every((warning) => !/Status colors "danger" and "warning"/u.test(warning)));
+
+  // A filled action pinned to the canvas's own stop: the lint names the
+  // lightness to pin it at instead, with the root marker it needs.
+  const background = parseTheme(encodeTheme(light)).semanticMappings?.background ?? { source: "primary", lightness: "surface" };
+  const vanished = {
+    ...light,
+    semanticMappings: { ...light.semanticMappings, actionBackground: background },
+    explicitMappingTokens: [...new Set([...(light.explicitMappingTokens ?? []), "actionBackground"])],
+  };
+  const canvas = (await validateAndLintThemePair(vanished, dark)).warnings
+    .find((warning) => warning.startsWith("light: fit lint action-canvas-separation"));
+  assert.match(canvas, /list actionBackground in explicitMappingTokens\.$/u);
+  const separated = await validateAndLintThemePair(applyProposedPin(vanished, canvas), dark);
+  assert.ok(separated.warnings.every((warning) => !/^light: fit lint action-canvas-separation/u.test(warning)));
+
+  // The same lint inside one section's color scheme is fixed by a pin in that
+  // context, which needs no marker.
+  const band = (theme) => ({
+    ...theme,
+    contexts: { band: { semanticMappings: { actionBackground: background } } },
+  });
+  const inBand = (await validateAndLintThemePair(band(light), band(dark))).warnings
+    .find((warning) => warning.startsWith("light: contexts.band fit lint action-canvas-separation"));
+  assert.match(inBand, /in lightTheme\.contexts\.band set tones/u);
+  assert.match(inBand, /a context's pin needs no explicitMappingTokens/u);
+  const bandFixed = await validateAndLintThemePair(applyProposedPin(band(light), inBand, "band"), band(dark));
+  assert.ok(bandFixed.warnings.every((warning) => !/^light: contexts\.band fit lint action-canvas-separation/u.test(warning)));
+});
+
+test("a font weight the family has no face for is refused with the nearest one it has (TR01189)", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const blackletter = { ...defaults.light.theme, fontBody: "UnifrakturCook, serif", fontWeightBody: "normal" };
+
+  await assert.rejects(validateAndLintThemePair(blackletter, defaults.dark.theme), (error) => {
+    assert.equal(error.code, "theme.font_weight_unavailable");
+    assert.equal(error.field, "lightTheme.fontWeightBody");
+    assert.match(error.message, /Nearest passing value: fontWeightBody = 700 \(it offers 700;/u);
+    return true;
+  });
+  await validateAndLintThemePair({ ...blackletter, fontWeightBody: "700" }, defaults.dark.theme);
+});
+
+test("each kind of contrast warning names the token its own remedy retunes, and the value clears it (TR01189)", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const light = defaults.light.theme;
+  const dark = defaults.dark.theme;
+  const pinned = (theme, tones, mappings) => ({
+    ...theme,
+    tones: { ...theme.tones, ...tones },
+    semanticMappings: { ...theme.semanticMappings, ...mappings },
+    explicitMappingTokens: [...new Set([...(theme.explicitMappingTokens ?? []), ...Object.keys(mappings)])],
+  });
+  const lintsOf = async (theme, id) => (await validateAndLintThemePair(theme, dark)).warnings
+    .filter((warning) => warning.startsWith(`light: fit lint ${id}`));
+
+  // A hover wash that the hover cannot read on: the lint names the wash first,
+  // and the proposal retunes the wash.
+  const wash = pinned(light, { wash: 0.6, hover: 0.5 }, {
+    linkHoverBg: { source: "primary", lightness: "tone:wash" },
+    linkHover: { source: "primary", lightness: "tone:hover" },
+  });
+  const [hover] = await lintsOf(wash, "link-hover-ordering");
+  assert.match(hover, /Nearest passing value: linkHoverBg at lightness /u);
+  assert.deepEqual(await lintsOf(applyProposedPin(wash, hover), "link-hover-ordering"), []);
+
+  // A ground no ink can reach the floor on: the ground is what moves.
+  const grey = pinned(light, { mid: 0.62 }, { background: { source: "primary", lightness: "tone:mid" } });
+  const [unmet] = await lintsOf(grey, "apca-target-unmet");
+  assert.match(unmet, /Nearest passing value: background at lightness /u);
+  assert.deepEqual(await lintsOf(applyProposedPin(grey, unmet), "apca-target-unmet"), []);
+
+  // A root with no marker treats every mapping as a pin, so the proposal adds
+  // none, and the other pins stay pins.
+  const background = parseTheme(encodeTheme(light)).semanticMappings?.background ?? { source: "primary", lightness: "surface" };
+  const { explicitMappingTokens: _marker, ...unmarked } = light;
+  const vanished = { ...unmarked, semanticMappings: { ...unmarked.semanticMappings, actionBackground: background } };
+  const [canvas] = await lintsOf(vanished, "action-canvas-separation");
+  assert.match(canvas, /this theme has no explicitMappingTokens, so every mapping in it is a pin; do not add one\)\.$/u);
+  const fixed = applyProposedPin(vanished, canvas);
+  assert.equal(fixed.explicitMappingTokens, undefined);
+  assert.deepEqual(await lintsOf(fixed, "action-canvas-separation"), []);
+});
+
+test("status-color proposals made together never give two families the same color (TR01189)", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const same = "#b0005a";
+  const intents = { danger: same, warning: same, success: same, info: same };
+  const light = { ...defaults.light.theme, intents };
+  // Both schemes collide the same way, as an author who copies intents across does.
+  const dark = { ...defaults.dark.theme, intents };
+  const proposed = (await validateAndLintThemePair(light, dark)).warnings
+    .map((warning) => /Nearest passing value: lightTheme\.intents\.([a-z]+) = "([^"]+)"/u.exec(warning))
+    .filter((match) => match !== null);
+  assert.ok(proposed.length > 0);
+  // One value per family, and no two families given the same one.
+  const values = proposed.map((match) => match[2]);
+  assert.equal(new Set(values).size, values.length, values.join(", "));
+  assert.equal(new Set(proposed.map((match) => match[1])).size, proposed.length);
+  // Taken together they leave no collision among the families they retune
+  // that was not already there.
+  assert.equal(proposed.length, 3, values.join(", "));
+  const retuned = { ...light, intents: { ...light.intents, ...Object.fromEntries(proposed.map((match) => [match[1], match[2]])) } };
+  const after = (await validateAndLintThemePair(retuned, dark)).warnings
+    .filter((warning) => /^light: Status colors/u.test(warning));
+  assert.deepEqual(after, []);
+});
+
+test("a font stack a page cannot carry, and weights missing in both schemes, are refused by field (TR01189)", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  await assert.rejects(
+    validateAndLintThemePair({ ...defaults.light.theme, fontBody: "Foo; color: red" }, defaults.dark.theme),
+    (error) => {
+      assert.equal(error.code, "theme.font_stack_invalid");
+      assert.equal(error.field, "lightTheme.fontBody");
+      return true;
+    },
+  );
+  const blackletter = (theme) => ({ ...theme, fontBody: "UnifrakturCook, serif", fontWeightBody: "normal" });
+  await assert.rejects(validateAndLintThemePair(blackletter(defaults.light.theme), blackletter(defaults.dark.theme)), (error) => {
+    assert.equal(error.code, "theme.font_weight_unavailable");
+    assert.match(error.message, /lightTheme\.fontWeightBody: .*darkTheme\.fontWeightBody: /u);
+    return true;
+  });
+  // Different fields fail in each scheme: only those two are named.
+  const lightBody = { ...defaults.light.theme, fontBody: "UnifrakturCook, serif", fontWeightBody: "normal" };
+  const darkMenu = { ...defaults.dark.theme, fontMenu: "UnifrakturCook, serif", fontWeightMenu: "normal" };
+  await assert.rejects(validateAndLintThemePair(lightBody, darkMenu), (error) => {
+    assert.match(error.message, /lightTheme\.fontWeightBody: /u);
+    assert.match(error.message, /darkTheme\.fontWeightMenu: /u);
+    assert.doesNotMatch(error.message, /lightTheme\.fontWeightMenu|darkTheme\.fontWeightBody/u);
+    return true;
+  });
+});
+
+test("every canvas lint on the launch fixture either has a proposal or is cleared by the root's (TR01189)", { skip: MONOREPO_ONLY }, async () => {
+  const styles = JSON.parse(await readFile(monorepoPath("business", "playbooks", "www-launch", "fixtures", "taproot-www", "settings", "taproot-styles.json"), "utf8")).settings;
+  const light = styles.lightTheme;
+  const background = parseTheme(encodeTheme(light)).semanticMappings?.background ?? { source: "primary", lightness: "surface" };
+  const vanished = {
+    ...light,
+    semanticMappings: { ...light.semanticMappings, actionBackground: background },
+    ...(Array.isArray(light.explicitMappingTokens)
+      ? { explicitMappingTokens: [...new Set([...light.explicitMappingTokens, "actionBackground"])] }
+      : {}),
+  };
+  const canvas = (await validateAndLintThemePair(vanished, styles.darkTheme)).warnings
+    .filter((warning) => /^light: (?:contexts\.[a-z0-9-]+ )?fit lint action-canvas-separation/u.test(warning));
+  assert.ok(canvas.length > 1, canvas.join("\n"));
+  const rootLint = canvas.find((warning) => warning.startsWith("light: fit lint"));
+  const afterRoot = (await validateAndLintThemePair(applyProposedPin(vanished, rootLint), styles.darkTheme)).warnings;
+  for (const warning of canvas.filter((entry) => entry !== rootLint)) {
+    const surface = /contexts\.([a-z0-9-]+) /u.exec(warning)[1];
+    const stillThere = afterRoot.some((entry) => entry.startsWith(`light: contexts.${surface} fit lint action-canvas-separation`));
+    assert.ok(!stillThere || /Nearest passing value/u.test(warning), warning);
+  }
+});

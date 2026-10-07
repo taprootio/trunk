@@ -119,8 +119,16 @@ dark logo on the rendered dark header at desktop and compact/mobile widths;
 transparent canvas pixels do not count as contrast. Supply separate
 scheme-specific assets when one visible mark cannot satisfy both surfaces.
 
+`taproot-site validate` checks the pulled workspace `taproot-site.json` names,
+with no credential, no network, and no write: every page source (metadata,
+Markdown conversion, media references, content vocabulary, section contexts),
+page paths and templates against the pages the pull recorded, navigation,
+redirects, forms, and the complete theme, appearance, header, brand, and
+footer. It reports every problem at once in `error.problems`, each with its
+file, code, and field, instead of one per run.
+
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
-with no credential, no network, and no write: a directory laid out like a
+the same way: a directory laid out like a
 pulled workspace — `pages/`, `nav.json`, `redirects.json`, and the four
 `settings/` documents —
 whose `manifest.fixture.json` binds deterministic page, resource, image, and
@@ -143,9 +151,10 @@ taproot-site validate "$(npm root --global)/@taprootio/site-authoring/examples/r
 The fixture is a fictional wellness studio — `example.test` hostnames, a
 reserved `555-01xx` telephone number, an invented street and town — with two
 free-form pages and one each of the article, recipe, album and place-review
-templates, a three-item navigation tree, and all four settings documents. Nothing in it describes a real business. Copy the directory
-somewhere writable before you edit it; `validate` never writes to the fixture
-it reads.
+templates, a three-item navigation tree, all four settings documents, and a
+`.taproot-site-media.json` that maps its one media path to a fixture image id.
+Nothing in it describes a real business. Copy the directory somewhere writable
+before you edit it; `validate` never writes to the fixture it reads.
 
 ## Authorize
 
@@ -285,14 +294,15 @@ each step names the reference it relies on.
 3. **Edit both schemes and the appearance.** `help theme` lists every field,
    the role slots, how anchor references resolve and what wins when a pin and
    a role disagree; `help appearance` covers the default scheme, header, logos
-   and favicon.
+   and favicon; `help fonts` lists the font families, by category, that the
+   font fields can name.
 4. **Prepare media locally.** Raster files only (PNG, JPEG, GIF, WebP),
    relative to the workspace root; make the transparent logo, its `@2x` copy,
    a dark-scheme logo when needed and a square favicon with your own tools,
    upload them with `media upload`, then assign `lightLogoId`, `darkLogoId`
    and `brand.faviconId` from the returned ids. There is no recolor, crop or
    SVG upload command.
-5. **Validate, preview, then push.** `validate` runs offline;
+5. **Validate, preview, then push.** `validate` checks the whole workspace offline;
    `theme push --dry-run` reads the site and lists the JSON paths at which
    each settings file differs from it, and whether the baseline `pull`
    recorded is still current; `theme push` saves both themes, the appearance
@@ -351,12 +361,40 @@ it is created: a source for another template is refused with
 template's fields and one worked example.
 
 `pages push [page-path...]` validates and sends the selected pages, or every
-workspace page when none is named; the homepage is addressed as `/`. It fails
+workspace page when none is named; the homepage is addressed as `/`. Every
+selected page is checked before anything is sent, and a refusal lists every
+problem in `error.problems`. `pages push --dry-run` runs the same checks
+against the live site, lists which pages would be created, updated, or left
+unchanged, and sends nothing. It fails
 closed with `pages.push_conflict` when a page's stored-state revision has
 moved since this workspace last reconciled with it, naming both revisions;
 `pull` first, or push after a refused pull has shown you the site's version.
-`media upload [path...]` uploads raster files and records component-ready
-delivery fields; MP4, MOV, and WebM files are uploaded as videos. Taproot does not
+
+`places search <name and city>` asks Google Places for the place a review
+names and reports predictions with a session token; `places select
+<googlePlaceId> <sessionToken>` records the match as a Taproot place and
+reports the `placeId` a place review's front matter needs. An article or an
+album can name its place the same way with `place:`.
+
+`plan` checks the whole workspace against the live site — pages, the media
+they reference and the images the settings name, the footer and the pages it
+links, the theme, navigation — and orders what is left
+to send: media upload, pages push, footer push (theme push refuses unsaved
+footer content), theme push, nav push, each marked ready, blocked, or nothing
+to do. It writes nothing and reports a `planHash`. `apply --plan <planHash>`
+plans again, refuses with `apply.plan_stale` if the workspace or the site
+moved, and otherwise runs the steps through the ordinary push verbs. While
+they run, a workspace file read differently from the plan (or not read by it)
+stops the step before it writes, naming the file, and so does a page revision
+or the site's navigation that moved. Steps are
+not atomic together: a failure reports in `error.completedWrites` which steps
+completed, which failed, and which did not run, and the next `plan` shows
+finished steps as nothing to do. Redirects, forms, approval, and deployment
+stay separate commands.
+`media upload [path...]` uploads raster files and records each one in
+`.taproot-site-media.json`; Markdown then names an image by its path (such as
+`media/photo.webp`) everywhere an image goes, from body images to component and
+section image fields. MP4, MOV, and WebM files are uploaded as videos. Taproot does not
 encode: the command reads each file with mediabunny, rewrites an H.264 and AAC
 file that is not an MP4 with its index first as one (copying the tracks, never
 re-encoding), declares its codecs, and prints the server's one-line refusal as
@@ -372,7 +410,9 @@ settings, and the closed footer document. `pull` writes each scheme's
 complete effective theme — the stored theme resolved over the same defaults
 every consumer renders — so a fresh workspace validates as pulled, and it
 keeps only authored `semanticMappings` pins (listed in
-`explicitMappingTokens`) because a pinned token shadows its role.
+`explicitMappingTokens` at the root; a pin inside a context needs no marker)
+because a pinned token shadows its role. Contrast and status-color warnings
+name the nearest passing value the CLI found and checked.
 `theme push` — and `theme push --dry-run`, which writes nothing — also runs
 Espalier's fit report over the root and every context in both schemes and
 prints each lint as a warning, such as a filled action that renders the
@@ -504,6 +544,18 @@ and reading order is value then label. Unicode spaces and tabs remain valid.
 Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal `<br>` tags are rejected
 with the exact fact field path. A label is optional and stays outside the value's link. See
 `taproot-site help page free-form` and `taproot-site help component cta`.
+
+### Link rel in 0.15.0
+
+A link publishes followed unless its author chooses otherwise. A link mark's
+`rel` takes space-separated link types (`nofollow`, `sponsored`, `ugc`, `me`,
+and the other standard types except `opener`), on any link; `target: "_blank"`
+opens a new tab with `noopener noreferrer` added. In Markdown, write
+`[Shop](https://shop.example){rel="sponsored nofollow" target="_blank"}`
+(either attribute alone works). Other tokens and
+targets are refused (`content.link_rel`, `content.link_target`). The editor's
+old default, `noopener noreferrer nofollow`, reads as no choice. See
+`taproot-site help page free-form`.
 
 ### Staging verification and deployment evidence
 

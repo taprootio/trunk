@@ -367,14 +367,7 @@ function wrapMark(html: string, mark: ProseMirrorMark): string {
     case "link": {
       const href = stringAttr(mark.attrs?.href);
       if (!href || !isSafeUrl(href)) return html;
-      return renderElement(
-        "a",
-        {
-          href,
-          rel: "noopener noreferrer nofollow",
-        },
-        html,
-      );
+      return renderElement("a", { href, ...linkRelAttributes(mark.attrs) }, html);
     }
     default:
       return html;
@@ -1375,6 +1368,71 @@ function serializeAttributes(attrs: Record<string, string | number | boolean | n
     .filter(([, value]) => value !== undefined && value !== null && value !== false)
     .map(([key, value]) => value === true ? key : `${key}="${escapeAttribute(String(value))}"`);
   return serialized.length ? ` ${serialized.join(" ")}` : "";
+}
+
+/**
+ * The rel tokens a link may carry (TR01190): every HTML link type valid on
+ * `<a>` except `opener`, which hands a new tab a handle on the page.
+ */
+export const LINK_REL_TOKENS = [
+  "nofollow",
+  "sponsored",
+  "ugc",
+  "me",
+  "noopener",
+  "noreferrer",
+  "external",
+  "author",
+  "license",
+  "tag",
+  "bookmark",
+  "help",
+  "prev",
+  "next",
+  "privacy-policy",
+  "terms-of-service",
+] as const;
+/** The targets a link may carry; only `_blank` changes what renders. */
+export const LINK_TARGETS = ["_blank", "_self"] as const;
+/**
+ * The editor stored this rel, with `target="_blank"`, on every link before
+ * authors could choose, so a mark carrying it records no choice of either.
+ */
+export const LEGACY_EDITOR_LINK_REL = "noopener noreferrer nofollow";
+
+/**
+ * An author's chosen tokens as a stored rel. Those three tokens in the old
+ * default's order would read as no choice, so they are stored in vocabulary
+ * order instead.
+ */
+export function spellLinkRel(tokens: readonly string[]): string {
+  const rel = tokens.join(" ");
+  return rel === LEGACY_EDITOR_LINK_REL
+    ? LINK_REL_TOKENS.filter((token) => tokens.includes(token)).join(" ")
+    : rel;
+}
+
+/** A stored rel as tokens, or undefined when it is the editor's old default (no choice). */
+export function chosenLinkRelTokens(rel: unknown): string[] | undefined {
+  const tokens = stringAttr(rel)?.trim().toLowerCase().split(/\s+/u).filter(Boolean) ?? [];
+  return tokens.join(" ") === LEGACY_EDITOR_LINK_REL ? undefined : tokens;
+}
+
+/**
+ * The `rel` and `target` a link publishes with: the author's allowed tokens in
+ * their order, and noopener and noreferrer whenever it opens a new tab.
+ * Anything else stored is ignored.
+ */
+export function linkRelAttributes(attrs: Record<string, unknown> | undefined): { rel?: string; target?: string } {
+  const stored = chosenLinkRelTokens(attrs?.rel);
+  if (!stored) return {};
+  const newTab = stringAttr(attrs?.target)?.trim().toLowerCase() === "_blank";
+  const allowed: readonly string[] = LINK_REL_TOKENS;
+  const rel = new Set([
+    ...stored.filter((token) => allowed.includes(token)),
+    ...(newTab ? ["noopener", "noreferrer"] : []),
+  ]);
+  return { ...(rel.size ? { rel: [...rel].join(" ") } : {}), ...(newTab ? { target: "_blank" } : {}) };
 }
 
 function isSafeUrl(url: string): boolean {

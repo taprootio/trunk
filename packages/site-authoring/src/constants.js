@@ -103,6 +103,12 @@ export const VERB_STAGING_REVIEW = "staging review";
 export const VERB_SITES = "sites";
 export const VERB_USE = "use";
 export const VERB_WHOAMI = "whoami";
+export const VERB_PLAN = "plan";
+export const VERB_APPLY = "apply";
+export const VERB_PLACES_SEARCH = "places search";
+export const VERB_PLACES_SELECT = "places select";
+/** The identity `plan` reports and `apply --plan` requires. */
+export const PLAN_HASH = /^sha256:[0-9a-f]{64}$/u;
 export const VERB_ENV = "env";
 
 // Which authoring verbs a site accepts (TR00790), as `use` records it in the

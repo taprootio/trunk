@@ -12,7 +12,13 @@ import { fileURLToPath } from "node:url";
 import { COMPONENT_TYPES } from "../../src/content/components.js";
 import { FREE_FORM_SECTION_REGISTRY } from "../../src/content/free-form-sections.js";
 import { NODE_RULES } from "../../src/content/validate-document.js";
-import { MARK_TYPES, NODE_TYPES, RETIRED_NODE_TYPES } from "../../src/content/vocabulary.js";
+import {
+  LINK_REL_TOKENS,
+  LINK_TARGETS,
+  MARK_TYPES,
+  NODE_TYPES,
+  RETIRED_NODE_TYPES,
+} from "../../src/content/vocabulary.js";
 import { MONOREPO_ONLY, MONOREPO_ROOT } from "../monorepo.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -95,6 +101,16 @@ test("the accepted node vocabulary is exactly what the renderer switches on", ()
 
 test("the accepted mark vocabulary is exactly what the renderer switches on", () => {
   assert.deepEqual([...switchLabels(copy, "wrapMark")].sort(), [...MARK_TYPES].sort());
+});
+
+test("the link rel and target vocabularies are exactly the renderer's (TR01190)", () => {
+  const list = (name) => {
+    const match = copy.match(new RegExp(`export const ${name} = \\[([^\\]]*)\\] as const;`, "u"));
+    assert.ok(match, `the copied renderer has no ${name}`);
+    return [...match[1].matchAll(/"([^"]+)"/gu)].map((entry) => entry[1]);
+  };
+  assert.deepEqual(list("LINK_REL_TOKENS"), [...LINK_REL_TOKENS]);
+  assert.deepEqual(list("LINK_TARGETS"), [...LINK_TARGETS]);
 });
 
 test("every accepted node has a validation rule, and no rule invents a node", () => {

@@ -3,6 +3,7 @@ import {
   canonicalizeComponentData,
   expandComponentAuthoringShorthand,
   isComponentType,
+  mapComponentImages,
   validateComponentBlock,
 } from "./components.js";
 import {
@@ -20,6 +21,8 @@ import {
   isPlainObject,
   isSafeUrl,
   isUuid,
+  LINK_REL_TOKENS,
+  LINK_TARGETS,
   MARK_TYPES,
 } from "./vocabulary.js";
 
@@ -595,7 +598,7 @@ function consumeTable(lines, prelude, context) {
 // Top-level section containers
 // ---------------------------------------------------------------------------
 
-function sectionHeaderAttrs(text, line) {
+async function sectionHeaderAttrs(text, line, markdownContext) {
   const match = SECTION_HEADER_RE.exec(text);
   if (!match) {
     throw fail(
@@ -674,6 +677,21 @@ function sectionHeaderAttrs(text, line) {
     }
   }
 
+  for (const [owner, field] of [["decoration", "image"], ["background", "image"], ["background", "portraitImage"]]) {
+    if (isPlainObject(parsed[owner]) && Object.hasOwn(parsed[owner], field)) {
+      parsed[owner] = {
+        ...parsed[owner],
+        [field]: await authoredImageField(
+          parsed[owner][field],
+          `/${owner}/${field}`,
+          markdownContext,
+          line,
+          "section header",
+        ),
+      };
+    }
+  }
+
   const normalizedDecoration = normalizeFreeFormSectionDecoration(
     parsed.decoration,
     "/attrs/decoration",
@@ -709,7 +727,7 @@ function fenceClosing(delimiter) {
 
 async function consumeSection(lines, start, headerText, context, depth) {
   const line = lines[start];
-  const attrs = sectionHeaderAttrs(headerText, line);
+  const attrs = await sectionHeaderAttrs(headerText, line, context);
   const body = [];
   let index = start + 1;
   let activeFence;
@@ -773,7 +791,7 @@ function stripClosingHashes(title) {
 // Fenced blocks: code, components, and inline facts
 // ---------------------------------------------------------------------------
 
-function consumeFence(lines, start, fence, context) {
+async function consumeFence(lines, start, fence, context) {
   const [, indent, delimiter, rawInfo] = fence;
   const info = rawInfo.trim();
   const line = lines[start];
@@ -801,7 +819,10 @@ function consumeFence(lines, start, fence, context) {
   }
 
   if (info.startsWith("component:")) {
-    return { node: componentNode(info.slice("component:".length).trim(), body.join("\n"), line), next: index };
+    return {
+      node: await componentNode(info.slice("component:".length).trim(), body.join("\n"), line, context),
+      next: index,
+    };
   }
   if (info === INLINE_FACTS_CONTRACT.markdown.fence) {
     if (context.blockPlacement !== "root" && context.blockPlacement !== "section") {
@@ -865,7 +886,7 @@ function stripIndent(text, columns) {
   return text.slice(index);
 }
 
-function componentNode(componentType, body, line) {
+async function componentNode(componentType, body, line, context) {
   if (!isComponentType(componentType)) {
     throw fail(
       CODES.componentUnknown,
@@ -879,7 +900,22 @@ function componentNode(componentType, body, line) {
   if (expanded.error !== undefined) {
     throw fail(CODES.componentData, "component block", expanded.error, line.number);
   }
-  const source = expanded.source;
+  let source = expanded.source;
+  const parsed = parseJsonOrUndefined(source);
+  if (parsed !== undefined) {
+    const imageFields = [];
+    mapComponentImages(componentType, parsed, (value, path) => {
+      imageFields.push([path, value]);
+      return value;
+    });
+    if (imageFields.length > 0) {
+      const resolved = new Map();
+      for (const [path, value] of imageFields) {
+        resolved.set(path, await authoredImageField(value, path, context, line, "component block"));
+      }
+      source = JSON.stringify(mapComponentImages(componentType, parsed, (_value, path) => resolved.get(path)));
+    }
+  }
   const errors = validateComponentBlock(componentType, source, "");
   if (errors.length > 0) {
     throw fail(errors[0].code, "component block", errors[0].message, line.number);
@@ -1476,12 +1512,71 @@ function parseLink(text, index, scan, lineNumber, marks) {
     );
   }
 
+  const options = parseLinkAttributes(text, destinationEnd + 1, lineNumber);
+  const attrs = { href: destination, ...options?.attrs };
   const inner = text.slice(index + 1, textEnd);
-  const nodes = parseInline(inner, scan, lineNumber, [...marks, { type: "link", attrs: { href: destination } }]);
+  const nodes = parseInline(inner, scan, lineNumber, [...marks, { type: "link", attrs }]);
   if (nodes.length === 0) {
     throw fail(CODES.markdownLink, "link", "A link must have text.", lineNumber);
   }
-  return { nodes, end: destinationEnd + 1 };
+  return { nodes, end: options ? options.end : destinationEnd + 1 };
+}
+
+/**
+ * The optional `{rel="sponsored nofollow" target="_blank"}` right after a
+ * link's destination (TR01190), either attribute alone or both in any order.
+ * Braces that start `{rel=` or `{target=` are attributes and must be well
+ * formed; any other brace after a link stays literal text.
+ */
+function parseLinkAttributes(text, from, lineNumber) {
+  const rest = text.slice(from);
+  if (!/^\{\s*(?:rel|target)\s*=/u.test(rest)) return undefined;
+  const match = /^\{((?:\s*(?:rel|target)="[^"\\{}]*")+)\s*\}/u.exec(rest);
+  const pairs = match ? [...match[1].matchAll(/(rel|target)="([^"]*)"/gu)] : [];
+  const names = pairs.map((pair) => pair[1]);
+  if (!match || new Set(names).size !== names.length) {
+    throw fail(
+      CODES.markdownLink,
+      "link attributes",
+      'Write a link\'s attributes right after it as {rel="nofollow" target="_blank"}: each at most once, '
+        + "double-quoted. Escape a literal brace as \\{.",
+      lineNumber,
+    );
+  }
+  const attrs = {};
+  for (const [, name, value] of pairs) {
+    if (name === "target") {
+      const target = value.trim().toLowerCase();
+      if (!LINK_TARGETS.includes(target)) {
+        throw fail(
+          CODES.linkTarget,
+          "link target",
+          `A link's target is "_blank" (open in a new tab) or "_self"; "${value}" is not one.`,
+          lineNumber,
+        );
+      }
+      attrs.target = target;
+      continue;
+    }
+    const tokens = value.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+    const unknown = tokens.filter((token) => !LINK_REL_TOKENS.includes(token));
+    if (tokens.length === 0 || unknown.length > 0) {
+      throw fail(
+        CODES.linkRel,
+        "link rel",
+        `A link's rel takes space-separated link types from ${LINK_REL_TOKENS.join(", ")}; ${
+          unknown.length
+            ? `${unknown.map((token) => `"${token}"`).join(", ")} ${unknown.length === 1 ? "is" : "are"} not one`
+            : "this one is empty"
+        }.`,
+        lineNumber,
+      );
+    }
+    // Vocabulary order, so a written rel can never read as the editor's old
+    // default ("noopener noreferrer nofollow"), which means no choice.
+    attrs.rel = LINK_REL_TOKENS.filter((token) => tokens.includes(token)).join(" ");
+  }
+  return { attrs, end: from + match[0].length };
 }
 
 // The same unbounded scan as `findLinkTextEnd`, and quadratic for the same
@@ -1515,19 +1610,34 @@ function unescapePunctuation(text) {
 }
 
 /**
- * Builds a `taprootImage` node from `![alt](reference)`.
- *
- * The node **always** carries `"src": ""` and `"urls": []`, whatever the
- * resolver reported for delivery URLs.
- * `PageImageDeliveryRewriter.ReplaceUrlFields` rewrites `src`/`url`/`urls`
- * only where the key already exists, filling them from the site's signed
- * delivery URLs at read time — so the key must be there and its value must not
- * be a URL this CLI invented. An image node missing the keys is rewritten into
- * nothing and renders blank; one carrying a hand-built URL renders a link the
- * site cannot sign.
+ * Builds a `taprootImage` node from `![alt](reference)`. Like every Markdown
+ * image it carries `"src": ""` and `"urls": []`; see `resolveAuthoredImage`.
  */
 async function imageNode(alt, reference, context, line) {
-  const source = unescapePunctuation(reference);
+  const resolved = await resolveAuthoredImage(unescapePunctuation(reference), context, line);
+  const attrs = {
+    imageId: resolved.imageId,
+    src: "",
+    urls: [],
+    alt: unescapePunctuation(alt) || resolved.alt,
+  };
+  if (resolved.width !== undefined) attrs.width = resolved.width;
+  if (resolved.height !== undefined) attrs.height = resolved.height;
+  return { type: "taprootImage", attrs };
+}
+
+/**
+ * The one way Markdown turns a media path into an image: body images,
+ * component image fields and section images all resolve here (TR01187).
+ *
+ * The record always carries `"src": ""` and `"urls": []`, whatever the
+ * resolver reported for delivery URLs. `PageImageDeliveryRewriter` fills them
+ * from the image id at read time, but only where the keys already exist, so
+ * they must be present and must not hold a URL this CLI invented: an image
+ * missing the keys renders blank, and a hand-built URL is one the site cannot
+ * sign. Width and height are left out when the media record does not know them.
+ */
+async function resolveAuthoredImage(source, context, line, field) {
   if (source.length > CONTENT_LIMITS.imageReferenceLength) {
     throw fail(CODES.markdownImage, "image", "The image reference is too long.", line.number);
   }
@@ -1541,7 +1651,9 @@ async function imageNode(alt, reference, context, line) {
     throw fail(
       CODES.markdownImage,
       "image",
-      `The image '${identifier(source)}' could not be resolved. Upload it with 'media upload' first.`,
+      `The image '${identifier(source)}'${field ? ` at ${field}` : ""} could not be resolved. `
+        + "Record it in .taproot-site-media.json: 'media upload' does that in a workspace, and a fixture lists it "
+        + "in its own copy.",
       line.number,
       error,
     );
@@ -1554,16 +1666,39 @@ async function imageNode(alt, reference, context, line) {
       line.number,
     );
   }
-
-  const attrs = {
+  const dimension = (value) => (Number.isSafeInteger(value) && value > 0 ? value : undefined);
+  const width = dimension(resolved.width);
+  const height = dimension(resolved.height);
+  return {
     imageId: resolved.imageId,
     src: "",
     urls: [],
-    alt: unescapePunctuation(alt) || (typeof resolved.alt === "string" ? resolved.alt : ""),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    alt: typeof resolved.alt === "string" ? resolved.alt : "",
   };
-  if (Number.isInteger(resolved.width) && resolved.width > 0) attrs.width = resolved.width;
-  if (Number.isInteger(resolved.height) && resolved.height > 0) attrs.height = resolved.height;
-  return { type: "taprootImage", attrs };
+}
+
+/** A component or section image field in Markdown: a media path, or null. */
+async function authoredImageField(value, path, context, line, label) {
+  if (value === null) return null;
+  if (typeof value !== "string" || value === "") {
+    throw fail(
+      CODES.markdownImage,
+      label,
+      `${path} takes a media path such as "media/photo.webp", or null. Markdown does not accept the upload record.`,
+      line.number,
+    );
+  }
+  return await resolveAuthoredImage(value, context, line, path);
+}
+
+function parseJsonOrUndefined(source) {
+  try {
+    return JSON.parse(source);
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------

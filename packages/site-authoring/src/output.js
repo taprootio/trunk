@@ -19,6 +19,7 @@ import {
   sanitizeDiagnostic,
   SiteAuthoringError,
 } from "./errors.js";
+import { problemsWithinBudget } from "./problems.js";
 
 const SAFE_SCALAR = /^[a-z][a-z0-9]*(?: [a-z][a-z0-9]*)?$/u;
 const MAXIMUM_OUTPUT_PATH_LENGTH = 4_096;
@@ -52,6 +53,13 @@ export function failureResult(error) {
   // Suppressing the empty array would collapse the first two into one.
   if (Array.isArray(error.differences)) {
     result.error.differences = error.differences;
+  }
+  if (Array.isArray(error.problems) && error.problems.length > 0) {
+    const problems = problemsWithinBudget(error.problems);
+    const count = Math.max(error.problemCount ?? 0, error.problems.length);
+    result.error.problems = problems;
+    result.error.problemCount = count;
+    if (problems.length < count) result.error.problemsTruncated = true;
   }
   const previewDiagnostic = normalizePreviewDiagnostic(error.previewDiagnostic);
   if (previewDiagnostic) result.error.diagnostic = previewDiagnostic;
@@ -159,6 +167,12 @@ export async function writeGithubActionsOutput(outputPath, result) {
   await appendInspectedGithubOutput(outputPath, stats, `${lines.join("\n")}\n`);
 }
 
+function problemLocation(problem) {
+  if (problem.file === undefined) return problem.field ?? problem.area ?? "-";
+  if (problem.field === undefined || problem.field.startsWith(problem.file)) return problem.field ?? problem.file;
+  return `${problem.file} ${problem.field}`;
+}
+
 export function humanFailure(error) {
   const field = error.field ? ` field=${sanitizeDiagnostic(error.field, "unknown")}` : "";
   const status = error.status ? ` status=${sanitizeDiagnostic(error.status, "unknown")}` : "";
@@ -167,8 +181,12 @@ export function humanFailure(error) {
     ? ` refusal=${sanitizeDiagnostic(kind, "unknown")}`
     : "";
   const details = error.details?.map((item) => `${item.field}: ${item.message}`).join("\n");
+  const problems = error.problems?.length > 1
+    ? error.problems.map((problem) => `  ${problemLocation(problem)} [${problem.code}]: ${problem.message}`).join("\n")
+    : undefined;
   return `${CLI_BINARY_NAME} failed [${error.code}]${field}${status}${refusal}: ${sanitizeDiagnostic(error.message)}`
-    + (details ? `\n${details}` : "");
+    + (details ? `\n${details}` : "")
+    + (problems ? `\n${problems}` : "");
 }
 
 export function serializeResult(result) {

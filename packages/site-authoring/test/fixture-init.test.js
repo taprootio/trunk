@@ -33,10 +33,12 @@ async function sourceWorkspace(t) {
     JSON.stringify({ configVersion: 1, siteId: manifest.siteId, workspaceDir: "." }),
   );
   await writeFile(path.join(source, "credentials.json"), "never-copy-this-token");
-  const page = path.join(source, "pages/index.md");
+  // Live delivery URLs and a signature in the media record the home page's
+  // image resolves through: none of it may reach the export.
+  const media = path.join(source, ".taproot-site-media.json");
   await writeFile(
-    page,
-    (await readFile(page, "utf8"))
+    media,
+    (await readFile(media, "utf8"))
       .replaceAll("https://static.example.test", "https://delivery.live.invalid")
       .replaceAll("riverbend-studio-1280.webp", "riverbend-studio-1280.webp?signature=never-copy-this-token#private"),
   );

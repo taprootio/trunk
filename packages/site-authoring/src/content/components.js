@@ -258,6 +258,10 @@ const IMAGE_BANNER = Object.freeze({
   image: image(),
   altText: str(),
   overlayText: str(),
+  // One supporting sentence and at most one link under the headline: the copy
+  // stack Espalier 6.1 lays out with a bounded measure (TR00819).
+  supportingText: boundedStr(280),
+  action: Object.freeze({ ...HERO_ACTION, nullable: true }),
   fontSize: enumOf("large", "standard", "small"),
   focus: shape({
     x: num({ minimum: 0, maximum: 1 }),
@@ -268,7 +272,20 @@ const IMAGE_BANNER = Object.freeze({
   // `ratio` keeps the wide/compact shape, capped at the viewport space below
   // the site header; `viewport` fills exactly that space (TR00413).
   heightMode: enumOf("ratio", "viewport"),
-  contentPosition: enumOf("bottom-start", "bottom", "bottom-end", "center", "top-start", "top", "top-end"),
+  contentPosition: enumOf(
+    "bottom-start",
+    "bottom",
+    "bottom-end",
+    "center",
+    "top-start",
+    "top",
+    "top-end",
+    "middle-start",
+    "middle-end",
+  ),
+  // Below the compact width the copy stays over the image, or moves into a
+  // band under it when the narrow crop has no quiet region.
+  compactPlacement: enumOf("overlay", "below"),
   contentGutter: enumOf("frame", "page"),
   followingSpacing: enumOf("standard", "compact"),
   scrim: enumOf("auto", "none", "flat", "top", "bottom", "left", "right", "radial"),
@@ -574,12 +591,15 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       image: null,
       altText: "",
       overlayText: "",
+      supportingText: "",
+      action: null,
       fontSize: "large",
       focus: { x: 0.5, y: 0.5 },
       ratio: "3/1",
       compactRatio: "3/2",
       heightMode: "ratio",
       contentPosition: "center",
+      compactPlacement: "overlay",
       contentGutter: "frame",
       followingSpacing: "standard",
       scrim: "auto",
@@ -597,8 +617,10 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "For a full-bleed photograph with text aligned to the surrounding page well, set contentGutter to page. followingSpacing: compact reduces the top padding of an immediately following section so a bottom banner heading reads with its supporting paragraph. Use a banner-only contentPadding: none section followed by a standard text section; keep their theme contexts consistent. Defaults preserve frame-edge text and standard section spacing.",
       "scrimEdge: flush finishes a directional scrim at full strength where it meets the page, so a full-bleed banner dissolves into the band below instead of ending at a visible line. It requires the arrangement above: a banner-only contentPadding: none section immediately followed by a section in the same theme context. It is inert when scrim is none, flat, or radial, and it stops being seamless when bannerScheme pins a polarity the page scheme does not share, because the scrim ink is then a derived color rather than the adjoining band's own. Default none; add it deliberately, per banner.",
       "Compose around the actual photograph: identify the meaningful subject and a quiet area for copy. Do not cover faces, product details, or high-detail edges. A focal point controls cropping, not text placement; inspect wide and compact crops separately. Keep the subject's face, ears, and other identifying details inside the compact frame, including at both ends of parallax travel. Adjust focus toward the subject rather than reusing a generic center; reduce motion or choose a roomier crop if preserving the subject requires it.",
-      "Use contentPosition to place copy in that quiet area, not automatically in the center. Keep one dominant message and nearby supporting copy/actions; if the photo has no safe text area, use a split hero or a separate text section instead of forcing an overlay.",
-      "Use the rule of thirds as a composition guide: consider the subject near one third and a compact text group in quiet space on the opposite side. Golden-ratio proportions are optional alternatives, not a proven engagement formula. Neither guide overrides legibility, the actual subject, or the compact crop. Current contentPosition values are edge/center anchors, not exact third or golden-ratio coordinates; do not invent unsupported positioning properties.",
+      "Use contentPosition to place copy in that quiet area, not automatically in the center: top, middle and bottom rows, each at start, center or end (middle-start and middle-end sit at mid-height against an edge; start and end mirror for right-to-left text). Keep one dominant message; if the photo has no safe text area, use a split hero or a separate text section instead of forcing an overlay.",
+      "The copy is a stack: overlayText is the headline, supportingText one optional supporting sentence (280 characters at most) set in the lead type, and action at most one link ({ label, url } with a safe URL, or null). The stack keeps its own spacing and a bounded line length, so long copy does not run the width of a wide banner, and the link is a real keyboard-reachable link with a visible focus ring. A headline alone lays out as before.",
+      "compactPlacement: below moves the copy into a band under the image at compact widths, on the banner scheme's own surface, for a crop that keeps its subject but loses the quiet region the copy sat on. Default overlay keeps the copy over the image. The banner grows instead of clipping when enlarged text or long labels need the room, past the height left below the site header if it must, and returns to its shape once the copy fits.",
+      "Use the rule of thirds as a composition guide: consider the subject near one third and a compact text group in quiet space on the opposite side. Golden-ratio proportions are optional alternatives, not a proven engagement formula. Neither guide overrides legibility, the actual subject, or the compact crop. contentPosition values are edge, middle and center anchors, not exact third or golden-ratio coordinates; do not invent unsupported positioning properties.",
       "Check contrast behind the actual letters at both motion endpoints and both themes: WCAG AA requires 4.5:1 for ordinary text and 3:1 for qualifying large text. A text shadow alone is not a contrast guarantee. Keep text and actions stationary; recheck at mobile widths and enlarged text.",
       "Prefer parallax-subtle or parallax when motion is useful: motion follows the reader's scrolling and stops when they stop. Infinite ambient loops are an explicit art-direction choice, not the default recommendation.",
       "imageMotion is optional and defaults to none. slow-zoom is a cinematic 18% zoom over 6 seconds, alternating; drift-start and drift-end travel horizontally over 8 seconds with a 14% safety crop.",
@@ -610,9 +632,12 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       image: null,
       altText: "",
       overlayText: "Train together",
+      supportingText: "Small classes, every morning, for every level.",
+      action: { label: "See the schedule", url: "/classes" },
       focus: { x: 0.5, y: 0.35 },
       heightMode: "ratio",
-      contentPosition: "bottom-start",
+      contentPosition: "middle-start",
+      compactPlacement: "below",
       scrim: "bottom",
       scrimStrength: "medium",
       texture: "paper",
@@ -680,6 +705,35 @@ export const COMPONENT_TYPES = Object.freeze(Object.keys(COMPONENT_DEFINITIONS))
 export const COMPONENT_SHAPES = Object.freeze(Object.fromEntries(
   Object.entries(COMPONENT_DEFINITIONS).map(([type, definition]) => [type, definition.fields]),
 ));
+
+/**
+ * Replaces each image field in parsed component data with
+ * `mapImage(value, path)`, following the component's field table. Markdown
+ * authoring turns media paths into stored image records this way, and help
+ * builds its Markdown examples the other way (TR01187). A value of the wrong
+ * shape is passed through for validation to report.
+ */
+export function mapComponentImages(componentType, data, mapImage) {
+  const fields = COMPONENT_SHAPES[componentType];
+  return fields !== undefined && isPlainObject(data) ? mapImageFields(fields, data, "", mapImage) : data;
+}
+
+function mapImageFields(fields, value, path, mapImage) {
+  const mapped = { ...value };
+  for (const [name, spec] of Object.entries(fields)) {
+    if (Object.hasOwn(value, name)) mapped[name] = mapImageValue(spec, value[name], `${path}/${name}`, mapImage);
+  }
+  return mapped;
+}
+
+function mapImageValue(spec, value, path, mapImage) {
+  if (spec.kind === "image") return mapImage(value, path);
+  if (spec.kind === "object" && isPlainObject(value)) return mapImageFields(spec.fields, value, path, mapImage);
+  if (spec.kind === "array" && Array.isArray(value)) {
+    return value.map((item, index) => mapImageValue(spec.item, item, `${path}/${index}`, mapImage));
+  }
+  return value;
+}
 
 export function getComponentDefinition(componentType) {
   return typeof componentType === "string" && Object.hasOwn(COMPONENT_DEFINITIONS, componentType)
@@ -749,8 +803,12 @@ function referenceSchema(spec) {
     case "image":
       return {
         type: ["object", "null"],
+        // What a Markdown component fence takes instead (TR01187).
+        markdownType: ["string", "null"],
         description:
-          "null, or a media-upload result. Keep imageId, src, and urls keys so the server can rewrite delivery URLs.",
+          "In Markdown, a media path recorded by media upload (such as \"media/photo.webp\"), or null; pages push "
+          + "stores the image record. A .pm.json document carries that record: keep imageId, src, and urls keys so "
+          + "the server can rewrite delivery URLs.",
         additionalProperties: false,
         properties: referenceProperties(COMPONENT_IMAGE_FIELDS),
       };
@@ -805,7 +863,7 @@ function describe(spec) {
     case "object":
       return "an object";
     case "image":
-      return "an image object or null";
+      return "a media path in Markdown, an image object in .pm.json, or null";
     case "uuid":
       return "a canonical lowercase UUID";
     case "safe-url":

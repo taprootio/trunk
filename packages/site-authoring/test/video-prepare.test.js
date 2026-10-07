@@ -18,7 +18,7 @@ import {
   Output,
 } from "mediabunny";
 
-import { indexComesFirst, isAac, isH264, mp4Name, prepareVideoFile } from "../src/video-prepare.js";
+import { indexComesFirst, isAac, isH264, mp4Name, prepareVideoFile, videoAcceptance } from "../src/video-prepare.js";
 
 const fixturePath = (name) => path.join(import.meta.dirname, "fixtures", "video", name);
 const bytesOf = (name) => readFileSync(fixturePath(name));
@@ -175,4 +175,23 @@ test("a secondary track the server would refuse is dropped by the rewrite, and t
   const described = await prepareVideoFile({ filePath, byteLength, maxRemuxBytes: 1 });
   assert.equal(described.remuxed, null);
   assert.equal(described.audioCodec, "opus");
+});
+
+test("acceptance follows what the upload would send: as it is, rewritten, or refused", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "video-acceptance-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, "extra.mp4");
+  await writeWithExtraOpusTrack(filePath);
+  const byteLength = readFileSync(filePath).byteLength;
+
+  assert.equal((await videoAcceptance({ filePath: fixturePath("with-aac.mp4"), byteLength: 1 })).accepted, true);
+  // The refused Opus track is dropped by the rewrite, unless the file is too large to rewrite.
+  assert.equal((await videoAcceptance({ filePath, byteLength })).accepted, true);
+  const tooLarge = await videoAcceptance({ filePath, byteLength, maxRemuxBytes: 1 });
+  assert.equal(tooLarge.accepted, false);
+  assert.equal(tooLarge.audioCodec, "opus");
+  assert.match(tooLarge.videoCodec, /^avc[13]\./u);
+  const garbage = path.join(dir, "garbage.mp4");
+  await writeFile(garbage, Buffer.alloc(64, 1));
+  assert.deepEqual(await videoAcceptance({ filePath: garbage, byteLength: 64 }), { accepted: false, videoCodec: "", audioCodec: "" });
 });

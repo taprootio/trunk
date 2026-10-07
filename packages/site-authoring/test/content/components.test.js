@@ -142,12 +142,15 @@ const COMPLETE = {
     image: IMAGE,
     altText: "The studio",
     overlayText: "Open now",
+    supportingText: "Classes every morning.",
+    action: { label: "See the schedule", url: "/classes" },
+    compactPlacement: "below",
     fontSize: "standard",
     focus: { x: 0.5, y: 0.25 },
     ratio: "4/1",
     compactRatio: "1/1",
     heightMode: "viewport",
-    contentPosition: "bottom-end",
+    contentPosition: "middle-end",
     scrim: "radial",
     scrimStrength: "strong",
     bannerScheme: "dark",
@@ -208,6 +211,31 @@ test("accepts every image banner text shadow strength and rejects an unknown one
 test("defaults the image banner text shadow to none", () => {
   assert.equal(getComponentDefinition("image-banner").defaultData.textShadow, "none");
   assert.deepEqual(validate("image-banner", { image: COMPLETE["image-banner"].image }), []);
+});
+
+test("holds the image banner copy stack to what the renderer publishes (TR00819)", async (testContext) => {
+  for (const contentPosition of ["middle-start", "middle-end"]) {
+    assert.deepEqual(validate("image-banner", { ...COMPLETE["image-banner"], contentPosition }), []);
+  }
+  assert.deepEqual(validate("image-banner", { ...COMPLETE["image-banner"], action: null, supportingText: "" }), []);
+  assert.deepEqual(validate("image-banner", { supportingText: "x".repeat(280) }), []);
+  // UTF-16 units, as generator readiness and the editor count them.
+  assert.deepEqual(validate("image-banner", { supportingText: "😀".repeat(140) }), []);
+  assert.equal(validate("image-banner", { supportingText: "😀".repeat(141) }).length, 1);
+  const refusals = [
+    ["an unknown compact placement", { compactPlacement: "beside" }, "/attrs/componentData/compactPlacement"],
+    ["supporting text over 280 characters", { supportingText: "x".repeat(281) }, "/attrs/componentData/supportingText"],
+    ["an action without a label", { action: { url: "/classes" } }, "/attrs/componentData/action/label"],
+    ["an unsafe action URL", { action: { label: "Go", url: "javascript:alert(1)" } }, "/attrs/componentData/action/url"],
+  ];
+  for (const [name, data, pointer] of refusals) {
+    await testContext.test(name, () => {
+      const errors = validate("image-banner", data);
+      assert.ok(errors.some((error) => error.path === pointer), JSON.stringify(errors));
+    });
+  }
+  assert.equal(getComponentDefinition("image-banner").defaultData.compactPlacement, "overlay");
+  assert.equal(getComponentDefinition("image-banner").defaultData.action, null);
 });
 
 test("holds creative component options to their published vocabularies", async (testContext) => {

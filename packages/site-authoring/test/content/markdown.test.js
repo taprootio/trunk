@@ -14,16 +14,51 @@ import { validateDocument } from "../../src/content/validate-document.js";
 
 const IMAGE_ID = "3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607";
 
+// Media paths with their own recorded uploads; any other path resolves to a
+// generic one.
+const AUTHORED_MEDIA = {
+  "media/hero-media.webp": {
+    imageId: "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+    width: 1200,
+    height: 800,
+    alt: "A welcoming hot yoga class",
+  },
+  "media/starburst.webp": { imageId: IMAGE_ID, width: 1200, height: 1200, alt: "" },
+  "media/class.webp": { imageId: IMAGE_ID, width: 1920, height: 1080, alt: "A hot yoga class" },
+  "media/class-portrait.webp": {
+    imageId: "9a8b7c6d-5e4f-4321-a098-76543210fedc",
+    width: 1920,
+    height: 1080,
+    alt: "A hot yoga class",
+  },
+};
+
 const resolveImage = async (reference) => ({
-  imageId: IMAGE_ID,
   // Delivery hints the emitter deliberately discards: the server rewrites
   // src/urls from the image id at read time.
   src: "https://cdn.example.test/low.webp",
   urls: [{ minWidth: 640, url: "https://cdn.example.test/640.webp" }],
-  width: 1600,
-  height: 900,
-  alt: `resolved ${reference}`,
+  ...(AUTHORED_MEDIA[reference] ?? { imageId: IMAGE_ID, width: 1600, height: 900, alt: `resolved ${reference}` }),
 });
+
+/**
+ * The shared section fixture renders with delivery URLs; converted Markdown
+ * stores the hero image with them empty.
+ */
+function withoutDeliveryUrls(document) {
+  return JSON.parse(JSON.stringify(document), (key, value) => {
+    if (key !== "componentData" || typeof value !== "string") return value;
+    const data = JSON.parse(value);
+    if (data.media === null || typeof data.media !== "object") return value;
+    return JSON.stringify({ ...data, media: { ...data.media, src: "", urls: [] } });
+  });
+}
+
+/** The image record a Markdown media path stores: delivery URLs are filled at read time. */
+const storedImage = (reference) => {
+  const { imageId, width, height, alt } = AUTHORED_MEDIA[reference];
+  return { imageId, src: "", urls: [], width, height, alt };
+};
 
 const convert = (markdown, options = {}) => markdownToProseMirror(markdown, { resolveImage, ...options });
 const text = (value, marks) => (marks ? { type: "text", text: value, marks } : { type: "text", text: value });
@@ -34,27 +69,9 @@ const tableCell = (type, ...content) => ({
   content: [{ type: "paragraph", ...(content.length > 0 ? { content } : {}) }],
 });
 const bold = [{ type: "bold" }];
-const DECORATION_IMAGE = {
-  imageId: IMAGE_ID,
-  src: "/img/starburst-640.webp",
-  urls: [{ minWidth: 640, url: "/img/starburst-640.webp", type: "image/webp" }],
-  width: 1200,
-  height: 1200,
-  alt: "",
-};
-const BACKGROUND_IMAGE = {
-  imageId: IMAGE_ID,
-  src: "/img/class-640.webp",
-  urls: [{ minWidth: 640, url: "/img/class-640.webp", type: "image/webp" }],
-  width: 1920,
-  height: 1080,
-  alt: "A hot yoga class",
-};
-const PORTRAIT_BACKGROUND_IMAGE = {
-  ...BACKGROUND_IMAGE,
-  imageId: "9a8b7c6d-5e4f-4321-a098-76543210fedc",
-  src: "/img/class-640.webp",
-};
+const DECORATION_IMAGE = storedImage("media/starburst.webp");
+const BACKGROUND_IMAGE = storedImage("media/class.webp");
+const PORTRAIT_BACKGROUND_IMAGE = storedImage("media/class-portrait.webp");
 const INLINE_FACT_ITEMS = [
   { value: "4.9 ★", label: "Community rating" },
   { value: "(555) 013-7788", label: "Call the studio", url: "tel:+15550137788" },
@@ -477,7 +494,7 @@ const GOLDENS = [
   {
     name: "a component fence carrying an image",
     markdown: "```component:image-banner\n"
-      + `{"overlayText":"Hi","image":{"imageId":"${IMAGE_ID}","src":"","urls":[],"width":10,"height":5,"alt":"x"}}\n`
+      + `{"overlayText":"Hi","image":"media/banner.webp"}\n`
       + "```",
     doc: {
       type: "doc",
@@ -485,8 +502,8 @@ const GOLDENS = [
         type: "componentBlock",
         attrs: {
           componentType: "image-banner",
-          componentData: `{"image":{"imageId":"${IMAGE_ID}","src":"","urls":[],"width":10,"height":5,"alt":"x"},`
-            + "\"overlayText\":\"Hi\"}",
+          componentData: `{"image":{"imageId":"${IMAGE_ID}","src":"","urls":[],"width":1600,"height":900,`
+            + "\"alt\":\"resolved media/banner.webp\"},\"overlayText\":\"Hi\"}",
         },
       }],
     },
@@ -496,7 +513,7 @@ const GOLDENS = [
     markdown: "Root prose.\n\n"
       + ":::section {\"surface\":\"raised\"}\n"
       + "```component:hero-section\n"
-      + "{\"overline\":\"Riverbend Hot Yoga · Elm Harbor\",\"title\":\"Come as you are. Leave feeling stronger.\",\"titleSize\":\"display\",\"lead\":\"Hot yoga, barre, and wellness practices for every body.\",\"primaryAction\":{\"label\":\"View class schedule\",\"url\":\"/classes\"},\"secondaryAction\":{\"label\":\"Call the studio\",\"url\":\"tel:+12535550123\"},\"alignment\":\"start\",\"media\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"mediaArrangement\":\"split\",\"mediaPosition\":\"after\",\"mediaWidth\":\"wide\"}\n"
+      + "{\"overline\":\"Riverbend Hot Yoga · Elm Harbor\",\"title\":\"Come as you are. Leave feeling stronger.\",\"titleSize\":\"display\",\"lead\":\"Hot yoga, barre, and wellness practices for every body.\",\"primaryAction\":{\"label\":\"View class schedule\",\"url\":\"/classes\"},\"secondaryAction\":{\"label\":\"Call the studio\",\"url\":\"tel:+12535550123\"},\"alignment\":\"start\",\"media\":\"media/hero-media.webp\",\"mediaArrangement\":\"split\",\"mediaPosition\":\"after\",\"mediaWidth\":\"wide\"}\n"
       + "```\n\n"
       + "A neutral section.\n"
       + ":::\n\n"
@@ -522,14 +539,14 @@ const GOLDENS = [
       + "{\"items\":[{\"quote\":\"Two months in, I can hold poses I could not attempt in January.\",\"authorName\":\"Marcus Ellery\",\"authorTitle\":\"Barre regular\",\"authorImage\":null}],\"carousel\":true,\"borderWidth\":1}\n"
       + "```\n"
       + ":::",
-    doc: representativeSectionDocument,
+    doc: withoutDeliveryUrls(representativeSectionDocument),
   },
   {
     name: "section decoration JSON round-trips as the complete normalized object",
     markdown: `:::section ${
       JSON.stringify({
         decoration: {
-          image: DECORATION_IMAGE,
+          image: "media/starburst.webp",
           anchor: "top-end",
           inlineOffsetPercent: 18,
           blockOffsetPercent: -12,
@@ -563,8 +580,8 @@ const GOLDENS = [
       JSON.stringify({
         background: {
           portraitFocus: { y: 0.3 },
-          portraitImage: PORTRAIT_BACKGROUND_IMAGE,
-          image: BACKGROUND_IMAGE,
+          portraitImage: "media/class-portrait.webp",
+          image: "media/class.webp",
           focus: { x: 0.6 },
         },
       })
@@ -892,6 +909,17 @@ test("refuses every construct outside the subset by name", async (testContext) =
     ["a link title", "[x](https://a.test \"t\")", "content.markdown_link", "link"],
     ["a pointy-bracket destination", "[x](<https://a.test>)", "content.markdown_link", "link"],
     ["nested links", "[a [b](https://x.test) c](https://y.test)", "content.markdown_link", "link"],
+    ["an unquoted link rel", "[x](https://a.test){rel=nofollow}", "content.markdown_link", "link attributes"],
+    [
+      "a repeated link attribute",
+      "[x](https://a.test){rel=\"ugc\" rel=\"me\"}",
+      "content.markdown_link",
+      "link attributes",
+    ],
+    ["an unknown link target", "[x](https://a.test){target=\"_top\"}", "content.link_target", "link target"],
+    ["an unknown link rel", "[x](https://a.test){rel=\"follow\"}", "content.link_rel", "link rel"],
+    ["opener as a link rel", "[x](https://a.test){rel=\"opener\"}", "content.link_rel", "link rel"],
+    ["an empty link rel", "[x](https://a.test){rel=\"\"}", "content.link_rel", "link rel"],
     ["an unclosed fence", "```js\ncode", "content.markdown_unclosed_fence", "fenced block"],
     [
       "a malformed section header",
@@ -948,12 +976,16 @@ test("refuses every construct outside the subset by name", async (testContext) =
       "section header",
     ],
     [
-      "an unsafe decoration delivery URL",
-      `:::section ${
-        JSON.stringify({ decoration: { image: { ...DECORATION_IMAGE, src: "javascript:alert(1)" } } })
-      }\ntext\n:::`,
-      "content.attr_invalid",
-      "/attrs/decoration/image/src",
+      "an upload record as a section image",
+      `:::section ${JSON.stringify({ decoration: { image: DECORATION_IMAGE } })}\ntext\n:::`,
+      "content.markdown_image",
+      "section header",
+    ],
+    [
+      "an upload record as a component image",
+      `\`\`\`component:image-banner\n${JSON.stringify({ image: storedImage("media/starburst.webp") })}\n\`\`\``,
+      "content.markdown_image",
+      "component block",
     ],
     [
       "a fence info string with attributes",
@@ -1161,6 +1193,35 @@ test("passes the raw reference to the resolver and reports its failures by name"
     );
   });
 
+  await testContext.test("a component or section image path the resolver cannot find", async () => {
+    for (const markdown of [
+      "```component:image-banner\n{\"image\":\"media/gone.webp\"}\n```",
+      ":::section {\"decoration\":{\"image\":\"media/gone.webp\"}}\ntext\n:::",
+    ]) {
+      await assert.rejects(
+        markdownToProseMirror(markdown, {
+          resolveImage: async () => {
+            throw new Error("not recorded");
+          },
+        }),
+        (error) => {
+          assert.equal(error.code, "content.markdown_image");
+          assert.match(error.message, /media\/gone\.webp/u);
+          return true;
+        },
+      );
+    }
+  });
+
+  await testContext.test("a media record without dimensions", async () => {
+    const { doc } = await markdownToProseMirror(
+      ":::section {\"background\":{\"image\":\"media/class.webp\"}}\n## Band\n:::",
+      { resolveImage: async () => ({ imageId: IMAGE_ID, width: 0, height: 0, alt: "" }) },
+    );
+    assert.deepEqual(doc.content[0].attrs.background.image, { imageId: IMAGE_ID, src: "", urls: [], alt: "" });
+    assert.deepEqual(validateDocument(doc).errors, []);
+  });
+
   await testContext.test("a resolver that returns no image id", async () => {
     for (const resolved of [undefined, null, {}, { imageId: "image-1" }, "an-id"]) {
       await assert.rejects(
@@ -1207,6 +1268,29 @@ test("gates its own output on the validator", () => {
   assert.doesNotThrow(() =>
     assertConvertedDocument({ type: "doc", content: [{ type: "paragraph", content: [text("x")] }] })
   );
+});
+
+test("a link's {rel target} lands in its mark, lower case, deduplicated, in vocabulary order (TR01190)", async () => {
+  // Written in the editor's old default order, it must still mean nofollow.
+  const { doc: legacy } = await convert("[Cart](/cart){ rel=\"noopener noreferrer nofollow\" }");
+  assert.deepEqual(legacy.content[0].content[0].marks[0].attrs, { href: "/cart", rel: "nofollow noopener noreferrer" });
+  const { doc: literal } = await convert("[a](/a){relative} and [b](/b) {target}");
+  assert.equal(literal.content[0].content[1].text, "{relative} and ");
+  const { doc: tab } = await convert("[Docs](https://docs.test){target=\"_BLANK\" rel=\"external\"}");
+  assert.deepEqual(tab.content[0].content[0].marks, [
+    { type: "link", attrs: { href: "https://docs.test", target: "_blank", rel: "external" } },
+  ]);
+  const { doc } = await convert("[Shop](https://shop.test){rel=\"Sponsored nofollow sponsored\"} and [home](/) {kept}");
+  assert.deepEqual(doc.content[0].content, [
+    {
+      type: "text",
+      text: "Shop",
+      marks: [{ type: "link", attrs: { href: "https://shop.test", rel: "nofollow sponsored" } }],
+    },
+    { type: "text", text: " and " },
+    { type: "text", text: "home", marks: [{ type: "link", attrs: { href: "/" } }] },
+    { type: "text", text: " {kept}" },
+  ]);
 });
 
 test("a video embed fence names the video by link and stores only its provider and id", async () => {

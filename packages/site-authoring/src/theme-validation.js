@@ -10,6 +10,8 @@ import {
 } from "@taprootio/espalier/shared/theme";
 
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import { loadEspalierShared } from "./espalier-shared.js";
+import { proposePassingValues, refuseUnavailableFontWeights } from "./theme-proposals.js";
 
 export const MAXIMUM_THEME_WARNINGS = 32;
 // Large enough for a whole fit lint: apca-target-unmet lists every pair that
@@ -403,7 +405,7 @@ let fitReport;
  * release that moves it.
  */
 function loadFitReport() {
-  fitReport ??= import(new URL("./theme-fit-report.js", import.meta.resolve("@taprootio/espalier/shared/theme")).href);
+  fitReport ??= loadEspalierShared("theme-fit-report.js");
   return fitReport;
 }
 
@@ -423,26 +425,36 @@ function loadFitReport() {
  * report describes exactly what the published page resolves. Lints are
  * warnings rather than refusals, matching how Espalier classifies them.
  */
+// The lint texts alone; validation itself uses fitLints. Kept for the test of
+// a report Espalier cannot build.
 export async function fitLintWarnings(light, dark) {
-  const { ROOT_SURFACE, themeFitReportSuite } = await loadFitReport();
+  return (await fitLints(light, dark)).items.map((item) => item.text);
+}
+
+/** The fit lints with the report each came from, for proposing a passing value. */
+async function fitLints(light, dark) {
+  const fit = await loadFitReport();
   let suite;
   try {
-    suite = themeFitReportSuite(parseTheme(light) ?? {}, parseTheme(dark) ?? {});
+    suite = fit.themeFitReportSuite(parseTheme(light) ?? {}, parseTheme(dark) ?? {});
   } catch (error) {
     // A pair that passed validation resolves, so this should not happen; if
     // it does, say the lints were not checked rather than implying none fired.
-    return [`Espalier could not build the fit report, so no fit lints were checked: ${error?.message ?? error}`];
+    return {
+      fit,
+      items: [{ text: `Espalier could not build the fit report, so no fit lints were checked: ${error?.message ?? error}` }],
+    };
   }
-  const warnings = [];
+  const items = [];
   for (const scheme of ["light", "dark"]) {
     for (const report of suite[scheme]) {
-      const surface = report.surface === ROOT_SURFACE ? "" : `contexts.${report.surface} `;
+      const surface = report.surface === fit.ROOT_SURFACE ? "" : `contexts.${report.surface} `;
       for (const lint of report.lints) {
-        warnings.push(`${scheme}: ${surface}fit lint ${lint.id} — ${lint.message}`);
+        items.push({ scheme, report, lint, text: `${scheme}: ${surface}fit lint ${lint.id} — ${lint.message}` });
       }
     }
   }
-  return warnings;
+  return { fit, items };
 }
 
 function boundedThemeWarnings(allWarnings) {
@@ -475,8 +487,17 @@ export function validateAndEncodeThemePair(lightTheme, darkTheme) {
  */
 export async function validateAndLintThemePair(lightTheme, darkTheme) {
   const { light, dark, warnings, inert } = checkThemePair(lightTheme, darkTheme);
-  const lints = await fitLintWarnings(light, dark);
-  return { light, dark, ...boundedThemeWarnings([...warnings, ...lints, ...inert]) };
+  await refuseUnavailableFontWeights(light, dark);
+  const { fit, items } = await fitLints(light, dark);
+  const proposed = await proposePassingValues({
+    lightTheme,
+    darkTheme,
+    warnings,
+    lints: items.filter((item) => item.lint !== undefined),
+    fit,
+  });
+  const unbuilt = items.filter((item) => item.lint === undefined).map((item) => item.text);
+  return { light, dark, ...boundedThemeWarnings([...proposed.warnings, ...unbuilt, ...proposed.lints, ...inert]) };
 }
 
 function checkThemePair(lightTheme, darkTheme) {

@@ -75,6 +75,30 @@ export const MARK_TYPES = Object.freeze([
   "link",
 ]);
 
+// The renderer's `LINK_REL_TOKENS` and `LINK_TARGETS` (TR01190): every HTML
+// link type valid on `<a>` except `opener`. The renderer publishes only these
+// and ignores the rest, so the CLI refuses the rest. The parity test reads
+// both lists from the copied renderer.
+export const LINK_REL_TOKENS = Object.freeze([
+  "nofollow",
+  "sponsored",
+  "ugc",
+  "me",
+  "noopener",
+  "noreferrer",
+  "external",
+  "author",
+  "license",
+  "tag",
+  "bookmark",
+  "help",
+  "prev",
+  "next",
+  "privacy-policy",
+  "terms-of-service",
+]);
+export const LINK_TARGETS = Object.freeze(["_blank", "_self"]);
+
 export const NODE_TYPE_SET = Object.freeze(new Set(NODE_TYPES));
 export const MARK_TYPE_SET = Object.freeze(new Set(MARK_TYPES));
 
@@ -108,6 +132,8 @@ export const CONTENT_ERROR_CODES = Object.freeze({
   markMisplaced: "content.mark_misplaced",
   unknownMark: "content.unknown_mark",
   linkHref: "content.link_href",
+  linkRel: "content.link_rel",
+  linkTarget: "content.link_target",
   // Attributes
   attrsInvalid: "content.attrs_invalid",
   attrUnknown: "content.attr_unknown",

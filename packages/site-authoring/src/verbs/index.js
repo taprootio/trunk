@@ -1,4 +1,5 @@
 import {
+  VERB_APPLY,
   VERB_APPROVE,
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
@@ -12,6 +13,9 @@ import {
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
   VERB_PAGES_PUSH,
+  VERB_PLACES_SEARCH,
+  VERB_PLACES_SELECT,
+  VERB_PLAN,
   VERB_PREVIEW_PAGE,
   VERB_PREVIEW_REVOKE,
   VERB_PULL,
@@ -39,6 +43,8 @@ import { logout } from "./logout.js";
 import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
 import { pagesPush } from "./pages-push.js";
+import { placesSearch, placesSelect } from "./places.js";
+import { apply, plan } from "./plan.js";
 import { previewPage } from "./preview-page.js";
 import { previewRevoke } from "./preview-revoke.js";
 import { pull } from "./pull.js";
@@ -70,6 +76,7 @@ import { whoami } from "./whoami.js";
  *   deployTarget,  // "staging" | "production" for `deploy`, else undefined
  *   quiet,         // --quiet; suppresses progress, never the JSON result
  *   keyName,       // --name; `login` only, undefined everywhere else
+ *   planHash,      // --plan; `apply` only: the plan it may run
  *   onProgress,    // human progress sink (stderr, or a no-op when quiet)
  *   fetch,         // injectable fetch, for tests
  *   signal,        // optional AbortSignal
@@ -92,6 +99,8 @@ import { whoami } from "./whoami.js";
  *                  //   with none, the workspace's media/ directory is walked
  *   formKeys,      // forms validate / push: narrow to these form keys;
  *                  //   with none, every file under forms/
+ *   placeQuery,    // places search: the words of the query
+ *   placeSelection, // places select: [googlePlaceId, sessionToken]
  *   pagePaths,     // approve: narrow to these page paths; with none, every
  *                  //   draft the workspace manifest tracks is staged
  *   pageId,        // preview page: the one persisted draft UUID to render
@@ -127,6 +136,10 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_PULL]: pull,
   [VERB_PAGES_PUSH]: pagesPush,
   [VERB_NAV_PUSH]: navPush,
+  [VERB_PLAN]: plan,
+  [VERB_PLACES_SEARCH]: placesSearch,
+  [VERB_PLACES_SELECT]: placesSelect,
+  [VERB_APPLY]: apply,
   [VERB_REDIRECTS_CHECK]: redirectsCheck,
   [VERB_REDIRECTS_PULL]: redirectsPull,
   [VERB_REDIRECTS_PUSH]: redirectsPush,

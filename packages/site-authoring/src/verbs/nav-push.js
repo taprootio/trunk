@@ -15,6 +15,8 @@ import {
   isContactOrWebUrl,
 } from "../contact-url.js";
 import { SiteAuthoringError } from "../errors.js";
+import { stableJson } from "../footer-draft-hash.js";
+import { planStale } from "../problems.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import {
   NAVIGATION_FILE_NAME,
@@ -304,6 +306,11 @@ export async function navPush(invocation) {
     // small as the contract allows.
     onProgress("Re-reading the live navigation tree immediately before replacing it.");
     const liveItems = await getNavigation(client, siteId);
+    // Under apply, the tree replaced must be the one its plan read: a change
+    // made since was never reviewed, and this write would erase it.
+    if (invocation.plannedLiveNavigation !== undefined && stableJson(liveItems) !== invocation.plannedLiveNavigation) {
+      throw planStale("The site's navigation", NAVIGATION_FILE_NAME);
+    }
     const liveIds = collectIds(liveItems);
     const pushedIds = collectIds(navItems);
     const removed = [...liveIds].filter((id) => !pushedIds.has(id)).sort();

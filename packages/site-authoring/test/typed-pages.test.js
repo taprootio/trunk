@@ -584,3 +584,40 @@ test("the cover rule counts every place the API counts an image, and ignores an 
   assert.equal(unusedCoverImageId(article([{ type: "taprootImage", attrs: { imageId: cover.toUpperCase() } }])), undefined);
   assert.equal(unusedCoverImageId(article([], "")), undefined);
 });
+
+test("an article or album names its place by id, sends it for the site to fill in, and keeps only the id on pull", async (context) => {
+  const article = (await readSource(
+    context,
+    "trip.md",
+    `---\ntitle: Trip\npath: trip\ntemplate: article\nplace: ${PLACE_ID}\n---\n\nWe went.\n`,
+  )).document;
+  assert.equal(article.data.place, PLACE_ID);
+  assert.deepEqual(wireTemplate(article).articleData.place, { placeId: PLACE_ID });
+
+  const album = (await readSource(
+    context,
+    "market.md",
+    `---\ntitle: Market\npath: market\ntemplate: album\nplace: ${PLACE_ID}\n---\n\n## Images\n\n![One](media/one.jpg)\n`,
+  )).document;
+  assert.deepEqual(wireTemplate(album).albumData.place, { placeId: PLACE_ID });
+
+  // The site answers with the place it filled in; the workspace keeps the id.
+  const pulled = workspaceDocumentFromPage({
+    template: {
+      templateType: "TEMPLATE_TYPE_ARTICLE",
+      articleData: { body: article.data.body, place: { placeId: PLACE_ID, name: "Cafe", city: "Oakland" } },
+    },
+  });
+  assert.equal(pulled.data.place, PLACE_ID);
+
+  // Omitted leaves the page's place alone; empty clears it.
+  const plain = (await readSource(context, "plain.md", "---\ntitle: Plain\npath: plain\ntemplate: article\n---\n\nText.\n")).document;
+  assert.equal("place" in wireTemplate(plain).articleData, false);
+  const cleared = (await readSource(context, "cleared.md", "---\ntitle: Cleared\npath: cleared\ntemplate: article\nplace:\n---\n\nText.\n")).document;
+  assert.deepEqual(wireTemplate(cleared).articleData.place, { placeId: "" });
+
+  await assert.rejects(
+    readSource(context, "bad.md", "---\ntitle: Bad\npath: bad\ntemplate: article\nplace: cafe\n---\n\nText.\n"),
+    (error) => error?.code === "pages.document_shape",
+  );
+});

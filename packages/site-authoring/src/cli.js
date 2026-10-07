@@ -10,10 +10,12 @@ import {
   DEPLOY_TARGET_STAGING,
   LIMITS,
   LOGIN_KEY_NAME_MAXIMUM,
+  PLAN_HASH,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   RESULT_SCHEMA_VERSION,
   SURFACE_DOCS_PRESENTATION,
   SURFACE_STANDARD,
+  VERB_APPLY,
   VERB_APPROVE,
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
@@ -29,6 +31,9 @@ import {
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
   VERB_PAGES_PUSH,
+  VERB_PLACES_SEARCH,
+  VERB_PLACES_SELECT,
+  VERB_PLAN,
   VERB_PREVIEW_PAGE,
   VERB_PREVIEW_REVOKE,
   VERB_PULL,
@@ -68,6 +73,7 @@ import {
   REFERENCE_TOPICS,
   REFERENCE_VERSION,
 } from "./reference-help.js";
+import { FONT_CATEGORIES, getFontCatalogReference } from "./font-catalog.js";
 import { assertCliCurrent } from "./session.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
 
@@ -95,15 +101,20 @@ const VERBS = Object.freeze([
   {
     name: VERB_VALIDATE,
     tokens: ["validate"],
-    summary: "Validate an offline fixture, or initialize one from a pulled workspace with --init.",
+    summary: "Check a whole workspace or offline fixture at once, or initialize a fixture with --init.",
     positionals: "fixturePath",
     offline: true,
     note:
-      "Reads manifest.fixture.json plus the fixture's page, navigation, theme, appearance, header, brand, and footer files. "
-      + "This proves local structure and semantics only. It does not prove authorization, live site ownership, concurrency, "
-      + "persisted round trips, or rendering; run a real pull and authorized preview before deployment. "
-      + `See '${CLI_BINARY_NAME} help fixture' for the manifest contract and for the path of the complete example `
-      + "fixture this package ships, which needs no credential and no pulled site. "
+      "With no directory, checks the pulled workspace taproot-site.json names; with one, checks that directory, which "
+      + "is either an offline fixture (manifest.fixture.json) or a pulled workspace. Every page source, the theme, "
+      + "appearance, header, brand, footer, navigation, redirects, and forms are checked with the validators the "
+      + "pushes use, and every problem is reported at once in error.problems (each with its file, code, and field) "
+      + "rather than one per run. A pulled workspace is checked against the pages, images, and baselines its "
+      + "manifests recorded at the pull. This proves local structure and semantics only. It does not prove "
+      + "authorization, live site ownership, concurrency, persisted round trips, or rendering: 'plan' checks a "
+      + "workspace against the live site, and 'pages push --dry-run' does that for pages alone. "
+      + `See '${CLI_BINARY_NAME} help fixture' for the fixture manifest contract and for the path of the complete `
+      + "example fixture this package ships, which needs no credential and no pulled site. "
       + "With --init, the directory is a new destination; the current pulled workspace or --config supplies the source.",
   },
   {
@@ -224,6 +235,7 @@ const VERBS = Object.freeze([
     surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["pages", "push"],
+    dryRun: true,
     summary: "Create and update pages from the local workspace.",
     positionals: "pagePaths",
     note:
@@ -237,7 +249,70 @@ const VERBS = Object.freeze([
       + "documents of pages it is not sending: an unrelated page left on an obsolete contract is reported by the "
       + "whole-workspace push, not used to block this one. The result states the selection and how many sources were "
       + "discovered and validated. "
+      + "Every selected page is checked before anything is sent, and a refusal lists every problem found in "
+      + "error.problems with its file, code, and field. --dry-run does all of that against the live site, reports "
+      + "which pages would be created, updated, or left unchanged, and sends nothing; it exits 1 when there are "
+      + "problems. "
       + "See 'taproot-site help page free-form' for the stable manifest and error contract.",
+  },
+  {
+    name: VERB_PLACES_SEARCH,
+    surface: SURFACE_STANDARD,
+    // A key finds the places for the place reviews it writes, so page editing
+    // is what it needs; each search is a billed Google Places request.
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["places", "search"],
+    positionals: "placeQuery",
+    summary: "Search Google Places for the place a review names; reports predictions and a session token.",
+    note: "Give the place's name and city, such as 'places search Blue Bottle Coffee Oakland'. Each prediction "
+      + "carries a googlePlaceId; pass the one that matches, with the reported sessionToken, to 'places select' to "
+      + "get the Taproot placeId a place review's front matter needs. Searches and the select that follows them are "
+      + "one billed session, so search with a precise query rather than many broad ones.",
+  },
+  {
+    name: VERB_PLACES_SELECT,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["places", "select"],
+    positionals: "placeSelection",
+    summary: "Record a places search prediction as a Taproot place and report its placeId.",
+    note: "Takes the googlePlaceId from 'places search', then that search's sessionToken. The place is recorded "
+      + "once for every site, so selecting it again returns the same placeId. Use it as placeId in a place review, "
+      + "or as place in an article or album.",
+  },
+  {
+    name: VERB_PLAN,
+    surface: SURFACE_STANDARD,
+    // Pages, media and navigation reads are Content; the presentation read and
+    // the footer draft are Design. The same set apply writes with.
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
+    tokens: ["plan"],
+    summary: "Check the whole workspace against the live site and order what is left to send. Writes nothing.",
+    note: "Runs every check the pushes run — each page against the site's pages, revisions and videos; media that "
+      + "pages reference and media upload has not sent; the theme, appearance and footer colors against the site's "
+      + "presentation revision; the footer against its draft; navigation against the live page list — and lists "
+      + "every problem with its area, file, code and field. It then orders the steps that remain: media upload, "
+      + "pages push, footer push (theme push refuses unsaved footer content), theme push, nav push, each marked "
+      + "ready, blocked, or nothing to do with the reason for its place. The result's planHash covers what each "
+      + "step would send and the live state it would meet; pass it to 'apply'. Redirects and forms are not "
+      + "covered: push them on their own. Approval and deployment stay separate.",
+  },
+  {
+    name: VERB_APPLY,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
+    tokens: ["apply"],
+    planHash: true,
+    summary: "Run the steps a plan listed, in order, through the ordinary push verbs.",
+    note: "Plans again first and refuses with apply.plan_stale when the workspace or the site moved since the plan "
+      + "you read, and with the plan's problems when it has any; nothing is written either way. While the steps "
+      + "run, any workspace file read differently from the plan, or not read by the plan at all, stops the step "
+      + "before it writes (apply.plan_stale, naming the file); so does a page revision or the site's navigation "
+      + "that moved, and the theme and footer saves are refused by the site when it moved. Steps are not "
+      + "atomic together: when one fails, the error's completedWrites lists the steps that completed, the one that "
+      + "failed, and those that did not run. Run 'plan' again — finished steps read as nothing to do, and a step "
+      + "whose answer was lost is reconciled by its own verb, never repeated blindly. Pages land as drafts; "
+      + "'approve' and 'deploy' remain separate.",
   },
   {
     name: VERB_NAV_PUSH,
@@ -344,8 +419,9 @@ const VERBS = Object.freeze([
       + "as a warning naming 'fit lint <id>' and does not stop the push, so read them in a --dry-run first. "
       + "pull writes each scheme's complete effective theme — the stored theme resolved over the same defaults every "
       + "consumer renders — so a fresh workspace validates as pulled. semanticMappings holds only authored pins, listed "
-      + "in explicitMappingTokens; every other token compiles from roles at render time, so never copy default "
-      + "mappings into a theme: a pinned token shadows its role.",
+      + "in explicitMappingTokens at the root (a context's pins need no marker); every other token compiles from roles "
+      + "at render time, so never copy default mappings into a theme: a pinned token shadows its role. Contrast and "
+      + "status-color warnings name the nearest passing value the CLI found and checked.",
   },
   {
     name: VERB_FOOTER_PUSH,
@@ -591,7 +667,7 @@ ${COMMON_OPTIONS}
 function verbHelp(verb) {
   const targetUsage = verb.target ? " (--staging | --production)" : "";
   const positionalUsage = verb.positionals === "fixturePath"
-    ? " <fixture-directory>"
+    ? " [<directory>]"
     : verb.positionals === "pageSelector"
     ? " <page-path-or-id>"
     : verb.positionals === "previewIds"
@@ -602,6 +678,10 @@ function verbHelp(verb) {
     ? " <site-name-or-id>"
     : verb.positionals === "formKeys"
     ? " [form-key...]"
+    : verb.positionals === "placeQuery"
+    ? " <query...>"
+    : verb.positionals === "placeSelection"
+    ? " <google-place-id> <session-token>"
     : verb.positionals
     ? ` [${verb.positionals === "paths" ? "path" : "page-path"}...]`
     : "";
@@ -620,6 +700,9 @@ function verbHelp(verb) {
     : "";
   const dryRunOption = verb.dryRun
     ? "\n  --dry-run        Read the site and report what a push would change, without writing."
+    : "";
+  const planOption = verb.planHash
+    ? "\n  --plan <hash>    The planHash 'plan' reported; required."
     : "";
   const nameOption = verb.keyName
     ? `\n  --name <text>    Name recorded on the issued key (default "${DEFAULT_LOGIN_KEY_NAME}",\n`
@@ -644,8 +727,9 @@ function verbHelp(verb) {
       + "Taproot accepts only the latest; with nothing recorded it runs."
     : "";
   const boundary = verb.name === VERB_VALIDATE
-    ? "Validation uses no credential, configuration, network or write. With --init it reads the pulled workspace "
-      + `or selected configuration and writes a new fixture directory, still without credentials or network.${upgradeGate}`
+    ? "Validation uses no credential, network or write; it reads the configuration only to find the workspace when "
+      + "no directory is given. With --init it reads the pulled workspace or selected configuration and writes a new "
+      + `fixture directory, still without credentials or network.${upgradeGate}`
     : selfContained
     ? "This offline verb uses no credential and reads no configuration, and performs no network request and no "
       + `write.${upgradeGate}`
@@ -661,7 +745,8 @@ function verbHelp(verb) {
   const options = verb.name === VERB_VALIDATE
     ? `Options:
   --init           Export a pulled workspace into the new fixture directory.
-  --config <path>  Before the verb; source configuration for --init only.
+  --config <path>  Before the verb; the configuration naming the workspace (no
+                   directory) or the --init source.
   --quiet          Suppress human progress. The JSON result is unchanged.
   --help           Show this help.
   --version        Show the package version.`
@@ -688,7 +773,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${deliveryTargetOption}${jsonOption}${dryRunOption}${nameOption}${note}
+${options}${targetOption}${deliveryTargetOption}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
 `;
 }
 
@@ -760,6 +845,9 @@ function parseReferenceArguments(arguments_) {
     && (subject !== undefined || extra.length > 0)
   ) {
     throw usageError("help.usage", `The '${topic}' topic does not accept a name.`);
+  }
+  if (topic === "fonts" && extra.length > 0) {
+    throw usageError("help.usage", "The 'fonts' topic accepts at most one category.");
   }
   if ((topic === "page" || topic === "component" || topic === "design") && (subject === undefined || extra.length > 0)) {
     throw usageError("help.usage", `The '${topic}' topic requires exactly one name.`);
@@ -833,6 +921,17 @@ function referenceResult(parsed) {
         referenceKind: parsed.topic,
         reference: getWorkflowReference(parsed.topic),
       };
+    case "fonts": {
+      const fonts = getFontCatalogReference(parsed.subject);
+      if (!fonts) {
+        throw usageError(
+          "help.font_category_unknown",
+          `Unknown font category. Expected one of: ${FONT_CATEGORIES.join(", ")}.`,
+          { alternatives: FONT_CATEGORIES },
+        );
+      }
+      return { ...result, topic: "fonts", fonts };
+    }
     case "theme":
       return { ...result, topic: "presentation", referenceKind: "theme", reference: getThemeReference() };
     case "appearance":
@@ -896,6 +995,16 @@ function parseWaitOption(arguments_, index) {
   return seconds;
 }
 
+function parsePlanOption(arguments_, index) {
+  const candidate = arguments_[index + 1];
+  if (typeof candidate !== "string" || !PLAN_HASH.test(candidate)) {
+    throw usageError("apply.plan_required", "--plan requires the planHash 'plan' reported (sha256:<64 hex>).", {
+      field: "planHash",
+    });
+  }
+  return candidate;
+}
+
 function parseNameOption(arguments_, index) {
   const candidate = arguments_[index + 1];
   if (
@@ -948,10 +1057,11 @@ function parseArguments(arguments_) {
   // origin the sign-in belongs to — so they accept it. whoami is offline and
   // reads both the store and the configuration, so it accepts it too: the test
   // is "reads nothing local", not "makes no request".
-  if (
-    verb.offline && !verb.readsLocalState && configPath !== undefined
-    && !(verb.name === VERB_VALIDATE && rest.includes("--init"))
-  ) {
+  // validate reads the configuration in two cases: --init, and no directory,
+  // which checks the workspace the configuration names.
+  const validateReadsConfig = verb.name === VERB_VALIDATE
+    && (rest.includes("--init") || rest.every((argument) => argument.startsWith("-")));
+  if (verb.offline && !verb.readsLocalState && configPath !== undefined && !validateReadsConfig) {
     throw usageError("cli.config_option", "--config applies only to verbs that read the site configuration.", {
       field: "configPath",
     });
@@ -969,6 +1079,7 @@ function parseArguments(arguments_) {
   let dryRun = false;
   let json = false;
   let keyName;
+  let planHash;
   const positionals = [];
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
@@ -1035,6 +1146,12 @@ function parseArguments(arguments_) {
       json = true;
       continue;
     }
+    if (verb.planHash && argument === "--plan") {
+      if (planHash !== undefined) throw usageError("cli.duplicate_option", "--plan may be supplied only once.");
+      planHash = parsePlanOption(rest, index);
+      index += 1;
+      continue;
+    }
     if (verb.keyName && argument === "--name") {
       if (keyName !== undefined) throw usageError("cli.duplicate_option", "--name may be supplied only once.");
       keyName = parseNameOption(rest, index);
@@ -1066,13 +1183,10 @@ function parseArguments(arguments_) {
       `${verb.tokens.join(" ")} requires exactly one of --staging or --production.`,
     );
   }
-  if (
-    verb.positionals === "fixturePath"
-    && positionals.length !== 1
-  ) {
+  if (verb.positionals === "fixturePath" && (positionals.length > 1 || (init && positionals.length !== 1))) {
     throw usageError(
       "validate.fixture_path_invalid",
-      "validate requires exactly one fixture directory.",
+      init ? "validate --init requires exactly one new fixture directory." : "validate accepts at most one directory.",
       { field: "fixturePath" },
     );
   }
@@ -1120,6 +1234,11 @@ function parseArguments(arguments_) {
       { field: "environmentSelector" },
     );
   }
+  if (verb.planHash && planHash === undefined) {
+    throw usageError("apply.plan_required", "apply requires --plan with the planHash that 'plan' reported.", {
+      field: "planHash",
+    });
+  }
   if (quiet && verb.name === VERB_LOGIN) {
     // The approval URL and user code reach the operator only as progress
     // lines, and the JSON result is serialized only after polling ends — so a
@@ -1161,6 +1280,7 @@ function parseArguments(arguments_) {
     init,
     dryRun,
     keyName,
+    ...(planHash === undefined ? {} : { planHash }),
     positionals: verb.positionals
       ? {
         key: verb.positionals,
@@ -1244,6 +1364,11 @@ export async function runCli({
       quiet: parsed.quiet,
       dryRun: parsed.dryRun,
       keyName: parsed.keyName,
+      ...(parsed.planHash === undefined ? {} : { planHash: parsed.planHash }),
+      // Only when given, like the other optional fields, so each verb keeps its default (TR00925).
+      ...(parsed.deliveryUrl === undefined ? {} : { deliveryUrl: parsed.deliveryUrl }),
+      ...(parsed.propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds: parsed.propagationWaitSeconds }),
+      ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
       capabilities: parsed.capabilities,
       surface: parsed.surface,
       surfaceCapabilities: parsed.surfaceCapabilities,

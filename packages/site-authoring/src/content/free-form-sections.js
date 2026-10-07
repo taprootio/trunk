@@ -18,6 +18,16 @@ function deepFreeze(value) {
 
 export const FREE_FORM_SECTION_REGISTRY = deepFreeze(registry);
 
+/**
+ * An image converted from a Markdown media path carries `"src": ""` and
+ * `"urls": []`, like body and component images: the API fills both from the
+ * image id at read time (TR01187). Only that exact pair is unfilled; any other
+ * empty value is still refused.
+ */
+function isUnfilledDelivery(image) {
+  return image.src === "" && Array.isArray(image.urls) && image.urls.length === 0;
+}
+
 function decorationDeliveryUrlIsSafe(value) {
   if (typeof value !== "string" || value === "" || /[\u0000-\u0020\u007f]/u.test(value) || value.includes("\\")) {
     return false;
@@ -70,10 +80,11 @@ function normalizeProcessedSectionImage(value, definition, path, label, report) 
   if (Object.hasOwn(value, "imageId") && !isUuid(value.imageId)) {
     reject(`${path}/imageId`, CODES.attrInvalid, `${label} imageId must be a canonical lowercase UUID.`);
   }
+  const unfilled = isUnfilledDelivery(value);
   if (Object.hasOwn(value, "src")) {
     if (typeof value.src !== "string") {
       reject(`${path}/src`, CODES.attrInvalid, `${label} src must be a string.`);
-    } else if (!decorationDeliveryUrlIsSafe(value.src)) {
+    } else if (!unfilled && !decorationDeliveryUrlIsSafe(value.src)) {
       reject(
         `${path}/src`,
         value.src === "" ? CODES.imageKeys : CODES.attrInvalid,
@@ -88,7 +99,7 @@ function normalizeProcessedSectionImage(value, definition, path, label, report) 
     if (!Array.isArray(value.urls)) {
       reject(`${path}/urls`, CODES.attrInvalid, `${label} urls must be an array.`);
     } else {
-      if (value.urls.length < definition.urls.minItems || value.urls.length > definition.urls.maxItems) {
+      if (!unfilled && (value.urls.length < definition.urls.minItems || value.urls.length > definition.urls.maxItems)) {
         reject(
           `${path}/urls`,
           CODES.attrInvalid,
@@ -138,6 +149,7 @@ function normalizeProcessedSectionImage(value, definition, path, label, report) 
       }
       if (
         definition.srcMustMatchUrls
+        && !unfilled
         && typeof value.src === "string"
         && !value.urls.some((option) => isPlainObject(option) && option.url === value.src)
       ) {
@@ -354,10 +366,11 @@ export function normalizeFreeFormSectionDecoration(
       report(`${imagePath}/imageId`, CODES.attrInvalid, "Section decoration imageId must be a canonical lowercase UUID.");
     }
 
+    const unfilled = isUnfilledDelivery(image);
     if (Object.hasOwn(image, "src")) {
       if (typeof image.src !== "string") {
         report(`${imagePath}/src`, CODES.attrInvalid, "Section decoration image src must be a string.");
-      } else if (!decorationDeliveryUrlIsSafe(image.src)) {
+      } else if (!unfilled && !decorationDeliveryUrlIsSafe(image.src)) {
         report(
           `${imagePath}/src`,
           image.src === "" ? CODES.imageKeys : CODES.attrInvalid,
@@ -372,7 +385,10 @@ export function normalizeFreeFormSectionDecoration(
       if (!Array.isArray(image.urls)) {
         report(`${imagePath}/urls`, CODES.attrInvalid, "Section decoration image urls must be an array.");
       } else {
-        if (image.urls.length < imageDefinition.urls.minItems || image.urls.length > imageDefinition.urls.maxItems) {
+        if (
+          !unfilled
+          && (image.urls.length < imageDefinition.urls.minItems || image.urls.length > imageDefinition.urls.maxItems)
+        ) {
           report(
             `${imagePath}/urls`,
             CODES.attrInvalid,
@@ -421,6 +437,7 @@ export function normalizeFreeFormSectionDecoration(
         }
         if (
           imageDefinition.srcMustMatchUrls
+          && !unfilled
           && typeof image.src === "string"
           && !image.urls.some((option) => isPlainObject(option) && option.url === image.src)
         ) {

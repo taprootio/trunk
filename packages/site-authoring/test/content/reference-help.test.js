@@ -5,11 +5,13 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  canonicalizeComponentData,
   COMPONENT_SHAPES,
   COMPONENT_TYPES,
   expandComponentAuthoringShorthand,
   getComponentDefinition,
   getComponentPropertyReference,
+  mapComponentImages,
 } from "../../src/content/components.js";
 import { markdownToProseMirror } from "../../src/content/markdown.js";
 import { validateDocument } from "../../src/content/validate-document.js";
@@ -53,7 +55,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 33);
+  assert.equal(REFERENCE_VERSION, 34);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -137,14 +139,38 @@ test("every component reference exposes its validator schema and validates its e
         validateDocument({ type: "doc", content: [reference.componentBlockExample] }).errors,
         [],
       );
+      // The Markdown example names images by media path; each resolves to the
+      // stored record with delivery URLs left for the server to fill.
+      const requested = [];
       const converted = await markdownToProseMirror(reference.markdownExample, {
-        resolveImage: async () => {
-          throw new Error("component examples must not resolve image references");
+        resolveImage: async (mediaPath) => {
+          requested.push(mediaPath);
+          return LIBRARY_IMAGE;
         },
       });
-      assert.deepEqual(converted.doc.content, [reference.componentBlockExample]);
+      const stored = { ...LIBRARY_IMAGE, src: "", urls: [] };
+      assert.deepEqual(converted.doc.content, [{
+        type: "componentBlock",
+        attrs: {
+          componentType,
+          componentData: canonicalizeComponentData(
+            componentType,
+            mapComponentImages(componentType, reference.example, (value) => (value === null ? null : stored)),
+          ),
+        },
+      }]);
+      assert.ok(requested.every((mediaPath) => mediaPath === "media/photo.webp"));
     });
   }
+});
+
+const LIBRARY_IMAGE = Object.freeze({
+  imageId: "3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607",
+  src: "https://static.example.test/library.webp",
+  urls: [{ minWidth: 640, url: "https://static.example.test/library.webp" }],
+  width: 1200,
+  height: 800,
+  alt: "From the library",
 });
 
 test("the free-form reference exposes the production document vocabulary and authoring workflow", () => {
@@ -308,11 +334,7 @@ test("section substrate help exposes registry delivery readiness and executable 
   }
 
   for (const markdown of [page.sections.background.markdownExample, page.sections.decoration.markdownExample]) {
-    const converted = await markdownToProseMirror(markdown, {
-      resolveImage: async () => {
-        throw new Error("section header examples carry complete processed images");
-      },
-    });
+    const converted = await markdownToProseMirror(markdown, { resolveImage: async () => LIBRARY_IMAGE });
     assert.deepEqual(validateDocument(converted.doc).errors, []);
   }
 });
@@ -476,8 +498,11 @@ test("plain-text free-form help prints background defaults, focal bounds, scrim 
   const output = formatReferenceResult({ topic: "page", page: getPageTypeReference("free-form") });
 
   assert.match(output, /Section photo background \(closed object\):/u);
-  assert.match(output, /image\s+processed-image; required/u);
-  assert.match(output, /portraitImage\s+processed-image \| null; default null/u);
+  assert.match(output, /image\s+media path in Markdown; processed-image in \.pm\.json; required/u);
+  assert.match(
+    output,
+    /portraitImage\s+media path \| null in Markdown; processed-image \| null in \.pm\.json; default null/u,
+  );
   assert.match(output, /responsive candidates 1 through 5/u);
   assert.match(output, /minWidth positive integer/u);
   assert.match(output, /optional type "image\/webp"/u);

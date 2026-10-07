@@ -19,23 +19,7 @@ description: An example home page for the offline authoring fixture.
     "url": "https://schedule.example.test/riverbend"
   },
   "alignment": "start",
-  "media": {
-    "imageId": "a0000000-0000-4000-8000-0000000000a2",
-    "src": "https://static.example.test/site/img/riverbend-studio-1280.webp",
-    "urls": [
-      {
-        "minWidth": 640,
-        "url": "https://static.example.test/site/img/riverbend-studio-640.webp"
-      },
-      {
-        "minWidth": 1280,
-        "url": "https://static.example.test/site/img/riverbend-studio-1280.webp"
-      }
-    ],
-    "width": 1600,
-    "height": 1067,
-    "alt": "An example photograph placeholder for the fixture studio"
-  },
+  "media": "media/riverbend-studio.webp",
   "mediaArrangement": "split",
   "mediaPosition": "after",
   "mediaWidth": "equal"

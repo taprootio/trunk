@@ -350,3 +350,21 @@ test("context diagnostics stop traversing at the document error bound", () => {
 
   assert.equal(result.errors.length, CONTENT_LIMITS.documentErrors);
 });
+
+test("a section image converted from a media path is accepted unfilled, and only as the exact pair", () => {
+  const imageId = "3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607";
+  const url = "https://static.example.test/site/img/class-640.webp";
+  const unfilled = { imageId, src: "", urls: [], width: 1920, height: 1080, alt: "" };
+  const halfFilled = [
+    { ...unfilled, urls: [{ minWidth: 640, url }] },
+    { ...unfilled, src: url },
+  ];
+
+  assert.deepEqual(normalizeFreeFormSectionBackground({ image: unfilled, portraitImage: unfilled }).errors, []);
+  assert.deepEqual(normalizeFreeFormSectionDecoration({ image: unfilled }).errors, []);
+  for (const image of halfFilled) {
+    assert.notDeepEqual(normalizeFreeFormSectionBackground({ image }).errors, []);
+    assert.notDeepEqual(normalizeFreeFormSectionBackground({ image: unfilled, portraitImage: image }).errors, []);
+    assert.notDeepEqual(normalizeFreeFormSectionDecoration({ image }).errors, []);
+  }
+});

@@ -54,7 +54,8 @@ const TYPED_PAGE_FRONT_MATTER_KEYS = Object.freeze(["displayDate", "coverImage"]
 /** Front-matter fields only one template accepts. Others are refused for it. */
 const TEMPLATE_FRONT_MATTER_KEYS = Object.freeze({
   [TEMPLATE_FREE_FORM]: Object.freeze([]),
-  [TEMPLATE_ARTICLE]: TYPED_PAGE_FRONT_MATTER_KEYS,
+  // `place` is the Taproot place id an article or album is about (TR01003).
+  [TEMPLATE_ARTICLE]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "place"]),
   [TEMPLATE_RECIPE]: Object.freeze([
     ...TYPED_PAGE_FRONT_MATTER_KEYS,
     "prepTimeMinutes",
@@ -64,7 +65,7 @@ const TEMPLATE_FRONT_MATTER_KEYS = Object.freeze({
     "recipeCuisine",
     "cookingMethod",
   ]),
-  [TEMPLATE_ALBUM]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "seamless", "borderWidth"]),
+  [TEMPLATE_ALBUM]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "seamless", "borderWidth", "place"]),
   [TEMPLATE_PLACE_REVIEW]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "placeId", "rating"]),
 });
 
@@ -89,6 +90,8 @@ const RATING_NAME_BY_WIRE = Object.freeze(
 // Not `isCanonicalUuid`: that accepts only RFC 4122 versions 1 to 5, and place
 // and image ids are minted by the server, which is free to use any version.
 const IDENTIFIER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/** An id the server minted, of any UUID version. */
+export const IMAGE_IDENTIFIER = IDENTIFIER;
 const DISPLAY_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 const ALBUM_IMAGES_HEADING = "images";
 const RECIPE_HEADINGS = Object.freeze(["ingredients", "instructions"]);
@@ -230,7 +233,7 @@ const RECIPE_KEYS = [
   "recipeCuisine",
   "cookingMethod",
 ];
-const ALBUM_KEYS = ["introductionBody", "images", "seamless", "borderWidth"];
+const ALBUM_KEYS = ["introductionBody", "images", "seamless", "borderWidth", "place"];
 const ALBUM_IMAGE_KEYS = ["imageId", "caption", "width", "height"];
 const ALBUM_MAXIMUM_BORDER_WIDTH = 20;
 const MAXIMUM_MINUTES = 100_000;
@@ -257,7 +260,7 @@ function canonicalIngredient(value) {
  * server's JSON omits defaults and may gain fields).
  */
 const DATA_BUILDERS = Object.freeze({
-  [TEMPLATE_ARTICLE]: (raw) => ({ body: raw.body }),
+  [TEMPLATE_ARTICLE]: (raw) => definedEntries([["body", raw.body], ["place", raw.place]]),
   [TEMPLATE_PLACE_REVIEW]: (raw) => ({ placeId: raw.placeId, rating: raw.rating, body: raw.body }),
   [TEMPLATE_ALBUM]: (raw) =>
     definedEntries([
@@ -273,6 +276,7 @@ const DATA_BUILDERS = Object.freeze({
       ],
       ["seamless", raw.seamless],
       ["borderWidth", raw.borderWidth],
+      ["place", raw.place],
     ]),
   [TEMPLATE_RECIPE]: (raw) =>
     definedEntries([
@@ -303,12 +307,22 @@ const DATA_BUILDERS = Object.freeze({
 const OPTIONAL_INTRODUCTION = (value, file, path) =>
   value === undefined ? undefined : requireDocument(value, file, path);
 
+/** A Taproot place id, or "" to clear the page's place; omitted leaves it as the site holds it. */
+function optionalPlace(value, file, path) {
+  if (value === undefined || value === "") return value;
+  requireIdentifier(value, file, path);
+  return value;
+}
+
 /** Strict checks on a source document's `data`, returning it in canonical form. */
 function canonicalSourceData(template, data, file) {
   const path = "data";
   if (template === TEMPLATE_ARTICLE) {
-    requireKeys(data, ["body"], file, path);
-    return DATA_BUILDERS[template]({ body: requireDocument(data.body, file, `${path}.body`, { nonEmpty: true }) });
+    requireKeys(data, ["body", "place"], file, path);
+    return DATA_BUILDERS[template]({
+      body: requireDocument(data.body, file, `${path}.body`, { nonEmpty: true }),
+      place: optionalPlace(data.place, file, `${path}.place`),
+    });
   }
   if (template === TEMPLATE_PLACE_REVIEW) {
     requireKeys(data, ["placeId", "rating", "body"], file, path);
@@ -348,6 +362,7 @@ function canonicalSourceData(template, data, file) {
     return DATA_BUILDERS[template]({
       ...data,
       introductionBody: OPTIONAL_INTRODUCTION(data.introductionBody, file, `${path}.introductionBody`),
+      place: optionalPlace(data.place, file, `${path}.place`),
     });
   }
   requireKeys(data, RECIPE_KEYS, file, path);
@@ -451,12 +466,15 @@ const presentIntroduction = (value) => {
   return doc !== undefined && Array.isArray(doc.content) && doc.content.length === 0 ? undefined : doc;
 };
 const listOf = (value) => (Array.isArray(value) ? value : []);
+// The site stores a page's place with its name and address; the workspace keeps only the id.
+const pagePlaceId = (value) =>
+  isPlainObject(value) && typeof value.placeId === "string" && value.placeId !== "" ? value.placeId : undefined;
 
 /** Lenient projections of what the site returned for each template's data. */
 const PAGE_PROJECTIONS = Object.freeze({
   [TEMPLATE_ARTICLE]: (raw) => {
     const body = presentDocument(raw.body);
-    return body === undefined ? undefined : DATA_BUILDERS[TEMPLATE_ARTICLE]({ body });
+    return body === undefined ? undefined : DATA_BUILDERS[TEMPLATE_ARTICLE]({ body, place: pagePlaceId(raw.place) });
   },
   [TEMPLATE_PLACE_REVIEW]: (raw) => {
     const body = presentDocument(raw.body);
@@ -470,6 +488,7 @@ const PAGE_PROJECTIONS = Object.freeze({
       images: listOf(raw.images).filter((image) => isPlainObject(image) && typeof image.imageId === "string"),
       seamless: typeof raw.seamless === "boolean" ? raw.seamless : undefined,
       borderWidth: Number.isSafeInteger(raw.borderWidth) ? raw.borderWidth : undefined,
+      place: pagePlaceId(raw.place),
     }),
   [TEMPLATE_RECIPE]: (raw) =>
     DATA_BUILDERS[TEMPLATE_RECIPE]({
@@ -723,7 +742,9 @@ export function wireTemplate(document_) {
     ? { body: document_ }
     : template === TEMPLATE_PLACE_REVIEW
     ? { ...document_.data, rating: PLACE_REVIEW_RATINGS[document_.data.rating] }
-    : document_.data;
+    : document_.data.place === undefined
+    ? document_.data
+    : { ...document_.data, place: { placeId: document_.data.place } };
   return { templateType: wireType, templateVersion: FREE_FORM_TEMPLATE_VERSION, [dataKey]: data };
 }
 
@@ -975,7 +996,7 @@ export async function typedDocumentFromMarkdown({ template, fields, markdown, fi
   }
   let data;
   if (template === TEMPLATE_ARTICLE) {
-    data = { body: await convert(markdown) };
+    data = { body: await convert(markdown), place: fields.get("place") };
   } else if (template === TEMPLATE_PLACE_REVIEW) {
     const placeId = fields.get("placeId");
     const rating = fields.get("rating");
@@ -993,6 +1014,7 @@ export async function typedDocumentFromMarkdown({ template, fields, markdown, fi
       ...(await parseAlbumBody(markdown, { file, convert, resolveImage })),
       seamless: parseFlag(fields, "seamless", file),
       borderWidth: parseCount(fields, "borderWidth", file, ALBUM_MAXIMUM_BORDER_WIDTH),
+      place: fields.get("place"),
     };
   } else {
     data = {

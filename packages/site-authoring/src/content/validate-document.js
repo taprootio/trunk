@@ -18,6 +18,8 @@ import {
   isPlainObject,
   isSafeUrl,
   isUuid,
+  LINK_REL_TOKENS,
+  LINK_TARGETS,
   MARK_TYPE_SET,
   NODE_TYPE_SET,
   normalizeCssLengthOverride,
@@ -485,12 +487,34 @@ const MARK_RULES = Object.freeze({
       { required: true, code: CODES.linkHref, missingCode: CODES.linkHref },
     ),
     // `@tiptap/extension-link` declares these four alongside `href`, and
-    // `Mark.toJSON` emits every declared attribute — so every link the editor
-    // has ever written carries all five, and refusing any of them would refuse
-    // an ordinary pull/push round trip. The renderer ignores them and writes
-    // its own `rel`.
-    target: optionalString(),
-    rel: optionalString(),
+    // `Mark.toJSON` emits every declared attribute, so every link the editor
+    // has ever written carries all five. The renderer publishes `rel` and
+    // `target="_blank"` from closed lists (TR01190), so those two are held to
+    // them; it ignores `class` and `title`. The editor's old default rel,
+    // "noopener noreferrer nofollow", is within the list and renders as no
+    // choice.
+    target: spec(
+      (value) => {
+        if (isAbsent(value) || (typeof value === "string" && value.trim() === "")) return null;
+        return typeof value === "string" && LINK_TARGETS.includes(value.trim().toLowerCase())
+          ? null
+          : `"_blank" (open in a new tab), "_self", or absent`;
+      },
+      { code: CODES.linkTarget },
+    ),
+    rel: spec(
+      (value) => {
+        if (isAbsent(value)) return null;
+        if (typeof value !== "string") return "a string of space-separated link types";
+        const unknown = value.trim().toLowerCase().split(/\s+/u)
+          .filter((token) => token && !LINK_REL_TOKENS.includes(token));
+        if (unknown.length === 0) return null;
+        return `space-separated link types from ${LINK_REL_TOKENS.join(", ")}; ${
+          unknown.map((token) => `"${token}"`).join(", ")
+        } ${unknown.length === 1 ? "is" : "are"} not one`;
+      },
+      { code: CODES.linkRel },
+    ),
     class: optionalString(),
     title: optionalString(),
   }),

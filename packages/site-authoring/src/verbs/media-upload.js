@@ -17,10 +17,11 @@ import {
 import { LIMITS, VERB_MEDIA_UPLOAD } from "../constants.js";
 import { SiteAuthoringError, sanitizeDiagnostic } from "../errors.js";
 import { contentHash, inspectImageBytes } from "../image-metadata.js";
+import { CHECK_AREA, collectProblems, problemsOf } from "../problems.js";
 import { ApiError } from "../transport.js";
 import { sniffVideoContentType, VIDEO_EXTENSIONS, videoTooLarge } from "../video-metadata.js";
-import { mp4Name, prepareVideoFile } from "../video-prepare.js";
-import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
+import { mp4Name, prepareVideoFile, videoAcceptance } from "../video-prepare.js";
+import { boundedByBytes, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import {
   ensureWorkspaceRoot,
   inspectWorkspaceEntry,
@@ -30,6 +31,7 @@ import {
   openWorkspaceFileStream,
   readMediaManifest,
   readWorkspaceFile,
+  recordedAlt,
   resolveWorkspacePath,
   SAFE_MEDIA_SEGMENT,
   walkWorkspaceFiles,
@@ -72,13 +74,126 @@ import {
  * it for evidence of a pull that never happened.
  */
 
-const MAXIMUM_REPORTED = 200;
+// Each list's share of the result's 64 KiB; the counts are always complete.
+const ITEMS_BYTES = 24 * 1024;
 const MAXIMUM_FILES = 500;
 const MEDIA_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ...VIDEO_EXTENSIONS];
 const MEDIA_WALK_OPTIONS = Object.freeze({
   segmentPattern: SAFE_MEDIA_SEGMENT,
   segmentDescription: "letters, digits, '.', '_', '-', and '@'",
 });
+
+/**
+ * The files under `media/` an upload would still send (TR00823): an image
+ * whose bytes the media manifest does not record, and a video with no
+ * confirmed upload. Each is classified and checked against the limits the
+ * upload applies, so a plan does not call ready a file the upload would
+ * refuse, and carries an identity of its content, so a plan made before the
+ * file was replaced does not describe it. A recorded upload is done only when
+ * the site still holds it: an image processed (one still processing, or gone,
+ * is sent again; the upload deduplicates and waits; one that failed is a
+ * problem), a video in its library. `site` answers both:
+ * `imageStates` maps the recorded image ids to what the site holds, and
+ * `videos` is the video library as `listVideos` reads it. Read only.
+ */
+export async function pendingMediaFiles(workspaceDir, mediaManifest, site) {
+  const files = await walkWorkspaceFiles(workspaceDir, MEDIA_DIRECTORY, MEDIA_EXTENSIONS, MEDIA_WALK_OPTIONS);
+  const pending = [];
+  const problems = [];
+  const listedVideoIds = new Set(site.videos.videos.map((candidate) => candidate.videoId));
+  for (const file of files) {
+    const video = mediaManifest.videos?.[file];
+    const image = mediaManifest.media?.[file];
+    const entry = await collectProblems(problems, { area: CHECK_AREA.media, file }, async () => {
+      if (typeof image?.imageId === "string") {
+        const bytes = await readWorkspaceFile(workspaceDir, file, WORKSPACE_LIMITS.mediaBytes);
+        if (image.contentHash === contentHash(bytes)) {
+          const held = site.imageStates.get(image.imageId);
+          if (held === IMAGE_PROCESSING_STATE_FAILED) {
+            throw new SiteAuthoringError(
+              "media.processing_failed",
+              `Taproot failed to process '${file}' (image ${image.imageId}), so it cannot be published. Replace the `
+                + "file with one that processes, or remove it and the references to it.",
+              { field: file, status: IMAGE_PROCESSING_STATE_FAILED },
+            );
+          }
+          if (held === IMAGE_PROCESSING_STATE_COMPLETE) return undefined;
+        }
+      }
+      const { source, identity, bytes } = await mediaFileIdentity(workspaceDir, file);
+      // One that still matches its confirmed video upload is done.
+      if (
+        typeof video?.videoId === "string"
+        && video.pendingConfirm !== true
+        && video.byteLength === source.byteLength
+        && video.modifiedMilliseconds === source.modifiedMilliseconds
+      ) {
+        if (listedVideoIds.has(video.videoId)) return undefined;
+        // The same refusal the upload gives: a listing cut short cannot say the video is gone.
+        if (site.videos.truncated) throw videoLibraryUnverifiable(file, video.videoId, site.videos.videos.length);
+      }
+      if (sniffVideoContentType(source.header) !== undefined) {
+        if (source.byteLength > WORKSPACE_LIMITS.videoBytes) throw videoTooLarge(file, WORKSPACE_LIMITS.videoBytes);
+        const acceptance = await videoAcceptance({
+          filePath: resolveWorkspacePath(workspaceDir, file),
+          byteLength: source.byteLength,
+        });
+        if (!acceptance.accepted) {
+          throw new SiteAuthoringError(
+            "media.video_unsupported",
+            acceptance.videoCodec === "" && acceptance.audioCodec === ""
+              ? `'${file}' could not be read as a video, so the upload would be refused.`
+              : `'${file}' is ${acceptance.videoCodec ? `${acceptance.videoCodec} video` : "no video"} with `
+                + `${acceptance.audioCodec ? `${acceptance.audioCodec} audio` : "no audio"}. `
+                + "Taproot accepts H.264 video with AAC audio or none: export it that way and upload it again.",
+            { field: file },
+          );
+        }
+        return { file, kind: "video", identity };
+      }
+      const { width, height } = inspectImageBytes(bytes, file);
+      return { file, kind: "image", identity, width, height };
+    });
+    if (entry !== undefined) pending.push(entry);
+  }
+  if (pending.length > MAXIMUM_FILES) {
+    problems.push(...problemsOf(tooManyFiles(pending.length), { area: CHECK_AREA.media }));
+  }
+  return { files: pending, problems };
+}
+
+/**
+ * What a media file is, for telling a plan's file from a replaced one: a
+ * video by its size and modification time, as the upload records it; anything
+ * else by its bytes, which are returned too.
+ */
+async function mediaFileIdentity(workspaceDir, file) {
+  const source = await openWorkspaceFileStream(workspaceDir, file, Number.MAX_SAFE_INTEGER);
+  await source.close();
+  if (sniffVideoContentType(source.header) !== undefined) {
+    return { source, identity: `${source.byteLength}:${source.modifiedMilliseconds}` };
+  }
+  const bytes = await readWorkspaceFile(workspaceDir, file, WORKSPACE_LIMITS.mediaBytes);
+  return { source, identity: contentHash(bytes), bytes };
+}
+
+function videoLibraryUnverifiable(file, videoId, listed) {
+  return new SiteAuthoringError(
+    "media.video_library_unverifiable",
+    `'${file}' was uploaded as video ${videoId}, which is not among the first ${listed} videos of this `
+      + "site's library, and the library is larger than one run can check. Remove the file's entry from "
+      + `${MEDIA_MANIFEST_FILE_NAME} to upload it again, or leave it.`,
+    { field: file },
+  );
+}
+
+function tooManyFiles(count) {
+  return new SiteAuthoringError(
+    "media.too_many_files",
+    `This run would upload ${count} files, more than the bounded maximum of ${MAXIMUM_FILES}.`,
+    { field: MEDIA_DIRECTORY },
+  );
+}
 
 function requireUploadCapability(response, fileName) {
   if (
@@ -339,13 +454,7 @@ async function uploadVideoFile({
         // A listing cut short cannot say the video is gone, and uploading again
         // would spend storage on a video that may well be there.
         if (truncated) {
-          throw new SiteAuthoringError(
-            "media.video_library_unverifiable",
-            `'${file}' was uploaded as video ${recorded.videoId}, which is not among the first ${byId.size} videos of this `
-              + "site's library, and the library is larger than one run can check. Remove the file's entry from "
-              + `${MEDIA_MANIFEST_FILE_NAME} to upload it again, or leave it.`,
-            { field: file },
-          );
+          throw videoLibraryUnverifiable(file, recorded.videoId, byId.size);
         }
       }
     }
@@ -441,13 +550,7 @@ export async function mediaUpload(invocation) {
       { field: selected.length > 0 ? normalizePositional(selected[0]) : MEDIA_DIRECTORY },
     );
   }
-  if (files.length > MAXIMUM_FILES) {
-    throw new SiteAuthoringError(
-      "media.too_many_files",
-      `This run would upload ${files.length} files, more than the bounded maximum of ${MAXIMUM_FILES}.`,
-      { field: MEDIA_DIRECTORY },
-    );
-  }
+  if (files.length > MAXIMUM_FILES) throw tooManyFiles(files.length);
 
   const uploaded = [];
   const uploadedVideos = [];
@@ -553,7 +656,7 @@ export async function mediaUpload(invocation) {
           // Preserve the author-owned alt text. Delivery fields start with
           // whatever confirm returned and are refreshed from the completed
           // library record below.
-          alt: typeof mediaManifest.media[file]?.alt === "string" ? mediaManifest.media[file].alt : "",
+          alt: recordedAlt(mediaManifest.media[file]),
           src: image.url,
           urls: image.responsiveUrls,
           deduplicated,
@@ -599,7 +702,9 @@ export async function mediaUpload(invocation) {
       manifestEntry.urls = image.responsiveUrls;
     }
     await writeMediaManifest(config.workspaceDir, mediaManifest);
-    const reported = boundedList(
+    // The delivery URLs stay in the media manifest: a signed URL list per
+    // file is what pushed a bulk upload past the result's 64 KiB (TR01001).
+    const reported = boundedByBytes(
       uploaded.map((entry) => ({
         file: entry.file,
         imageId: entry.imageId,
@@ -607,18 +712,10 @@ export async function mediaUpload(invocation) {
         width: entry.width,
         height: entry.height,
         processingState: observed.get(entry.imageId)?.processingState ?? IMAGE_PROCESSING_STATE_COMPLETE,
-        media: {
-          imageId: entry.imageId,
-          src: observed.get(entry.imageId)?.url ?? "",
-          urls: observed.get(entry.imageId)?.responsiveUrls ?? [],
-          width: entry.width,
-          height: entry.height,
-          alt: mediaManifest.media[entry.file]?.alt ?? "",
-        },
       })),
-      MAXIMUM_REPORTED,
+      ITEMS_BYTES,
     );
-    const reportedVideos = boundedList(
+    const reportedVideos = boundedByBytes(
       uploadedVideos.map((entry) => ({
         file: entry.file,
         videoId: entry.videoId,
@@ -635,7 +732,7 @@ export async function mediaUpload(invocation) {
         // block for `.pm.json` sources.
         component: videoComponent(entry.videoId),
       })),
-      MAXIMUM_REPORTED,
+      ITEMS_BYTES,
     );
     return successResult(VERB_MEDIA_UPLOAD, siteId, {
       mediaManifestFile: MEDIA_MANIFEST_FILE_NAME,

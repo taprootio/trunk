@@ -2,7 +2,7 @@ import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -101,6 +101,9 @@ const TAPROOT_WWW_PAGE_SOURCES = INSIDE_MONOREPO
   : undefined;
 const TAPROOT_WWW_STYLES = INSIDE_MONOREPO
   ? JSON.parse(await readFile(new URL("settings/taproot-styles.json", TAPROOT_WWW_FIXTURE_ROOT), "utf8"))
+  : undefined;
+const TAPROOT_WWW_MEDIA = INSIDE_MONOREPO
+  ? JSON.parse(await readFile(new URL(".taproot-site-media.json", TAPROOT_WWW_FIXTURE_ROOT), "utf8"))
   : undefined;
 const REAL_CONTENT = Object.freeze({ markdownToProseMirror, validateDocument });
 
@@ -482,6 +485,8 @@ const DEPLOYMENTS = /\/deployments$/u;
 const STAGING_PREVIEW_STATUS = /\/staging-preview\/status$/u;
 const STAGING_PREVIEW_ROOT = /^\/$/u;
 const SITE_IMAGES = /\/sites\/[^/]+\/images$/u;
+const PLACES_SEARCH = /^\/api\/v1\/places\/search$/u;
+const PLACES_SELECT = /^\/api\/v1\/places\/select$/u;
 const BROKEN_REFERENCES = /\/sites\/[^/]+\/broken-references$/u;
 const REQUEST_UPLOAD = /\/images\/request-upload$/u;
 const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
@@ -570,6 +575,8 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "POST", pattern: PREVIEW_CREATE, permission: "site.pages.edit_any" },
   { method: "GET", pattern: PREVIEW_STATUS, permission: "site.pages.edit_any" },
   { method: "DELETE", pattern: PREVIEW_STATUS, permission: "site.pages.edit_any" },
+  { method: "GET", pattern: PLACES_SEARCH, permission: "site.pages.edit_any" },
+  { method: "POST", pattern: PLACES_SELECT, permission: "site.pages.edit_any" },
 ]);
 
 // Reached with the account sign-in rather than a site credential, so no site
@@ -4252,6 +4259,11 @@ test("TR00621 pull-to-push tracks the system 404 as an editable page beside four
     workspacePath(workspace, "pages/404.pm.json"),
     `${JSON.stringify(paragraphDocument("This page wandered off."), undefined, 2)}\n`,
   );
+  // The pages name their media by path, recorded in the fixture's media manifest.
+  await writeFile(
+    workspacePath(workspace, ".taproot-site-media.json"),
+    `${JSON.stringify({ ...TAPROOT_WWW_MEDIA, siteId: SITE_ID }, undefined, 2)}\n`,
+  );
   const styles = structuredClone(TAPROOT_WWW_STYLES);
   styles.entityId = SITE_ID;
   await writeFile(
@@ -5824,10 +5836,18 @@ test("a retired rawHtml node keeps a stable human and JSON refusal before any pa
   });
 
   assert.equal(exitCode, 1);
-  assert.deepEqual(JSON.parse(stdout).error, {
+  // The page's every finding travels with the refusal (TR01002): the retired
+  // node, and the empty body its removal would leave.
+  const { problems, ...error } = JSON.parse(stdout).error;
+  assert.deepEqual(error, {
     code: "content.raw_html_forbidden",
     field: `${file}:/content/0`,
+    problemCount: 2,
   });
+  assert.deepEqual(problems.map((problem) => [problem.code, problem.field]), [
+    ["content.raw_html_forbidden", `${file}:/content/0`],
+    ["content.empty_document", `${file}:doc`],
+  ]);
   assert.match(stderr, /taproot-site failed \[content\.raw_html_forbidden\]/u);
   assert.match(stderr, new RegExp(`${file}:/content/0`, "u"));
   assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
@@ -7186,14 +7206,14 @@ test("media upload hashes, sniffs, uploads with the signed headers, confirms, an
   ]);
   assert.equal(result.media.total, 1);
   assert.equal(result.media.deduplicated, 0);
-  assert.equal(result.media.items[0].processingState, "IMAGE_PROCESSING_STATE_COMPLETE");
-  assert.deepEqual(result.media.items[0].media, {
+  // The delivery URLs live in the media manifest (asserted above), not the result (TR01001).
+  assert.deepEqual(result.media.items[0], {
+    file: "media/hero.png",
     imageId: IMAGE_ID,
-    src: "https://cdn.example.test/hero.webp",
-    urls: [{ minWidth: 640, url: "https://cdn.example.test/hero-640.webp" }],
+    deduplicated: false,
     width: 1200,
     height: 800,
-    alt: "",
+    processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
   });
   assert.ok(progress.some((line) => line.includes("Waiting for 1 image(s)")));
 });
@@ -8045,10 +8065,15 @@ test("pages push copies the provider thumbnail for an embed with no poster, once
 });
 
 test("pages push leaves an embed that already has a poster alone", async (site) => {
-  const kept = { imageId: OTHER_VIDEO_ID, src: "x", urls: [], width: 1, height: 1, alt: "" };
-  const workspace = await fixture(site, embedPage(
-    EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour", poster: kept }),
-  ));
+  const kept = { imageId: OTHER_VIDEO_ID, src: "", urls: [], width: 1280, height: 720, alt: "Our poster" };
+  const workspace = await fixture(site, {
+    ...embedPage(EMBED_FENCE({ url: "https://youtu.be/dQw4w9WgXcQ", title: "Tour", poster: "media/poster.webp" })),
+    ".taproot-site-media.json": {
+      mediaManifestVersion: 2,
+      siteId: SITE_ID,
+      media: { "media/poster.webp": { imageId: OTHER_VIDEO_ID, width: 1280, height: 720, alt: "Our poster" } },
+    },
+  });
   const wire = api([...pushRoutes(), importPosterRoute(), posterLibraryRoute()]);
   const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
   await pagesPush(invocation);
@@ -11685,4 +11710,1494 @@ test("a cover image the page does not use stops the whole push before any reques
       && /The selected cover image must be used by this page\./u.test(error.message),
   );
   assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Whole-workspace checks: validate on a pulled workspace, pages push
+// --dry-run, plan and apply (TR01002, TR00823)
+// ---------------------------------------------------------------------------
+
+const HOME_ENTRY = Object.freeze({
+  pageId: HOME_PAGE_ID,
+  resourceId: resourceIdFor(HOME_PAGE_ID),
+  path: "",
+  title: "Home",
+  description: "The front door.",
+  status: "PAGE_STATUS_PUBLISHED",
+  templateType: "TEMPLATE_TYPE_FREE_FORM",
+  file: "pages/index.pm.json",
+  sourceFormat: "prosemirror",
+});
+
+/** A complete pulled workspace: settings, navigation, a tracked home page, and a new page with new media. */
+const STUDIO_MEDIA_MANIFEST = Object.freeze({
+  mediaManifestVersion: 2,
+  siteId: SITE_ID,
+  media: { "media/studio.png": { imageId: IMAGE_ID, contentHash: contentHashOf(png(1200, 800)), src: "", urls: [], width: 1200, height: 800 } },
+});
+
+function contentHashOf(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function wholeWorkspace({ navItems = [], files = {}, uploaded = false } = {}) {
+  const theme = themeWorkspace();
+  return {
+    ...theme,
+    ...(uploaded ? { ".taproot-site-media.json": STUDIO_MEDIA_MANIFEST } : {}),
+    ".taproot-site-manifest.json": {
+      ...theme[".taproot-site-manifest.json"],
+      pages: [{ workspaceMode: "editable", ...HOME_ENTRY }],
+    },
+    "nav.json": { siteId: SITE_ID, navItems },
+    "pages/index.pm.json": paragraphDocument("Welcome home."),
+    "pages/about.md": "---\ntitle: About us\npath: about\n---\n\n![The studio](media/studio.png)\n",
+    "media/studio.png": png(1200, 800),
+    ...files,
+  };
+}
+
+const BROKEN_PAGES = Object.freeze({
+  "pages/bad-path.md": "---\ntitle: Bad path\npath: Hello World\n---\n\nText.\n",
+  "pages/missing-media.md": "---\ntitle: Missing\npath: missing\n---\n\n![Gone](media/gone.png)\n",
+});
+
+/** The site's side of a whole-workspace run, with pages that a create or update really changes. */
+function siteRoutes({
+  live = [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" })],
+  navItems = [],
+  presentationSave = (call) => presentationSaveReply(call),
+  site = { presentationRevision: PRESENTATION_REVISION },
+  // The footer the workspace was pulled with, so its draft is current.
+  footerSettings = themeWorkspace()["settings/site-publishing-preferences.json"].settings.footerSettings,
+} = {}) {
+  const pages = [...live];
+  return [
+    { method: "GET", pattern: PAGES_LIST, reply: () => ({ pages, nextPageToken: "" }) },
+    {
+      method: "POST",
+      pattern: PAGES_COLLECTION,
+      reply: (call) => {
+        const summary = draftSummary(NEW_PAGE_ID, call.body.path);
+        pages.push(summary);
+        return summary;
+      },
+    },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: () => presentationReply({ revision: site.presentationRevision, footerSettings }),
+    },
+    { method: "POST", pattern: PRESENTATION, reply: presentationSave },
+    { method: "POST", pattern: FOOTER_SETTINGS, reply: (call) => ({ footerSettings: call.body.footerSettings }) },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems } },
+    { method: "PUT", pattern: NAVIGATION, reply: (call) => ({ navItems: call.body.navItems }) },
+    ...uploadRoutes(),
+  ];
+}
+
+function cliRun(site, arguments_, wire, content = REAL_CONTENT) {
+  let stdout = "";
+  let stderr = "";
+  return runCli({
+    arguments_: ["--config", site.configPath, ...arguments_],
+    environment: { TAPROOT_SITE_KEY: TOKEN, XDG_CONFIG_HOME: site.configHome },
+    cwd: site.project,
+    stdout: { write: (chunk) => (stdout += chunk) },
+    stderr: { write: (chunk) => (stderr += chunk) },
+    handlers: Object.fromEntries(Object.entries(VERB_HANDLERS).map(([name, handler]) => [
+      name,
+      (invocation) => handler({ ...invocation, content }),
+    ])),
+    fetch: wire === undefined
+      ? async () => assert.fail("an offline verb made a request")
+      : capabilityGatedFetch(
+        Object.hasOwn(VERB_CAPABILITIES, arguments_.slice(0, 2).join(" ")) ? arguments_.slice(0, 2).join(" ") : arguments_[0],
+        wire.fetch,
+      ),
+  }).then((exitCode) => ({ exitCode, result: JSON.parse(stdout), stderr }));
+}
+
+function writes(wire) {
+  return wire.calls.filter((call) => call.method !== "GET");
+}
+
+test("validate checks a pulled workspace with no credential or request and reports every problem at once", async (site) => {
+  const clean = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const passed = await cliRun(clean, ["validate"]);
+  assert.equal(passed.exitCode, 0, passed.stderr);
+  assert.equal(passed.result.offline, true);
+  assert.deepEqual(passed.result.workspace, { manifest: ".taproot-site-manifest.json", settingsOnly: false });
+  assert.equal(passed.result.validated.pages.total, 2);
+
+  const broken = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_PAGE", title: "Nowhere", resourceId: resourceIdFor(STORY_PAGE_ID) }],
+    files: BROKEN_PAGES,
+    uploaded: true,
+  }));
+  const failed = await cliRun(broken, ["validate"]);
+  assert.equal(failed.exitCode, 1);
+  const found = failed.result.error.problems.map((problem) => [problem.area, problem.file, problem.code]);
+  assert.deepEqual(found, [
+    ["navigation", "nav.json", "nav.resource_unknown"],
+    ["pages", "pages/bad-path.md", "pages.path_unsupported"],
+    ["pages", "pages/missing-media.md", "content.markdown_image"],
+  ]);
+  assert.equal(failed.result.error.problemCount, 3);
+  assert.equal(failed.result.error.code, "nav.resource_unknown");
+  for (const [, file] of found) assert.ok(failed.stderr.includes(file), `stderr names ${file}`);
+});
+
+test("pages push --dry-run checks every page against the site, lists what it would send, and sends nothing", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const wire = api(siteRoutes());
+  const clean = await cliRun(workspace, ["pages", "push", "--dry-run"], wire);
+  assert.equal(clean.exitCode, 0, clean.stderr);
+  assert.equal(clean.result.dryRun, true);
+  assert.equal(clean.result.pages.wouldCreate, 1);
+  assert.equal(clean.result.pages.wouldUpdate, 1);
+  assert.deepEqual(clean.result.pages.items.map((item) => [item.path, item.action]), [
+    ["about", "created"],
+    ["/", "updated"],
+  ]);
+  assert.deepEqual(writes(wire), []);
+
+  for (const [file, contents] of Object.entries(BROKEN_PAGES)) {
+    await writeFile(workspacePath(workspace, file), contents);
+  }
+  const refused = await cliRun(workspace, ["pages", "push", "--dry-run"], wire);
+  assert.equal(refused.exitCode, 1);
+  assert.deepEqual(refused.result.error.problems.map((problem) => [problem.file, problem.code]), [
+    ["pages/bad-path.md", "pages.path_unsupported"],
+    ["pages/missing-media.md", "content.markdown_image"],
+  ]);
+  // The real push refuses with the same list before sending anything.
+  const pushed = await cliRun(workspace, ["pages", "push"], wire);
+  assert.equal(pushed.exitCode, 1);
+  assert.equal(pushed.result.error.problemCount, 2);
+  assert.deepEqual(writes(wire), []);
+});
+
+test("a refusal's problem list stays inside the result bound however many pages fail", async (site) => {
+  const files = {};
+  for (let index = 0; index < 400; index += 1) {
+    files[`pages/broken-${String(index).padStart(3, "0")}.md`] =
+      `---\ntitle: Broken ${index}\npath: Broken Page ${index}\n---\n\nText.\n`;
+  }
+  const workspace = await fixture(site, wholeWorkspace({ files, uploaded: true }));
+  const failed = await cliRun(workspace, ["validate"]);
+  assert.equal(failed.exitCode, 1);
+  assert.deepEqual(failed.stderr.split("\n").filter((line) => line.startsWith("  ") && !line.includes("[pages.path_unsupported]")), []);
+  assert.equal(failed.result.error.problemCount, 400);
+  assert.equal(failed.result.error.problemsTruncated, true);
+  assert.ok(failed.result.error.problems.length > 50);
+  assert.ok(failed.result.error.problems.length < 400);
+  // stderr carries every one.
+  assert.equal(failed.stderr.split("\n").filter((line) => line.startsWith("  pages/broken-")).length, 400);
+});
+
+test("plan orders the remaining steps, binds them to a hash, and writes nothing", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+  }));
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+
+  assert.equal(planned.exitCode, 0, planned.stderr);
+  assert.match(planned.result.planHash, /^sha256:[0-9a-f]{64}$/u);
+  assert.deepEqual(planned.result.problems, []);
+  assert.equal(planned.result.ready, true);
+  assert.deepEqual(planned.result.steps.map((entry) => [entry.step, entry.status]), [
+    ["media upload", "ready"],
+    ["pages push", "ready"],
+    ["footer push", "nothing to do"],
+    ["theme push", "ready"],
+    ["nav push", "ready"],
+  ]);
+  assert.deepEqual(planned.result.steps[0].items, ["media/studio.png"]);
+  assert.equal(planned.result.steps[1].create, 1);
+  assert.equal(planned.result.steps[1].update, 1);
+  assert.ok(planned.result.steps.every((entry) => typeof entry.reason === "string"));
+  assert.deepEqual(writes(wire), []);
+  // Nothing in the workspace moved either: the same plan hashes the same.
+  const again = await cliRun(workspace, ["plan"], wire);
+  assert.equal(again.result.planHash, planned.result.planHash);
+});
+
+test("plan marks the step a problem blocks, and apply refuses that plan without writing", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_PAGE", title: "Story", resourceId: resourceIdFor(STORY_PAGE_ID) }],
+  }));
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.exitCode, 0);
+  assert.equal(planned.result.ready, false);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "nav push").status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => problem.code), ["nav.resource_unknown"]);
+
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.equal(applied.result.error.code, "nav.resource_unknown");
+  assert.deepEqual(writes(wire), []);
+});
+
+test("apply refuses a plan the workspace has moved past", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+  await writeFile(workspacePath(workspace, "pages/about.md"), "---\ntitle: About us\npath: about\n---\n\nRewritten.\n");
+
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.equal(applied.result.error.code, "apply.plan_stale");
+  assert.equal(applied.result.error.field, "planHash");
+  assert.deepEqual(writes(wire), []);
+  const usage = await cliRun(workspace, ["apply"], wire);
+  assert.equal(usage.exitCode, 2);
+  assert.equal(usage.result.error.code, "apply.plan_required");
+});
+
+test("an apply that fails partway reports each step, and the next plan picks up where it stopped", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+  }));
+  const wire = api(siteRoutes({
+    presentationSave: () => jsonResponse(violation("StyleSettings", "refused for the test"), 400),
+  }));
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const failed = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  assert.equal(failed.exitCode, 1);
+  assert.deepEqual(failed.result.error.completedWrites, [
+    "media upload: completed",
+    "pages push: completed",
+    "theme push: failed",
+    "nav push: not run",
+  ]);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 1);
+
+  // What finished reads as finished; what failed or never ran is still ready.
+  const replanned = await cliRun(workspace, ["plan"], wire);
+  assert.deepEqual(replanned.result.steps.map((entry) => [entry.step, entry.status]), [
+    ["media upload", "nothing to do"],
+    ["pages push", "nothing to do"],
+    ["footer push", "nothing to do"],
+    ["theme push", "ready"],
+    ["nav push", "ready"],
+  ]);
+  assert.notEqual(replanned.result.planHash, planned.result.planHash);
+});
+
+test("an unexpected error in an apply step still reports the steps that completed", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const wire = api(siteRoutes());
+  // Converts as usual while planning, then fails the way a bug would when the
+  // pages step converts again.
+  let conversions = 0;
+  const content = {
+    validateDocument,
+    markdownToProseMirror: async (...arguments_) => {
+      conversions += 1;
+      if (conversions > 2) throw new TypeError("unexpected");
+      return await markdownToProseMirror(...arguments_);
+    },
+  };
+  const planned = await cliRun(workspace, ["plan"], wire, content);
+  const failed = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire, content);
+
+  assert.equal(failed.exitCode, 1);
+  assert.equal(failed.result.error.code, "apply.step_failed");
+  assert.match(failed.stderr, /pages push failed unexpectedly \(TypeError\)/u);
+  assert.deepEqual(failed.result.error.completedWrites.slice(0, 2), ["media upload: completed", "pages push: failed"]);
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("apply runs every ready step in order through the push verbs and reports what it applied", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+  }));
+  // A footer content edit, which footer push owns and theme push refuses to overwrite.
+  const publishingFile = "settings/site-publishing-preferences.json";
+  const publishing = await readWorkspaceJson(workspace, publishingFile);
+  publishing.settings.footerSettings.enabled = true;
+  await writeFile(workspacePath(workspace, publishingFile), `${JSON.stringify(publishing, undefined, 2)}\n`);
+  const wire = api(siteRoutes());
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "footer push").status, "ready");
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  assert.equal(applied.exitCode, 0, applied.stderr);
+  assert.deepEqual(applied.result.applied.map((entry) => entry.step), [
+    "media upload",
+    "pages push",
+    "footer push",
+    "theme push",
+    "nav push",
+  ]);
+  assert.deepEqual(applied.result.skipped, []);
+  assert.equal(applied.result.nextStep, "approve");
+  assert.deepEqual(applied.result.applied[1].result, { created: 1, updated: 1, unchanged: 0 });
+  // The writes reached the site in the plan's order.
+  const order = writes(wire).map((call) => {
+    if (REQUEST_UPLOAD.test(call.pathname) || CONFIRM_UPLOAD.test(call.pathname) || PRESIGNED_PUT.test(call.pathname)) return "media";
+    if (PAGES_COLLECTION.test(call.pathname) || PAGE_BY_ID.test(call.pathname)) return "pages";
+    if (FOOTER_SETTINGS.test(call.pathname)) return "footer";
+    if (PRESENTATION.test(call.pathname)) return "theme";
+    return NAVIGATION.test(call.pathname) ? "nav" : call.pathname;
+  });
+  assert.deepEqual([...new Set(order)], ["media", "pages", "footer", "theme", "nav"]);
+  // Nothing is deployed or approved.
+  assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 0);
+  assert.equal(wire.matching("POST", DEPLOY).length, 0);
+});
+
+test("component and section images name a media path the same apply uploads", async (site) => {
+  const about = "---\ntitle: About us\npath: about\n---\n\n"
+    + "```component:image-banner\n{\"image\":\"media/studio.png\",\"overlayText\":\"Visit\"}\n```\n\n"
+    + ":::section {\"background\":{\"image\":\"media/studio.png\"}}\n## Our studio\n:::\n";
+  const workspace = await fixture(site, wholeWorkspace({ files: { "pages/about.md": about } }));
+  const wire = api(siteRoutes());
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.deepEqual(planned.result.problems, []);
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 0, applied.stderr);
+
+  // Each path resolves to the record media upload wrote; the server fills the delivery URLs.
+  const { imageId } = (await readWorkspaceJson(workspace, ".taproot-site-media.json")).media["media/studio.png"];
+  const stored = { imageId, src: "", urls: [], width: 1200, height: 800, alt: "" };
+  const body = wire.matching("POST", PAGES_COLLECTION)[0].body.template.freeFormData.body;
+  const banner = body.content.find((node) => node.type === "componentBlock");
+  assert.deepEqual(JSON.parse(banner.attrs.componentData).image, stored);
+  assert.deepEqual(body.content.find((node) => node.type === "section").attrs.background.image, stored);
+});
+
+test("apply refuses a plan the site has moved past", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const state = { presentationRevision: PRESENTATION_REVISION };
+  const wire = api(siteRoutes({ site: state }));
+  const planned = await cliRun(workspace, ["plan"], wire);
+  state.presentationRevision = NEXT_PRESENTATION_REVISION;
+
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.equal(applied.result.error.code, "apply.plan_stale");
+  assert.deepEqual(writes(wire), []);
+});
+
+test("a media file replaced after the plan makes the plan stale", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+  await writeFile(workspacePath(workspace, "media/studio.png"), png(1300, 800));
+
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.equal(applied.result.error.code, "apply.plan_stale");
+  assert.deepEqual(writes(wire), []);
+});
+
+test("plan blocks pages on a manifest whose source registry contradicts itself", async (site) => {
+  const files = wholeWorkspace();
+  const manifest = structuredClone(files[".taproot-site-manifest.json"]);
+  manifest.pages.push({ ...manifest.pages[0], pageId: ABOUT_PAGE_ID, resourceId: resourceIdFor(ABOUT_PAGE_ID), path: "about" });
+  const workspace = await fixture(site, { ...files, ".taproot-site-manifest.json": manifest });
+  const wire = api(siteRoutes());
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.ready, false);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "pages push").status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => [problem.area, problem.code]), [
+    ["pages", "workspace.manifest_invalid"],
+  ]);
+});
+
+test("plan refuses a Docs workspace, which holds its settings only", async (site) => {
+  const files = wholeWorkspace();
+  const workspace = await fixture(site, {
+    ...files,
+    ".taproot-site-manifest.json": { ...files[".taproot-site-manifest.json"], authoringSurface: "docs-presentation" },
+  });
+  const planned = await cliRun(workspace, ["plan"], api(siteRoutes()));
+  assert.equal(planned.exitCode, 2);
+  assert.equal(planned.result.error.code, "plan.surface_unsupported");
+});
+
+test("plan keeps its problem list inside the result bound", async (site) => {
+  const files = {};
+  for (let index = 0; index < 300; index += 1) {
+    files[`pages/broken-${String(index).padStart(3, "0")}.md`] =
+      `---\ntitle: Broken ${index}\npath: Broken Page With A Long Name Number ${index}\n---\n\nText.\n`;
+  }
+  const workspace = await fixture(site, wholeWorkspace({ files }));
+  const planned = await cliRun(workspace, ["plan"], api(siteRoutes()));
+  assert.equal(planned.exitCode, 0, planned.stderr);
+  assert.equal(planned.result.problemCount, 300);
+  assert.equal(planned.result.problemsTruncated, true);
+  assert.ok(planned.result.problems.length < 300);
+});
+
+test("validate judges redirect sources against the paths the workspace's own sources will hold", async (site) => {
+  const files = wholeWorkspace({ uploaded: true });
+  const manifest = {
+    ...files[".taproot-site-manifest.json"],
+    redirects: { file: "redirects.json", revision: REDIRECT_REVISION, entries: 1 },
+    pages: [
+      ...files[".taproot-site-manifest.json"].pages,
+      {
+        workspaceMode: "editable",
+        pageId: STORY_PAGE_ID,
+        resourceId: resourceIdFor(STORY_PAGE_ID),
+        path: "old-story",
+        title: "Story",
+        status: "PAGE_STATUS_PUBLISHED",
+        templateType: "TEMPLATE_TYPE_FREE_FORM",
+        file: "pages/story.md",
+        sourceFormat: "markdown",
+      },
+    ],
+  };
+  // The source renames the page, so its old path is free for a redirect.
+  const renamed = await fixture(site, {
+    ...files,
+    ".taproot-site-manifest.json": manifest,
+    "pages/story.md": "---\ntitle: Story\npath: story\n---\n\nText.\n",
+    "redirects.json": redirectsDocument([{ path: "/old-story", target: "/story" }]),
+  });
+  const passed = await cliRun(renamed, ["validate"]);
+  assert.equal(passed.exitCode, 0, passed.stderr);
+
+  // A new source at a redirect's source path is the collision the site refuses.
+  const occupied = await fixture(site, {
+    ...files,
+    ".taproot-site-manifest.json": { ...manifest, pages: files[".taproot-site-manifest.json"].pages },
+    "redirects.json": redirectsDocument([{ path: "/about", target: "/" }]),
+  });
+  const failed = await cliRun(occupied, ["validate"]);
+  assert.equal(failed.exitCode, 1);
+  assert.equal(failed.result.error.code, "redirects.path_occupied");
+});
+
+/**
+ * Sends the workspace's presentation in a save whose answer is lost, and
+ * returns what the site then holds: exactly the workspace's change set, one
+ * revision on. The workspace keeps the pending record that save left.
+ */
+async function committedLostSave(workspace) {
+  let committed;
+  const lostWire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        committed = call.body;
+        throw new Error("socket hang up");
+      },
+    },
+  ]);
+  await assert.rejects(themePush(invoke(workspace, lostWire, { verb: "theme push" }).invocation));
+  const held = { siteId: SITE_ID, revision: NEXT_PRESENTATION_REVISION, sitePublishingPreferences: {} };
+  for (const group of SETTINGS_GROUPS) held[group.responseProperty] ??= {};
+  for (const write of committed.settings) {
+    const group = SETTINGS_GROUPS.find((candidate) => candidate.settingsType === write.settingsType);
+    // SetSetting carries every value as text; the read answers booleans as booleans.
+    held[group.responseProperty][write.setting] = write.value === "true" || write.value === "false"
+      ? write.value === "true"
+      : write.value;
+  }
+  held.sitePublishingPreferences.footerSettings = applyFooterColors(
+    themeWorkspace()["settings/site-publishing-preferences.json"].settings.footerSettings,
+    committed.footerColors,
+  );
+  return held;
+}
+
+function routesHolding(held, options) {
+  return siteRoutes(options)
+    .map((route) => (route.method === "GET" && route.pattern === PRESENTATION ? { ...route, reply: held } : route));
+}
+
+test("plan runs theme push again to settle a save whose answer was lost even when nothing else changed", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const held = await committedLostSave(workspace);
+  const wire = api(routesHolding(held, {
+    presentationSave: (call) => presentationSaveReply(call, { applied: false, revision: NEXT_PRESENTATION_REVISION }),
+  }));
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const theme = planned.result.steps.find((entry) => entry.step === "theme push");
+  assert.deepEqual(theme.differences, []);
+  assert.equal(theme.replaysLostSave, true);
+  assert.equal(theme.status, "ready");
+});
+
+test("plan refuses only the theme or footer step that would run against a site that moved", async (site) => {
+  // A theme that would change, against a revision the site has moved past.
+  const moved = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const movedPlan = await cliRun(moved, ["plan"], api(siteRoutes({ site: { presentationRevision: NEXT_PRESENTATION_REVISION } })));
+  assert.equal(movedPlan.result.steps.find((entry) => entry.step === "theme push").status, "blocked");
+  assert.deepEqual(movedPlan.result.problems.map((problem) => problem.code), ["theme.concurrent_modification"]);
+
+  // A theme that would change, from a workspace with no presentation baseline.
+  const files = wholeWorkspace({ uploaded: true });
+  const { presentation: _presentation, ...unbaselined } = files[".taproot-site-manifest.json"];
+  const old = await fixture(site, { ...files, ".taproot-site-manifest.json": unbaselined });
+  const oldPlan = await cliRun(old, ["plan"], api(siteRoutes()));
+  assert.deepEqual(oldPlan.result.problems.map((problem) => problem.code), ["theme.pull_required"]);
+
+  // A theme with nothing to send is not refused for a moved revision, so a
+  // page-only apply goes ahead.
+  const unchanged = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const held = await committedLostSave(unchanged);
+  const manifestFile = workspacePath(unchanged, ".taproot-site-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  delete manifest.presentation.pending;
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  const unchangedPlan = await cliRun(unchanged, ["plan"], api(routesHolding(held)));
+  assert.deepEqual(unchangedPlan.result.problems, []);
+  assert.equal(unchangedPlan.result.steps.find((entry) => entry.step === "theme push").status, "nothing to do");
+  assert.equal(unchangedPlan.result.steps.find((entry) => entry.step === "pages push").status, "ready");
+  // Nor for a missing baseline: there is nothing to fence.
+  delete manifest.presentation;
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  const unbaselinedPlan = await cliRun(unchanged, ["plan"], api(routesHolding(held)));
+  assert.deepEqual(unbaselinedPlan.result.problems, []);
+  assert.equal(unbaselinedPlan.result.steps.find((entry) => entry.step === "theme push").status, "nothing to do");
+
+  // A footer content edit whose draft moved on the site since the pull.
+  const footer = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const publishingFile = workspacePath(footer, "settings/site-publishing-preferences.json");
+  const publishing = JSON.parse(await readFile(publishingFile, "utf8"));
+  publishing.settings.footerSettings.enabled = true;
+  await writeFile(publishingFile, JSON.stringify(publishing));
+  const footerManifestFile = workspacePath(footer, ".taproot-site-manifest.json");
+  const footerManifest = JSON.parse(await readFile(footerManifestFile, "utf8"));
+  footerManifest.footer.expectedDraftHash = "0".repeat(64);
+  await writeFile(footerManifestFile, JSON.stringify(footerManifest));
+  const footerPlan = await cliRun(footer, ["plan"], api(siteRoutes()));
+  assert.equal(footerPlan.result.steps.find((entry) => entry.step === "footer push").status, "blocked");
+  assert.ok(footerPlan.result.problems.some((problem) => problem.code === "footer.concurrent_modification"));
+});
+
+test("plan blocks media upload on a file the upload would refuse", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ files: { "media/broken.png": Buffer.from("not an image") } }));
+  const planned = await cliRun(workspace, ["plan"], api(siteRoutes()));
+  assert.equal(planned.result.ready, false);
+  assert.equal(planned.result.steps[0].status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => [problem.area, problem.file]), [["media", "media/broken.png"]]);
+});
+
+test("plan uploads a new or replaced video but not one that still matches its upload, and caps a run's files", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true, files: { "media/tour.mp4": FASTSTART } }));
+  const library = [];
+  const wire = api([{ method: "GET", pattern: SITE_VIDEOS, reply: () => ({ videos: library, nextPageToken: "" }) }, ...siteRoutes()]);
+  const fresh = await cliRun(workspace, ["plan"], wire);
+  assert.equal(fresh.result.ready, true, JSON.stringify(fresh.result.problems));
+  assert.deepEqual(fresh.result.steps[0].items, ["media/tour.mp4"]);
+
+  // Recorded at the size and time on disk: done. Recorded at another size: replaced, so pending again.
+  const onDisk = await stat(workspacePath(workspace, "media/tour.mp4"));
+  const record = (byteLength) => ({
+    ...STUDIO_MEDIA_MANIFEST,
+    videos: { "media/tour.mp4": { videoId: VIDEO_ID, byteLength, modifiedMilliseconds: Math.floor(onDisk.mtimeMs) } },
+  });
+  await writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify(record(onDisk.size)));
+  // Unchanged but deleted from the site's library: uploaded again.
+  assert.deepEqual((await cliRun(workspace, ["plan"], wire)).result.steps[0].items, ["media/tour.mp4"]);
+  library.push({ videoId: VIDEO_ID });
+  assert.equal((await cliRun(workspace, ["plan"], wire)).result.steps[0].status, "nothing to do");
+  await writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify(record(onDisk.size + 1)));
+  assert.deepEqual((await cliRun(workspace, ["plan"], wire)).result.steps[0].items, ["media/tour.mp4"]);
+
+  // A recorded image whose bytes changed is pending too.
+  await writeFile(workspacePath(workspace, "media/studio.png"), png(1300, 800));
+  assert.deepEqual((await cliRun(workspace, ["plan"], wire)).result.steps[0].items, ["media/studio.png", "media/tour.mp4"]);
+
+  const files = {};
+  for (let index = 0; index < 501; index += 1) files[`media/bulk-${String(index).padStart(3, "0")}.png`] = png(10 + index, 10);
+  const bulk = await fixture(site, wholeWorkspace({ files }));
+  const capped = await cliRun(bulk, ["plan"], api(siteRoutes()));
+  assert.equal(capped.result.ready, false);
+  assert.deepEqual(capped.result.problems.map((problem) => problem.code), ["media.too_many_files"]);
+});
+
+test("a plan with many problems, pages, and pending media still fits the result bound", async (site) => {
+  const files = {};
+  for (let index = 0; index < 300; index += 1) {
+    files[`pages/broken-${String(index).padStart(3, "0")}.md`] =
+      `---\ntitle: Broken ${index}\npath: Broken Page With A Long Name Number ${index}\n---\n\nText.\n`;
+  }
+  // Long names, so the page and media lists alone would pass 64 KiB unbounded.
+  const long = "x".repeat(180);
+  for (let index = 0; index < 120; index += 1) {
+    const name = `fine-${long}-${String(index).padStart(3, "0")}`;
+    files[`pages/${name}.md`] = `---\ntitle: Fine ${index}\npath: ${name}\n---\n\nText.\n`;
+    files[`media/${long}-${String(index).padStart(3, "0")}.png`] = png(20 + index, 20);
+  }
+  const workspace = await fixture(site, wholeWorkspace({ files }));
+  const planned = await cliRun(workspace, ["plan"], api(siteRoutes()));
+  assert.equal(planned.exitCode, 0, planned.stderr);
+  assert.equal(planned.result.problemCount, 300);
+  assert.equal(planned.result.problemsTruncated, true);
+  assert.equal(planned.result.steps[0].itemsTruncated, true);
+  assert.equal(planned.result.steps[0].files, 121);
+  assert.equal(planned.result.steps[1].itemsTruncated, true);
+  assert.equal(planned.result.steps[1].create, 121);
+});
+
+test("plan reads a recorded image as done only when the site holds it processed", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const planWith = async (library) => {
+    const routes = [{ method: "GET", pattern: SITE_IMAGES, reply: { images: library, nextPageToken: "" } }, ...siteRoutes()];
+    return (await cliRun(workspace, ["plan"], api(routes))).result;
+  };
+  const held = (processingState) => [{ image: { imageId: IMAGE_ID, processingState }, processingState }];
+
+  assert.equal((await planWith(held("IMAGE_PROCESSING_STATE_COMPLETE"))).steps[0].status, "nothing to do");
+  // Still processing, or gone from the library: sent again, which deduplicates and waits.
+  assert.deepEqual((await planWith(held("IMAGE_PROCESSING_STATE_PENDING"))).steps[0].items, ["media/studio.png"]);
+  assert.deepEqual((await planWith([])).steps[0].items, ["media/studio.png"]);
+  const failed = await planWith(held("IMAGE_PROCESSING_STATE_FAILED"));
+  assert.equal(failed.steps[0].status, "blocked");
+  assert.deepEqual(failed.problems.map((problem) => [problem.file, problem.code]), [["media/studio.png", "media.processing_failed"]]);
+});
+
+test("a page that fails partway through the pages step is reported with the pages sent before it", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const routes = [
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }], nextPageToken: "" } },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: () => jsonResponse(violation("Title", "refused for the test"), 400) },
+    ...siteRoutes(),
+  ];
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const failed = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  assert.equal(failed.exitCode, 1);
+  assert.deepEqual(failed.result.error.completedWrites, [
+    "pages push: failed",
+    "theme push: not run",
+    "page /: failed",
+    "page about: created",
+  ]);
+  // The written page is recorded, so the next plan updates nothing twice.
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.ok(manifest.pages.some((entry) => entry.pageId === NEW_PAGE_ID && entry.file === "pages/about.md"));
+});
+
+test("a pages step that fails after many writes still names the failure and the steps not run", async (site) => {
+  const files = {};
+  for (let index = 0; index < 130; index += 1) {
+    files[`pages/page-${String(index).padStart(3, "0")}.md`] = `---\ntitle: Page ${index}\npath: page-${index}\n---\n\nText.\n`;
+  }
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true, files }));
+  let creates = 0;
+  const routes = [
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }], nextPageToken: "" } },
+    {
+      method: "POST",
+      pattern: PAGES_COLLECTION,
+      reply: (call) => {
+        creates += 1;
+        if (creates === 111) return jsonResponse(violation("Title", "refused for the test"), 400);
+        return draftSummary(`44444444-4444-4444-8444-${String(creates).padStart(12, "0")}`, call.body.path);
+      },
+    },
+    ...siteRoutes(),
+  ];
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const failed = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  const labels = failed.result.error.completedWrites;
+  assert.equal(labels.length, 100);
+  assert.deepEqual(labels.slice(0, 2), ["pages push: failed", "theme push: not run"]);
+  assert.match(labels[2], /^page page-\d+: failed$/u);
+  assert.equal(labels[3], "20 more page(s): not sent");
+  assert.match(labels[4], /^page .+: created$/u);
+});
+
+test("plan reads recorded images by id, so a large library cannot hide one", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const routes = [{
+    method: "GET",
+    pattern: SITE_IMAGES,
+    reply: (call) => ({
+      images: call.query.getAll("imageIds").map((imageId) => ({
+        image: { imageId },
+        processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
+      })),
+      nextPageToken: "",
+    }),
+  }, ...siteRoutes()];
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps[0].status, "nothing to do");
+  assert.deepEqual(wire.matching("GET", SITE_IMAGES).map((call) => call.query.getAll("imageIds")), [[IMAGE_ID]]);
+});
+
+test("a page whose write may have committed is reported as unknown, not failed", async (testContext) => {
+  const answers = {
+    "an unreadable body": () => new Response(
+      new ReadableStream({ start: (controller) => controller.error(new Error("connection reset")) }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+    "a body that is not JSON": () => new Response("<html>", { status: 200, headers: { "content-type": "application/json" } }),
+    "a server error": () => jsonResponse({ code: 13, message: "internal" }, 500),
+  };
+  for (const [label, answer] of Object.entries(answers)) {
+    await testContext.test(label, async (site) => {
+      const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+      const routes = [{ method: "POST", pattern: PAGES_COLLECTION, reply: answer }, ...siteRoutes()];
+      const pushed = await cliRun(workspace, ["pages", "push"], api(routes));
+      assert.equal(pushed.exitCode, 1);
+      assert.equal(pushed.result.error.completedWrites[0], "page about: unknown");
+    });
+  }
+});
+
+test("pages push --dry-run keeps its page list inside the result bound", async (site) => {
+  const files = {};
+  const long = "x".repeat(180);
+  for (let index = 0; index < 300; index += 1) {
+    const name = `fine-${long}-${String(index).padStart(3, "0")}`;
+    files[`pages/${name}.md`] = `---\ntitle: Fine ${index}\npath: ${name}\n---\n\nText.\n`;
+  }
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true, files }));
+  const dry = await cliRun(workspace, ["pages", "push", "--dry-run"], api(siteRoutes()));
+  assert.equal(dry.exitCode, 0, dry.stderr);
+  assert.equal(dry.result.pages.wouldCreate, 301);
+  assert.equal(dry.result.pages.itemsTruncated, true);
+});
+
+test("plan refuses a recorded video a truncated library cannot vouch for, and reads images in batches of 100", async (site) => {
+  const media = {};
+  for (let index = 0; index < 101; index += 1) {
+    media[`media/gone-${index}.png`] = { imageId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}` };
+  }
+  const workspace = await fixture(site, wholeWorkspace({ files: { "media/tour.mp4": FASTSTART } }));
+  const onDisk = await stat(workspacePath(workspace, "media/tour.mp4"));
+  await writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify({
+    mediaManifestVersion: 2,
+    siteId: SITE_ID,
+    media,
+    videos: { "media/tour.mp4": { videoId: VIDEO_ID, byteLength: onDisk.size, modifiedMilliseconds: Math.floor(onDisk.mtimeMs) } },
+  }));
+  const others = Array.from({ length: 1000 }, (_, index) => ({ videoId: `0a1b2c3d-0a1b-4c3d-8a1b-${String(index).padStart(12, "0")}` }));
+  const routes = [
+    { method: "GET", pattern: SITE_VIDEOS, reply: { videos: others, nextPageToken: "more" } },
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "" } },
+    ...siteRoutes(),
+  ];
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps[0].status, "blocked");
+  assert.ok(planned.result.problems.some((problem) => problem.code === "media.video_library_unverifiable"));
+  assert.deepEqual(wire.matching("GET", SITE_IMAGES).map((call) => call.query.getAll("imageIds").length), [100, 1]);
+});
+
+test("a targeted pages push --dry-run bounds its selected paths too", async (site) => {
+  const files = {};
+  const paths = [];
+  for (let index = 0; index < 60; index += 1) {
+    const name = `page-${"y".repeat(180)}-${String(index).padStart(3, "0")}`;
+    files[`pages/${name}.md`] = `---\ntitle: Page ${index}\npath: ${name}\n---\n\nText.\n`;
+    paths.push(name);
+  }
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true, files }));
+  const dry = await cliRun(workspace, ["pages", "push", "--dry-run", ...paths], api(siteRoutes()));
+  assert.equal(dry.exitCode, 0, dry.stderr);
+  assert.equal(dry.result.pages.selectedPathsTruncated, true);
+  assert.ok(dry.result.pages.selectedPaths.length < 60);
+});
+
+test("plan blocks a video the upload would refuse before anything is uploaded", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ files: { "media/broken.mp4": unreadableMp4() } }));
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps[0].status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => [problem.file, problem.code]), [["media/broken.mp4", "media.video_unsupported"]]);
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.deepEqual(writes(wire), []);
+});
+
+/** A workspace whose footer links the about page and carries a feature image, both recorded by the pull. */
+function linkedFooterWorkspace({ liveAbout }) {
+  const files = wholeWorkspace({ uploaded: true });
+  const manifest = structuredClone(files[".taproot-site-manifest.json"]);
+  manifest.pages.push({
+    workspaceMode: "metadata-only",
+    pageId: ABOUT_PAGE_ID,
+    resourceId: resourceIdFor(ABOUT_PAGE_ID),
+    path: "about-us",
+    title: "About",
+    status: "PAGE_STATUS_PUBLISHED",
+    templateType: "TEMPLATE_TYPE_FREE_FORM",
+  });
+  const publishing = structuredClone(files["settings/site-publishing-preferences.json"]);
+  const footerSettings = { ...authorableFooter(), light: publishing.settings.footerSettings.light, dark: publishing.settings.footerSettings.dark };
+  publishing.settings.footerSettings = footerSettings;
+  // Recorded as pulled, then edited, so the footer step would run.
+  const pulled = { ...footerSettings, enabled: !footerSettings.enabled };
+  manifest.footer = footerManifestEntry(pulled);
+  const live = [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" })];
+  if (liveAbout) live.push(pageSummary({ pageId: ABOUT_PAGE_ID, path: "about-us" }));
+  return {
+    files: { ...files, ".taproot-site-manifest.json": manifest, "settings/site-publishing-preferences.json": publishing },
+    featureImageId: footerSettings.featureImage.imageId,
+    live,
+    pulled,
+  };
+}
+
+function heldImages(imageIds) {
+  return {
+    method: "GET",
+    pattern: SITE_IMAGES,
+    reply: (call) => ({
+      images: call.query.getAll("imageIds").filter((imageId) => imageIds.includes(imageId))
+        .map((imageId) => ({ image: { imageId }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" })),
+      nextPageToken: "",
+    }),
+  };
+}
+
+test("plan refuses a footer link to a page the site has deleted since the pull", async (site) => {
+  const { files, featureImageId, live, pulled } = linkedFooterWorkspace({ liveAbout: false });
+  const workspace = await fixture(site, files);
+  const planned = await cliRun(workspace, ["plan"], api([heldImages([IMAGE_ID, featureImageId]), ...siteRoutes({ live, footerSettings: pulled })]));
+  assert.equal(planned.result.steps.find((entry) => entry.step === "footer push").status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => problem.code), ["footer.page_reference_unknown"]);
+  assert.match(planned.result.problems[0].field, /\.pageResourceId$/u);
+});
+
+test("plan refuses a footer image the site no longer holds, and passes one it holds", async (site) => {
+  const { files, featureImageId, live, pulled } = linkedFooterWorkspace({ liveAbout: true });
+  const workspace = await fixture(site, files);
+  const missing = await cliRun(workspace, ["plan"], api([heldImages([IMAGE_ID]), ...siteRoutes({ live, footerSettings: pulled })]));
+  assert.equal(missing.result.steps.find((entry) => entry.step === "footer push").status, "blocked");
+  assert.deepEqual(missing.result.problems.map((problem) => [problem.area, problem.code, problem.field]), [
+    ["footer", "plan.image_missing", featureImageId],
+  ]);
+  const held = await cliRun(workspace, ["plan"], api([heldImages([IMAGE_ID, featureImageId]), ...siteRoutes({ live, footerSettings: pulled })]));
+  assert.deepEqual(held.result.problems, []);
+  assert.equal(held.result.steps.find((entry) => entry.step === "footer push").status, "ready");
+});
+
+test("plan refuses a logo the site no longer holds only when the theme would be saved", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const stylesFile = workspacePath(workspace, "settings/taproot-styles.json");
+  const styles = JSON.parse(await readFile(stylesFile, "utf8"));
+  styles.settings.lightLogoId = IMAGE_ID;
+  await writeFile(stylesFile, JSON.stringify(styles));
+  const planned = await cliRun(workspace, ["plan"], api([heldImages([]), ...siteRoutes()]));
+  assert.equal(planned.result.steps.find((entry) => entry.step === "theme push").status, "blocked");
+  assert.ok(planned.result.problems.some((problem) => problem.code === "plan.image_missing" && problem.field === IMAGE_ID));
+  const held = await cliRun(workspace, ["plan"], api([heldImages([IMAGE_ID]), ...siteRoutes()]));
+  assert.equal(held.result.steps.find((entry) => entry.step === "theme push").status, "ready");
+});
+
+test("a create whose answer was lost blocks a later push to that path until a pull adopts the page", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const live = [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" })];
+  const lost = [
+    {
+      method: "POST",
+      pattern: PAGES_COLLECTION,
+      reply: (call) => {
+        // The page is made; the answer never arrives.
+        live.push(draftSummary(NEW_PAGE_ID, call.body.path));
+        return new Response(new ReadableStream({ start: (controller) => controller.error(new Error("reset")) }), { status: 200 });
+      },
+    },
+    ...siteRoutes({ live }),
+  ];
+  const first = await cliRun(workspace, ["pages", "push"], api(lost));
+  assert.equal(first.result.error.completedWrites[0], "page about: unknown");
+  assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pendingCreates, { about: "pages/about.md" });
+
+  const wire = api(siteRoutes({ live }));
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "pages push").status, "blocked");
+  assert.ok(planned.result.problems.some((problem) => problem.code === "pages.create_unconfirmed"));
+  const again = await cliRun(workspace, ["pages", "push"], wire);
+  assert.equal(again.result.error.code, "pages.create_unconfirmed");
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).filter((call) => call.body.path === "about").length, 0);
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("a create that is confirmed, or refused outright, leaves no pending-create marker", async (site) => {
+  const confirmed = await fixture(site, wholeWorkspace({ uploaded: true }));
+  assert.equal((await cliRun(confirmed, ["pages", "push"], api(siteRoutes()))).exitCode, 0);
+  assert.equal((await readWorkspaceJson(confirmed, ".taproot-site-manifest.json")).pendingCreates, undefined);
+
+  const refused = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const routes = [{ method: "POST", pattern: PAGES_COLLECTION, reply: () => jsonResponse(violation("Path", "taken"), 400) }, ...siteRoutes()];
+  assert.equal((await cliRun(refused, ["pages", "push"], api(routes))).exitCode, 1);
+  assert.equal((await readWorkspaceJson(refused, ".taproot-site-manifest.json")).pendingCreates, undefined);
+});
+
+test("apply sends only the page sources and replaces only the navigation its plan saw", async (testContext) => {
+  await testContext.test("a page edited while media uploads is not sent", async (site) => {
+    const workspace = await fixture(site, wholeWorkspace());
+    const routes = siteRoutes().map((route) => (route.method === "POST" && route.pattern === REQUEST_UPLOAD
+      ? {
+        ...route,
+        reply: async (call, calls) => {
+          await writeFile(workspacePath(workspace, "pages/about.md"), "---\ntitle: About us\npath: about\n---\n\nUnreviewed.\n");
+          return await route.reply(call, calls);
+        },
+      }
+      : route));
+    const wire = api(routes);
+    const planned = await cliRun(workspace, ["plan"], wire);
+    const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+    assert.equal(applied.exitCode, 1);
+    assert.equal(applied.result.error.code, "apply.plan_stale");
+    assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+    assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+  });
+
+  await testContext.test("navigation changed on the site during an earlier step is not replaced", async (site) => {
+    const workspace = await fixture(site, wholeWorkspace({
+      uploaded: true,
+      navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+    }));
+    const liveNav = [];
+    const routes = [
+      { method: "GET", pattern: SITE_IMAGES, reply: { images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }], nextPageToken: "" } },
+      { method: "GET", pattern: NAVIGATION, reply: () => ({ navItems: liveNav }) },
+      ...siteRoutes().map((route) => (route.method === "POST" && route.pattern === PAGES_COLLECTION
+        ? {
+          ...route,
+          reply: (call, calls) => {
+            liveNav.push({ id: navId(9), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Theirs", externalUrl: "https://example.com/theirs" });
+            return route.reply(call, calls);
+          },
+        }
+        : route)),
+    ];
+    const wire = api(routes);
+    const planned = await cliRun(workspace, ["plan"], wire);
+    const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+    assert.equal(applied.exitCode, 1);
+    assert.equal(applied.result.error.code, "apply.plan_stale");
+    assert.ok(applied.result.error.completedWrites.includes("nav push: failed"));
+    assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+  });
+});
+
+test("a page added while an earlier apply step runs is not sent", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const routes = siteRoutes().map((route) => (route.method === "POST" && route.pattern === REQUEST_UPLOAD
+    ? {
+      ...route,
+      reply: async (call, calls) => {
+        await writeFile(workspacePath(workspace, "pages/late.md"), "---\ntitle: Late\npath: late\n---\n\nUnreviewed.\n");
+        return await route.reply(call, calls);
+      },
+    }
+    : route));
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.result.error.code, "apply.plan_stale");
+  assert.equal(applied.result.error.field, "pages/late.md");
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("apply refuses footer, theme, navigation, and media edited while an earlier step runs", async (testContext) => {
+  const editJson = async (workspace, file, change) => {
+    const document_ = JSON.parse(await readFile(workspacePath(workspace, file), "utf8"));
+    change(document_);
+    await writeFile(workspacePath(workspace, file), JSON.stringify(document_));
+  };
+  const cases = [
+    {
+      label: "footer",
+      before: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+        document_.settings.footerSettings.enabled = true;
+      }),
+      during: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+        document_.settings.footerSettings.showBrand = false;
+      }),
+      field: "settings/site-publishing-preferences.json",
+      unsent: (wire) => wire.matching("POST", FOOTER_SETTINGS).length,
+    },
+    {
+      label: "footer color",
+      before: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+        document_.settings.footerSettings.enabled = true;
+      }),
+      during: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+        document_.settings.footerSettings.light.textColor = "#123456";
+      }),
+      field: "settings/site-publishing-preferences.json",
+      unsent: (wire) => wire.matching("POST", FOOTER_SETTINGS).length,
+    },
+    {
+      label: "page manifest title",
+      during: (workspace) => editJson(workspace, ".taproot-site-manifest.json", (document_) => {
+        document_.pages[0].title = "Retitled mid-apply";
+      }),
+      field: ".taproot-site-manifest.json",
+      unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
+    },
+    {
+      label: "page media record",
+      files: { "media/other.png": png(320, 200) },
+      before: (workspace) => writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify({
+        mediaManifestVersion: 2,
+        siteId: SITE_ID,
+        media: { "media/other.png": { imageId: IMAGE_ID, contentHash: contentHashOf(png(320, 200)), width: 320, height: 200, alt: "" } },
+      })),
+      during: (workspace) => editJson(workspace, ".taproot-site-media.json", (document_) => {
+        document_.media["media/other.png"].alt = "Changed mid-apply";
+      }),
+      // While apply re-plans, after it read the media records: the plan's own
+      // read is the first navigation read, apply's the second.
+      trigger: { method: "GET", pattern: NAVIGATION, occurrence: 2 },
+      field: ".taproot-site-media.json",
+      unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
+    },
+    {
+      label: "pending media alt text",
+      files: { "media/other.png": png(320, 200) },
+      before: (workspace) => writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify({
+        mediaManifestVersion: 2,
+        siteId: SITE_ID,
+        // Recorded, but its bytes changed since, so this apply uploads it again.
+        media: { "media/other.png": { imageId: IMAGE_ID, contentHash: "0".repeat(64), width: 320, height: 200, alt: "" } },
+      })),
+      during: (workspace) => editJson(workspace, ".taproot-site-media.json", (document_) => {
+        document_.media["media/other.png"].alt = "Changed mid-apply";
+      }),
+      trigger: { method: "GET", pattern: NAVIGATION, occurrence: 2 },
+      field: ".taproot-site-media.json",
+      unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
+    },
+    {
+      label: "page revision",
+      live: () => [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home", bodyRevision: "sha256:aaaaaaaaaaaaaaaa" })],
+      during: (workspace, live) => {
+        live[0] = pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home", bodyRevision: "sha256:bbbbbbbbbbbbbbbb" });
+      },
+      field: "pages/index.pm.json",
+      unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
+    },
+    {
+      label: "theme",
+      during: (workspace) => editJson(workspace, "settings/site-header.json", (document_) => {
+        document_.settings.brandText = "Edited mid-apply";
+      }),
+      field: "settings/site-header.json",
+      unsent: (wire) => wire.matching("POST", PRESENTATION).length,
+    },
+    {
+      label: "navigation",
+      during: (workspace) => editJson(workspace, "nav.json", (document_) => {
+        document_.navItems[0].title = "Edited mid-apply";
+      }),
+      field: "nav.json",
+      unsent: (wire) => wire.matching("PUT", NAVIGATION).length,
+    },
+    {
+      label: "media",
+      files: { "media/zz-second.png": png(640, 480) },
+      during: (workspace) => writeFile(workspacePath(workspace, "media/zz-second.png"), png(641, 480)),
+      field: "media/zz-second.png",
+      unsent: (wire) => wire.matching("POST", REQUEST_UPLOAD).length - 1,
+    },
+  ];
+  for (const scenario of cases) {
+    await testContext.test(scenario.label, async (site) => {
+      const workspace = await fixture(site, wholeWorkspace({
+        navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+        files: scenario.files ?? {},
+      }));
+      await scenario.before?.(workspace);
+      let edited = false;
+      const live = scenario.live?.();
+      const routes = [
+        ...(live === undefined ? [] : [{ method: "GET", pattern: PAGES_LIST, reply: () => ({ pages: live, nextPageToken: "" }) }]),
+        { method: "GET", pattern: SITE_IMAGES, reply: { images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }], nextPageToken: "" } },
+        ...siteRoutes(),
+      ];
+      const trigger = scenario.trigger ?? { method: "POST", pattern: REQUEST_UPLOAD, occurrence: 1 };
+      let seen = 0;
+      const index = routes.findIndex((route) => route.method === trigger.method && route.pattern === trigger.pattern);
+      const original = routes[index];
+      routes[index] = {
+        ...original,
+        reply: async (call, calls) => {
+          seen += 1;
+          if (!edited && seen === trigger.occurrence) {
+            edited = true;
+            await scenario.during(workspace, live);
+          }
+          return typeof original.reply === "function" ? await original.reply(call, calls) : original.reply;
+        },
+      };
+      const wire = api(routes);
+      const planned = await cliRun(workspace, ["plan"], wire);
+      assert.equal(planned.result.ready, true, JSON.stringify(planned.result.problems));
+      const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+      assert.equal(applied.result.error?.code, "apply.plan_stale");
+      assert.equal(applied.result.error.field, scenario.field);
+      assert.equal(scenario.unsent(wire), 0);
+    });
+  }
+});
+
+/**
+ * The read ledger's guarantee, over every file the workspace holds rather than
+ * the inputs anyone thought to list: a file edited while an earlier apply step
+ * runs either stops the step that would read it, naming it, or is never read
+ * again, so nothing unreviewed is sent (TR00823).
+ */
+test("an edit to any workspace file during apply is refused by name, or never read again", async (testContext) => {
+  const navItems = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }];
+  const probe = await fixture(testContext, wholeWorkspace({ navItems }));
+  const files = (await readdir(probe.workspaceDir, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path.relative(probe.workspaceDir, path.join(entry.parentPath ?? entry.path, entry.name)).split(path.sep).join("/")
+    )
+    .sort();
+  // What the steps after the media upload read: these must refuse. The edit
+  // lands during the upload, the first step; the unit tests cover edits to a
+  // file apply itself wrote.
+  const mustRefuse = [
+    ".taproot-site-manifest.json",
+    "nav.json",
+    "pages/about.md",
+    "pages/index.pm.json",
+    "settings/brand.json",
+    "settings/site-header.json",
+    "settings/site-publishing-preferences.json",
+    "settings/taproot-styles.json",
+  ];
+  assert.ok(mustRefuse.every((file) => files.includes(file)), files.join(", "));
+  const outcomes = {};
+  for (const file of files) {
+    await testContext.test(file, async (site) => {
+      const workspace = await fixture(site, wholeWorkspace({ navItems }));
+      const routes = siteRoutes();
+      const index = routes.findIndex((route) => route.method === "POST" && route.pattern === REQUEST_UPLOAD);
+      const original = routes[index];
+      let edited = false;
+      routes[index] = {
+        ...original,
+        reply: async (call, calls) => {
+          if (!edited) {
+            edited = true;
+            await appendFile(workspacePath(workspace, file), file.endsWith(".png") ? Buffer.from([0]) : "\n");
+          }
+          return typeof original.reply === "function" ? await original.reply(call, calls) : original.reply;
+        },
+      };
+      const wire = api(routes);
+      const planned = await cliRun(workspace, ["plan"], wire);
+      assert.equal(planned.result.ready, true, JSON.stringify(planned.result.problems));
+      const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+      assert.ok(edited);
+      if (applied.exitCode === 0) {
+        outcomes[file] = "not read again";
+      } else {
+        assert.equal(applied.result.error.code, "apply.plan_stale", applied.stderr);
+        assert.equal(applied.result.error.field, file);
+        outcomes[file] = "refused";
+      }
+    });
+  }
+  for (const file of mustRefuse) assert.equal(outcomes[file], "refused", file);
+});
+
+test("plan tells two images it has not uploaded apart, so an unused cover is caught before apply", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    files: {
+      "media/cover.png": png(800, 600),
+      "media/inside.png": png(640, 480),
+      "pages/story.md": "---\ntitle: Story\npath: journal/story\ntemplate: article\ncoverImage: media/cover.png\n---\n\n"
+        + "Inside.\n\n![Inside](media/inside.png)\n",
+    },
+  }));
+  const planned = await cliRun(workspace, ["plan"], api(siteRoutes()));
+
+  assert.equal(planned.result.ready, false);
+  assert.ok(
+    planned.result.problems.some((problem) => problem.code === "pages.cover_image_unused" && problem.file === "pages/story.md"),
+    JSON.stringify(planned.result.problems),
+  );
+});
+
+test("plan names a page image the site does not hold, and leaves images this plan uploads to the media step", async (site) => {
+  const foreign = "99999999-9999-4999-8999-999999999999";
+  const workspace = await fixture(site, wholeWorkspace({
+    files: {
+      "pages/index.pm.json": {
+        type: "doc",
+        content: [{ type: "taprootImage", attrs: { imageId: foreign, src: "", urls: [], width: 10, height: 10, alt: "Elsewhere" } }],
+      },
+    },
+  }));
+  const wire = api([
+    // The library holds only the images it is asked about that are its own.
+    {
+      method: "GET",
+      pattern: SITE_IMAGES,
+      reply: (call) => ({
+        images: call.query.getAll("imageIds").filter((imageId) => imageId === IMAGE_ID)
+          .map((imageId) => ({ image: { imageId }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" })),
+        nextPageToken: "",
+      }),
+    },
+    ...siteRoutes(),
+  ]);
+  const planned = await cliRun(workspace, ["plan"], wire);
+
+  assert.equal(planned.result.ready, false);
+  assert.deepEqual(
+    planned.result.problems.map(({ code, file, field }) => [code, file, field]),
+    [["plan.page_image_missing", "pages/index.pm.json", foreign]],
+  );
+  // pages/about.md names media/studio.png, which this plan uploads: not a problem.
+  assert.ok(!planned.result.problems.some((problem) => problem.file === "pages/about.md"));
+});
+
+test("a planned page that an upload's deduplication leaves unchanged is skipped, not refused", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  // The site's presentation revision follows the theme save, as a real site's does.
+  const siteState = { presentationRevision: PRESENTATION_REVISION };
+  const wire = api(siteRoutes({ site: siteState }));
+  const first = await cliRun(workspace, ["plan"], wire);
+  const firstApply = await cliRun(workspace, ["apply", "--plan", first.result.planHash], wire);
+  assert.equal(firstApply.exitCode, 0, firstApply.stderr);
+  siteState.presentationRevision = firstApply.result.applied.find((entry) => entry.step === "theme push").result.revision;
+  // The page is pushed with the uploaded image; then its media record is lost,
+  // so the next plan uploads the file again and sees the page as changed.
+  const media = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  delete media.media["media/studio.png"];
+  await writeFile(workspacePath(workspace, ".taproot-site-media.json"), `${JSON.stringify(media, undefined, 2)}\n`);
+  const patchesBefore = wire.matching("PATCH", PAGE_BY_ID).length;
+
+  const second = await cliRun(workspace, ["plan"], wire);
+  assert.equal(second.result.steps.find((entry) => entry.step === "pages push").status, "ready");
+  const applied = await cliRun(workspace, ["apply", "--plan", second.result.planHash], wire);
+
+  // The upload returns the image the page already shows, so the page is
+  // unchanged and skipped rather than refused.
+  assert.equal(applied.exitCode, 0, applied.stderr);
+  assert.equal(applied.result.applied.find((entry) => entry.step === "pages push").result.updated, 0);
+  assert.equal(
+    wire.matching("PATCH", PAGE_BY_ID).slice(patchesBefore).filter((call) => call.body.path === "about").length,
+    0,
+  );
+});
+
+test("every apply step uses the configuration apply planned with, even if taproot-site.json changes", async (site) => {
+  const otherSite = "77777777-7777-4777-8777-777777777777";
+  const workspace = await fixture(site, wholeWorkspace());
+  const routes = siteRoutes();
+  const index = routes.findIndex((route) => route.method === "POST" && route.pattern === REQUEST_UPLOAD);
+  const original = routes[index];
+  routes[index] = {
+    ...original,
+    reply: async (call, calls) => {
+      const config = JSON.parse(await readFile(workspace.configPath, "utf8"));
+      await writeFile(workspace.configPath, `${JSON.stringify({ ...config, siteId: otherSite })}\n`);
+      return typeof original.reply === "function" ? await original.reply(call, calls) : original.reply;
+    },
+  };
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  assert.equal(applied.exitCode, 0, applied.stderr);
+  assert.ok(!wire.calls.some((call) => call.pathname.includes(otherSite) || call.query?.toString().includes(otherSite)));
+});
+
+test("a planned page whose source is deleted while an earlier apply step runs stops the pages step", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace());
+  const routes = siteRoutes();
+  const index = routes.findIndex((route) => route.method === "POST" && route.pattern === REQUEST_UPLOAD);
+  const original = routes[index];
+  routes[index] = {
+    ...original,
+    reply: async (call, calls) => {
+      await rm(workspacePath(workspace, "pages/about.md"), { force: true });
+      return typeof original.reply === "function" ? await original.reply(call, calls) : original.reply;
+    },
+  };
+  const wire = api(routes);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+
+  assert.equal(applied.result.error.code, "apply.plan_stale");
+  assert.equal(applied.result.error.field, "pages/about.md");
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+test("a 500-file media upload with long delivery URLs reports within the result bound and exits 0", async (site) => {
+  const files = {};
+  for (let index = 0; index < 500; index += 1) {
+    files[`media/batch/photo-with-a-long-descriptive-name-${String(index).padStart(3, "0")}.png`] = png(100 + index, 100);
+  }
+  const workspace = await fixture(site, files);
+  const imageIdFor = (index) => `55555555-5555-4555-8555-${String(index).padStart(12, "0")}`;
+  const longUrl = (index, width) => `https://cdn.example.test/${"signed/".repeat(20)}${index}-${width}.webp?X-Amz-Signature=${"a".repeat(256)}`;
+  let requested = 0;
+  const routes = [
+    {
+      method: "POST",
+      pattern: REQUEST_UPLOAD,
+      reply: (call) => {
+        requested += 1;
+        return {
+          presignedUrl: PRESIGNED_URL,
+          uploadId: imageIdFor(requested),
+          isDuplicate: false,
+          requiredHeaders: {
+            "Content-Type": call.body.contentType,
+            "Content-Length": String(call.body.fileSize),
+            "x-amz-meta-original-filename": call.body.fileName,
+          },
+        };
+      },
+    },
+    { method: "PUT", pattern: PRESIGNED_PUT, reply: () => new Response(null, { status: 200 }) },
+    {
+      method: "POST",
+      pattern: CONFIRM_UPLOAD,
+      reply: (call) => ({ image: { imageId: call.body.uploadId, processingState: "IMAGE_PROCESSING_STATE_PENDING" } }),
+    },
+    {
+      method: "GET",
+      pattern: SITE_IMAGES,
+      // Paged as the library pages, a hundred at a time.
+      reply: (call) => {
+        const start = Number(call.query.get("pageToken") || 0);
+        return {
+          images: Array.from({ length: Math.min(100, 500 - start) }, (_, offset) => {
+            const index = start + offset;
+            return {
+              image: {
+                imageId: imageIdFor(index + 1),
+                url: longUrl(index, 1200),
+                responsiveUrls: [320, 640, 960, 1280, 1920].map((width) => ({ minWidth: width, url: longUrl(index, width) })),
+                processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
+              },
+              processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
+            };
+          }),
+          nextPageToken: start + 100 < 500 ? String(start + 100) : "",
+        };
+      },
+    },
+  ];
+  const uploaded = await cliRun(workspace, ["media", "upload"], api(routes));
+  assert.equal(uploaded.exitCode, 0, uploaded.stderr);
+  assert.equal(uploaded.result.media.total, 500);
+  assert.equal(uploaded.result.media.itemsTruncated, true);
+  assert.ok(uploaded.result.media.items.length > 0);
+  assert.ok(uploaded.result.media.items.every((item) => !("media" in item) && !("src" in item)));
+  assert.ok(Buffer.byteLength(JSON.stringify(uploaded.result), "utf8") <= LIMITS.githubOutputBytes);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-media.json");
+  assert.equal(Object.keys(manifest.media).length, 500);
+  assert.equal(manifest.media["media/batch/photo-with-a-long-descriptive-name-000.png"].urls.length, 5);
+});
+
+test("delivery check's --production --url, --wait and --no-browser reach the check from the command line", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  // The about route is still propagating on the first look, so --wait has something to re-check.
+  let aboutReads = 0;
+  const routes = deliveryRoutes().map((route) => (route.pattern.source === "^\\/about\\/$"
+    ? { ...route, reply: () => (aboutReads++ === 0 ? new Response("", { status: 404 }) : route.reply()) }
+    : route));
+  const checked = await cliRun(
+    workspace,
+    ["delivery", "check", "--production", "--url", `${PUBLIC_ORIGIN}/`, "--wait", "1", "--no-browser"],
+    api(routes),
+  );
+  assert.equal(checked.exitCode, 0, checked.stderr);
+  assert.equal(checked.result.target.url, `${PUBLIC_ORIGIN}/`);
+  assert.equal(checked.result.target.resolvedFrom, "option");
+  assert.equal(checked.result.browser.reason, "disabled");
+  assert.equal(checked.result.propagation.waitedSeconds, 1);
+  assert.equal(checked.result.verdict, "delivered");
+});
+
+test("places search and select find the Taproot place a review names, in one billed session", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PLACES_SEARCH,
+      reply: {
+        predictions: [
+          { googlePlaceId: "ChIJ-blue-bottle", name: "Blue Bottle Coffee", formattedAddress: "300 Webster St, Oakland" },
+          // Google ids run past 100 characters; Taproot stores up to 256.
+          { googlePlaceId: `ChIJ${"x".repeat(252)}`, name: "Blue Bottle Coffee", formattedAddress: "4270 Broadway, Oakland" },
+        ],
+      },
+    },
+    {
+      method: "POST",
+      pattern: PLACES_SELECT,
+      reply: { id: TYPED_PLACE_ID, name: "Blue Bottle Coffee", category: "Cafe", city: "Oakland" },
+    },
+  ]);
+  const searched = await cliRun(workspace, ["places", "search", "Blue", "Bottle", "Oakland"], wire);
+  assert.equal(searched.exitCode, 0, searched.stderr);
+  assert.equal(searched.result.predictions[0].googlePlaceId, "ChIJ-blue-bottle");
+  assert.equal(searched.result.predictions[1].googlePlaceId.length, 256);
+  const search = wire.matching("GET", PLACES_SEARCH)[0];
+  assert.equal(search.query.get("query"), "Blue Bottle Oakland");
+  assert.equal(search.query.get("siteId"), SITE_ID);
+  assert.equal(search.query.get("sessionToken"), searched.result.sessionToken);
+
+  const selected = await cliRun(workspace, ["places", "select", "ChIJ-blue-bottle", searched.result.sessionToken], wire);
+  assert.equal(selected.exitCode, 0, selected.stderr);
+  assert.equal(selected.result.place.placeId, TYPED_PLACE_ID);
+  assert.deepEqual(wire.matching("POST", PLACES_SELECT)[0].body, {
+    siteId: SITE_ID,
+    googlePlaceId: "ChIJ-blue-bottle",
+    sessionToken: searched.result.sessionToken,
+  });
+
+  const longId = searched.result.predictions[1].googlePlaceId;
+  const selectedLong = await cliRun(workspace, ["places", "select", longId, searched.result.sessionToken], wire);
+  assert.equal(selectedLong.exitCode, 0, selectedLong.stderr);
+  assert.equal(wire.matching("POST", PLACES_SELECT)[1].body.googlePlaceId, longId);
+
+  for (const selection of [
+    ["ChIJ-blue-bottle", "not-a-token"],
+    ["ChIJ-blue-bottle"],
+    ["x".repeat(257), searched.result.sessionToken],
+    ["ChIJ.blue bottle", searched.result.sessionToken],
+  ]) {
+    const usage = await cliRun(workspace, ["places", "select", ...selection], wire);
+    assert.equal(usage.exitCode, 2);
+    assert.equal(usage.result.error.code, "places.selection_invalid");
+  }
+  assert.equal(wire.matching("POST", PLACES_SELECT).length, 2);
+});
+
+test("places search refuses a prediction whose Google place id Taproot could not store", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  for (const googlePlaceId of ["x".repeat(257), "ChIJ.blue bottle"]) {
+    const wire = api([
+      { method: "GET", pattern: PLACES_SEARCH, reply: { predictions: [{ googlePlaceId, name: "Blue Bottle Coffee" }] } },
+    ]);
+    const searched = await cliRun(workspace, ["places", "search", "Blue", "Bottle"], wire);
+    assert.notEqual(searched.exitCode, 0);
+    assert.equal(searched.result.error.code, "api.place_contract");
+  }
 });

@@ -5,6 +5,17 @@ import path from "node:path";
 
 import { atomicWriteFile } from "./atomic-file.js";
 import { hasAsciiControl, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import {
+  noteEntry,
+  noteExists,
+  noteFileDeleted,
+  noteFileMissing,
+  noteFileRead,
+  noteFileWritten,
+  noteStreamMissing,
+  noteStreamOpened,
+  noteWalk,
+} from "./workspace-ledger.js";
 
 /**
  * The local workspace: what `pull` writes, what the push verbs read back, and
@@ -713,6 +724,7 @@ export async function ensureWorkspaceDirectory(workspaceDir, relativeDirectory =
 export async function readWorkspaceFile(workspaceDir, relativePath, maximumBytes) {
   const filePath = resolveWorkspacePath(workspaceDir, relativePath);
   if (!await requireRealDirectoryChain(workspaceDir, relativePath)) {
+    noteFileMissing(relativePath);
     throw new SiteAuthoringError(
       "workspace.file_missing",
       `Workspace file '${relativePath}' does not exist.`,
@@ -744,10 +756,13 @@ export async function readWorkspaceFile(workspaceDir, relativePath, maximumBytes
       if (bytesRead === 0) break;
       total += bytesRead;
     }
-    return buffer.subarray(0, total);
+    const contents = buffer.subarray(0, total);
+    noteFileRead(relativePath, contents);
+    return contents;
   } catch (error) {
     if (error instanceof SiteAuthoringError) throw error;
     if (error && typeof error === "object" && error.code === "ENOENT") {
+      noteFileMissing(relativePath);
       throw new SiteAuthoringError(
         "workspace.file_missing",
         `Workspace file '${relativePath}' does not exist.`,
@@ -778,6 +793,7 @@ const STREAM_HEADER_BYTES = 4096;
 export async function openWorkspaceFileStream(workspaceDir, relativePath, maximumBytes) {
   const filePath = resolveWorkspacePath(workspaceDir, relativePath);
   if (!await requireRealDirectoryChain(workspaceDir, relativePath)) {
+    noteStreamMissing(relativePath);
     throw new SiteAuthoringError(
       "workspace.file_missing",
       `Workspace file '${relativePath}' does not exist.`,
@@ -812,6 +828,7 @@ export async function openWorkspaceFileStream(workspaceDir, relativePath, maximu
       total += bytesRead;
     }
     const opened = handle;
+    noteStreamOpened(relativePath, byteLength, modifiedMilliseconds, header.subarray(0, total));
     return {
       byteLength,
       modifiedMilliseconds,
@@ -850,6 +867,7 @@ export async function openWorkspaceFileStream(workspaceDir, relativePath, maximu
     await handle?.close().catch(() => {});
     if (error instanceof SiteAuthoringError) throw error;
     if (error && typeof error === "object" && error.code === "ENOENT") {
+      noteStreamMissing(relativePath);
       throw new SiteAuthoringError(
         "workspace.file_missing",
         `Workspace file '${relativePath}' does not exist.`,
@@ -885,6 +903,12 @@ export async function readWorkspaceJson(workspaceDir, relativePath, maximumBytes
  * read outside the workspace.
  */
 export async function inspectWorkspaceEntry(workspaceDir, relativePath) {
+  const kind = await classifyWorkspaceEntry(workspaceDir, relativePath);
+  noteEntry(relativePath, kind);
+  return kind;
+}
+
+async function classifyWorkspaceEntry(workspaceDir, relativePath) {
   const target = resolveWorkspacePath(workspaceDir, relativePath);
   // The leaf `lstat` below refuses a linked final component; this refuses a
   // linked one anywhere above it, which is how `media/link/sub` would otherwise
@@ -929,6 +953,12 @@ export async function inspectWorkspaceEntry(workspaceDir, relativePath) {
  * missing.
  */
 export async function workspaceFileExists(workspaceDir, relativePath) {
+  const exists = await regularFileExists(workspaceDir, relativePath);
+  noteExists(relativePath, exists);
+  return exists;
+}
+
+async function regularFileExists(workspaceDir, relativePath) {
   const filePath = resolveWorkspacePath(workspaceDir, relativePath);
   if (!await requireRealDirectoryChain(workspaceDir, relativePath)) return false;
   let stats;
@@ -982,6 +1012,7 @@ export async function writeWorkspaceFile(workspaceDir, relativePath, contents, {
         ),
     },
   });
+  noteFileWritten(relativePath, contents);
   return relativePath;
 }
 
@@ -998,7 +1029,7 @@ export async function writeWorkspaceJson(workspaceDir, relativePath, value) {
  * exists to prevent.
  */
 export async function deleteWorkspaceFile(workspaceDir, relativePath) {
-  if (!await workspaceFileExists(workspaceDir, relativePath)) return false;
+  if (!await regularFileExists(workspaceDir, relativePath)) return false;
   try {
     await unlink(resolveWorkspacePath(workspaceDir, relativePath));
   } catch (error) {
@@ -1009,6 +1040,7 @@ export async function deleteWorkspaceFile(workspaceDir, relativePath) {
       { field: relativePath },
     );
   }
+  noteFileDeleted(relativePath);
   return true;
 }
 
@@ -1040,8 +1072,12 @@ export async function walkWorkspaceFiles(
   extensions,
   { segmentPattern = SAFE_SEGMENT, segmentDescription = "letters, digits, '.', '_', and '-'" } = {},
 ) {
+  const filter = `${extensions.join(",")}|${segmentPattern}`;
   const rootPath = resolveWorkspacePath(workspaceDir, relativeRoot);
-  if (!await requireRealDirectoryChain(workspaceDir, relativeRoot, { includeLeaf: true })) return [];
+  if (!await requireRealDirectoryChain(workspaceDir, relativeRoot, { includeLeaf: true })) {
+    noteWalk(relativeRoot, filter, []);
+    return [];
+  }
   const collected = [];
   const queue = [{ directory: rootPath, relative: relativeRoot, depth: 0 }];
   while (queue.length > 0) {
@@ -1088,7 +1124,9 @@ export async function walkWorkspaceFiles(
       }
     }
   }
-  return collected.sort();
+  collected.sort();
+  noteWalk(relativeRoot, filter, collected);
+  return collected;
 }
 
 /**
@@ -1322,6 +1360,11 @@ export async function readMediaManifest(workspaceDir, expectedSiteId) {
       MEDIA_MANIFEST_FILE_NAME,
     ),
   };
+}
+
+/** The alt text a media record keeps when its file is uploaded again: the author's own, or none. */
+export function recordedAlt(entry) {
+  return typeof entry?.alt === "string" ? entry.alt : "";
 }
 
 export async function writeMediaManifest(workspaceDir, mediaManifest) {

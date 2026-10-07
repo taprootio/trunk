@@ -66,8 +66,15 @@ const FIELD_HELP = Object.freeze({
     type: "UUID",
     required: true,
     description:
-      "The Taproot place being reviewed. The site fills in its name, address and coordinates from this record; this "
-      + "CLI does not search for places.",
+      "The Taproot place being reviewed. The site fills in its name, address and coordinates from this record. Find "
+      + "it with 'places search <name and city>' and 'places select <googlePlaceId> <sessionToken>'.",
+  },
+  place: {
+    type: "UUID",
+    required: false,
+    description:
+      "The Taproot place an article or album is about, found the same way as a place review's placeId. Omit it to "
+      + "leave the page's place as it is; an empty value clears it.",
   },
   rating: {
     type: Object.keys(PLACE_REVIEW_RATINGS).join(" | "),
@@ -172,7 +179,7 @@ const TYPE_DETAILS = Object.freeze({
       { displayDate: "2023-06-18", coverImageId: EXAMPLE_IMAGE_ID },
       { body: PARAGRAPH("We parked at the end of the gravel road and walked the last mile.") },
     ),
-    dataFields: ["body: ProseMirror document (required, not empty)"],
+    dataFields: ["body: ProseMirror document (required, not empty)", "place: UUID of a Taproot place (optional; \"\" clears it)"],
   },
   [TEMPLATE_RECIPE]: {
     displayName: "Recipe",
@@ -240,6 +247,7 @@ const TYPE_DETAILS = Object.freeze({
       "introductionBody: ProseMirror document (optional)",
       "images: [{ imageId, caption, width, height }]; at least one",
       "seamless: true | false and borderWidth: 0-20 (optional; omitted inherits the site default)",
+      "place: UUID of a Taproot place (optional; \"\" clears it)",
     ],
   },
   [TEMPLATE_PLACE_REVIEW]: {

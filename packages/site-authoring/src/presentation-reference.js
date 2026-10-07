@@ -227,14 +227,25 @@ const THEME_GROUPS = Object.freeze([
     summary: "Choose families and weights, then tune type, spacing, radius, and fluid viewport scales together.",
     fields: Object.freeze([
       ...["fontBody", "fontHeadings", "fontBrand", "fontMonospace"].map((name) =>
-        themeField(name, "CSS font-family; empty inherits the consuming surface's fallback.")
+        themeField(
+          name,
+          "CSS font-family starting with a family from 'help fonts'; an unlisted family is not loaded. Empty "
+            + "inherits the consuming surface's fallback.",
+        )
       ),
       themeField(
         "fontMenu",
-        "CSS font-family for navigation menu items and group labels; empty falls back to fontBody, never to headings.",
+        "CSS font-family for navigation menu items and group labels, starting with a family from 'help fonts'; "
+          + "empty falls back to fontBody, never to headings.",
       ),
       ...["fontWeightBody", "fontWeightHeadings", "fontWeightBrand", "fontWeightMonospace", "fontWeightMenu"].map(
-        (name) => themeField(name, "CSS font-weight: 1–1000, normal/bold/lighter/bolder, or a CSS-wide keyword."),
+        (name) =>
+          themeField(
+            name,
+            "CSS font-weight. For a catalog family it must be one of the family's weights in 'help fonts' "
+              + "(normal is 400, bold 700); validate and theme push refuse any other value, which would fail the "
+              + "publish. Unset, it defaults to 400 for body and monospace and 700 for headings, brand and menu.",
+          ),
       ),
       themeField("rootFontSize", "Root font size in px.", { minimum: 1, warningMaximum: 100 }),
       themeField("typeRatio", "Modular type-scale ratio.", { exclusiveMinimum: 1, warningMaximum: 1.3 }),
@@ -323,11 +334,14 @@ export const ROLE_RESOLUTION = Object.freeze({
     + "makes a mapping a pin: the resolver recompiles every token the marker leaves out, so a mapping it does not "
     + "name is a cached value that is never applied. To pin a token, set the mapping and add the token to the "
     + "marker; to let a role reach it, drop the token from the marker or delete the mapping. A document that "
-    + "carries no explicitMappingTokens at all predates the marker, and every mapping in it is still a pin.",
+    + "carries no explicitMappingTokens at all predates the marker, and every mapping in it is still a pin. The "
+    + "marker is the root's alone: a mapping in a context's semanticMappings is a pin by itself, needs no marker, "
+    + "and a context cannot carry one.",
     "Otherwise the token is compiled from the roles, and an APCA contrast check may nudge an action or ink stop so "
     + "the pair stays readable.",
     "Otherwise the Espalier default mapping applies.",
-    "A context rebinds roles, lightness, tones and pins for one zone with the same precedence inside that zone.",
+    "A context rebinds roles, lightness, tones and pins for one zone with the same precedence inside that zone; its "
+    + "pins need no explicitMappingTokens.",
   ]),
 });
 
@@ -392,12 +406,12 @@ export function getThemeReference() {
       "Check the filled action before anything else looks finished. Its ramp stop is chosen by the engine near a mid-band target rather than named by the theme, so seating the ramp — the remedy for every other anchored token — cannot move it, and declaring an action role does not either. The only lever is pinning semanticMappings.actionBackground.",
       "A brand colour between roughly L 0.55 and L 0.83 cannot be a button surface at its own lightness: across that band no ink, not even pure black, reaches the Lc 75 APCA asks of a button label. Espalier then walks the label to the far end of the ramp and the button renders inverted — a dark surface carrying a pale label where the swatch wanted the opposite. Pin the stop just past the band instead. A gold at L 0.81 pinned to a tone at L 0.85 carries a dark label at Lc 76; the same gold left to the engine compiles to a brown one.",
       "Name a tone as a lowercase slug — gold-band, not goldBand. theme push refuses any other name, and refuses a mapping that names a tone its theme or context never declares.",
-      "theme push runs Espalier's fit report over the root and every context in both schemes and lists each finding as a warning reading 'fit lint <id>'; theme push --dry-run does the same and writes nothing, and validate does it for an offline fixture. Read the lints before calling a theme done: action-anchor-inversion names a filled action that rendered the opposite way round from the swatches it declares, apca-target-unmet names a pair enforcement could not rescue, and action-canvas-separation and link-hover-ordering cover an action lost in its canvas and a hover weaker than its link. A lint is a warning, not a refusal, so a push still goes through with one — the lints are what tell an agent the design did not survive the compile.",
+      "theme push runs Espalier's fit report over the root and every context in both schemes and lists each finding as a warning reading 'fit lint <id>'; theme push --dry-run does the same and writes nothing, and validate does it for an offline fixture. Read the lints before calling a theme done: action-anchor-inversion names a filled action that rendered the opposite way round from the swatches it declares, apca-target-unmet names a pair enforcement could not rescue, and action-canvas-separation and link-hover-ordering cover an action lost in its canvas and a hover weaker than its link. A lint is a warning, not a refusal, so a push still goes through with one — the lints are what tell an agent the design did not survive the compile. Contrast and status-color warnings end with 'Nearest passing value: …' when the CLI finds one: it applied that value to a copy of the theme and checked that the warning clears without raising another, so start there and check again. validate and theme push refuse a font weight a catalog family has no face for (theme.font_weight_unavailable), because the publish would fail, and name the nearest weight it has.",
       "Add named contexts for whole zones, including inverted zones, and rebind lightness when the zone changes brightness. A context that declares its own action needs its own actionBackground pin: without one it compiles at the engine's mid-band stop, and where the root is pinned it carries the root's pin instead, whatever action colour the context declares.",
       "Tune typography, type/space ratios, radii, and viewport interpolation as one layout system.",
       "Typography is per scheme on purpose: light and dark set their own moods, so a heading, body, or brand face that differs between them is a design choice, and theme push never warns about it.",
       "Retune danger/success/warning/info through intents without changing their meanings; design data palettes separately.",
-      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model. pull keeps only authored pins there and lists them in explicitMappingTokens; a mapping the marker does not name is never applied, so a hand-added pin needs its token added to the marker or theme push reports it as inert.",
+      "Use semanticMappings only for meanings roles and contexts cannot express; scattered pins shadow the coherent model. pull keeps only authored pins there and lists them in explicitMappingTokens; a mapping the marker does not name is never applied, so a hand-added pin at the root needs its token added to the marker or theme push reports it as inert. A pin inside a context needs no marker.",
       "Run theme push --dry-run and clear its warnings, fit lints included; then run theme push and verify text, actions, focus states, and both schemes in authoring previews.",
     ],
     example: THEME_EXAMPLE,

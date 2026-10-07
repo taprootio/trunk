@@ -21,6 +21,7 @@ import {
   updateCredentialMetadata,
 } from "./credentials.js";
 import { SiteAuthoringError } from "./errors.js";
+import { withinByteBudget } from "./problems.js";
 import { exchangeSiteAuthoringToken, withRefusalGuidance } from "./api.js";
 import { ApiError, SiteApiClient } from "./transport.js";
 import { readStoredApiBaseUrl } from "./settings.js";
@@ -125,6 +126,9 @@ function siteMissingError() {
 }
 
 async function loadConfig(invocation) {
+  // apply hands its steps the configuration it planned with, so a
+  // taproot-site.json edited mid-apply is not read by a later step.
+  if (invocation.resolvedConfig !== undefined) return invocation.resolvedConfig;
   return await loadSiteConfig({
     cwd: invocation.cwd ?? process.cwd(),
     configPath: invocation.configPath,
@@ -550,6 +554,15 @@ export function boundedList(values, maximum) {
   return items.length === values.length
     ? { items, count: values.length }
     : { items, count: values.length, truncated: true };
+}
+
+/**
+ * The leading values whose JSON fits `budget` bytes, for a list whose entries
+ * vary in length: a count bound alone can still pass the 64 KiB result bound.
+ */
+export function boundedByBytes(values, budget) {
+  const items = withinByteBudget(values, budget);
+  return items.length === values.length ? { items } : { items, truncated: true };
 }
 
 export function successResult(verb, siteId, payload = {}) {

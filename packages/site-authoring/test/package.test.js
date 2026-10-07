@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "5.0.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.2.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -76,6 +76,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // The complete offline fixture the README's first command validates and
     // 'help fixture' locates (TR00647). About 32 KB unpacked, 17 KB of it the
     // light and dark theme pair in taproot-styles.json.
+    "examples/riverbend-wellness/.taproot-site-media.json",
     "examples/riverbend-wellness/manifest.fixture.json",
     "examples/riverbend-wellness/nav.json",
     "examples/riverbend-wellness/pages/green-smoothie.md",
@@ -131,12 +132,14 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/delivery-browser.js",
     "src/delivery-check.js",
     "src/errors.js",
+    "src/espalier-shared.js",
     "src/field-schema.json",
     "src/field-validation.js",
     // The one home for the offline fixture contract: validate enforces it and
     // 'help fixture' states it from the same constants (TR00647).
     "src/fixture-contract.js",
     "src/fixture-init.js",
+    "src/font-catalog.js",
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-workspace.js",
@@ -149,6 +152,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/json-path-diff.js",
     "src/output.js",
     "src/presentation-reference.js",
+    "src/problems.js",
     "src/progress.js",
     "src/redirects-contract.js",
     "src/redirects-workspace.js",
@@ -160,6 +164,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/staging-check.js",
     "src/surface.js",
     "src/theme-projection.js",
+    "src/theme-proposals.js",
     "src/theme-validation.js",
     "src/transport.js",
     "src/typed-page-reference.js",
@@ -178,6 +183,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/media-upload.js",
     "src/verbs/nav-push.js",
     "src/verbs/pages-push.js",
+    "src/verbs/places.js",
+    "src/verbs/plan.js",
     "src/verbs/preview-page.js",
     "src/verbs/preview-revoke.js",
     "src/verbs/pull.js",
@@ -197,6 +204,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // Reads a video's codecs and rewrites it as an MP4 with its index first, without
     // re-encoding, before `media upload` sends it (TR01110).
     "src/video-prepare.js",
+    "src/workspace-check.js",
+    "src/workspace-ledger.js",
     "src/workspace.js",
   ]);
 });

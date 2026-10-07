@@ -178,7 +178,8 @@ const AUTHORING_PREVIEW_FIELD_ERRORS = Object.freeze({
   ],
   [AUTHORING_PREVIEW_FIELDS.staging]: [
     "preview.staging_unavailable",
-    "The site does not have an available staging hostname for authoring previews.",
+    "The site's staging address is not ready for previews. If the site has never deployed to staging, run "
+      + "'deploy --staging' once; otherwise check its staging host with 'taproot-site status'.",
   ],
   [AUTHORING_PREVIEW_FIELDS.expiry]: ["preview.expired", "The authoring preview has expired."],
   [AUTHORING_PREVIEW_FIELDS.readiness]: ["preview.not_ready", "The authoring preview is not ready for a handoff."],
@@ -231,6 +232,11 @@ function requireIdentifier(value, code, field) {
     throw new SiteAuthoringError(code, `Taproot returned an invalid ${field}.`, { field });
   }
   return value;
+}
+
+/** A Google place id as Taproot stores it: the server's characters and its 256-character column. */
+export function isGooglePlaceId(value) {
+  return typeof value === "string" && value.length <= 256 && /^[A-Za-z0-9_-]+$/u.test(value);
 }
 
 function requireCanonicalUuid(value, code, field) {
@@ -872,6 +878,57 @@ export async function listVideos(client, siteId, requestOptions = {}) {
     if (videos.length >= MAXIMUM_IMAGES) break;
   }
   return { videos, truncated: true };
+}
+
+/**
+ * Google Places autocomplete for a place review (TR01003). A key searches for
+ * the site it was issued for; every search and the select that follows share
+ * `sessionToken`, which is what groups them into one billed session.
+ */
+export async function searchPlaces(client, siteId, { text: searchText, sessionToken }) {
+  const search = query([["query", searchText], ["siteId", siteId], ["sessionToken", sessionToken]]);
+  const response = requireObject(
+    await client.request(`v1/places/search${search}`),
+    "api.place_contract",
+    "place search",
+  );
+  return (Array.isArray(response.predictions) ? response.predictions : []).map((value) => {
+    const prediction = requireObject(value, "api.place_contract", "place prediction");
+    return {
+      googlePlaceId: requireGooglePlaceId(prediction.googlePlaceId),
+      name: text(prediction.name),
+      formattedAddress: text(prediction.formattedAddress),
+    };
+  });
+}
+
+function requireGooglePlaceId(value) {
+  if (!isGooglePlaceId(value)) {
+    throw new SiteAuthoringError("api.place_contract", "Taproot returned an invalid googlePlaceId.", { field: "googlePlaceId" });
+  }
+  return value;
+}
+
+/** Records a prediction as a Taproot place, ending the search's billed session, and returns its id. */
+export async function selectPlace(client, siteId, { googlePlaceId, sessionToken }) {
+  const place = requireObject(
+    await client.request("v1/places/select", {
+      method: "POST",
+      body: { siteId, googlePlaceId, sessionToken },
+    }),
+    "api.place_contract",
+    "selected place",
+  );
+  return {
+    // Any UUID version: the server mints place ids.
+    placeId: requireIdentifier(place.id, "api.place_contract", "id"),
+    name: text(place.name),
+    category: text(place.category),
+    address: text(place.address),
+    city: text(place.city),
+    region: text(place.region),
+    country: text(place.country),
+  };
 }
 
 /**

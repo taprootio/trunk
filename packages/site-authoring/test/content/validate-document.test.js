@@ -841,6 +841,42 @@ test("accepts a link mark carrying every attribute the extension declares", () =
   }));
 });
 
+test("holds link rel and target to the renderer's vocabularies (TR01190)", async (testContext) => {
+  const link = (attrs) =>
+    doc({
+      type: "paragraph",
+      content: [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "/classes", ...attrs } }] }],
+    });
+  for (
+    const attrs of [
+      { rel: "nofollow" },
+      { rel: "sponsored nofollow" },
+      { rel: "UGC  me" },
+      { rel: "external author license tag bookmark help prev next privacy-policy terms-of-service" },
+      { rel: "", target: "" },
+      { rel: "   ", target: "  " },
+      { rel: null, target: null },
+      { target: "_blank" },
+      { target: "_self" },
+    ]
+  ) {
+    await testContext.test(`accepts ${JSON.stringify(attrs)}`, () => assertValid(link(attrs)));
+  }
+  await testContext.test("refuses an unknown rel token, naming it", () => {
+    const result = assertRejects(link({ rel: "nofollow follow" }), "content.link_rel");
+    assert.match(result.errors[0].message, /"follow" is not one/u);
+  });
+  await testContext.test("refuses opener", () => {
+    assertRejects(link({ rel: "opener" }), "content.link_rel");
+  });
+  await testContext.test("refuses a non-string rel", () => {
+    assertRejects(link({ rel: ["nofollow"] }), "content.link_rel");
+  });
+  await testContext.test("refuses an unknown target", () => {
+    assertRejects(link({ target: "_top" }), "content.link_target");
+  });
+});
+
 test("accepts an ordered list exactly as the editor serialises it", async (testContext) => {
   const list = (attrs) => {
     const node = { type: "orderedList", content: [{ type: "listItem", content: [paragraph("one")] }] };
