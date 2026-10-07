@@ -8584,10 +8584,62 @@ test("deploy --staging stages an edited redirect map when nothing else is select
   const result = await deploy(invocation);
 
   assert.equal(result.ok, true);
+  assert.equal(wire.matching("GET", READINESS)[0].query.get("useExactPageSelection"), "true");
   assert.equal(wire.matching("POST", DEPLOY).length, 1);
   assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
   // Readiness here names no site-wide change, so the generic line is the fallback.
   assert.ok(progress.includes("Your site has changed since the last release. Staging publishes the change."));
+});
+
+test("deploy --staging excludes a deselected failed-media page from redirect readiness", async (site) => {
+  const workspace = await fixture(site);
+  const routes = deployRoutes().map((route) => route.pattern !== READINESS ? route : {
+    ...route,
+    reply: (call) => call.query.get("useExactPageSelection") === "true"
+      ? { state: "PAGE_PUBLISHING_READINESS_STATE_READY", approvedPageCount: 1, selectedPageCount: 0,
+        hasCandidateChanges: true, redirectsChanged: true, blockers: [] }
+      : { state: "PAGE_PUBLISHING_READINESS_STATE_FAILED", hasCandidateChanges: true,
+        blockers: [{ imageId: IMAGE_ID, uploadedName: "unselected.jpg",
+          state: "PAGE_PUBLISHING_READINESS_STATE_FAILED", message: "Processing failed." }] },
+  });
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW,
+      reply: { stagedPages: [{ pageId: ABOUT_PAGE_ID }], settingsChanges: [], navigationChanged: false } },
+    ...routes,
+  ]);
+  const { invocation } = invoke(workspace, wire, {
+    verb: "deploy", deployTarget: "staging", stagedPageIds: [], selectedSettingsTypes: [], includeNavigation: false,
+  });
+
+  const result = await deploy(invocation);
+
+  assert.equal(result.ok, true);
+  const readiness = wire.matching("GET", READINESS)[0];
+  assert.equal(readiness.query.get("useExactPageSelection"), "true");
+  assert.deepEqual(readiness.query.getAll("stagedPageIds"), []);
+  assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
+});
+
+test("deploy --staging retains the site-wide readiness fallback for a large page selection", async (site) => {
+  const workspace = await fixture(site);
+  const pageIds = Array.from({ length: 101 }, (_, index) =>
+    `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`);
+  const wire = api([
+    { method: "GET", pattern: DEPLOY_REVIEW,
+      reply: { stagedPages: pageIds.map(pageId => ({ pageId })), settingsChanges: [], navigationChanged: false } },
+    ...deployRoutes({ readiness: { approvedPageCount: 101, selectedPageCount: 101 } }),
+  ]);
+  const { invocation } = invoke(workspace, wire, {
+    verb: "deploy", deployTarget: "staging", stagedPageIds: pageIds, selectedSettingsTypes: [], includeNavigation: false,
+  });
+
+  const result = await deploy(invocation);
+
+  assert.equal(result.ok, true);
+  const readiness = wire.matching("GET", READINESS)[0];
+  assert.deepEqual(readiness.query.getAll("stagedPageIds"), []);
+  assert.equal(readiness.query.get("useExactPageSelection"), "false");
+  assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds, pageIds);
 });
 
 test("deploy --staging names the site-wide changes it publishes when nothing else is selected", async (site) => {

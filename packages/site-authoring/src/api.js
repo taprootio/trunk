@@ -1008,6 +1008,7 @@ export async function getPublishingReadiness(client, siteId, selection = {}) {
           ["stagedPageIds", selection.stagedPageIds],
           ["selectedSettingsTypes", selection.selectedSettingsTypes],
           ["includeNavigation", selection.includeNavigation],
+          ["useExactPageSelection", selection.useExactPageSelection],
         ])
       }`,
     )),

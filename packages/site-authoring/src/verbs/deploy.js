@@ -367,6 +367,7 @@ export async function deploy(invocation) {
     const readiness = await getPublishingReadiness(client, siteId, {
       ...candidate,
       stagedPageIds: stagedPageIds.length > MAXIMUM_READINESS_PAGE_IDS ? undefined : stagedPageIds,
+      useExactPageSelection: stagedPageIds.length === 0,
     });
     if (readiness.blockers.length > 0) {
       throw new SiteAuthoringError(
