@@ -22,7 +22,7 @@ import {
 } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import { checkStagingRedirects } from "../staging-check.js";
+import { inspectStagingPreview } from "../staging-check.js";
 import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
 
@@ -160,31 +160,6 @@ function reportReadiness(readiness) {
     blockers: blockers.items,
     ...(blockers.truncated ? { blockersTruncated: true } : {}),
   };
-}
-
-async function inspectStagingPreview(client, siteId, onProgress, now) {
-  let checks;
-  try {
-    checks = await checkStagingRedirects(client, siteId, onProgress, now);
-    if (!checks.redirects.verified) {
-      onProgress(
-        "Warning: staging redirects are not all verified. Check the reported mismatches against the staged release; run 'taproot-site redirects check' again once the deployment has completed.",
-      );
-    }
-  } catch {
-    onProgress(
-      "Warning: the deployment completed, but authenticated staging redirect checks could not finish. Run 'taproot-site redirects check' again.",
-    );
-    checks = { routeCheck: "unresolved", redirects: { verified: false, covered: false } };
-  }
-  try {
-    // Mint after checks so the final single-use URL has never been consumed.
-    const handoff = await mintStagingPreviewHandoff(client, siteId, { now });
-    return { ...checks, ...handoff };
-  } catch {
-    onProgress("Warning: the deployment completed, but a staging handoff could not be minted.");
-    return { ...checks, url: "", warning: "Staging handoff unavailable; run redirects check to retry." };
-  }
 }
 
 const PRESENTATION_REVIEW_GUIDANCE = "Open the URL once in a browser, then switch the site's theme toggle between "
@@ -428,7 +403,7 @@ export async function deploy(invocation) {
         nextStep: stagingPreview.url === "" ? "staging review" : "deploy --production",
       });
     }
-    const stagingPreview = await inspectStagingPreview(client, siteId, onProgress, now);
+    const { routeCheck, redirects, stagingPreview } = await inspectStagingPreview(client, siteId, onProgress, now);
     onProgress(REDIRECT_ACTIVATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {
       target,
@@ -441,8 +416,10 @@ export async function deploy(invocation) {
       deployment: completed,
       outcome: created.outcome,
       readiness: reportReadiness(readiness),
+      routeCheck,
+      redirects,
       stagingPreview,
-      nextStep: stagingPreview.redirects?.verified === true ? "deploy --production" : "redirects check",
+      nextStep: redirects.verified === true ? "deploy --production" : "redirects check",
     });
   });
 }

@@ -5,6 +5,7 @@ import { NAVIGATION_MAXIMUM_DEPTH } from "../api.js";
 import { loadSiteConfig } from "../config.js";
 import { VERB_VALIDATE } from "../constants.js";
 import { freeFormRootPresentation } from "../content/free-form-sections.js";
+import { autolinkWarnings } from "../content/link-warnings.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
 import {
   FIXTURE_CONTRACT_VERSION,
@@ -17,12 +18,14 @@ import {
 import { initializeFixture } from "../fixture-init.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
 import { FORMS_DIRECTORY } from "../forms-contract.js";
+import { authorWarnings, descriptionWarnings } from "../page-metadata.js";
 import { CHECK_AREA, collectProblems, refuseProblems } from "../problems.js";
 import { isRedirectMapRevision, REDIRECT_KIND_GONE, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
 import { boundedList, successResult } from "../session.js";
 import { SETTINGS_GROUPS } from "../settings-catalog.js";
 import { checkWorkspace } from "../workspace-check.js";
 import {
+  displayPagePath,
   MANIFEST_FILE_NAME,
   MANIFEST_VERSION,
   MEDIA_MANIFEST_FILE_NAME,
@@ -30,6 +33,7 @@ import {
   normalizePagePath,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_WORKSPACE_MODE_EDITABLE,
+  PAGE_WORKSPACE_MODE_METADATA_ONLY,
   PAGES_DIRECTORY,
   pageSourceFormat,
   readManifest,
@@ -39,6 +43,7 @@ import {
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
   workspaceFileExists,
+  SYSTEM_PAGE_NOT_FOUND_PATH,
 } from "../workspace.js";
 import { documentImageIds, isAuthorableTemplateType, placedVideoIds } from "../typed-pages.js";
 
@@ -289,6 +294,29 @@ function validateFixtureManifest(manifest) {
   for (const [index, entry] of manifest.pages.entries()) {
     const field = `pages[${index}]`;
     const pagePath = normalizePagePath(entry?.path);
+    // A page the fixture only names, such as a generated page navigation
+    // points at: it has identities and a path, and no source (TR01198).
+    if (isPlainObject(entry) && entry.workspaceMode === PAGE_WORKSPACE_MODE_METADATA_ONLY) {
+      // The home page and the 404 page are always editable sources.
+      if (
+        !isCanonicalUuid(entry.pageId) || !isCanonicalUuid(entry.resourceId) || pagePath === undefined
+        || Object.hasOwn(entry, "file") || pagePath === "" || pagePath === SYSTEM_PAGE_NOT_FOUND_PATH
+      ) {
+        fail(
+          "fixture.page_invalid",
+          `${field} is metadata-only, so it needs deterministic page/resource identities, a usable path other than `
+            + "the home page or the 404 page, and no file.",
+          field,
+        );
+      }
+      if (pageIds.has(entry.pageId) || resourceIds.has(entry.resourceId) || paths.has(pagePath)) {
+        fail("fixture.page_duplicate", `${field} duplicates a pageId, resourceId, or page path.`, field);
+      }
+      pageIds.add(entry.pageId);
+      resourceIds.add(entry.resourceId);
+      paths.add(pagePath);
+      continue;
+    }
     const extension = typeof entry?.file === "string"
       ? PAGE_SOURCE_EXTENSIONS.find((candidate) => entry.file.toLowerCase().endsWith(candidate))
       : undefined;
@@ -332,6 +360,9 @@ function validateFixtureManifest(manifest) {
     resourceIds.add(entry.resourceId);
     files.add(entry.file);
     paths.add(pagePath);
+  }
+  if (files.size === 0) {
+    fail("fixture.pages_invalid", "The fixture manifest must bind one or more editable pages.", "pages");
   }
   return { manifest, imageIds, videoIds, deliveryOrigins, pageIds, resourceIds, files, settingsEntityIds };
 }
@@ -691,7 +722,7 @@ export async function validateFixture(invocation = {}) {
       requireFixturePageBound(page, manifestByFile.get(page.file), { imageIds, videoIds, deliveryOrigins });
       return true;
     });
-    if (bound) validatedPages.push({ file: page.file, path: page.pagePath });
+    if (bound) validatedPages.push({ file: page.file, path: displayPagePath(page.pagePath) });
   }
   await collectProblems(problems, { area: "fixture", file: FIXTURE_MANIFEST_FILE_NAME }, () => {
     requireFixtureRecordsMatch(manifest, checked);
@@ -701,6 +732,11 @@ export async function validateFixture(invocation = {}) {
   refuseProblems(problems, "validate found problems in the fixture");
 
   const hints = pageHints(checked, onProgress);
+  const warnings = {
+    ...autolinkWarnings(checked.pages?.planned, onProgress),
+    ...descriptionWarnings(checked.pages?.planned, onProgress),
+    ...authorWarnings(checked.pages?.planned, onProgress),
+  };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
   );
@@ -715,6 +751,7 @@ export async function validateFixture(invocation = {}) {
     },
     ...validatedSummary(checked, validatedPages),
     hints,
+    ...warnings,
     proves: [
       "fixture structure and bounded files",
       "page content and named theme contexts",
@@ -756,8 +793,15 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
 
   const pages = checked.settingsOnly
     ? []
-    : checked.pages.planned.map((page) => ({ file: page.file, path: page.pagePath }));
+    : checked.pages.planned.map((page) => ({ file: page.file, path: displayPagePath(page.pagePath) }));
   const hints = pageHints(checked, onProgress);
+  const warnings = checked.settingsOnly
+    ? {}
+    : {
+      ...autolinkWarnings(checked.pages.planned, onProgress),
+      ...descriptionWarnings(checked.pages.planned, onProgress),
+      ...authorWarnings(checked.pages.planned, onProgress),
+    };
   onProgress(
     checked.settingsOnly
       ? "Validated the workspace's two themes, appearance, and footer without credentials or mutation."
@@ -769,6 +813,7 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
     workspace: { manifest: MANIFEST_FILE_NAME, settingsOnly: checked.settingsOnly },
     ...validatedSummary(checked, pages),
     hints,
+    ...warnings,
     proves: [
       "every page source: metadata, Markdown conversion, media references, content vocabulary, and section contexts",
       "page paths, templates, and system pages against the pages the pull recorded",

@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { atomicWriteFile } from "./atomic-file.js";
+import { parseAuthorReference } from "./authors-contract.js";
 import { hasAsciiControl, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 import {
   noteEntry,
@@ -290,6 +291,9 @@ export const WORKSPACE_LIMITS = Object.freeze({
   // untouched. Generous for any real authoring workspace, and an explicit
   // refusal rather than an unbounded buffer for one that is not.
   pulledBodyBytes: 64 * 1024 * 1024,
+  // The site's authors and the members a page can name: a few hundred people
+  // at most, but written by the site and read back, so bounded by bytes.
+  authorsBytes: 1024 * 1024,
   files: 5_000,
   directoryDepth: 12,
   relativePathBytes: 1_024,
@@ -341,22 +345,42 @@ export function canonicalDocumentHash(document_) {
 
 /**
  * What a push would send for a page, as one hash: the source's bytes plus the
- * title, path and description that travel with it (for a `.pm.json` source they
- * come from the manifest, not the file). `pages push` skips a page whose key
+ * title, path, description and author that travel with it (for a `.pm.json`
+ * source they come from the manifest, not the file). `pages push` skips a page whose key
  * equals the one recorded when the workspace last agreed with the site, so an
  * unedited page is never re-sent (an update would turn an approved page back
  * into a draft). A Markdown source also folds in the hash of the document it
  * converts to, because its media references resolve through the media manifest:
  * re-uploading an image changes what is sent without changing the file.
  */
-export function pageContentKey(sourceHash, { title, path, description }, documentHash = "") {
+export function pageContentKey(sourceHash, { title, path, description, author }, documentHash = "") {
+  // The author joins the key only when there is one (TR01196). Every page
+  // without an author keeps the key it has always had, so an existing workspace
+  // does not see each of its pages as changed and resend them all, which would
+  // turn approved pages back into drafts.
   return workspaceContentHash(
-    Buffer.from(JSON.stringify([sourceHash, title ?? "", path ?? "", description ?? "", documentHash]), "utf8"),
+    Buffer.from(
+      JSON.stringify([
+        sourceHash,
+        title ?? "",
+        path ?? "",
+        description ?? "",
+        documentHash,
+        ...(typeof author === "string" && author !== "" ? [author] : []),
+      ]),
+      "utf8",
+    ),
   );
 }
 
 function normalizeBaselineHash(value) {
   return typeof value === "string" && WORKSPACE_CONTENT_HASH.test(value) ? value : undefined;
+}
+
+// A folded author reference or "" (no author); anything else is a damaged member.
+function normalizeAuthorValue(value) {
+  if (value === undefined || value === "") return value;
+  return parseAuthorReference(value)?.value;
 }
 
 // A calendar date or "" (no date). Anything else is a damaged baseline member.
@@ -375,7 +399,7 @@ function normalizeBaselineDisplayDate(value) {
  * dropped here instead of becoming a path refusal inside the verb that exists
  * to repair the manifest.
  */
-function isDiscoverablePageSource(file) {
+export function isDiscoverablePageSource(file) {
   if (typeof file !== "string" || !file.startsWith(`${PAGES_DIRECTORY}/`)) return false;
   const segments = file.split("/");
   return segments.length > 1
@@ -434,9 +458,10 @@ export function pageSourceRegistry(manifest) {
     const contentKey = normalizeBaselineHash(declared?.contentKey);
     const revision = normalizePageBodyRevision(declared?.revision);
     const displayDate = normalizeBaselineDisplayDate(declared?.displayDate);
+    const author = normalizeAuthorValue(declared?.author);
     const baseline =
       remoteHash === undefined && sourceHash === undefined && revision === undefined && displayDate === undefined
-        && contentKey === undefined
+        && contentKey === undefined && author === undefined
         ? undefined
         : {
           ...(remoteHash === undefined ? {} : { remoteHash }),
@@ -444,12 +469,31 @@ export function pageSourceRegistry(manifest) {
           ...(contentKey === undefined ? {} : { contentKey }),
           ...(revision === undefined ? {} : { revision }),
           ...(displayDate === undefined ? {} : { displayDate }),
+          // The author the site held for the page when this workspace last
+          // reconciled with it: what a page's own author reference is
+          // compared with before anything is sent (TR01196).
+          ...(author === undefined || author === "" ? {} : { author }),
         };
     const record = {
       pageId: entry.pageId,
       file: entry.file,
       sourceFormat,
       baseline,
+      // What a generated page was when this workspace last pulled it, kept so a
+      // pull that cannot read its body does not forget it (TR01195).
+      ...(entry.generated !== null && typeof entry.generated === "object" && !Array.isArray(entry.generated)
+        ? { generated: entry.generated }
+        : {}),
+      // What this workspace says the page's metadata is; a .pm.json page's only
+      // record of it (TR01194).
+      metadata: {
+        title: typeof entry.title === "string" ? entry.title : "",
+        path: typeof entry.path === "string" ? entry.path : "",
+        description: typeof entry.description === "string" ? entry.description : "",
+        // The author reference the site holds for the page, or the one a
+        // `pages meta set --author` is waiting to send (TR01196).
+        author: normalizeAuthorValue(entry.author) ?? "",
+      },
       baselineDiscarded: declared !== undefined && baseline === undefined,
       formatMismatch: entry.sourceFormat !== undefined && entry.sourceFormat !== sourceFormat,
       duplicateSource: false,
@@ -1148,6 +1192,14 @@ export function normalizePagePath(value) {
     return undefined;
   }
   return trimmed;
+}
+
+/**
+ * A page path as results show it: the home page is '/', everything else as
+ * stored. The manifest and the wire keep the empty root path.
+ */
+export function displayPagePath(value) {
+  return (normalizePagePath(value) ?? value) || "/";
 }
 
 /**

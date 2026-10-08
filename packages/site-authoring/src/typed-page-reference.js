@@ -4,6 +4,7 @@ import {
   PLACE_REVIEW_RATINGS,
   TEMPLATE_ALBUM,
   TEMPLATE_ARTICLE,
+  TEMPLATE_GENERATED,
   TEMPLATE_PLACE_REVIEW,
   TEMPLATE_RECIPE,
 } from "./typed-pages.js";
@@ -34,6 +35,14 @@ const FIELD_HELP = Object.freeze({
     type: "string",
     required: true,
     description: "Selects the template. A page's template never changes after it is created.",
+  },
+  author: {
+    type: "string",
+    required: false,
+    description:
+      "Credits the page to a site author by handle (jane-doe) or to a site member who can create pages by email "
+      + "address. Pages are authorless unless you name one, and an author already on the page is never replaced. "
+      + "'authors list' shows who can be named; 'authors add' creates a site author without an account.",
   },
   displayDate: {
     type: "YYYY-MM-DD",
@@ -270,48 +279,106 @@ const TYPE_DETAILS = Object.freeze({
       "body: ProseMirror document (required, not empty)",
     ],
   },
+  [TEMPLATE_GENERATED]: {
+    displayName: "Generated page",
+    summary:
+      "A listing Taproot generates from the site's content: a tag, the tags index, a published year or month, a place "
+      + "archive, or a folder. You cannot create one; you customize its title, breadcrumb, description and introduction.",
+    documentExample: documentExample(
+      TEMPLATE_GENERATED,
+      {},
+      {
+        kind: "GENERATED_PAGE_KIND_TAG",
+        tagId: "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a",
+        year: 0,
+        month: 0,
+        countryCode: "",
+        regionCode: "",
+        citySlug: "",
+        categorySlug: "",
+        customTitle: "Trail notes",
+        breadcrumbTitle: "",
+        customDescription: "Field notes from the trails I walk most often.",
+        introductionBody: PARAGRAPH("Everything I have written about walking."),
+      },
+    ),
+    dataFields: [
+      "kind and the identity fields (tagId, year, month, countryCode, regionCode, citySlug, categorySlug): what the "
+      + "page is, written by pull. Leave them as pulled; a push that changes them is refused (pages.generated_identity)",
+      "customTitle: string; empty uses the generated title (the page's reader-facing title)",
+      "breadcrumbTitle: string; empty uses the generated label (used on pages beneath this one)",
+      "customDescription: string, at most 1000 characters, about 160 shown in search results; empty uses the "
+      + "introduction's first paragraph, else the generated description",
+      "introductionBody: ProseMirror document (optional), shown above the generated listing",
+    ],
+    note:
+      "The manifest's title and description for a generated page are what the site reports, recorded for reference; "
+      + "edit customTitle and customDescription here (or with 'pages meta set'), not the manifest. "
+      + "pages push updates the page and refuses to create one (pages.generated_create), move it (pages.generated_move) "
+      + "or change its identity (pages.generated_identity). The site derives the page's title and description from "
+      + "customTitle, customDescription and introductionBody, so what a push sends for them is ignored. A source the site "
+      + "no longer has a page for is reported and skipped by a whole-workspace push.",
+  },
 });
 
 export const TYPED_PAGE_TYPES = Object.freeze(Object.keys(TYPE_DETAILS));
+/** The templates a Markdown source can declare: every typed page but the update-only generated one. */
+export const MARKDOWN_PAGE_TYPES = Object.freeze(TYPED_PAGE_TYPES.filter((type) => type !== TEMPLATE_GENERATED));
 
 function typedReference(type) {
   const details = TYPE_DETAILS[type];
+  const generated = type === TEMPLATE_GENERATED;
   return Object.freeze({
     type,
     displayName: details.displayName,
     summary: details.summary,
     workspace: Object.freeze({
       directory: `${PAGES_DIRECTORY}/`,
-      sourceRule:
-        `One source file per page, exactly as for a free-form page: see '${CLI_BINARY_NAME} help page free-form'. `
-        + "The template is declared in the source (front matter 'template', or the .pm.json 'template' field) and is "
-        + "immutable after creation: pages push refuses a source whose template differs from the live page's "
-        + "(pages.template_immutable).",
-      pull:
-        "pull writes each page of this template as a .pm.json document, byte-stable across pulls. A page you authored as "
-        + "Markdown keeps its Markdown source, and a change made on the site since the last pull is reported as a conflict.",
+      sourceRule: generated
+        ? `One source file per page, exactly as for a free-form page: see '${CLI_BINARY_NAME} help page free-form'. `
+          + "A generated page exists only because the site's content produces it, so its source exists only after "
+          + "'pull' and is never created by hand."
+        : `One source file per page, exactly as for a free-form page: see '${CLI_BINARY_NAME} help page free-form'. `
+          + "The template is declared in the source (front matter 'template', or the .pm.json 'template' field) and is "
+          + "immutable after creation: pages push refuses a source whose template differs from the live page's "
+          + "(pages.template_immutable).",
+      pull: generated
+        ? "pull writes each generated page as a .pm.json document, byte-stable across pulls, and keeps your edits to it "
+          + "when the site's copy has not changed. A change made on the site since the last pull is reported as a conflict."
+        : "pull writes each page of this template as a .pm.json document, byte-stable across pulls. A page you authored as "
+          + "Markdown keeps its Markdown source, and a change made on the site since the last pull is reported as a conflict.",
       formats: Object.freeze([
-        Object.freeze({
+        ...(generated ? [] : [Object.freeze({
           extension: ".md",
           purpose: "Author the page as Markdown with front matter.",
           metadata: Object.freeze(
             frontMatterKeysFor(type).map((name) => Object.freeze({ name, ...FIELD_HELP[name] })),
           ),
-        }),
+        })]),
         Object.freeze({
           extension: ".pm.json",
-          purpose:
-            "The pulled form: { template, displayDate?, coverImageId?, data }. Title, path and description come from the manifest.",
+          purpose: generated
+            ? "The pulled form, and the only one: { template, data }. Path comes from the manifest; title and description "
+              + "are the custom ones in data."
+            : "The pulled form: { template, displayDate?, coverImageId?, data }. Title, path and description come from the manifest.",
           dataFields: Object.freeze(details.dataFields),
         }),
       ]),
     }),
-    markdown: Object.freeze({ body: details.body, example: details.markdownExample }),
+    ...(generated ? {} : { markdown: Object.freeze({ body: details.body, example: details.markdownExample }) }),
     document: Object.freeze({ example: details.documentExample, ...(details.note ? { note: details.note } : {}) }),
     workflow: Object.freeze([
-      Object.freeze({ command: `${CLI_BINARY_NAME} media upload`, result: "Upload cover and album images first." }),
+      ...(generated
+        ? [Object.freeze({
+          command: `${CLI_BINARY_NAME} pull, then pages meta set <path> --title/--description`,
+          result: "Pull the page, then set its custom title or description (or edit the .pm.json).",
+        })]
+        : [Object.freeze({ command: `${CLI_BINARY_NAME} media upload`, result: "Upload cover and album images first." })]),
       Object.freeze({ command: `${CLI_BINARY_NAME} validate`, result: "Check the workspace before sending anything." }),
-      Object.freeze({ command: `${CLI_BINARY_NAME} pages push`, result: "Create or update an unapproved draft." }),
+      Object.freeze({
+        command: `${CLI_BINARY_NAME} pages push`,
+        result: generated ? "Update the generated page's unapproved draft." : "Create or update an unapproved draft.",
+      }),
       Object.freeze({
         command: `${CLI_BINARY_NAME} approve, deploy --staging, deploy --production`,
         result: "Stage, review and promote, as for any page.",
@@ -335,9 +402,10 @@ function formatField(field) {
 export function formatTypedPageReference(page) {
   const markdown = page.workspace.formats.find((format) => format.extension === ".md");
   const json = page.workspace.formats.find((format) => format.extension === ".pm.json");
-  return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace (${page.workspace.directory}):\n  source rule           ${page.workspace.sourceRule}\n  pull                  ${page.workspace.pull}\n\nMarkdown front matter:\n${
-    markdown.metadata.map(formatField).join("\n")
-  }\n\nMarkdown body: ${page.markdown.body}\n\nMarkdown example:\n${page.markdown.example}\n.pm.json (${json.purpose})\n  data:\n${
+  const markdownSection = markdown === undefined
+    ? ""
+    : `Markdown front matter:\n${markdown.metadata.map(formatField).join("\n")}\n\nMarkdown body: ${page.markdown.body}\n\nMarkdown example:\n${page.markdown.example}\n`;
+  return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace (${page.workspace.directory}):\n  source rule           ${page.workspace.sourceRule}\n  pull                  ${page.workspace.pull}\n\n${markdownSection}.pm.json (${json.purpose})\n  data:\n${
     json.dataFields.map((field) => `    ${field}`).join("\n")
   }\n${page.document.note === undefined ? "" : `  ${page.document.note}\n`}\n.pm.json example:\n${
     JSON.stringify(page.document.example, null, 2)

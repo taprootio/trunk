@@ -148,7 +148,7 @@ test("the shipped example fixture validates without credentials, network, or wri
   );
   assert.deepEqual(json.validated.pages.items, [
     { file: "pages/green-smoothie.md", path: "recipes/green-smoothie" },
-    { file: "pages/index.md", path: "" },
+    { file: "pages/index.md", path: "/" },
     { file: "pages/journal-welcome.md", path: "journal/welcome" },
     { file: "pages/juice-bar.md", path: "reviews/juice-bar" },
     { file: "pages/studio-tour.pm.json", path: "albums/studio-tour" },
@@ -501,6 +501,64 @@ async function placeVideoOnVisitPage(fixture, videoId) {
   );
   await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
 }
+
+test("a metadata-only fixture page is bounded to what a linked page can be (TR01198)", async (context) => {
+  const linked = {
+    pageId: "f1000000-0000-4000-8000-000000000001",
+    resourceId: "f1000000-0000-4000-8000-000000000002",
+    path: "hike",
+    workspaceMode: "metadata-only",
+  };
+  const withPages = (edit) => async (fixture) => {
+    const manifestPath = path.join(fixture, "manifest.fixture.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    edit(manifest);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
+  };
+  const cases = [
+    ["a source file", withPages((manifest) => manifest.pages.push({ ...linked, file: "pages/hike.pm.json" })), "fixture.page_invalid"],
+    ["no path", withPages((manifest) => manifest.pages.push({ ...linked, path: undefined })), "fixture.page_invalid"],
+    ["the home page", withPages((manifest) => manifest.pages.push({ ...linked, path: "" })), "fixture.page_invalid"],
+    ["the 404 page", withPages((manifest) => manifest.pages.push({ ...linked, path: "404" })), "fixture.page_invalid"],
+    [
+      "an editable page's identity",
+      withPages((manifest) => manifest.pages.push({ ...linked, pageId: manifest.pages[0].pageId })),
+      "fixture.page_duplicate",
+    ],
+    [
+      "an editable page's path",
+      withPages((manifest) => manifest.pages.push({ ...linked, path: manifest.pages.at(-1).path })),
+      "fixture.page_duplicate",
+    ],
+    [
+      "no editable page beside it",
+      withPages((manifest) => {
+        manifest.pages = manifest.pages.map((entry, index) => ({
+          pageId: entry.pageId,
+          resourceId: entry.resourceId,
+          path: entry.path === "" || entry.path === "404" ? `moved-${index}` : entry.path,
+          workspaceMode: "metadata-only",
+        }));
+      }),
+      "fixture.pages_invalid",
+    ],
+  ];
+  for (const [label, mutate, code] of cases) {
+    await context.test(label, async (caseContext) => {
+      const { fixture } = await copiedFixture(caseContext, label);
+      await mutate(fixture);
+      const result = await runValidation(fixture);
+      assert.equal(result.exitCode, 1);
+      assert.equal(JSON.parse(result.stdout).error.code, code);
+    });
+  }
+  await context.test("an unlinked one is accepted", async (caseContext) => {
+    const { fixture } = await copiedFixture(caseContext, "accepted");
+    await withPages((manifest) => manifest.pages.push(linked))(fixture);
+    const result = await runValidation(fixture);
+    assert.equal(result.exitCode, 0, result.stderr);
+  });
+});
 
 test("offline failures retain the push validators' stable code and field", async (context) => {
   const cases = [

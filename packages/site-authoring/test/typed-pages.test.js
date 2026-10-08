@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { getPageTypeReference } from "../src/reference-help.js";
+import { formatTypedPageReference } from "../src/typed-page-reference.js";
 import {
   contentDocuments,
   documentImageIds,
@@ -620,4 +621,134 @@ test("an article or album names its place by id, sends it for the site to fill i
     readSource(context, "bad.md", "---\ntitle: Bad\npath: bad\ntemplate: article\nplace: cafe\n---\n\nText.\n"),
     (error) => error?.code === "pages.document_shape",
   );
+});
+
+// ---------------------------------------------------------------------------
+// TR01195 — the generated template
+// ---------------------------------------------------------------------------
+
+const TAG_ID = "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a";
+const generatedData = (extra = {}) => ({ kind: "GENERATED_PAGE_KIND_TAG", tagId: TAG_ID, ...extra });
+
+test("a generated page reads from the site with its defaults written out and no date or cover", () => {
+  const document_ = workspaceDocumentFromPage({
+    displayDate: "2024-01-01",
+    coverImageId: COVER_ID,
+    template: {
+      templateType: "TEMPLATE_TYPE_GENERATED",
+      generatedPageData: {
+        kind: "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
+        year: 2024,
+        month: 5,
+        customDescription: "Spring.",
+        introductionBody: { type: "doc", content: [] },
+      },
+    },
+  });
+  assert.deepEqual(document_, {
+    template: "generated",
+    data: {
+      kind: "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
+      tagId: "",
+      year: 2024,
+      month: 5,
+      countryCode: "",
+      regionCode: "",
+      citySlug: "",
+      categorySlug: "",
+      customTitle: "",
+      breadcrumbTitle: "",
+      customDescription: "Spring.",
+    },
+  });
+  assert.equal(documentTemplate(document_), "generated");
+  // A kind this package does not know cannot be pushed back, so it is not readable.
+  assert.equal(
+    workspaceDocumentFromPage({
+      template: { templateType: "TEMPLATE_TYPE_GENERATED", generatedPageData: { kind: "GENERATED_PAGE_KIND_UNKNOWN" } },
+    }),
+    undefined,
+  );
+});
+
+test("a generated source is strict about its shape, and its description is bounded", () => {
+  const file = "pages/tags/trails.pm.json";
+  const parse = (data, extra = {}) => typedDocumentFromJson({ template: "generated", data, ...extra }, file);
+  assert.equal(parse(generatedData({ customDescription: "  Trim me.  " })).data.customDescription, "Trim me.");
+  assert.equal(parse(generatedData({ customDescription: "x".repeat(1000) })).data.customDescription.length, 1000);
+  for (
+    const [label, bad, extra] of [
+      ["an unknown field", generatedData({ slug: "trails" })],
+      ["a missing kind", { tagId: TAG_ID }],
+      ["the unknown kind", { kind: "GENERATED_PAGE_KIND_UNKNOWN" }],
+      ["a tag id that is not a UUID", generatedData({ tagId: "trails" })],
+      ["a fractional year", generatedData({ year: 2024.5 })],
+      ["a month of 13", generatedData({ month: 13 })],
+      ["a non-string title", generatedData({ customTitle: 3 })],
+      ["a non-document introduction", generatedData({ introductionBody: "text" })],
+      ["a date the page does not carry", generatedData(), { displayDate: "2024-01-01" }],
+      ["a cover the page does not carry", generatedData(), { coverImageId: COVER_ID }],
+    ]
+  ) {
+    assert.throws(() => parse(bad, extra), (error) => error?.code === "pages.document_shape", label);
+  }
+  assert.throws(
+    () => parse(generatedData({ customDescription: "x".repeat(1001) })),
+    (error) => error?.code === "pages.description_too_long",
+  );
+  // Counted as characters, not UTF-16 units.
+  assert.doesNotThrow(() => parse(generatedData({ customDescription: "😀".repeat(1000) })));
+});
+
+test("a generated source goes to the wire with its identity, an introduction always present, and no page fields", () => {
+  const document_ = typedDocumentFromJson({ template: "generated", data: generatedData({ customTitle: "Trails" }) }, "a.pm.json");
+  const wire = wireTemplate(document_);
+  assert.equal(wire.templateType, "TEMPLATE_TYPE_GENERATED");
+  assert.deepEqual(wire.generatedPageData.introductionBody, { type: "doc", content: [] });
+  assert.equal(wire.generatedPageData.customTitle, "Trails");
+  assert.deepEqual(wirePageFields(document_), {});
+
+  const introduction = paragraphDoc("Intro.");
+  const withIntroduction = typedDocumentFromJson(
+    { template: "generated", data: generatedData({ introductionBody: introduction }) },
+    "a.pm.json",
+  );
+  assert.deepEqual(wireTemplate(withIntroduction).generatedPageData.introductionBody, introduction);
+  // The introduction is validated like an album's or a recipe's.
+  assert.deepEqual(
+    contentDocuments(withIntroduction).map(({ path, mayBeEmpty, restricted }) => [path, mayBeEmpty, restricted]),
+    [["data.introductionBody", true, true]],
+  );
+});
+
+test("a Markdown source cannot be a generated page", async (context) => {
+  await assert.rejects(
+    typedDocumentFromMarkdown({
+      template: "generated",
+      fields: new Map(),
+      markdown: "Text.",
+      file: "pages/a.md",
+      convert: async () => paragraphDoc("Text."),
+      resolveImage: async () => ({ imageId: COVER_ID }),
+    }),
+    (error) => error?.code === "pages.generated_markdown",
+  );
+  await assert.rejects(
+    readSource(context, "tags.md", "---\ntitle: Tags\npath: tags\ntemplate: generated\n---\n\nText.\n"),
+    (error) => error?.code === "pages.generated_markdown",
+  );
+});
+
+test("help page generated describes an update-only source without a Markdown form", () => {
+  const reference = getPageTypeReference("generated");
+  assert.equal(reference.type, "generated");
+  assert.deepEqual(reference.workspace.formats.map((format) => format.extension), [".pm.json"]);
+  assert.equal(reference.markdown, undefined);
+  const json = typedDocumentFromJson(reference.document.example, "generated.pm.json");
+  assert.equal(documentTemplate(json), "generated");
+  for (const { doc } of contentDocuments(json)) assert.deepEqual(CONTENT.validateDocument(doc).errors, []);
+  const text = formatTypedPageReference(reference);
+  assert.match(text, /^Generated page \(generated\)/u);
+  assert.match(text, /pages\.generated_create/u);
+  assert.doesNotMatch(text, /Markdown front matter/u);
 });

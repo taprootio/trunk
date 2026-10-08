@@ -64,7 +64,12 @@ import {
   REDIRECTS_FILE_NAME,
 } from "./redirects-contract.js";
 import { SETTINGS_GROUPS } from "./settings-catalog.js";
-import { formatTypedPageReference, getTypedPageReference, TYPED_PAGE_TYPES } from "./typed-page-reference.js";
+import {
+  formatTypedPageReference,
+  getTypedPageReference,
+  MARKDOWN_PAGE_TYPES,
+  TYPED_PAGE_TYPES,
+} from "./typed-page-reference.js";
 import { PAGE_TEMPLATES } from "./typed-pages.js";
 import {
   INTERNAL_PAGE_BASELINE_DIRECTORY,
@@ -72,6 +77,7 @@ import {
   NAVIGATION_FILE_NAME,
   PAGE_SOURCE_EXTENSIONS,
   PAGE_WORKSPACE_MODE_EDITABLE,
+  PAGE_WORKSPACE_MODE_METADATA_ONLY,
   PAGES_DIRECTORY,
   pageSourceFormat,
   SETTINGS_DIRECTORY,
@@ -80,7 +86,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 34;
+export const REFERENCE_VERSION = 35;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -672,10 +678,16 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Run 'redirects check' after staging, or read deploy --staging's automatic check. The Node CLI consumes "
       + "a separate staging handoff and checks the current map at the real edge, using an in-memory cookie and "
       + "manual redirects. It reports each path, HTTP status and Location without following targets.",
+      "The result carries routeCheck (resolved or unresolved) and redirects: { revision, revisionUnchanged, "
+      + "verified, total, checked, matched, failed, items: [{ path, status, location, expectedStatus, matches, "
+      + "error? }], itemsTruncated? }, at the top level of both redirects check and deploy --staging. An entry "
+      + "whose request failed carries error: \"request_failed\". A check that cannot finish at all reports "
+      + "verified: false, an empty items list and redirects.error { code, message }.",
       "verified is true only if every entry matched and the map revision stayed unchanged during the check. "
       + "The check proves the current map at staging, not a historical deployment. A mismatch means the staged "
       + "release does not carry the entry (yet); re-run redirects check after the deployment completes, before promoting. Requests are bounded to 90 seconds, eight at a time; "
-      + "large JSON lists are truncated explicitly with failed entries first. Human output reports every entry.",
+      + "large JSON lists are truncated explicitly with failed entries first (redirects.itemsTruncated). Progress "
+      + "output reports every entry on stderr; --quiet hides it.",
       "stagingPreview.url is a fresh, single-use two-minute handoff, minted after checks. It is emitted only "
       + "in final JSON, excluded from progress and GITHUB_OUTPUT; keep it private. The staging cookie lasts "
       + "five minutes and remains subject to current site/host/credential permission.",
@@ -937,7 +949,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + `sourceFormat, and workspaceMode ${PAGE_WORKSPACE_MODE_EDITABLE}. Album images and the cover image must be `
       + "listed in fixture.imageIds. "
       + "status, hasDraft, isGenerated, and description are recorded by pull and not read: the page key set "
-      + "stays open so a fixture from a newer pull is not refused. The homepage's path is the empty string.",
+      + "stays open so a fixture from a newer pull is not refused. The homepage's path is the empty string. "
+      + `An entry with workspaceMode ${PAGE_WORKSPACE_MODE_METADATA_ONLY} names a page the fixture has no source for, `
+      + "such as a generated section page navigation links to: pageId, resourceId and path, and no file.",
       `file lives under '${PAGES_DIRECTORY}/' and ends in ${PAGE_SOURCE_EXTENSIONS.join(" or ")}; sourceFormat must be `
       + `the format that extension implies (${
         PAGE_SOURCE_EXTENSIONS.map((extension) => `${extension} is '${pageSourceFormat(`page${extension}`)}'`).join(
@@ -971,8 +985,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "validate reads the fixture and writes nothing to it. Copy the directory somewhere writable before editing it.",
       "validate --init <new-directory> exports the current pulled workspace as a validated version-7 fixture with "
       + "appearance and footer metadata. Run from the workspace or its configured project; --config may select the source.",
-      "Initialization keeps editable pages of every template as workspace documents and reports excluded metadata-only pages. "
-      + "References to excluded pages must be resolved before the fixture can validate. It never copies credentials, "
+      "Initialization keeps editable pages of every template as workspace documents. A metadata-only page that "
+      + "navigation, the footer or a page links to is kept as a metadata-only entry (initialized.linkedPages); other "
+      + "metadata-only pages are left out (initialized.skippedPages). It never copies credentials, "
       + "internal reconciliation state, or deployment receipts. UUIDs and HTTP(S) origins are replaced with deterministic "
       + "fixture identities and example.test origins; URL credentials, queries and fragments are removed. Authored prose is retained.",
       "The destination must be outside the source workspace and must not exist; its parent must already exist without symlinks. Exports are bounded to 64 MiB. "
@@ -1518,6 +1533,31 @@ const FREE_FORM_REFERENCE = Object.freeze({
         + "refuses before changing anything under pages/ and preserves the site's version as internal state. A "
         + "locally edited .pm.json is kept rather than overwritten, and only collides when the site changed too.",
       conflictError: "pages.pull_conflict",
+      metadata:
+        "A .pm.json page's title, path and description live in the manifest, not the file. Change the title or "
+        + "description with pages meta set <path> --title/--description; a Markdown page keeps them in its front "
+        + "matter. pull keeps such an edit until pages push sends it, and a site edit to the same page is a "
+        + "pages.pull_conflict. A description over 160 characters is warned about (search results cut it off); "
+        + "over 1000 is refused.",
+      authorship:
+        "Pages are authorless by default: a page created without an author publishes with no byline, and pages push "
+        + "lists the pages it created that way in pages.authorless. Name an author with author: in the front matter "
+        + "(every template) or, for a .pm.json page, pages meta set <path> --author. An author is a site author "
+        + "without a Taproot account, named by handle (jane-doe), or a site member who can create pages, named by "
+        + "email address. authors list shows who can be named and rewrites authors.json; authors add <handle> "
+        + "--name <name> [--email <address>] creates a site author, whose address stays private. A site author's "
+        + "name appears on the byline and in structured data, with no profile link or follow button. authors add "
+        + "again with the same handle and name succeeds (existing: true); another name for a taken handle is "
+        + "authors.handle_taken. Only the CLI assigns authors, and only to a page that has none. authors.json is as old "
+        + "as the last pull or authors list, so offline commands (validate, pages meta set) only warn "
+        + "(pages.author_unverified) about a name it lacks; pages push and plan read the site's current list once on a "
+        + "miss and refuse only a name the site lacks. The CLI only fills a page that has no author: a different one "
+        + "already on the page is pages.author_conflict, which names the way out (pages meta set <path> --author "
+        + "<the site's author> for a .pm.json page, the author: line for Markdown, or pages meta set <path> --author "
+        + "\"\" to drop an author that was never sent), naming the author a page already has changes nothing, and a "
+        + "name that is unknown or belongs to a member who cannot create pages is pages.author_unknown either way. "
+        + "Text that is neither a handle nor an address is pages.author_invalid.",
+      authorshipErrors: Object.freeze(["pages.author_invalid", "pages.author_unknown", "pages.author_conflict"]),
       conflictDetail:
         "A reported conflict names the JSON paths at which the site's document differs from the copy this workspace "
         + "last reconciled with, in error.differences, which carries three states. Absent: the two documents were "
@@ -1570,12 +1610,22 @@ const FREE_FORM_REFERENCE = Object.freeze({
             defaultForNew: "",
           }),
           Object.freeze({
+            name: "author",
+            type: "string",
+            requiredForNew: false,
+            inheritedForTracked: true,
+            defaultForNew: "",
+            description:
+              "A site author's handle (jane-doe) or a member's email address. Omit it for an authorless page; it "
+              + "only fills a page that has none, and never replaces one.",
+          }),
+          Object.freeze({
             name: "template",
             type: "string",
             requiredForNew: false,
             inheritedForTracked: false,
             defaultForNew: "free-form",
-            description: `Other templates: ${TYPED_PAGE_TYPES.join(", ")}; see '${CLI_BINARY_NAME} help pages'.`,
+            description: `Other templates: ${MARKDOWN_PAGE_TYPES.join(", ")}; see '${CLI_BINARY_NAME} help pages'.`,
           }),
         ]),
       }),
@@ -1866,7 +1916,7 @@ export function formatReferenceResult(result) {
         page.workspace.formats.map((format) => `  ${format.extension.padEnd(9)} ${format.purpose}`).join("\n")
       }\n\nOne source per page:\n  rule                  ${sourceRule.rule}\n  manifest fields       ${
         sourceRule.manifestFields.join(", ")
-      }\n  pull                  ${sourceRule.pull}\n  internal state        ${sourceRule.internalState}\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${sourceRule.renamedSource} (${sourceRule.renamedSourceError})\n  conflicts             ${sourceRule.conflict} (${sourceRule.conflictError})\n  conflict detail       ${sourceRule.conflictDetail}\n  push conflicts        ${sourceRule.pushConflict} (${sourceRule.pushConflictError})\n  revision              ${sourceRule.revisionSource}\n  recovery              ${sourceRule.conflictRecovery}\n  push selection        ${sourceRule.pushSelection}\n\nSystem pages: ${page.workspace.systemPages}\n\nMarkdown front matter:\n${
+      }\n  pull                  ${sourceRule.pull}\n  internal state        ${sourceRule.internalState}\n  format change         ${sourceRule.formatChange} (${sourceRule.formatChangeError})\n  renamed source        ${sourceRule.renamedSource} (${sourceRule.renamedSourceError})\n  conflicts             ${sourceRule.conflict} (${sourceRule.conflictError})\n  conflict detail       ${sourceRule.conflictDetail}\n  push conflicts        ${sourceRule.pushConflict} (${sourceRule.pushConflictError})\n  revision              ${sourceRule.revisionSource}\n  recovery              ${sourceRule.conflictRecovery}\n  push selection        ${sourceRule.pushSelection}\n  authors               ${sourceRule.authorship} (${sourceRule.authorshipErrors.join(", ")})\n\nSystem pages: ${page.workspace.systemPages}\n\nMarkdown front matter:\n${
         markdownFormat.metadata.map(formatMetadata).join("\n")
       }\n\nDocument root: { "type": "doc", "content": [...] }\nSupported nodes: ${
         page.document.nodes.join(", ")

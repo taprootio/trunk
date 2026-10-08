@@ -23,6 +23,7 @@ import {
 // would turn a successful mint into an orphaned key.
 import { KEY_PREFIX } from "./credentials.js";
 import { isCanonicalUuid, normalizePreviewDiagnostic, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
+import { normalizeAuthorListing, parseAuthorReference } from "./authors-contract.js";
 import { docsPublicationModeFromWire, siteKindFromWire, surfaceFromWire } from "./surface.js";
 import {
   DEFAULT_REDIRECT_STATUS,
@@ -499,6 +500,14 @@ export function normalizePageSummary(value) {
     // The page's calendar date, empty when it has none. It is not part of
     // `bodyRevision`, so a typed page's push guard compares it separately.
     displayDate: typeof summary.displayDate === "string" ? summary.displayDate : "",
+    // The name the page's author goes by in a write: a site author's handle or
+    // a member's email address, folded. Empty for a page with no author, for a
+    // former member's page, and against a Taproot that predates authors
+    // (TR01196). Never the author's display name, which is not a reference.
+    authorRef: typeof summary.authorRef === "string" ? parseAuthorReference(summary.authorRef)?.value ?? "" : "",
+    // Whether the page credits anyone at all, which an empty authorRef cannot
+    // say: it is also empty for an author this credential may not name.
+    hasAuthor: typeof summary.authorDisplayName === "string" && summary.authorDisplayName.trim() !== "",
   };
 }
 
@@ -543,6 +552,62 @@ export async function updatePage(client, pageId, body) {
   return normalizePageSummary(
     await client.request(`v1/pages/${encodeURIComponent(pageId)}`, { method: "PATCH", body }),
   );
+}
+
+/**
+ * Gives the site's two author refusals the stable codes the CLI documents
+ * (TR01196). The site answers an unknown name and one that cannot be named with
+ * the same field and wording on purpose; this keeps them one code too.
+ */
+export function translateAuthorRefusal(error, file) {
+  if (!(error instanceof ApiError)) return error;
+  for (const [field, code, fallback] of [
+    ["AuthorUnknown", "pages.author_unknown", "No site author or member who can create pages has that name."],
+    ["AuthorConflict", "pages.author_conflict", "The page already has a different author, which is never replaced."],
+  ]) {
+    if (error.hasField(field)) {
+      const detail = sanitizeDiagnostic(error.descriptionFor(field) ?? fallback, fallback);
+      // The workspace only learns who the site credits from a pull, and a
+      // conflict means someone gave the page an author after the last one.
+      const hint = field === "AuthorConflict"
+        ? " Run 'taproot-site pull' to learn who the site credits, then match it with 'pages meta set <path> --author "
+          + "<author>' (a .pm.json page) or the author: front matter line (Markdown)."
+        : "";
+      return new SiteAuthoringError(code, `'${file}': ${detail}${hint}`, { field: file });
+    }
+  }
+  return error;
+}
+
+/**
+ * Reads who a page can be credited to: the site's authors without an account
+ * and the members who can create pages (TR01196).
+ */
+export async function listSiteAuthors(client, siteId) {
+  return normalizeAuthorListing(
+    requireObject(await client.request(sitePath(siteId, "authors")), "api.authors_contract", "site authors"),
+  );
+}
+
+/** Creates a site author. The site folds the handle and the address. */
+export async function createSiteAuthor(client, siteId, { handle, displayName, email }) {
+  const created = requireObject(
+    await client.request(sitePath(siteId, "authors"), {
+      method: "POST",
+      body: { handle, displayName, ...(email === undefined ? {} : { email }) },
+    }),
+    "api.authors_contract",
+    "site author",
+  );
+  const listing = normalizeAuthorListing({ authors: [created], members: [] });
+  if (listing.authors.length !== 1) {
+    throw new SiteAuthoringError(
+      "api.authors_contract",
+      "Taproot returned a site author this CLI could not read.",
+      { field: "handle" },
+    );
+  }
+  return listing.authors[0];
 }
 
 export async function publishDrafts(client, pageIds) {

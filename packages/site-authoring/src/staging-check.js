@@ -152,3 +152,65 @@ export async function checkStagingRedirects(client, siteId, onProgress, now) {
     },
   };
 }
+
+/**
+ * The staging redirect check and a fresh preview handoff, as redirects check and
+ * deploy --staging report them. A check that cannot finish keeps the same shape,
+ * with the reason.
+ */
+export async function inspectStagingPreview(client, siteId, onProgress, now) {
+  let routeCheck;
+  let redirects;
+  let stagingUrl;
+  try {
+    ({ routeCheck, redirects, stagingUrl } = await checkStagingRedirects(client, siteId, onProgress, now));
+    if (!redirects.verified) {
+      onProgress(
+        "Warning: staging redirects are not all verified. Check the reported mismatches against the staged release; run 'taproot-site redirects check' again once the deployment has completed.",
+      );
+    }
+  } catch (error) {
+    onProgress(
+      "Warning: the authenticated staging redirect check could not finish. Run 'taproot-site redirects check' again.",
+    );
+    routeCheck = "unresolved";
+    redirects = {
+      total: 0,
+      checked: 0,
+      matched: 0,
+      failed: 0,
+      verified: false,
+      items: [],
+      error: redirectCheckError(error),
+    };
+  }
+  try {
+    // Mint after checks so the final single-use URL has never been consumed.
+    const stagingPreview = await mintStagingPreviewHandoff(client, siteId, { now });
+    return { routeCheck, redirects, stagingPreview };
+  } catch {
+    onProgress("Warning: a staging handoff could not be minted.");
+    return {
+      routeCheck,
+      redirects,
+      stagingPreview: {
+        url: "",
+        ...(stagingUrl ? { stagingUrl } : {}),
+        warning: "Staging handoff unavailable; run redirects check to retry.",
+      },
+    };
+  }
+}
+
+/**
+ * Why the automatic redirect check could not finish. Only this CLI's own
+ * errors carry their code and message; anything else (a timeout, a network
+ * failure) is named, never echoed, since its text is not ours to publish.
+ */
+function redirectCheckError(error) {
+  if (error instanceof SiteAuthoringError) {
+    return { code: error.code, message: sanitizeDiagnostic(error.message, "The redirect check could not finish.") };
+  }
+  const name = typeof error?.name === "string" && /^[A-Za-z]{1,40}$/u.test(error.name) ? error.name : "Error";
+  return { code: "redirects.check_failed", message: `The redirect check could not finish (${name}).` };
+}

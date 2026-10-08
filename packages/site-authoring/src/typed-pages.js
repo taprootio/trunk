@@ -1,6 +1,7 @@
 import { FREE_FORM_TEMPLATE_VERSION, TEMPLATE_TYPE_FREE_FORM } from "./api.js";
 import { isVideoEmbedId } from "./content/video-embed-url.js";
 import { SiteAuthoringError } from "./errors.js";
+import { requireDescriptionLength } from "./page-metadata.js";
 
 /**
  * The authored page templates (TR00893).
@@ -29,6 +30,12 @@ export const TEMPLATE_ARTICLE = "article";
 export const TEMPLATE_RECIPE = "recipe";
 export const TEMPLATE_ALBUM = "album";
 export const TEMPLATE_PLACE_REVIEW = "place-review";
+/**
+ * A page Taproot generates (a tag, a month, a folder). It is update-only: the
+ * owner's title, breadcrumb, description and introduction are authored, and
+ * pages push refuses to create one or to change what it is (TR01195).
+ */
+export const TEMPLATE_GENERATED = "generated";
 
 /** Wire identity and the `PageTemplate` member that carries each template's data. */
 export const PAGE_TEMPLATES = Object.freeze({
@@ -37,12 +44,13 @@ export const PAGE_TEMPLATES = Object.freeze({
   [TEMPLATE_RECIPE]: Object.freeze({ wireType: "TEMPLATE_TYPE_RECIPE", dataKey: "recipeData" }),
   [TEMPLATE_ALBUM]: Object.freeze({ wireType: "TEMPLATE_TYPE_ALBUM", dataKey: "albumData" }),
   [TEMPLATE_PLACE_REVIEW]: Object.freeze({ wireType: "TEMPLATE_TYPE_PLACE_REVIEW", dataKey: "placeReviewData" }),
+  [TEMPLATE_GENERATED]: Object.freeze({ wireType: "TEMPLATE_TYPE_GENERATED", dataKey: "generatedPageData" }),
 });
 
 export const PAGE_TEMPLATE_NAMES = Object.freeze(Object.keys(PAGE_TEMPLATES));
 
 /** Front-matter fields every template accepts. */
-export const SHARED_FRONT_MATTER_KEYS = Object.freeze(["title", "path", "description", "template"]);
+export const SHARED_FRONT_MATTER_KEYS = Object.freeze(["title", "path", "description", "template", "author"]);
 
 /**
  * The page-level fields the other templates add. A free-form page's source is
@@ -67,6 +75,8 @@ const TEMPLATE_FRONT_MATTER_KEYS = Object.freeze({
   ]),
   [TEMPLATE_ALBUM]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "seamless", "borderWidth", "place"]),
   [TEMPLATE_PLACE_REVIEW]: Object.freeze([...TYPED_PAGE_FRONT_MATTER_KEYS, "placeId", "rating"]),
+  // Generated pages have no Markdown form.
+  [TEMPLATE_GENERATED]: Object.freeze([]),
 });
 
 export const FRONT_MATTER_KEYS = Object.freeze(
@@ -96,6 +106,52 @@ const DISPLAY_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 const ALBUM_IMAGES_HEADING = "images";
 const RECIPE_HEADINGS = Object.freeze(["ingredients", "instructions"]);
 
+/** The generated page kinds the site reports, as the API names them (never the unknown kind). */
+export const GENERATED_PAGE_KINDS = Object.freeze([
+  "GENERATED_PAGE_KIND_TAG",
+  "GENERATED_PAGE_KIND_TAGS_INDEX",
+  "GENERATED_PAGE_KIND_PUBLISHED_INDEX",
+  "GENERATED_PAGE_KIND_PUBLISHED_YEAR",
+  "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
+  "GENERATED_PAGE_KIND_PLACES_INDEX",
+  "GENERATED_PAGE_KIND_PLACES_COUNTRY",
+  "GENERATED_PAGE_KIND_PLACES_STATE",
+  "GENERATED_PAGE_KIND_PLACES_CITY",
+  "GENERATED_PAGE_KIND_PLACES_CATEGORY",
+  "GENERATED_PAGE_KIND_FOLDER_INDEX",
+]);
+/** What a generated page is: system-managed, so a push must send it back unchanged. */
+export const GENERATED_IDENTITY_KEYS = Object.freeze([
+  "kind",
+  "tagId",
+  "year",
+  "month",
+  "countryCode",
+  "regionCode",
+  "citySlug",
+  "categorySlug",
+]);
+const GENERATED_KEYS = [
+  ...GENERATED_IDENTITY_KEYS,
+  "customTitle",
+  "breadcrumbTitle",
+  "customDescription",
+  "introductionBody",
+];
+const GENERATED_TEXT_KEYS = [
+  "tagId",
+  "countryCode",
+  "regionCode",
+  "citySlug",
+  "categorySlug",
+  "customTitle",
+  "breadcrumbTitle",
+  "customDescription",
+];
+const GENERATED_MAXIMUM_YEAR = 9999;
+const GENERATED_MAXIMUM_MONTH = 12;
+const EMPTY_DOCUMENT = Object.freeze({ type: "doc", content: Object.freeze([]) });
+
 function fail(code, message, field) {
   return new SiteAuthoringError(code, message, { field });
 }
@@ -114,6 +170,32 @@ export function templateNameForWireType(wireType) {
 /** Whether `pull` and `pages push` handle pages of this wire `templateType`. */
 export function isAuthorableTemplateType(wireType) {
   return templateNameForWireType(wireType) !== undefined;
+}
+
+/** Whether a wire `templateType` is a generated page. */
+export function isGeneratedTemplateType(wireType) {
+  return wireType === PAGE_TEMPLATES[TEMPLATE_GENERATED].wireType;
+}
+
+/** The system-managed fields of a generated page's `data`, which the manifest records and a push must not change. */
+export function generatedIdentity(data) {
+  return Object.fromEntries(GENERATED_IDENTITY_KEYS.map((key) => [key, data[key]]));
+}
+
+/** The names of the identity fields that differ, for a message. */
+export function changedGeneratedIdentity(recorded, data) {
+  return GENERATED_IDENTITY_KEYS.filter((key) => recorded[key] !== data[key]);
+}
+
+/** The title a generated page is sent with: the owner's, else the one the site last reported. */
+export function generatedPageTitle(data, reportedTitle) {
+  // Trimmed as Taproot trims it, or a padded title would never match the key a pull recorded.
+  return data.customTitle.trim() || reportedTitle;
+}
+
+/** The description a generated page is sent with: the owner's, else the one the site last reported. */
+export function generatedPageDescription(data, reportedDescription) {
+  return data.customDescription.trim() === "" ? reportedDescription : data.customDescription.trim();
 }
 
 /** The template a canonical workspace document represents. */
@@ -262,6 +344,22 @@ function canonicalIngredient(value) {
 const DATA_BUILDERS = Object.freeze({
   [TEMPLATE_ARTICLE]: (raw) => definedEntries([["body", raw.body], ["place", raw.place]]),
   [TEMPLATE_PLACE_REVIEW]: (raw) => ({ placeId: raw.placeId, rating: raw.rating, body: raw.body }),
+  // Defaults are written out, so a page with no custom title reads the same on every pull.
+  [TEMPLATE_GENERATED]: (raw) =>
+    definedEntries([
+      ["kind", raw.kind],
+      ["tagId", raw.tagId ?? ""],
+      ["year", raw.year ?? 0],
+      ["month", raw.month ?? 0],
+      ["countryCode", raw.countryCode ?? ""],
+      ["regionCode", raw.regionCode ?? ""],
+      ["citySlug", raw.citySlug ?? ""],
+      ["categorySlug", raw.categorySlug ?? ""],
+      ["customTitle", raw.customTitle ?? ""],
+      ["breadcrumbTitle", raw.breadcrumbTitle ?? ""],
+      ["customDescription", raw.customDescription ?? ""],
+      ["introductionBody", raw.introductionBody],
+    ]),
   [TEMPLATE_ALBUM]: (raw) =>
     definedEntries([
       ["introductionBody", raw.introductionBody],
@@ -337,6 +435,30 @@ function canonicalSourceData(template, data, file) {
     return DATA_BUILDERS[template]({
       ...data,
       body: requireDocument(data.body, file, `${path}.body`, { nonEmpty: true }),
+    });
+  }
+  if (template === TEMPLATE_GENERATED) {
+    requireKeys(data, GENERATED_KEYS, file, path);
+    if (!GENERATED_PAGE_KINDS.includes(data.kind)) {
+      throw fail(
+        "pages.document_shape",
+        `'${file}' ${path}.kind must be one of ${GENERATED_PAGE_KINDS.join(", ")}.`,
+        file,
+      );
+    }
+    for (const key of GENERATED_TEXT_KEYS) {
+      if (data[key] !== undefined) requireString(data[key], file, `${path}.${key}`);
+    }
+    if (data.tagId !== undefined && data.tagId !== "") requireIdentifier(data.tagId, file, `${path}.tagId`);
+    if (data.year !== undefined) requireCount(data.year, file, `${path}.year`, GENERATED_MAXIMUM_YEAR);
+    if (data.month !== undefined) requireCount(data.month, file, `${path}.month`, GENERATED_MAXIMUM_MONTH);
+    // The API trims a description, so the length that counts is the trimmed one.
+    const customDescription = data.customDescription?.trim();
+    requireDescriptionLength(customDescription, `${file}:${path}.customDescription`);
+    return DATA_BUILDERS[template]({
+      ...data,
+      customDescription,
+      introductionBody: OPTIONAL_INTRODUCTION(data.introductionBody, file, `${path}.introductionBody`),
     });
   }
   if (template === TEMPLATE_ALBUM) {
@@ -442,6 +564,14 @@ export function typedDocumentFromJson(parsed, file) {
       file,
     );
   }
+  if (template === TEMPLATE_GENERATED && (parsed.displayDate !== undefined || parsed.coverImageId !== undefined)) {
+    throw fail(
+      "pages.document_shape",
+      `'${file}' is a generated page, which has no displayDate or coverImageId of its own: its document is `
+        + "{ template, data }.",
+      file,
+    );
+  }
   const displayDate = parsed.displayDate === undefined ? undefined : requireDisplayDate(parsed.displayDate, file);
   let coverImageId;
   if (parsed.coverImageId !== undefined) {
@@ -482,6 +612,17 @@ const PAGE_PROJECTIONS = Object.freeze({
     if (body === undefined || rating === undefined || typeof raw.placeId !== "string") return undefined;
     return DATA_BUILDERS[TEMPLATE_PLACE_REVIEW]({ placeId: raw.placeId, rating, body });
   },
+  // A kind this package does not know cannot be pushed back safely, so it is not readable here.
+  [TEMPLATE_GENERATED]: (raw) =>
+    GENERATED_PAGE_KINDS.includes(raw.kind)
+      ? DATA_BUILDERS[TEMPLATE_GENERATED]({
+        kind: raw.kind,
+        ...Object.fromEntries(GENERATED_TEXT_KEYS.map((key) => [key, typeof raw[key] === "string" ? raw[key] : ""])),
+        year: Number.isSafeInteger(raw.year) ? raw.year : 0,
+        month: Number.isSafeInteger(raw.month) ? raw.month : 0,
+        introductionBody: presentIntroduction(raw.introductionBody),
+      })
+      : undefined,
   [TEMPLATE_ALBUM]: (raw) =>
     DATA_BUILDERS[TEMPLATE_ALBUM]({
       introductionBody: presentIntroduction(raw.introductionBody),
@@ -524,9 +665,15 @@ export function workspaceDocumentFromPage(page, listedTemplateType) {
   if (name === TEMPLATE_FREE_FORM) return isPlainObject(raw.body) ? raw.body : undefined;
   const data = PAGE_PROJECTIONS[name](raw);
   if (data === undefined) return undefined;
+  // A generated page's date and cover are not part of its source: a push leaves them as the site holds them.
+  const generated = name === TEMPLATE_GENERATED;
   return typedDocument(name, {
-    displayDate: typeof page.displayDate === "string" && page.displayDate !== "" ? page.displayDate : undefined,
-    coverImageId: typeof page.coverImageId === "string" && page.coverImageId !== "" ? page.coverImageId : undefined,
+    displayDate: !generated && typeof page.displayDate === "string" && page.displayDate !== ""
+      ? page.displayDate
+      : undefined,
+    coverImageId: !generated && typeof page.coverImageId === "string" && page.coverImageId !== ""
+      ? page.coverImageId
+      : undefined,
     data,
   });
 }
@@ -558,7 +705,7 @@ export function contentDocuments(document_) {
 /** Whether a push sends `displayDate` for pages of this wire template type (every template but free-form). */
 export function sentDisplayDate(wireType) {
   const name = templateNameForWireType(wireType);
-  return name !== undefined && name !== TEMPLATE_FREE_FORM;
+  return name !== undefined && name !== TEMPLATE_FREE_FORM && name !== TEMPLATE_GENERATED;
 }
 
 // The nodes the API accepts in an album or recipe introduction and in a recipe
@@ -742,6 +889,9 @@ export function wireTemplate(document_) {
     ? { body: document_ }
     : template === TEMPLATE_PLACE_REVIEW
     ? { ...document_.data, rating: PLACE_REVIEW_RATINGS[document_.data.rating] }
+    // The API reads a missing introduction as no document at all, so the empty one is sent.
+    : template === TEMPLATE_GENERATED
+    ? { ...document_.data, introductionBody: document_.data.introductionBody ?? EMPTY_DOCUMENT }
     : document_.data.place === undefined
     ? document_.data
     : { ...document_.data, place: { placeId: document_.data.place } };
@@ -960,6 +1110,16 @@ function parseFlag(fields, key, file) {
   return value === "true";
 }
 
+/** Generated pages are edited in their .pm.json source only. */
+export function generatedMarkdownFault(file) {
+  return fail(
+    "pages.generated_markdown",
+    `'${file}' declares the generated template, which has no Markdown form: a generated page is pulled as a `
+      + ".pm.json document and edited there.",
+    file,
+  );
+}
+
 /**
  * Front-matter fields the declared template does not accept.
  *
@@ -988,6 +1148,7 @@ export function templateFrontMatterFault(template, fieldNames, file) {
  * module stays pure.
  */
 export async function typedDocumentFromMarkdown({ template, fields, markdown, file, convert, resolveImage }) {
+  if (template === TEMPLATE_GENERATED) throw generatedMarkdownFault(file);
   const displayDate = fields.has("displayDate") ? requireDisplayDate(fields.get("displayDate"), file) : undefined;
   let coverImageId;
   if (fields.has("coverImage")) {

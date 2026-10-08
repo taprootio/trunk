@@ -5,22 +5,39 @@ import {
   listVideos,
   IMAGE_PROCESSING_STATE_COMPLETE,
   PAGE_STATUS_DELETED,
+  listSiteAuthors,
   posterFromImage,
+  translateAuthorRefusal,
   updatePage,
   withRefusalGuidance,
 } from "../api.js";
+import {
+  AUTHORS_FILE_NAME,
+  authorConflictMessage,
+  authorKnown,
+  parseAuthorReference,
+  projectAuthorsForWorkspace,
+  readAuthorsDocument,
+} from "../authors-contract.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
+import { autolinkWarnings } from "../content/link-warnings.js";
+import { ApiError } from "../transport.js";
 import { waitForProcessing } from "./media-upload.js";
 import { SiteAuthoringError } from "../errors.js";
+import { DESCRIPTION_MAXIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, descriptionWarnings } from "../page-metadata.js";
 import { stableJson } from "../footer-draft-hash.js";
 import { CHECK_AREA, collectProblems, planStale, problemsOf, refuseProblems } from "../problems.js";
 import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "../reserved-paths.js";
 import { boundedByBytes, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
 import {
+  changedGeneratedIdentity,
   contentDocuments,
   COVER_IMAGE_UNUSED_MESSAGE,
   documentTemplate,
+  generatedMarkdownFault,
+  generatedPageDescription,
+  generatedPageTitle,
   placedVideoIds,
   posterlessVideoEmbeds,
   FRONT_MATTER_KEYS,
@@ -28,6 +45,7 @@ import {
   requireTemplateName,
   sentDisplayDate,
   TEMPLATE_FREE_FORM,
+  TEMPLATE_GENERATED,
   templateFrontMatterFault,
   typedDocumentFromJson,
   typedDocumentFromMarkdown,
@@ -43,6 +61,7 @@ import {
 } from "../content/free-form-sections.js";
 import { CONTENT_ERROR_CODES } from "../content/vocabulary.js";
 import {
+  displayPagePath,
   deleteWorkspaceFile,
   internalPageObservedRevisionFile,
   MEDIA_MANIFEST_FILE_NAME,
@@ -70,6 +89,7 @@ import {
   workspaceContentHash,
   workspaceFileExists,
   writeManifest,
+  writeWorkspaceJson,
 } from "../workspace.js";
 
 /**
@@ -266,6 +286,7 @@ function parseFrontMatter(source, file) {
   if (fields.has("template")) {
     try {
       template = requireTemplateName(fields.get("template"), file);
+      if (template === TEMPLATE_GENERATED) record(generatedMarkdownFault(file));
     } catch (error) {
       record(error);
     }
@@ -478,6 +499,7 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
   let pathCandidates = [];
   let title;
   let declaredDescription;
+  let declaredAuthor;
   let declaredPath;
   let template = TEMPLATE_FREE_FORM;
   let fields;
@@ -487,6 +509,9 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
     fields = frontMatter.fields;
     title = frontMatter.fields.get("title") ?? manifestEntry?.title;
     declaredDescription = frontMatter.fields.get("description") ?? manifestEntry?.description;
+    // An empty `author:` names nobody, so it falls back like an absent one
+    // rather than overriding the manifest's with nothing (TR01196).
+    declaredAuthor = frontMatter.fields.get("author") || manifestEntry?.author;
     declaredPath = frontMatter.fields.has("path") ? frontMatter.fields.get("path") : manifestEntry?.path;
     markdown = frontMatter.markdown;
     fault = frontMatter.fault;
@@ -502,10 +527,10 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
     }
     title = manifestEntry.title;
     declaredDescription = manifestEntry.description;
+    declaredAuthor = manifestEntry.author;
     declaredPath = manifestEntry.path;
     template = peekJsonTemplate(source);
   }
-
   const pagePath = normalizePagePath(declaredPath);
   if (pagePath === undefined) {
     // Not one resolved page, but not nothing either: a file declaring two
@@ -554,6 +579,7 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
     pagePath,
     title,
     declaredDescription,
+    declaredAuthor,
     fault,
     pathClaims: [],
     template,
@@ -629,6 +655,51 @@ function requireReconciledDisplayDate({ file, pagePath, target, entry, document_
       + `'${file}' and pull again.`,
     { field: file, alternatives: [recorded, live] },
   );
+}
+
+/**
+ * The refusals that keep a generated page what Taproot made it (TR01195). Only
+ * its title, breadcrumb, description and introduction are the owner's, so a
+ * push may update an existing generated page and nothing else: it never creates
+ * one, moves it, or changes the kind or identity it was pulled with. Checked
+ * here, before anything is sent, because the API refuses the same changes only
+ * after earlier pages in the push were written.
+ *
+ * A source with no live page is the caller's to classify (a stale file in a
+ * whole-workspace push, a refusal when the path was asked for), so `target` is
+ * always a live page here.
+ */
+function requireGeneratedUpdate({ file, pagePath, target, entry, document_ }) {
+  const livePath = normalizePagePath(target.path) ?? target.path;
+  if (livePath !== pagePath) {
+    throw documentError(
+      "pages.generated_move",
+      `'${file}' would move the generated page at '${livePath || "/"}' to '${pagePath || "/"}'. A generated page's `
+        + "path is set by Taproot from the content it lists: change the content that produces it, not its path.",
+      file,
+    );
+  }
+  const recorded = entry?.generated;
+  if (recorded === null || typeof recorded !== "object" || Array.isArray(recorded)) {
+    // Without the record there is nothing to prove this file is still the page
+    // it was pulled as, and an edit to its identity would pass for an owner's.
+    throw documentError(
+      "pages.generated_identity",
+      `'${file}' is a generated-page source, but this workspace has no record of which generated page it was pulled `
+        + "as, so its identity cannot be checked. Run 'taproot-site pull' to record it, then push again.",
+      file,
+    );
+  }
+  const changed = changedGeneratedIdentity(recorded, document_.data);
+  if (changed.length > 0) {
+    throw documentError(
+      "pages.generated_identity",
+      `'${file}' changes ${changed.join(", ")}, which say what this generated page is and which the site manages. `
+        + "Only customTitle, breadcrumbTitle, customDescription and introductionBody are yours to edit: restore "
+        + "the pulled values, or delete the file and pull again.",
+      `${file}:data.${changed[0]}`,
+    );
+  }
 }
 
 /**
@@ -844,6 +915,110 @@ async function copyVideoEmbedPosters(client, siteId, planned, { onProgress, now 
   }
 }
 
+/** `authors.json`, or undefined when it is absent, unreadable, or another site's. */
+async function readRecordedAuthors(workspaceDir, siteId) {
+  try {
+    if (!await workspaceFileExists(workspaceDir, AUTHORS_FILE_NAME)) return undefined;
+    return readAuthorsDocument(
+      await readWorkspaceJson(workspaceDir, AUTHORS_FILE_NAME, WORKSPACE_LIMITS.authorsBytes),
+      siteId,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads the site's live author listing for an online run (TR01196), in the
+ * shape `readAuthorsDocument` gives, so a name added since `authors.json` was
+ * written is found. `write` keeps the workspace copy current; `plan` leaves the
+ * workspace alone and passes false. A site that cannot be asked (an older
+ * Taproot, a credential without the content capability) answers `undefined`,
+ * which proves nothing either way.
+ */
+export function liveAuthorsRefresher({ client, workspaceDir, siteId, write, onProgress }) {
+  return async () => {
+    onProgress(`An author is not in ${AUTHORS_FILE_NAME}; asking the site who can be named.`);
+    let listing;
+    try {
+      listing = await listSiteAuthors(client, siteId);
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      onProgress("The site's authors could not be read, so the author is left for the site to check.");
+      return undefined;
+    }
+    const document_ = projectAuthorsForWorkspace(siteId, listing);
+    if (write) await writeWorkspaceJson(workspaceDir, AUTHORS_FILE_NAME, document_);
+    return readAuthorsDocument(document_, siteId);
+  };
+}
+
+/**
+ * Decides what a page says about its author before anything is sent
+ * (TR01196). `declared` is what the source (or, for a `.pm.json` page, its
+ * manifest entry) names; `recorded` is the author the site held when the
+ * workspace last reconciled with the page.
+ *
+ * Pages are authorless by default and an author is never replaced, so:
+ * nothing declared sends nothing; the author the site already has sends
+ * nothing and passes; a different one is refused here, where the site would
+ * refuse it only after earlier pages were written; and a new one is sent once
+ * the site is known to have it.
+ *
+ * "Known to have it" is asked of `authors.json` first, but a miss there is only
+ * as good as the day the file was written. An online run (`refreshAuthors`)
+ * asks the site once and refuses only what the site's own list lacks; an
+ * offline one cannot ask, so it sends nothing and flags the name as unverified
+ * rather than refusing a person who may have been added since.
+ */
+async function resolvePageAuthor({ file, pagePath, declared, recorded, markdown, knownAuthors, refreshAuthors }) {
+  if (declared === undefined || declared === "") return { author: "", sendAuthor: false };
+  const reference = parseAuthorReference(declared);
+  if (reference === undefined) {
+    throw documentError(
+      "pages.author_invalid",
+      `'${file}' names author '${String(declared).slice(0, 80)}', which is neither a site author's handle (such as `
+        + "jane-doe) nor a member's email address.",
+      file,
+    );
+  }
+  const current = parseAuthorReference(recorded)?.value ?? "";
+  if (reference.value === current) return { author: reference.value, sendAuthor: false };
+  if (current !== "") {
+    throw documentError(
+      "pages.author_conflict",
+      authorConflictMessage({
+        shown: displayPagePath(pagePath),
+        file,
+        held: current,
+        wanted: reference.value,
+        markdown,
+      }),
+      file,
+    );
+  }
+  let known = authorKnown(await knownAuthors(), reference.value);
+  let unverified = false;
+  if (known !== true) {
+    if (refreshAuthors === undefined) {
+      unverified = known === false;
+    } else {
+      const fresh = await refreshAuthors();
+      known = authorKnown(fresh, reference.value);
+      if (known === false) {
+        throw documentError(
+          "pages.author_unknown",
+          `'${file}' names author '${reference.value}', who is not among the site's authors or the members who can `
+            + "create pages. Run 'taproot-site authors list' to see who can be named, or 'taproot-site authors add' "
+            + "to create a site author.",
+          file,
+        );
+      }
+    }
+  }
+  return { author: reference.value, sendAuthor: true, unverified };
+}
+
 /**
  * Phase one over the workspace's page sources (TR01002): resolve which file is
  * each page's one source, convert and validate it, and decide create, update,
@@ -867,15 +1042,21 @@ export async function planPages({
   online,
   requestedPaths,
   getSharedThemeContexts,
+  refreshAuthors,
   onProgress = () => {},
 }) {
   const problems = [];
   const area = { area: CHECK_AREA.pages };
   const targeted = requestedPaths !== undefined;
+  // Generated-page sources whose page no longer exists on the site, found in a
+  // whole-workspace run: reported, and nothing is sent for them.
+  const staleGenerated = [];
   // Manifest integrity is never scoped: a registry that contradicts itself
   // describes some other workspace, so nothing in it can be planned.
   await collectProblems(problems, area, () => requireManifestSourceRegistry(pageSourceRegistry(manifest)));
-  if (problems.length > 0) return { targeted, sources: [], selected: [], planned: [], unresolved: [], problems };
+  if (problems.length > 0) {
+    return { targeted, sources: [], selected: [], planned: [], unresolved: [], staleGenerated, problems };
+  }
   const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
   const liveById = new Map(live.map((summary) => [summary.pageId, summary]));
   const liveByPath = new Map(live.map((summary) => [normalizePagePath(summary.path) ?? summary.path, summary]));
@@ -891,6 +1072,26 @@ export async function planPages({
     manifest.pages.filter((entry) => typeof entry?.pageId === "string").map((entry) => [entry.pageId, entry]),
   );
   let sharedThemeContexts;
+  // What the workspace last recorded about who can be named (TR01196). Absent
+  // is the common case and means a reference cannot be checked offline, which
+  // is never a reason to refuse it.
+  let recordedAuthors;
+  let recordedAuthorsRead = false;
+  const getRecordedAuthors = async () => {
+    if (!recordedAuthorsRead) {
+      recordedAuthorsRead = true;
+      recordedAuthors = await readRecordedAuthors(workspaceDir, siteId);
+    }
+    return recordedAuthors;
+  };
+  // At most one live read per run, however many pages name a new author.
+  let liveAuthorsRead;
+  const getLiveAuthors = refreshAuthors === undefined
+    ? undefined
+    : () => {
+      liveAuthorsRead ??= refreshAuthors();
+      return liveAuthorsRead;
+    };
 
   // Resolution: which file is each page path's one authoritative source.
   // This reads metadata only — a manifest entry, or a front-matter block —
@@ -899,8 +1100,35 @@ export async function planPages({
   const sources = [];
   const claimants = [];
   const unresolved = [];
+  // Sources of generated pages the site has since retired, which pull keeps
+  // apart from the live pages (TR01195). Never sent; reported, not refused,
+  // unless a push names that path.
+  const retiredByFile = new Map(
+    (Array.isArray(manifest.retiredGeneratedSources) ? manifest.retiredGeneratedSources : [])
+      .filter((entry) => typeof entry?.file === "string" && typeof entry?.path === "string")
+      .map((entry) => [entry.file, entry]),
+  );
   for (const file of files) {
     const manifestEntry = manifestByFile.get(file);
+    const retired = manifestEntry === undefined ? retiredByFile.get(file) : undefined;
+    if (retired !== undefined) {
+      const retiredPath = normalizePagePath(retired.path) ?? retired.path;
+      // A page created since at the same path has its own source, which is the
+      // one a push by that path sends.
+      if (targeted && requestedPaths.has(retiredPath) && !liveByPath.has(retiredPath)) {
+        throw documentError(
+          "pages.generated_create",
+          `'${file}' was the source of a generated page that the site no longer has, and a push cannot create `
+            + "one. Delete the file.",
+          file,
+        );
+      }
+      if (!targeted) {
+        staleGenerated.push({ file, path: displayPagePath(retiredPath) });
+        onProgress(`'${file}' is the source of a generated page the site no longer has; nothing is sent for it.`);
+      }
+      continue;
+    }
     try {
       const source = await readWorkspacePageSource({ workspaceDir, file, manifestEntry });
       if (source.pagePath === undefined) {
@@ -1012,6 +1240,79 @@ export async function planPages({
           file,
         );
       }
+      const generated = documentTemplate(document_) === TEMPLATE_GENERATED;
+      if (generated && target === undefined) {
+        if (targeted) {
+          throw documentError(
+            "pages.generated_create",
+            `'${file}' is a generated-page source, but the site has no generated page for it. Taproot creates `
+              + "generated pages from the site's content; a push cannot create one. If the page no longer exists, "
+              + "delete this file and run 'taproot-site pull'.",
+            file,
+          );
+        }
+        // The site retired this page (its tag, month, place or folder is gone),
+        // which is Taproot's doing, not a mistake in the workspace: it cannot
+        // block the pages that do exist.
+        staleGenerated.push({ file, path: displayPagePath(pagePath) });
+        onProgress(
+          `'${file}' is a generated-page source, but the site has no generated page at '${pagePath || "/"}' any more; `
+            + "nothing is sent for it. Delete the file, or run 'taproot-site pull' to refresh the workspace.",
+        );
+        return;
+      }
+      // The file-keyed entry is gone whenever the file was renamed or replaced —
+      // which is exactly what the pull, delete the `.pm.json`, author a `.md`
+      // flow does. Falling back through the page's own identity keeps the
+      // fields the workspace never restated; without it the whole-object
+      // UpdatePage sends "" and false and silently clears both.
+      const targetEntry = target === undefined ? undefined : manifestByPageId.get(target.pageId);
+      const description = generated
+        // The manifest's title and description are what the site reported; the owner's are in the document.
+        ? generatedPageDescription(document_.data, declaredDescription ?? targetEntry?.description ?? "")
+        : declaredDescription ?? targetEntry?.description ?? "";
+      const sentTitle = generated ? generatedPageTitle(document_.data, title) : title;
+      const sentDescription = typeof description === "string" ? description : "";
+      // A Markdown source carries its author in the front matter its hash
+      // already covers; only a .pm.json page keeps one in the manifest, where
+      // the key has to see it. Absent, the key is the one it always was.
+      const markdownSource = source.sourceFormat === PAGE_SOURCE_FORMAT_MARKDOWN;
+      const contentKeyFor = (author) => pageContentKey(
+        source.sourceHash,
+        {
+          title: sentTitle,
+          path: pagePath,
+          description: sentDescription,
+          author: markdownSource ? "" : author,
+        },
+        markdownSource ? canonicalDocumentHash(document_) : "",
+      );
+      // A generated page has no author, so its key is final here. Every other
+      // page's key waits for the author resolved below.
+      let contentKey = contentKeyFor("");
+      // The source and everything sent with it match what the site last agreed
+      // to, so sending again would only turn an approved page back into a draft.
+      // Not when the operator was shown a conflict for this page (the record
+      // exists to let this push reassert the source), and not when the source
+      // moved or changed format, which the send re-registers in the manifest.
+      const isUnchanged = (record) => target !== undefined
+        && targetEntry?.baseline?.contentKey === contentKey
+        && record === undefined
+        && targetEntry.file === file
+        && targetEntry.sourceFormat === source.sourceFormat;
+      // An untouched generated page is not this push's to judge. Taproot
+      // moves its revision and its path on its own (a tag rename, a month that
+      // gained a post), and refusing the whole push for a page nothing here
+      // sends would make one renamed page block every other edit.
+      let untouchedGenerated = false;
+      if (generated) {
+        const observedFile = internalPageObservedRevisionFile(target.pageId);
+        if (observedFile !== undefined) await workspaceFileExists(workspaceDir, observedFile);
+        untouchedGenerated = isUnchanged(await readObservedPageRecord(workspaceDir, target.pageId));
+        if (!untouchedGenerated) {
+          requireGeneratedUpdate({ file, pagePath, target, entry: manifestEntry ?? targetEntry, document_ });
+        }
+      }
       const workspaceSystemKind = systemPageKind(pagePath);
       if (target === undefined) {
         if (workspaceSystemKind !== undefined) {
@@ -1051,7 +1352,7 @@ export async function planPages({
         if (observedRecordFile !== undefined) await workspaceFileExists(workspaceDir, observedRecordFile);
         const observed = await readObservedPageRecord(workspaceDir, target.pageId);
         observedRecord = observed;
-        if (online) {
+        if (online && !untouchedGenerated) {
           const guard = {
             file,
             pagePath,
@@ -1071,7 +1372,7 @@ export async function planPages({
       // earlier pages have been written. A page matching itself is the ordinary
       // update and is left alone.
       const holder = liveByPath.get(pagePath);
-      if (holder !== undefined && holder.pageId !== target?.pageId) {
+      if (!untouchedGenerated && holder !== undefined && holder.pageId !== target?.pageId) {
         throw documentError(
           "pages.path_taken",
           `'${file}' claims page path '${pagePath}', which page ${holder.pageId} already holds on this site. `
@@ -1079,14 +1380,6 @@ export async function planPages({
           file,
         );
       }
-
-      // The file-keyed entry is gone whenever the file was renamed or replaced —
-      // which is exactly what the pull, delete the `.pm.json`, author a `.md`
-      // flow does. Falling back through the page's own identity keeps the
-      // fields the workspace never restated; without it the whole-object
-      // UpdatePage sends "" and false and silently clears both.
-      const targetEntry = target === undefined ? undefined : manifestByPageId.get(target.pageId);
-      const description = declaredDescription ?? targetEntry?.description ?? "";
 
       await validateWorkspacePageDocument({
         workspaceDir,
@@ -1100,28 +1393,54 @@ export async function planPages({
         }),
       });
 
-      const sentDescription = typeof description === "string" ? description : "";
-      const contentKey = pageContentKey(
-        source.sourceHash,
-        { title, path: pagePath, description: sentDescription },
-        source.sourceFormat === PAGE_SOURCE_FORMAT_MARKDOWN ? canonicalDocumentHash(document_) : "",
-      );
+      // Online, the listing says whom the site credits now; the baseline is
+      // only whom it credited at the last reconcile. Discarding a draft in the
+      // app can drop an author the CLI assigned, and the push must then ask
+      // again rather than trust the record. A page that credits someone this
+      // credential may not name keeps the recorded author (TR01196).
+      const recordedAuthor = targetEntry?.baseline?.author;
+      const heldAuthor = online && target !== undefined
+        ? target.authorRef || (target.hasAuthor ? recordedAuthor : "")
+        : recordedAuthor;
+      const authorship = generated
+        ? { author: "", sendAuthor: false }
+        : await resolvePageAuthor({
+          file,
+          pagePath,
+          declared: source.declaredAuthor ?? targetEntry?.author,
+          recorded: heldAuthor,
+          markdown: markdownSource,
+          knownAuthors: getRecordedAuthors,
+          refreshAuthors: getLiveAuthors,
+        });
+      contentKey = contentKeyFor(authorship.author);
+      // An author the site no longer holds is a change to send, however the
+      // source compares with the record.
+      const unchanged = isUnchanged(observedRecord) && !(online && target !== undefined && authorship.sendAuthor);
+      // Only for a page this push sends: a description stored before the limit
+      // existed must not block a push that leaves it alone (TR01194). A
+      // generated page's derived description is not the owner's to shorten;
+      // its customDescription is checked with the document.
+      if (!generated && !unchanged && [...sentDescription].length > DESCRIPTION_MAXIMUM_LENGTH) {
+        throw documentError(
+          "pages.description_too_long",
+          `'${file}' has a ${[...sentDescription].length}-character description; it may be at most `
+            + `${DESCRIPTION_MAXIMUM_LENGTH}, and search results show about ${DESCRIPTION_WARN_LENGTH}.`,
+          file,
+        );
+      }
       planned.push({
         file,
         pagePath,
-        title,
+        title: sentTitle,
+        // Only the owner's own description is warned about for length: the derived one is not theirs to shorten.
+        ...(generated ? { declaredDescription: document_.data.customDescription } : {}),
         contentKey,
-        // The source and everything sent with it match what the site last agreed
-        // to, so sending again would only turn an approved page back into a draft.
-        // Not when the operator was shown a conflict for this page (the record
-        // exists to let this push reassert the source), and not when the source
-        // moved or changed format, which the send re-registers in the manifest.
-        unchanged: target !== undefined
-          && targetEntry?.baseline?.contentKey === contentKey
-          && observedRecord === undefined
-          && targetEntry.file === file
-          && targetEntry.sourceFormat === source.sourceFormat,
+        unchanged,
         description: sentDescription,
+        author: authorship.author,
+        sendAuthor: authorship.sendAuthor,
+        ...(authorship.unverified === true ? { authorUnverified: true } : {}),
         document: document_,
         sourceFormat: source.sourceFormat,
         sourceHash: source.sourceHash,
@@ -1135,7 +1454,7 @@ export async function planPages({
     });
   }
 
-  return { targeted, sources, selected, planned, unresolved, problems };
+  return { targeted, sources, selected, planned, unresolved, staleGenerated, problems };
 }
 
 function missingPathError(file) {
@@ -1146,9 +1465,20 @@ function missingPathError(file) {
   );
 }
 
+/**
+ * The generated-page sources whose page the site no longer has, as a result
+ * field (TR01195). Reported rather than refused: the site retired the page, and
+ * nothing is sent for the file.
+ */
+export function staleGeneratedSourcesField(staleGenerated) {
+  return staleGenerated.length === 0
+    ? {}
+    : { staleGeneratedSources: { total: staleGenerated.length, ...reportedList("items", staleGenerated, LIST_BYTES) } };
+}
+
 /** What a dry run or a plan reports for one planned page. */
 export function plannedPageItem(page) {
-  return { file: page.file, path: page.pagePath || "/", action: page.unchanged ? "unchanged" : page.action };
+  return { file: page.file, path: displayPagePath(page.pagePath), action: page.unchanged ? "unchanged" : page.action };
 }
 
 export async function pagesPush(invocation) {
@@ -1219,9 +1549,17 @@ export async function pagesPush(invocation) {
       livePages,
       online: true,
       requestedPaths,
+      refreshAuthors: liveAuthorsRefresher({
+        client,
+        workspaceDir: config.workspaceDir,
+        siteId,
+        // A dry run writes nothing, authors.json included.
+        write: !dryRun,
+        onProgress,
+      }),
       onProgress,
     });
-    const { planned, targeted, unresolved } = plan;
+    const { planned, targeted, unresolved, staleGenerated } = plan;
     // A page that places a video names it by id, and only the library knows
     // whether that id is one of this site's videos. Asked once for the whole
     // push, before anything is written, so a page cannot be sent that
@@ -1254,6 +1592,10 @@ export async function pagesPush(invocation) {
         : {}),
       discovered: files.length,
     };
+    // Warned about only for pages this push sends, so an unchanged page is not
+    // re-reported every time.
+    const sending = planned.filter((page) => !page.unchanged);
+    const warnings = { ...autolinkWarnings(sending, onProgress), ...descriptionWarnings(sending, onProgress) };
     if (dryRun) {
       refuseProblems(plan.problems, "pages push --dry-run found problems and sent nothing");
       onProgress("Dry run: nothing was sent.");
@@ -1266,8 +1608,10 @@ export async function pagesPush(invocation) {
           wouldUpdate: planned.filter((page) => !page.unchanged && page.action === "updated").length,
           ...selection,
           validated: planned.length,
+          ...staleGeneratedSourcesField(staleGenerated),
           ...reportedList("items", planned.map(plannedPageItem), ITEMS_BYTES),
         },
+        ...warnings,
       });
     }
     refuseProblems(plan.problems, "pages push sent nothing");
@@ -1292,6 +1636,10 @@ export async function pagesPush(invocation) {
           shortDescription: page.description,
           template: wireTemplate(page.document),
           ...wirePageFields(page.document),
+          // Only a name the site has not been told: repeating the author a page
+          // already has would let a later change of that person's permissions
+          // refuse a push that changes nothing about authorship.
+          ...(page.sendAuthor ? { author: page.author } : {}),
         };
         // A create whose answer is lost may still have made the page. Recorded
         // first, so a later push or plan that finds a page at this path refuses
@@ -1301,9 +1649,14 @@ export async function pagesPush(invocation) {
           await writeManifest(config.workspaceDir, manifest);
         }
         attempting = page;
-        const summary = page.action === "created"
-          ? await createPage(client, { siteId, ...fields })
-          : await updatePage(client, page.pageId, { pageId: page.pageId, ...fields });
+        let summary;
+        try {
+          summary = page.action === "created"
+            ? await createPage(client, { siteId, ...fields })
+            : await updatePage(client, page.pageId, { pageId: page.pageId, ...fields });
+        } catch (error) {
+          throw translateAuthorRefusal(error, page.file);
+        }
         attempting = undefined;
         manifestDirty = true;
         if (page.action === "created") {
@@ -1312,10 +1665,11 @@ export async function pagesPush(invocation) {
         }
         applied.push({
           file: page.file,
-          path: summary.path,
+          path: displayPagePath(summary.path),
           pageId: summary.pageId,
           action: page.action,
           status: summary.status,
+          ...(page.author === "" ? {} : { author: page.author }),
         });
         // `entry?.` because a hand-edited manifest can hold a null in the list,
         // and a raw TypeError here would collapse to an opaque `site.failed`
@@ -1323,6 +1677,10 @@ export async function pagesPush(invocation) {
         // where a crash costs more than a refusal.
         const existing = manifest.pages.find((entry) => entry?.pageId === summary.pageId);
         const record = existing ?? {};
+        // The author the site holds now: what it reports, else what was just
+        // accepted, else what this workspace already knew it held.
+        const heldAuthor = summary.authorRef
+          || (page.sendAuthor ? page.author : parseAuthorReference(record.baseline?.author)?.value ?? "");
         Object.assign(record, {
           pageId: summary.pageId,
           resourceId: summary.resourceId || record.resourceId || "",
@@ -1361,9 +1719,14 @@ export async function pagesPush(invocation) {
             // Recorded for the pages whose push sends a date, so the next push
             // can tell a date the site changed from one it already holds.
             ...(sentDisplayDate(page.templateType) ? { displayDate: summary.displayDate } : {}),
+            ...(heldAuthor === "" ? {} : { author: heldAuthor }),
           },
           pendingApproval: true,
         });
+        // What the source names, kept beside the site's own for a .pm.json
+        // page, whose manifest entry is the only place it is written down.
+        if (page.author === "") delete record.author;
+        else record.author = page.author;
         if (existing === undefined) manifest.pages.push(record);
         // The override this page's record permitted has now been taken, and
         // the baseline above records what the site holds because of it.
@@ -1407,6 +1770,16 @@ export async function pagesPush(invocation) {
       if (manifestDirty) await writeManifest(config.workspaceDir, manifest);
     }
 
+    // Pages are authorless unless a source names an author, and an owner
+    // otherwise finds the missing byline only after publishing (TR01196).
+    const authorless = applied.filter((entry) => entry.action === "created" && entry.author === undefined);
+    if (authorless.length > 0) {
+      onProgress(
+        `${authorless.length} page(s) were created without an author, so they publish with no byline. To credit one, `
+          + "add 'author: <handle or email>' to its front matter or run 'taproot-site pages meta set <path> --author "
+          + "<handle or email>', then push again; 'taproot-site authors list' shows who can be named.",
+      );
+    }
     return successResult(VERB_PAGES_PUSH, siteId, {
       pages: {
         total: planned.length,
@@ -1418,8 +1791,18 @@ export async function pagesPush(invocation) {
         ...(unresolved.length > 0
           ? { unresolved: unresolved.length, ...reportedList("unresolvedItems", unresolved, LIST_BYTES) }
           : {}),
+        ...staleGeneratedSourcesField(staleGenerated),
         ...reportedList("items", applied, ITEMS_BYTES),
+        ...(authorless.length > 0
+          ? {
+            authorless: {
+              total: authorless.length,
+              ...reportedList("items", authorless.map(({ file, path }) => ({ file, path })), LIST_BYTES),
+            },
+          }
+          : {}),
       },
+      ...warnings,
       // `pages push` writes drafts. Nothing reaches an audience until `approve`
       // stages them and `deploy` publishes the site.
       // Nothing to approve when every page was unchanged and nothing was sent.

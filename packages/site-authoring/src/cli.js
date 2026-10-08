@@ -17,6 +17,8 @@ import {
   SURFACE_STANDARD,
   VERB_APPLY,
   VERB_APPROVE,
+  VERB_AUTHORS_ADD,
+  VERB_AUTHORS_LIST,
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
   VERB_STAGING_REVIEW,
@@ -30,6 +32,7 @@ import {
   VERB_LOGOUT,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
+  VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
   VERB_PLACES_SEARCH,
   VERB_PLACES_SELECT,
@@ -109,8 +112,10 @@ const VERBS = Object.freeze([
       + "is either an offline fixture (manifest.fixture.json) or a pulled workspace. Every page source, the theme, "
       + "appearance, header, brand, footer, navigation, redirects, and forms are checked with the validators the "
       + "pushes use, and every problem is reported at once in error.problems (each with its file, code, and field) "
-      + "rather than one per run. A pulled workspace is checked against the pages, images, and baselines its "
-      + "manifests recorded at the pull. This proves local structure and semantics only. It does not prove "
+      + "rather than one per run. A pulled workspace is checked offline against the pages (generated ones included, "
+      + "so navigation to a section or tag page resolves), images, and baselines its manifests recorded at the pull. "
+      + "A link whose address is only http(s):// plus its own text (left by older editor autolinking) is reported in "
+      + "linkWarnings without refusing; pages push reports the same for the pages it sends. This proves local structure and semantics only. It does not prove "
       + "authorization, live site ownership, concurrency, persisted round trips, or rendering: 'plan' checks a "
       + "workspace against the live site, and 'pages push --dry-run' does that for pages alone. "
       + `See '${CLI_BINARY_NAME} help fixture' for the fixture manifest contract and for the path of the complete `
@@ -228,7 +233,64 @@ const VERBS = Object.freeze([
       + "site's version under '.taproot-site-state/', and leaves you to either push the local source or delete it "
       + "and pull again. A locally edited '.pm.json' is kept rather than overwritten for the same reason. "
       + "First revisions adopted without a completed body comparison are counted in pages.revisionsRecordedWithoutBodyComparison "
-      + "and announced on the human channel. New downloads and compared bodies are excluded.",
+      + "and announced on the human channel. New downloads and compared bodies are excluded. "
+      + "A page Taproot generates (a tag, an archive, a place, a folder) is pulled as an update-only '.pm.json' "
+      + "(template 'generated'): you edit its custom title, breadcrumb title, custom description and introduction, "
+      + "and the manifest keeps the title and description the site reports.",
+  },
+  {
+    name: VERB_PAGES_META_SET,
+    tokens: ["pages", "meta", "set"],
+    offline: true,
+    // Offline, but it reads taproot-site.json and edits the workspace manifest.
+    readsLocalState: true,
+    writesWorkspace: true,
+    metaOptions: true,
+    positionals: "metaPagePath",
+    summary: "Set a tracked page's title, description or author in the workspace; 'pages push' sends it.",
+    note: "Names one page by its path ('/' for the homepage) and sets --title, --description, --author, or any of "
+      + "them, in the workspace's record of that page. A .pm.json page keeps its title, description and author "
+      + "there, so this is the supported way to change them; a Markdown page keeps them in its front matter, which "
+      + "is edited instead. --author names a site author by handle or a member by email address (see 'authors "
+      + "list'); it only fills a page that has no author, and a page that already has a different one is refused "
+      + "(pages.author_conflict). A name missing from authors.json is only warned about (authors.json can be older "
+      + "than the site's list); 'pages push' checks it against the site. --author \"\" drops an author that has not "
+      + "been sent; it never removes the site's. "
+      + "A generated page keeps its own in its source (data.customTitle and data.customDescription), which this "
+      + "edits; an empty --title or --description there clears the custom value so the page uses its generated one. "
+      + "A description longer than 160 characters is warned about (search results cut it off) and one longer than "
+      + "1000 is refused. Nothing is sent: run 'pages push', then 'approve'.",
+  },
+  {
+    name: VERB_AUTHORS_LIST,
+    surface: SURFACE_STANDARD,
+    // Naming an author is part of writing a page, and the site gates both the
+    // list and the creation on the permission that creates pages (TR01196).
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["authors", "list"],
+    summary: "List the site authors and the members a page can be credited to; refreshes authors.json.",
+    note: "A page's author is a site author without a Taproot account (named by handle, such as jane-doe) or a site "
+      + "member who can create pages (named by email address). Pages are authorless unless a source names one, and "
+      + "an author already on a page is never replaced. The result lists authors { handle, displayName, hasEmail } "
+      + "and members { email, displayName }, and rewrites authors.json, which the offline checks ('validate', "
+      + "'pages meta set') read to warn about a name it lacks. authors.json holds members' email addresses: keep it "
+      + "out of a public repository. "
+      + "A site author's own address is private and is never listed or written.",
+  },
+  {
+    name: VERB_AUTHORS_ADD,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["authors", "add"],
+    positionals: "authorHandle",
+    authorOptions: true,
+    summary: "Create a site author, someone a page can be credited to who has no Taproot account.",
+    note: "Give the handle (lowercase letters, digits and single hyphens, at most 64 characters; it never changes) "
+      + "and --name, the name readers see on the byline. --email is optional: it is kept private, never published, "
+      + "and lets the person be linked to a Taproot account later. Then credit pages to the author with "
+      + "'author: <handle>' in a page's front matter or 'pages meta set <path> --author <handle>'. A handle the site "
+      + "already has under another name is refused (authors.handle_taken); under the same name it succeeds with "
+      + "existing: true. authors.json is updated with the new author.",
   },
   {
     name: VERB_PAGES_PUSH,
@@ -240,6 +302,10 @@ const VERBS = Object.freeze([
     positionals: "pagePaths",
     note:
       "Positional page paths narrow the push to those pages; with none, every workspace page is validated and sent. "
+      + "A link in a page being sent whose address is only http(s):// plus its own text is reported in linkWarnings "
+      + "(content.link_autolinked) without refusing. "
+      + "A page is created without an author unless its source names one ('author:' in the front matter, or 'pages "
+      + "meta set --author'); the pages created that way are listed in pages.authorless with how to credit them. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
       + "A selected path resolves to its one authoritative source from metadata alone, and that page is then validated "
       + "exactly as a whole push would validate it — site binding, manifest integrity, live create-or-update "
@@ -253,6 +319,10 @@ const VERBS = Object.freeze([
       + "error.problems with its file, code, and field. --dry-run does all of that against the live site, reports "
       + "which pages would be created, updated, or left unchanged, and sends nothing; it exits 1 when there are "
       + "problems. "
+      + "A generated page's source is update-only: a push refuses to create one (pages.generated_create), move it "
+      + "(pages.generated_move), or change what it is (pages.generated_identity). A generated page you did not edit "
+      + "never blocks a whole-workspace push, and one the site no longer has is reported as pages.staleGeneratedSources "
+      + "and skipped (naming its path refuses with pages.generated_create). "
       + "See 'taproot-site help page free-form' for the stable manifest and error contract.",
   },
   {
@@ -330,9 +400,9 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["redirects", "check"],
     summary: "Check the current redirect map through the authenticated staging edge.",
-    note: "Reports path, HTTP status and Location without following redirects. A redirect is live only with the release "
-      + "that carries it, so this reads the staged release. "
-      + "The result includes a fresh single-use staging handoff; keep it private.",
+    note: "Reports each entry's path, HTTP status and Location in redirects.items, and redirects.verified, without "
+      + "following redirects. A redirect is live only with the release that carries it, so this reads the staged release. "
+      + "The result includes a fresh single-use staging handoff in stagingPreview.url; keep it private.",
   },
   {
     name: VERB_REDIRECTS_PULL,
@@ -457,7 +527,10 @@ const VERBS = Object.freeze([
     positionals: "pagePaths",
     note: "Positional arguments narrow the selection to those page paths;"
       + " with none, every draft the workspace manifest tracks is staged."
-      + " The homepage is recorded with an empty path, so address it as '/'.",
+      + " The homepage is recorded with an empty path, so address it as '/'."
+      + " A named page with no pending draft (already approved, or published with no new draft) is listed in"
+      + " skipped { total, items: [{ pageId, path, status, reason }] } and the rest are approved; a path that names"
+      + " no page this workspace tracks refuses the whole call.",
   },
   {
     name: VERB_DEPLOY,
@@ -479,7 +552,8 @@ const VERBS = Object.freeze([
     note: "deploy --staging returns a single-use review handoff in stagingPreview.url, on a managed Docs site too, "
       + "where it stages settings only: open the URL once, then switch the site's theme toggle to review both "
       + "schemes before deploy --production. If no handoff could be minted, stagingPreview.reason names why and "
-      + "stagingPreview.recovery the next step; 'staging review' mints another.",
+      + "stagingPreview.recovery the next step; 'staging review' mints another. On a Standard site the result also "
+      + "carries the automatic redirect check: routeCheck and redirects (see 'help redirects').",
   },
   {
     name: VERB_PREVIEW_PAGE,
@@ -682,6 +756,10 @@ function verbHelp(verb) {
     ? " <query...>"
     : verb.positionals === "placeSelection"
     ? " <google-place-id> <session-token>"
+    : verb.positionals === "metaPagePath"
+    ? " <page-path> [--title <text>] [--description <text>] [--author <handle-or-email>]"
+    : verb.positionals === "authorHandle"
+    ? " <handle> --name <display-name> [--email <address>]"
     : verb.positionals
     ? ` [${verb.positionals === "paths" ? "path" : "page-path"}...]`
     : "";
@@ -694,6 +772,15 @@ function verbHelp(verb) {
     ? `\n  --staging        Deploy the staged site to staging.
   --production     Promote the completed staging deployment to production.
   --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
+    : "";
+  const metaOptions = verb.metaOptions
+    ? `\n  --title <text>       The page's title.
+  --description <text> The page's description for search results and link previews; '' clears it.
+  --author <ref>       Credit a page that has no author: a site author's handle or a member's email address.`
+    : "";
+  const authorOptions = verb.authorOptions
+    ? `\n  --name <text>        The name readers see on the byline (required).
+  --email <address>    A private address, kept to link the person to an account later (optional).`
     : "";
   const jsonOption = verb.json
     ? "\n  --json           Emit the stable JSON contract (operational output is always JSON)."
@@ -733,6 +820,9 @@ function verbHelp(verb) {
     : selfContained
     ? "This offline verb uses no credential and reads no configuration, and performs no network request and no "
       + `write.${upgradeGate}`
+    : verb.writesWorkspace
+    ? "This verb edits only the local workspace: it reads the configuration, uses no credential, and makes no "
+      + "network request."
     : verb.offline
     ? "This verb answers entirely from local state — the stored sign-in and the configuration — and makes no "
       + `network request and no write.${upgradeGate}`
@@ -773,7 +863,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${deliveryTargetOption}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
+${options}${targetOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
 `;
 }
 
@@ -1005,6 +1095,45 @@ function parsePlanOption(arguments_, index) {
   return candidate;
 }
 
+/**
+ * The text after --title or --description. Either may be empty, which clears a
+ * generated page's custom value; a page with its own title refuses an empty one.
+ */
+function parseMetaOption(arguments_, index, option) {
+  const candidate = arguments_[index + 1];
+  if (
+    typeof candidate !== "string"
+    || Buffer.byteLength(candidate, "utf8") > 8 * 1024
+    || hasAsciiControl(candidate)
+  ) {
+    throw usageError(
+      "cli.meta_option",
+      option === "--title"
+        ? "--title requires one printable title (an empty one clears a generated page's custom title)."
+        : "--description requires one printable description (an empty one clears it).",
+      { field: option.slice(2) },
+    );
+  }
+  return candidate;
+}
+
+/** The text after --author, --name (authors add) or --email: one printable value, bounded. */
+function parseAuthorOption(arguments_, index, option, { allowEmpty = false } = {}) {
+  const candidate = arguments_[index + 1];
+  if (
+    typeof candidate !== "string"
+    || (candidate.length === 0 && !allowEmpty)
+    || Buffer.byteLength(candidate, "utf8") > 2 * 1024
+    || hasAsciiControl(candidate)
+    || candidate.startsWith("--")
+  ) {
+    throw usageError("cli.author_option", `${option} requires exactly one printable value.`, {
+      field: option.slice(2),
+    });
+  }
+  return candidate;
+}
+
 function parseNameOption(arguments_, index) {
   const candidate = arguments_[index + 1];
   if (
@@ -1080,6 +1209,11 @@ function parseArguments(arguments_) {
   let json = false;
   let keyName;
   let planHash;
+  let metaTitle;
+  let metaDescription;
+  let metaAuthor;
+  let authorName;
+  let authorEmail;
   const positionals = [];
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
@@ -1149,6 +1283,39 @@ function parseArguments(arguments_) {
     if (verb.planHash && argument === "--plan") {
       if (planHash !== undefined) throw usageError("cli.duplicate_option", "--plan may be supplied only once.");
       planHash = parsePlanOption(rest, index);
+      index += 1;
+      continue;
+    }
+    if (verb.metaOptions && (argument === "--title" || argument === "--description")) {
+      const value = parseMetaOption(rest, index, argument);
+      if (argument === "--title") {
+        if (metaTitle !== undefined) throw usageError("cli.duplicate_option", "--title may be supplied only once.");
+        metaTitle = value;
+      } else {
+        if (metaDescription !== undefined) {
+          throw usageError("cli.duplicate_option", "--description may be supplied only once.");
+        }
+        metaDescription = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (verb.metaOptions && argument === "--author") {
+      if (metaAuthor !== undefined) throw usageError("cli.duplicate_option", "--author may be supplied only once.");
+      // An empty value clears a pending author that was never sent.
+      metaAuthor = parseAuthorOption(rest, index, argument, { allowEmpty: true });
+      index += 1;
+      continue;
+    }
+    if (verb.authorOptions && (argument === "--name" || argument === "--email")) {
+      const value = parseAuthorOption(rest, index, argument);
+      if (argument === "--name") {
+        if (authorName !== undefined) throw usageError("cli.duplicate_option", "--name may be supplied only once.");
+        authorName = value;
+      } else {
+        if (authorEmail !== undefined) throw usageError("cli.duplicate_option", "--email may be supplied only once.");
+        authorEmail = value;
+      }
       index += 1;
       continue;
     }
@@ -1234,6 +1401,28 @@ function parseArguments(arguments_) {
       { field: "environmentSelector" },
     );
   }
+  if (verb.positionals === "metaPagePath" && positionals.length !== 1) {
+    throw usageError("pages.meta_path_invalid", "pages meta set names exactly one page path ('/' for the homepage).", {
+      field: "pagePath",
+    });
+  }
+  if (verb.metaOptions && metaTitle === undefined && metaDescription === undefined && metaAuthor === undefined) {
+    throw usageError(
+      "pages.meta_nothing_to_set",
+      "pages meta set needs --title, --description, --author, or any of them.",
+      { field: "title" },
+    );
+  }
+  if (verb.positionals === "authorHandle" && positionals.length !== 1) {
+    throw usageError("authors.handle_missing", "authors add needs exactly one handle, such as jane-doe.", {
+      field: "handle",
+    });
+  }
+  if (verb.authorOptions && authorName === undefined) {
+    throw usageError("authors.name_missing", "authors add needs --name, the name readers see on the byline.", {
+      field: "name",
+    });
+  }
   if (verb.planHash && planHash === undefined) {
     throw usageError("apply.plan_required", "apply requires --plan with the planHash that 'plan' reported.", {
       field: "planHash",
@@ -1281,12 +1470,18 @@ function parseArguments(arguments_) {
     dryRun,
     keyName,
     ...(planHash === undefined ? {} : { planHash }),
+    ...(metaTitle === undefined ? {} : { metaTitle }),
+    ...(metaDescription === undefined ? {} : { metaDescription }),
+    ...(metaAuthor === undefined ? {} : { metaAuthor }),
+    ...(authorName === undefined ? {} : { authorName }),
+    ...(authorEmail === undefined ? {} : { authorEmail }),
     positionals: verb.positionals
       ? {
         key: verb.positionals,
         values: positionals,
-        scalar: verb.positionals === "pageSelector" || verb.positionals === "fixturePath"
-          || verb.positionals === "siteSelector" || verb.positionals === "environmentSelector",
+        scalar: verb.positionals === "pageSelector" || verb.positionals === "fixturePath" || verb.positionals === "metaPagePath"
+          || verb.positionals === "siteSelector" || verb.positionals === "environmentSelector"
+          || verb.positionals === "authorHandle",
       }
       : undefined,
   };
@@ -1369,6 +1564,11 @@ export async function runCli({
       ...(parsed.deliveryUrl === undefined ? {} : { deliveryUrl: parsed.deliveryUrl }),
       ...(parsed.propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds: parsed.propagationWaitSeconds }),
       ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
+      ...(parsed.metaTitle === undefined ? {} : { metaTitle: parsed.metaTitle }),
+      ...(parsed.metaDescription === undefined ? {} : { metaDescription: parsed.metaDescription }),
+      ...(parsed.metaAuthor === undefined ? {} : { metaAuthor: parsed.metaAuthor }),
+      ...(parsed.authorName === undefined ? {} : { authorName: parsed.authorName }),
+      ...(parsed.authorEmail === undefined ? {} : { authorEmail: parsed.authorEmail }),
       capabilities: parsed.capabilities,
       surface: parsed.surface,
       surfaceCapabilities: parsed.surfaceCapabilities,

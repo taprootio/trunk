@@ -99,6 +99,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // The one durable single-file write (TR00645), shared by the workspace and
     // the credential store so the fsync/rename discipline exists once.
     "src/atomic-file.js",
+    "src/authors-contract.js",
     "src/bounded-file.js",
     "src/capabilities.js",
     // The version comparison and offline refusal the latest-only gate needs
@@ -118,6 +119,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/content/free-form-sections.js",
     "src/content/index.js",
     "src/content/inline-facts.js",
+    "src/content/link-warnings.js",
     "src/content/markdown.js",
     "src/content/media-presentation.js",
     "src/content/tiptap-prosemirror.ts",
@@ -151,6 +153,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/json-guard.js",
     "src/json-path-diff.js",
     "src/output.js",
+    "src/page-metadata.js",
     "src/presentation-reference.js",
     "src/problems.js",
     "src/progress.js",
@@ -170,6 +173,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/typed-page-reference.js",
     "src/typed-pages.js",
     "src/verbs/approve.js",
+    "src/verbs/authors.js",
     "src/verbs/delivery-check.js",
     "src/verbs/deploy.js",
     "src/verbs/env.js",
@@ -182,6 +186,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/logout.js",
     "src/verbs/media-upload.js",
     "src/verbs/nav-push.js",
+    "src/verbs/pages-meta-set.js",
     "src/verbs/pages-push.js",
     "src/verbs/places.js",
     "src/verbs/plan.js",

@@ -4,6 +4,7 @@ import {
   getSettingsGroup,
   getSitePresentation,
   getSiteRedirectMap,
+  listSiteAuthors,
   listSitePages,
   PAGE_STATUS_DELETED,
   PAGE_STATUS_DRAFT,
@@ -16,6 +17,7 @@ import {
   SURFACE_DOCS_PRESENTATION,
   VERB_PULL,
 } from "../constants.js";
+import { AUTHORS_FILE_NAME, parseAuthorReference, projectAuthorsForWorkspace } from "../authors-contract.js";
 import { sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
 import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../footer-workspace.js";
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
@@ -31,8 +33,15 @@ import {
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
-import { isAuthorableTemplateType, sentDisplayDate, workspaceDocumentFromPage } from "../typed-pages.js";
 import {
+  generatedIdentity,
+  isAuthorableTemplateType,
+  isGeneratedTemplateType,
+  sentDisplayDate,
+  workspaceDocumentFromPage,
+} from "../typed-pages.js";
+import {
+  displayPagePath,
   canonicalDocumentHash,
   deleteWorkspaceFile,
   ensureWorkspaceRoot,
@@ -52,6 +61,7 @@ import {
   PAGE_WORKSPACE_MODE_EDITABLE,
   PAGE_WORKSPACE_MODE_METADATA_ONLY,
   PAGES_DIRECTORY,
+  isDiscoverablePageSource,
   pageSourceFormat,
   pageSourceRegistry,
   readObservedPageRecord,
@@ -117,6 +127,57 @@ const APPEARANCE_SETTINGS_TYPES = Object.freeze([
   SETTINGS_TYPE_SITE_HEADER,
 ]);
 
+/** The well-formed `retiredGeneratedSources` records of a previous manifest. */
+function retiredSourceRecords(value) {
+  return (Array.isArray(value) ? value : []).filter((record) =>
+    record !== null && typeof record === "object" && typeof record.pageId === "string"
+    && typeof record.file === "string" && typeof record.path === "string"
+    && pageSourceFormat(record.file) !== undefined && isDiscoverablePageSource(record.file)
+  ).map(({ pageId, file, path }) => ({ pageId, file, path }));
+}
+
+/**
+ * Whether a .pm.json page's title, path or description in the manifest moved
+ * since the last pull or push agreed on them (`pages meta set`, TR01194). The
+ * recorded content key covers exactly those and the source bytes.
+ */
+function metadataEditedLocally(source, templateType) {
+  return source.sourceFormat !== PAGE_SOURCE_FORMAT_MARKDOWN
+    && !isGeneratedTemplateType(templateType)
+    && source.baseline?.contentKey !== undefined
+    && source.baseline?.sourceHash !== undefined
+    && pageContentKey(source.baseline.sourceHash, source.metadata) !== source.baseline.contentKey;
+}
+
+/**
+ * A baseline recording the author the site holds now (TR01196). The reference
+ * compared against before an author is sent, so it has to move with every pull,
+ * kept edits included.
+ */
+function withHeldAuthor(baseline, author) {
+  if (baseline === undefined) return author === "" ? undefined : { author };
+  const { author: _previous, ...rest } = baseline;
+  return author === "" ? rest : { ...rest, author };
+}
+
+/**
+ * Says so when a kept `pages meta set --author` names someone other than the
+ * author the site now holds. The edit stays (a pull never discards the
+ * operator's work), but a push of it would be refused as pages.author_conflict,
+ * so the way out is named here instead of at the push (TR01196).
+ */
+function reportPendingAuthorDisagreement(source, summary, onProgress) {
+  const pending = parseAuthorReference(source.metadata?.author)?.value ?? "";
+  const held = parseAuthorReference(summary.authorRef)?.value ?? "";
+  if (pending === "" || held === "" || pending === held) return;
+  const shown = summary.path === "" ? "/" : summary.path;
+  onProgress(
+    `Kept the local author '${pending}' of '${source.file}', but the site credits '${held}', and an author is never `
+      + `replaced from the CLI. Run 'taproot-site pages meta set ${shown} --author ${held}' to match the site; `
+      + "to credit someone else, change it in the app.",
+  );
+}
+
 /**
  * The refusal for a remote body this workspace cannot represent.
  *
@@ -129,13 +190,19 @@ function pullConflict(conflicts) {
   const first = conflicts[0];
   const selector = first.pagePath || "/";
   const remaining = conflicts.length - 1;
+  const local = first.metadataOnly
+    ? " and this workspace's title, path or description for it (pages meta set)"
+    : first.localChanged
+    ? " and in this workspace"
+    : "";
   return new SiteAuthoringError(
     "pages.pull_conflict",
-    `Page '${selector}' changed on the site${first.localChanged ? " and in this workspace" : ""} since the last `
+    `Page '${selector}' changed on the site${local} since the last `
       + `pull, and '${first.file}' cannot be rewritten from the site's document. Nothing under '${PAGES_DIRECTORY}/' `
       + `was changed, and the site's version is preserved at '${first.baselineFile}'. Either run `
       + `'taproot-site pages push ${selector}' to make the site match '${first.file}', or delete '${first.file}' `
-      + `and pull again to adopt the site's version as this page's source.`
+      + `and pull again to adopt the site's version as this page's source`
+      + (first.metadataOnly ? ", which also drops the local title, path and description." : ".")
       + (remaining > 0 ? ` ${remaining} other tracked page(s) are in the same state.` : "")
       // Last, so the diagnostic bounds itself: the message is cut at
       // LIMITS.diagnosticScalars, and twenty long paths must never cut off the
@@ -284,8 +351,10 @@ function bodyStatusFor(summary) {
  * produces the same file names on every pull, whatever order the listing
  * arrives in. The manifest remains the authority on which page a file is.
  */
-function assignPageFiles(pages, tracked) {
-  const reserved = new Set(pages.map((summary) => `${PAGES_DIRECTORY}/${summary.pageId}.pm.json`));
+function assignPageFiles(pages, tracked, kept = new Set()) {
+  // `kept` holds files this pull must not write over: the sources of retired
+  // generated pages, which may hold unpushed edits (TR01195).
+  const reserved = new Set([...pages.map((summary) => `${PAGES_DIRECTORY}/${summary.pageId}.pm.json`), ...kept]);
   const claimed = new Set();
   const assigned = new Map();
   for (const summary of pages) {
@@ -556,8 +625,8 @@ async function requireWorkspaceBelongsToSite(workspaceDir, siteId) {
       PAGES_DIRECTORY,
     );
   }
-  // These three do carry a site, so they can clear themselves.
-  for (const artifact of [NAVIGATION_FILE_NAME, MEDIA_MANIFEST_FILE_NAME, REDIRECTS_FILE_NAME]) {
+  // These four do carry a site, so they can clear themselves.
+  for (const artifact of [NAVIGATION_FILE_NAME, MEDIA_MANIFEST_FILE_NAME, REDIRECTS_FILE_NAME, AUTHORS_FILE_NAME]) {
     const artifactBinding = await inspectArtifactSiteBinding(workspaceDir, artifact);
     if (artifactBinding.state === "absent") continue;
     if (artifactBinding.state === "bound" && artifactBinding.siteId === siteId) continue;
@@ -600,8 +669,74 @@ export async function pull(invocation) {
     }
     const live = pages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
     const authorable = live.filter((summary) => isAuthorableTemplateType(summary.templateType));
+    // Generated-page sources recorded apart as retired. One whose page the site
+    // lists again (a bounded listing left it out last time) takes its file back
+    // as that page's source; with no baseline, pull compares the bytes with the
+    // site's document before replacing anything, so unpushed edits are kept.
+    const previousRetired = presentationOnly
+      ? []
+      : retiredSourceRecords(
+        (await readManifest(config.workspaceDir, siteId, { required: false }).catch(() => undefined))
+          ?.retiredGeneratedSources,
+      );
+    const registeredFiles = new Set([...registry.values()].map((source) => source.file));
+    for (const record of previousRetired) {
+      if (registry.has(record.pageId) || registeredFiles.has(record.file)) continue;
+      if (!authorable.some((summary) => summary.pageId === record.pageId)) continue;
+      registry.set(record.pageId, {
+        pageId: record.pageId,
+        file: record.file,
+        sourceFormat: pageSourceFormat(record.file),
+        baseline: undefined,
+        metadata: { title: "", path: record.path, description: "" },
+        baselineDiscarded: false,
+        formatMismatch: false,
+        duplicateSource: false,
+        duplicateIdentity: false,
+      });
+      registeredFiles.add(record.file);
+    }
     const tracked = await resolveTrackedSources(config.workspaceDir, authorable, registry, onProgress);
-    const pageFiles = assignPageFiles(authorable, tracked);
+    // A generated page the site retired (its tag, month, place or folder is
+    // gone) leaves its pulled file behind: authored content, so pull will not
+    // delete it, and settles it before naming any page's file so that a page
+    // created since at the same path never writes over it. It is recorded
+    // apart from the live pages, which navigation and the other checks read
+    // as existing, so that a push still knows the file and skips it rather
+    // than refusing it as an unknown raw document.
+    //
+    // A bounded listing cannot tell a retired page from one it left out, so
+    // there the files are kept and recorded the same way, without claiming
+    // the page is gone; the next full listing settles which they are.
+    const retiredGeneratedSources = [];
+    if (!presentationOnly) {
+      const livePageIds = new Set(live.map((summary) => summary.pageId));
+      const trackedFiles = new Set([...tracked.values()].map((source) => source.file));
+      const candidates = [
+        ...[...registry].filter(([, source]) => source.generated !== undefined)
+          .map(([pageId, source]) => ({ pageId, file: source.file, path: source.metadata.path })),
+        ...previousRetired,
+      ];
+      const seen = new Set();
+      for (const { pageId, file, path } of candidates) {
+        if (livePageIds.has(pageId) || trackedFiles.has(file) || seen.has(file)) continue;
+        if (pageSourceFormat(file) === undefined || !isDiscoverablePageSource(file)) continue;
+        if (!await workspaceFileExists(config.workspaceDir, file)) continue;
+        seen.add(file);
+        retiredGeneratedSources.push({ pageId, file, path });
+        onProgress(
+          truncated
+            ? `'${file}' is the source of a generated page this bounded listing did not include; it is kept as it is.`
+            : `'${file}' was the source of a generated page that the site no longer has. `
+              + "Delete the file; a push sends nothing for it.",
+        );
+      }
+    }
+    const pageFiles = assignPageFiles(
+      authorable,
+      tracked,
+      new Set(retiredGeneratedSources.map((source) => source.file)),
+    );
 
     // The redirect map, with the revision a later push is fenced by (TR00702).
     // Read here, before the first workspace write, for the same reason the
@@ -624,6 +759,27 @@ export async function pull(invocation) {
             `This Taproot does not serve a redirect map yet; ${REDIRECTS_FILE_NAME} is not written and the manifest `
               + "records no redirect baseline.",
           );
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // Who a page can be credited to (TR01196). A Taproot that predates authors,
+    // or a credential without the content capability, leaves the file unwritten
+    // rather than failing a pull that does not need it.
+    let authorListing;
+    if (!presentationOnly) {
+      onProgress("Reading the site's authors.");
+      try {
+        authorListing = await listSiteAuthors(client, siteId);
+      } catch (error) {
+        if (
+          error instanceof ApiError
+          && (error.refusalKind() === REFUSAL_UNCLASSIFIED || error.refusalKind() === REFUSAL_CAPABILITY_MISSING)
+          && UNAVAILABLE_SETTINGS_STATUSES.has(error.httpStatus)
+        ) {
+          onProgress(`The site's authors are not readable by this credential or this Taproot; ${AUTHORS_FILE_NAME} is not written.`);
         } else {
           throw error;
         }
@@ -742,12 +898,23 @@ export async function pull(invocation) {
         // page's one source. Dropping it from the registry would let the next
         // pull mint the competing document all over again.
         onProgress(`Page '${summary.path}' has no readable body; keeping '${source.file}' as its source.`);
+        // A `pages meta set` edit is kept with the baseline that proves it is
+        // one; without the baseline the next pull could not tell it from the
+        // site's values and would overwrite it.
+        const metadataKept = metadataEditedLocally(source, summary.templateType);
+        const keptBaseline = metadataKept ? withHeldAuthor(source.baseline, summary.authorRef) : undefined;
+        if (metadataKept) reportPendingAuthorDisagreement(source, summary, onProgress);
         trackedPlans.set(summary.pageId, {
-          description,
-          title: titleFromRead(page, summary),
-          path: pathFromRead(page, summary),
+          // The page is still the generated page it was; losing the record would
+          // let the next push take an edit to its identity for the owner's.
+          ...(source.generated === undefined ? {} : { generated: source.generated }),
+          description: metadataKept ? source.metadata.description : description,
+          title: metadataKept ? source.metadata.title : titleFromRead(page, summary),
+          path: metadataKept ? source.metadata.path : pathFromRead(page, summary),
+          author: metadataKept ? source.metadata.author : summary.authorRef,
           file: source.file,
           sourceFormat: source.sourceFormat,
+          ...(keptBaseline === undefined ? {} : { baseline: keptBaseline }),
         });
         continue;
       }
@@ -840,12 +1007,29 @@ export async function pull(invocation) {
       if (revision !== undefined && source.baseline?.revision === undefined && sourceMatchesRemote === undefined) {
         revisionsRecordedWithoutBodyComparison += 1;
       }
+      // A .pm.json page keeps its title, path and description in the manifest,
+      // so an edit there (`pages meta set`) is local work just like an edited
+      // body: kept over the site's values, and a conflict if the site moved
+      // too (TR01194). The recorded content key is what the two last agreed on.
+      //
+      // A generated page is the exception: its manifest title and description are what the site
+      // reports, and its own are in the document, so editing them by hand changes nothing.
+      const generatedPage = isGeneratedTemplateType(summary.templateType);
+      const metadataEdited = metadataEditedLocally(source, summary.templateType);
       const keepLocal = markdown || localChanged;
-      const conflicted = markdown ? remoteChanged : localChanged && remoteChanged;
+      const conflicted = markdown ? remoteChanged : (localChanged || metadataEdited) && remoteChanged;
+      if (metadataEdited && !remoteChanged) {
+        onProgress(`Kept the local title, path and description of '${source.file}'; push them to send them.`);
+      }
+      if (metadataEdited) reportPendingAuthorDisagreement(source, summary, onProgress);
       trackedPlans.set(summary.pageId, {
-        description,
-        title: titleFromRead(page, summary),
-        path: pathFromRead(page, summary),
+        ...(generatedPage ? { generated: generatedIdentity(body.data) } : {}),
+        description: metadataEdited ? source.metadata.description : description,
+        title: metadataEdited ? source.metadata.title : titleFromRead(page, summary),
+        path: metadataEdited ? source.metadata.path : pathFromRead(page, summary),
+        // A `pages meta set --author` waiting to be sent is kept like any other
+        // metadata edit; otherwise the manifest records who the site credits.
+        author: metadataEdited ? source.metadata.author : summary.authorRef,
         file: source.file,
         sourceFormat: source.sourceFormat,
         // `sourceHash` records the source as of the last time it *agreed* with
@@ -867,10 +1051,25 @@ export async function pull(invocation) {
             remoteHash,
             sourceHash: localChanged ? source.baseline?.sourceHash : sourceHash,
             // Carried, never minted here: a kept source is only known to match
-            // the site if a push or an earlier pull already said so.
-            ...(source.baseline?.contentKey === undefined ? {} : { contentKey: source.baseline.contentKey }),
+            // the site if a push or an earlier pull already said so. When this
+            // pull adopts the site's title, path and description (they were not
+            // edited here), the key is re-derived over them, or the next pull
+            // would read the adopted values as a local edit.
+            ...(source.baseline?.contentKey === undefined
+              ? {}
+              : {
+                contentKey: markdown || metadataEdited || source.baseline.sourceHash === undefined
+                  ? source.baseline.contentKey
+                  : pageContentKey(source.baseline.sourceHash, {
+                    title: titleFromRead(page, summary),
+                    path: pathFromRead(page, summary),
+                    description,
+                    author: summary.authorRef,
+                  }),
+              }),
             ...(revision === undefined ? {} : { revision }),
             ...(remoteDisplayDate === undefined ? {} : { displayDate: remoteDisplayDate }),
+            ...(summary.authorRef === "" ? {} : { author: summary.authorRef }),
           }
           : {
             remoteHash,
@@ -879,11 +1078,17 @@ export async function pull(invocation) {
               title: titleFromRead(page, summary),
               path: pathFromRead(page, summary),
               description,
+              author: summary.authorRef,
             }),
             ...(revision === undefined ? {} : { revision }),
             ...(remoteDisplayDate === undefined ? {} : { displayDate: remoteDisplayDate }),
+            ...(summary.authorRef === "" ? {} : { author: summary.authorRef }),
           },
-        ...(keepLocal ? { baselineBody: serialized, baselineFile } : { refresh: serialized, baselineFile }),
+        // A conflict preserves the site's version whatever kept the source: the
+        // refusal names that copy as where the site's document now is.
+        ...(keepLocal || conflicted
+          ? { baselineBody: serialized, baselineFile }
+          : { refresh: serialized, baselineFile }),
       });
       if (remoteChanged) {
         // A refusal for this same version already worked this out, against a
@@ -937,7 +1142,9 @@ export async function pull(invocation) {
             pagePath: normalizePagePath(summary.path) ?? summary.path,
             file: source.file,
             baselineFile,
-            localChanged,
+            localChanged: localChanged || metadataEdited,
+            // Only the manifest's title, path or description moved here, not the file.
+            metadataOnly: metadataEdited && !localChanged,
             differences,
             observedRevision: revision,
             observedRemoteHash: remoteHash,
@@ -1013,6 +1220,7 @@ export async function pull(invocation) {
         hasDraft: summary.hasDraft,
         isGenerated: summary.isGenerated,
         workspaceMode: PAGE_WORKSPACE_MODE_METADATA_ONLY,
+        ...(summary.authorRef === "" ? {} : { author: summary.authorRef }),
       };
       if (isAuthorableTemplateType(summary.templateType)) {
         // This pull is reconciling the page, so the manifest below carries the
@@ -1026,8 +1234,12 @@ export async function pull(invocation) {
         const plan = trackedPlans.get(summary.pageId);
         if (plan !== undefined) {
           entry.description = plan.description;
+          if (plan.author === undefined || plan.author === "") delete entry.author;
+          else entry.author = plan.author;
           if (plan.title !== undefined) entry.title = plan.title;
           if (plan.path !== undefined) entry.path = plan.path;
+          // What a generated page is, so a push can refuse a source that changed it.
+          if (plan.generated !== undefined) entry.generated = plan.generated;
           if (plan.file !== undefined) {
             entry.file = plan.file;
             entry.sourceFormat = plan.sourceFormat;
@@ -1060,6 +1272,7 @@ export async function pull(invocation) {
           onProgress(`Page '${summary.path}' has no readable body; snapshotting metadata only.`);
         } else {
           entry.file = pageFiles.get(summary.pageId);
+          if (isGeneratedTemplateType(summary.templateType)) entry.generated = generatedIdentity(body.data);
           const source = Buffer.from(`${JSON.stringify(body, undefined, 2)}\n`, "utf8");
           entry.workspaceMode = PAGE_WORKSPACE_MODE_EDITABLE;
           entry.sourceFormat = pageSourceFormat(entry.file);
@@ -1072,9 +1285,11 @@ export async function pull(invocation) {
               title: entry.title,
               path: entry.path,
               description: entry.description,
+              author: entry.author,
             }),
             ...(revision === undefined ? {} : { revision }),
             ...(displayDate === undefined ? {} : { displayDate }),
+            ...(summary.authorRef === "" ? {} : { author: summary.authorRef }),
           };
           await writeWorkspaceFile(config.workspaceDir, entry.file, source);
           bodies += 1;
@@ -1097,6 +1312,14 @@ export async function pull(invocation) {
         config.workspaceDir,
         REDIRECTS_FILE_NAME,
         projectRedirectMapForWorkspace(siteId, redirectMap),
+      );
+    }
+
+    if (authorListing !== undefined) {
+      await writeWorkspaceJson(
+        config.workspaceDir,
+        AUTHORS_FILE_NAME,
+        projectAuthorsForWorkspace(siteId, authorListing),
       );
     }
 
@@ -1132,6 +1355,7 @@ export async function pull(invocation) {
       ...(presentationRevision === undefined ? {} : { presentation: presentationManifestEntry(presentationRevision) }),
       ...(formsBaseline === undefined ? {} : { forms: formsBaseline }),
       pages: manifestPages,
+      ...(retiredGeneratedSources.length === 0 ? {} : { retiredGeneratedSources }),
     };
     await writeManifest(config.workspaceDir, manifest);
     onProgress(`Wrote ${MANIFEST_FILE_NAME} describing ${manifestPages.length} pages.`);
@@ -1147,7 +1371,7 @@ export async function pull(invocation) {
     const reported = boundedList(
       manifestPages.map((entry) => ({
         pageId: entry.pageId,
-        path: entry.path,
+        path: displayPagePath(entry.path),
         status: entry.status,
         templateType: entry.templateType,
         file: entry.file,
@@ -1181,6 +1405,17 @@ export async function pull(invocation) {
           entries: redirectMap.entries.length,
         },
       }),
+      // Absent, not zeroed, when the site served no listing: `0` would read as
+      // a site with nobody to credit.
+      ...(authorListing === undefined
+        ? {}
+        : {
+          authors: {
+            file: AUTHORS_FILE_NAME,
+            authors: authorListing.authors.length,
+            members: authorListing.members.length,
+          },
+        }),
       settings: {
         pulled: pulledSettings.map((entry) => entry.settingsType),
         skipped: skippedSettings,

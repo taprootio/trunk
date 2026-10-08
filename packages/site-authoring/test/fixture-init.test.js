@@ -134,6 +134,108 @@ test("init refuses existing destinations and linked source files without overwri
   assert.ok(!(await readdir(root)).includes("output"));
 });
 
+test("init keeps a generated page navigation points at, so a real workspace validates offline (TR01198)", async (t) => {
+  const { source } = await sourceWorkspace(t);
+  const manifestFile = path.join(source, ".taproot-site-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  const section = {
+    pageId: "a0000000-0000-4000-8000-0000000000f1",
+    resourceId: "a0000000-0000-4000-8000-0000000000f2",
+    path: "hike",
+    title: "Hike",
+    status: "PAGE_STATUS_PUBLISHED",
+    templateType: "TEMPLATE_TYPE_GENERATED",
+    hasDraft: false,
+    isGenerated: true,
+    workspaceMode: "metadata-only",
+  };
+  // A generated page nothing links to stays out of the fixture.
+  const unlinked = { ...section, pageId: "a0000000-0000-4000-8000-0000000000f3", resourceId: "a0000000-0000-4000-8000-0000000000f4", path: "code" };
+  manifest.pages.push(section, unlinked);
+  manifest.navigation.items += 1;
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  const nav = path.join(source, "nav.json");
+  const doc = JSON.parse(await readFile(nav, "utf8"));
+  doc.navItems.push({
+    id: "a0000000-0000-4000-8000-0000000000f5",
+    kind: "NAV_ITEM_KIND_PAGE",
+    title: "Hike",
+    resourceId: section.resourceId,
+    children: [],
+  });
+  await writeFile(nav, JSON.stringify(doc));
+
+  const initialized = await invoke(source, ["validate", "--init", "../output"]);
+  assert.equal(initialized.exit, 0, initialized.stderr);
+  assert.equal(initialized.result.initialized.linkedPages, 1);
+  const output = initialized.result.initialized.directory;
+  const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
+  const linked = fixture.pages.filter((entry) => entry.workspaceMode === "metadata-only");
+  assert.equal(linked.length, 1);
+  assert.equal(linked[0].path, "hike");
+  assert.equal(Object.hasOwn(linked[0], "file"), false);
+  const exported = JSON.parse(await readFile(path.join(output, "nav.json"), "utf8"));
+  assert.equal(exported.navItems.at(-1).resourceId, linked[0].resourceId);
+  const result = await invoke(source, ["validate", output]);
+  assert.equal(result.exit, 0, result.stderr);
+});
+
+test("init exports a pulled generated page as an editable source that validates offline (TR01195)", async (t) => {
+  const { source } = await sourceWorkspace(t);
+  const manifestFile = path.join(source, ".taproot-site-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  const identity = {
+    kind: "GENERATED_PAGE_KIND_TAG",
+    tagId: "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a",
+    year: 0,
+    month: 0,
+    countryCode: "",
+    regionCode: "",
+    citySlug: "",
+    categorySlug: "",
+  };
+  manifest.pages.push({
+    pageId: "a0000000-0000-4000-8000-0000000000e1",
+    resourceId: "a0000000-0000-4000-8000-0000000000e2",
+    path: "tags/trails",
+    title: "Trails",
+    description: "Pages tagged with Trails.",
+    status: "PAGE_STATUS_PUBLISHED",
+    templateType: "TEMPLATE_TYPE_GENERATED",
+    hasDraft: false,
+    isGenerated: true,
+    file: "pages/tags/trails.pm.json",
+    sourceFormat: "prosemirror",
+    workspaceMode: "editable",
+    generated: identity,
+  });
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  await mkdir(path.join(source, "pages", "tags"), { recursive: true });
+  await writeFile(
+    path.join(source, "pages", "tags", "trails.pm.json"),
+    JSON.stringify({
+      template: "generated",
+      data: { ...identity, customTitle: "", breadcrumbTitle: "", customDescription: "Field notes." },
+    }),
+  );
+
+  const initialized = await invoke(source, ["validate", "--init", "../output"]);
+  assert.equal(initialized.exit, 0, initialized.stderr);
+  const output = initialized.result.initialized.directory;
+  const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
+  const exported = fixture.pages.find((entry) => entry.templateType === "TEMPLATE_TYPE_GENERATED");
+  assert.equal(exported.workspaceMode, "editable");
+  assert.equal(exported.isGenerated, true);
+  const document_ = JSON.parse(await readFile(path.join(output, exported.file), "utf8"));
+  assert.equal(document_.template, "generated");
+  assert.equal(document_.data.customDescription, "Field notes.");
+  // The identity record travels with the page, so the exported workspace can still check it.
+  assert.equal(exported.generated.kind, "GENERATED_PAGE_KIND_TAG");
+  assert.equal(exported.generated.tagId, document_.data.tagId);
+  const result = await invoke(source, ["validate", output]);
+  assert.equal(result.exit, 0, result.stderr);
+});
+
 test("init removes its incomplete destination when exported content fails fixture validation", async (t) => {
   const { root, source } = await sourceWorkspace(t);
   const nav = path.join(source, "nav.json");

@@ -42,7 +42,14 @@ import {
 import { footerPush } from "./footer-push.js";
 import { mediaUpload, pendingMediaFiles } from "./media-upload.js";
 import { navPush, validateNavigationWorkspaceDocument } from "./nav-push.js";
-import { pagesPush, placedVideoProblems, planPages, plannedPageItem } from "./pages-push.js";
+import {
+  liveAuthorsRefresher,
+  pagesPush,
+  placedVideoProblems,
+  planPages,
+  plannedPageItem,
+  staleGeneratedSourcesField,
+} from "./pages-push.js";
 import { comparePresentation, presentationMovedRefusal, presentationPullRequired, themePush } from "./theme-push.js";
 
 /**
@@ -265,6 +272,8 @@ async function preflight(session, invocation) {
       files: await walkWorkspaceFiles(workspaceDir, PAGES_DIRECTORY, PAGE_SOURCE_EXTENSIONS),
       livePages,
       online: true,
+      // Asked of the site but never written down: `plan` leaves the workspace as it found it.
+      refreshAuthors: liveAuthorsRefresher({ client, workspaceDir, siteId, write: false, onProgress }),
       // From the theme validated above, so a broken styles file is one problem, not one per page.
       getSharedThemeContexts: async () =>
         offline.presentation === undefined
@@ -370,6 +379,7 @@ async function preflight(session, invocation) {
         create: sending.filter((page) => page.action === "created").length,
         update: sending.filter((page) => page.action === "updated").length,
         unchanged: pages.planned.length - sending.length,
+        ...staleGeneratedSourcesField(pages.staleGenerated),
         items: pagesItems.items,
         ...(pagesItems.truncated ? { itemsTruncated: true } : {}),
       }),

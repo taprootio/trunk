@@ -124,8 +124,12 @@ with no credential, no network, and no write: every page source (metadata,
 Markdown conversion, media references, content vocabulary, section contexts),
 page paths and templates against the pages the pull recorded, navigation,
 redirects, forms, and the complete theme, appearance, header, brand, and
-footer. It reports every problem at once in `error.problems`, each with its
-file, code, and field, instead of one per run.
+footer. Navigation to a generated page (a section, tag or place page) resolves
+against the pages the pull recorded. It reports every problem at once in
+`error.problems`, each with its file, code, and field, instead of one per run.
+Warnings never refuse: `linkWarnings` names a link whose address is only
+`http(s)://` plus its own text (`content.link_autolinked`, left by older editor
+autolinking), and `pages push` reports the same for the pages it sends.
 
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
 the same way: a directory laid out like a
@@ -360,6 +364,92 @@ it is created: a source for another template is refused with
 `pages.template_immutable`. `taproot-site help page <type>` gives each
 template's fields and one worked example.
 
+A `.pm.json` page's title, path, description and author live in the workspace
+manifest rather than the file. `pages meta set <path> --title <text>
+--description <text>` changes the title or description there (a Markdown page
+keeps them in its front matter; `--author` is described under *Page authors*); `pull` keeps that edit until `pages push`
+sends it, and a site edit to the same page is a `pages.pull_conflict`. A
+description over 160 characters is a warning (`descriptionWarnings`), because
+search results cut it off; over 1000 is refused with
+`pages.description_too_long`, by the CLI and by Taproot.
+
+### Page authors
+
+Pages are authorless by default: a page you create with the CLI publishes with
+no byline unless you name an author, and `pages push` lists the pages it created
+that way in `pages.authorless`, with how to credit them. An author is one of two
+kinds of person, named by one string:
+
+- a **site author without a Taproot account** — one of an imported blog's
+  authors, say — named by handle (`jane-doe`: lowercase letters, digits and
+  single hyphens, at most 64 characters, fixed when the author is created). A
+  site author's name appears on the byline and in the page's structured data;
+  there is no profile link or follow button, because there is no account;
+- a **site member who can create pages**, named by email address.
+
+`authors list` prints both and rewrites `authors.json` (`pull` writes it too).
+`authors add jane-doe --name "Jane Doe" [--email jane@example.com]` creates a
+site author; `--email` is kept private (never published, never listed) so the
+person can be linked to a Taproot account later. Adding a handle the site
+already has under the same name succeeds and reports `existing: true`, so a
+script can repeat itself; a different name for a taken handle is refused
+(`authors.handle_taken`), naming the one the site has. `authors.json` holds the
+members' email addresses, so keep it out of a public repository.
+
+A page names its author with `author: jane-doe` in its front matter (any
+template), or, for a `.pm.json` page, `pages meta set <path> --author jane-doe`.
+Only the CLI assigns authors, and only to a page that has none; people editing
+in the app are never asked to name one. `authors.json` is as old as the last
+`pull` or `authors list`, so a name missing from it is not proof the person does
+not exist. `validate` and `pages meta set` run offline: they refuse text that
+is neither a handle nor an address (`pages.author_invalid`) and otherwise only
+warn (`pages.author_unverified`, in `authorWarnings`) about a name `authors.json`
+lacks. `pages push` and `plan` settle it online: on a miss they read the site's
+current list once (`pages push` rewrites `authors.json` with it) and refuse
+(`pages.author_unknown`) only a name the site really lacks. A member who cannot
+create pages is `pages.author_unknown` as well, with the same wording.
+
+The CLI only fills a page that has no author: a page that already has a
+different one is refused (`pages.author_conflict`), by the CLI from what the
+last pull recorded and by Taproot, and naming the author a page already has
+changes nothing. The refusal says how to settle it: for a `.pm.json` page,
+`pages meta set <path> --author <the site's author>` matches the site, and
+`pages meta set <path> --author ""` drops an author that was never sent (it
+never asks the site to remove one, and is refused once the site holds an
+author); for a Markdown page, fix the `author:` line. `pull` keeps a pending
+author the site now disagrees with and says so. The author is recorded on the
+page's manifest entry (`author`, and `baseline.author` for what the site
+held), so a re-push never resends it. The site names a page's author in
+listings only while that person can still be named: a former member's page, or
+a member who can no longer create pages, reports none, and a push that names
+someone else on it is refused as a conflict.
+
+Pages Taproot generates from the site's content — a tag, the tags index, a
+published year or month, a place archive, a folder — are update-only sources.
+`pull` writes each as `pages/<name>.pm.json` with `"template": "generated"`:
+`data` holds what the page is (`kind`, `tagId`, `year`, `month`, `countryCode`,
+`regionCode`, `citySlug`, `categorySlug`, which you leave as pulled) and the four
+things that are yours to author: `customTitle`, `breadcrumbTitle`,
+`customDescription` and `introductionBody`. An empty string means "use the
+generated default"; the description then falls back to the introduction's first
+paragraph, else the system default. The manifest keeps the title and description
+the site reports, for reference. `pages meta set <path> --title/--description`
+edits `customTitle` and `customDescription` in the source (an empty value
+clears it), and `pages push` sends the page back as an unapproved draft. The
+title and description the site stores are derived from `customTitle`,
+`customDescription` and `introductionBody`, so what a push sends for them is
+ignored. A push refuses to create a generated page (`pages.generated_create`),
+move one (`pages.generated_move`) or change its kind or identity
+(`pages.generated_identity`, also when the manifest has no record of what the
+file was pulled as: run `pull`); there is no Markdown form
+(`pages.generated_markdown`). A generated page you did not edit never blocks a
+push of the whole workspace, even when Taproot moved it since the pull (a tag was
+renamed). If the site no longer has the page (its tag, month or folder is gone),
+a whole-workspace push reports the file under `pages.staleGeneratedSources` and
+sends nothing for it, and `pull` says so; delete the file. Naming that path in
+`pages push <page-path>` is refused with `pages.generated_create`. A description over 160 characters is warned about,
+since search results cut it off, and one over 1000 is refused.
+
 `pages push [page-path...]` validates and sends the selected pages, or every
 workspace page when none is named; the homepage is addressed as `/`. Every
 selected page is checked before anything is sent, and a refusal lists every
@@ -557,6 +647,25 @@ targets are refused (`content.link_rel`, `content.link_target`). The editor's
 old default, `noopener noreferrer nofollow`, reads as no choice. See
 `taproot-site help page free-form`.
 
+### Authoring feedback in 0.16.0
+
+- `pages meta set <path> --title/--description/--author` edits a `.pm.json`
+  page's title, description or author; `pull` keeps the edit until `pages push`
+  sends it. Descriptions are warned about over 160 characters and refused over
+  1000, here and by Taproot.
+- Generated pages (tags, archives, places, folders) pull as update-only sources
+  whose custom title, breadcrumb, description and introduction you can edit.
+- Pages are authorless by default. `authors list`, `authors add` and
+  `authors.json` name a member who can create pages or a site author without a
+  Taproot account; `author:` front matter or `pages meta set --author` credits
+  one on a page that has none, and an author is never replaced from the CLI.
+- `redirects check` and `deploy --staging` report `routeCheck`, `redirects` and
+  `stagingPreview` at the top level; result paths spell the home page `/`;
+  `approve` skips a page with nothing to approve instead of failing the batch.
+- `validate` checks a real pulled workspace offline (`validate --init` keeps the
+  generated pages navigation links to), and `validate` and `pages push` warn on
+  links that look made by autolinking (`content.link_autolinked`).
+
 ### Staging verification and deployment evidence
 
 `deploy --staging` selects the same changed pages, settings groups and navigation
@@ -579,13 +688,15 @@ only error class and known page/node/attribute labels, never renderer messages.
 Staging deploys check the current redirect map through the real staging edge.
 Run `taproot-site redirects check` to repeat once the deployment has completed; a redirect is a file inside the release, so it is live exactly when its release is served.
 The Node CLI consumes a separate handoff, retains its short staging cookie in
-memory, and requests each map path without following redirects. Results report
-path, HTTP status and Location; `verified` requires all entries to match and the
+memory, and requests each map path without following redirects. Both
+`redirects check` and `deploy --staging` report `routeCheck` and `redirects` at
+the top level of their result: `redirects.items` lists each path, HTTP status
+and Location, and `redirects.verified` requires all entries to match and the
 map revision to remain unchanged. A mismatch is evidence to investigate, not a
 failed deployment. Checks describe the current map, not a historical release.
 Requests have a 90-second deadline with eight concurrent requests; large JSON
-lists have explicit truncation, prioritizing failures. Human output reports each
-entry. A gate/transport failure never counts as verified.
+lists have explicit truncation, prioritizing failures. Progress output reports
+each entry. A gate/transport failure never counts as verified.
 
 `stagingPreview.url` is a fresh single-use two-minute handoff minted **after**
 checks. Opening it consumes it and establishes a five-minute staging cookie.
@@ -640,8 +751,10 @@ The destination must be new, outside the source workspace, and its parent must e
 to select another source configuration. Initialization needs no credential or
 network. It exports editable pages of every template as workspace documents with navigation,
 redirects, settings, and version-7 appearance/footer metadata, validates the
-result, and leaves the source unchanged. Excluded metadata-only pages are
-counted; unresolved references to them fail validation.
+result, and leaves the source unchanged. A metadata-only page that navigation,
+the footer or a page links to, such as a generated section page, is kept as a
+metadata-only entry (`initialized.linkedPages`); other metadata-only pages are
+left out (`initialized.skippedPages`).
 
 Exported UUIDs and HTTP(S) origins are deterministic fixture values under
 `example.test`; URL credentials, query strings and fragments are removed.

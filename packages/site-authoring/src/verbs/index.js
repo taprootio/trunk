@@ -1,6 +1,8 @@
 import {
   VERB_APPLY,
   VERB_APPROVE,
+  VERB_AUTHORS_ADD,
+  VERB_AUTHORS_LIST,
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
   VERB_ENV,
@@ -12,6 +14,7 @@ import {
   VERB_LOGOUT,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
+  VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
   VERB_PLACES_SEARCH,
   VERB_PLACES_SELECT,
@@ -31,6 +34,7 @@ import {
   VERB_WHOAMI,
 } from "../constants.js";
 import { approve } from "./approve.js";
+import { authorsAdd, authorsList } from "./authors.js";
 import { deliveryCheck } from "./delivery-check.js";
 import { deploy } from "./deploy.js";
 import { env } from "./env.js";
@@ -42,6 +46,7 @@ import { login } from "./login.js";
 import { logout } from "./logout.js";
 import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
+import { pagesMetaSet } from "./pages-meta-set.js";
 import { pagesPush } from "./pages-push.js";
 import { placesSearch, placesSelect } from "./places.js";
 import { apply, plan } from "./plan.js";
@@ -103,6 +108,7 @@ import { whoami } from "./whoami.js";
  *   placeSelection, // places select: [googlePlaceId, sessionToken]
  *   pagePaths,     // approve: narrow to these page paths; with none, every
  *                  //   draft the workspace manifest tracks is staged
+ *   authorHandle,  // authors add: the handle of the site author to create
  *   pageId,        // preview page: the one persisted draft UUID to render
  *   previewIds,    // preview revoke: [page UUID, snapshot UUID]
  * }
@@ -135,6 +141,9 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_LOGOUT]: logout,
   [VERB_PULL]: pull,
   [VERB_PAGES_PUSH]: pagesPush,
+  [VERB_PAGES_META_SET]: pagesMetaSet,
+  [VERB_AUTHORS_LIST]: authorsList,
+  [VERB_AUTHORS_ADD]: authorsAdd,
   [VERB_NAV_PUSH]: navPush,
   [VERB_PLAN]: plan,
   [VERB_PLACES_SEARCH]: placesSearch,

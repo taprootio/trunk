@@ -15,6 +15,8 @@ import {
   MANIFEST_FILE_NAME,
   MANIFEST_VERSION,
   PAGE_WORKSPACE_MODE_EDITABLE,
+  normalizePagePath,
+  PAGE_WORKSPACE_MODE_METADATA_ONLY,
   readManifest,
   readMediaManifest,
   readWorkspaceJson,
@@ -143,10 +145,14 @@ export async function initializeFixture(invocation, validate) {
       status: entry.status,
       templateType: entry.templateType,
       hasDraft: entry.hasDraft,
-      isGenerated: false,
+      isGenerated: entry.isGenerated === true,
       file,
       sourceFormat: "prosemirror",
       workspaceMode: "editable",
+      // What a generated page is, which its identity check needs offline.
+      ...(entry.generated !== null && typeof entry.generated === "object" && !Array.isArray(entry.generated)
+        ? { generated: entry.generated }
+        : {}),
     }));
     add(file, sanitize(page.document));
   }
@@ -193,6 +199,44 @@ export async function initializeFixture(invocation, validate) {
           : { siteId: original.siteId, revision: original.revision, entries: original.entries },
       ),
     );
+  }
+  // Navigation and footer links may point at pages the fixture has no source
+  // for, such as generated section pages; they travel as metadata-only entries
+  // so the fixture validates as the site does (TR01198).
+  const editablePageCount = pages.length;
+  const linkedResourceIds = new Set();
+  (function collect(value) {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) {
+        if ((key === "resourceId" || key === "pageResourceId") && typeof child === "string") {
+          linkedResourceIds.add(child);
+        } else collect(child);
+      }
+    }
+  })([...documents.values()]);
+  for (const entry of source.pages) {
+    if (entry.workspaceMode !== PAGE_WORKSPACE_MODE_METADATA_ONLY) continue;
+    if (!isCanonicalUuid(entry.pageId) || !isCanonicalUuid(entry.resourceId)) continue;
+    if (!linkedResourceIds.has(identity(entry.resourceId))) continue;
+    const linkedPath = normalizePagePath(entry.path);
+    if (linkedPath === undefined || linkedPath === "") {
+      refuse(
+        `A page that is linked to has no usable path of its own (${JSON.stringify(entry.path ?? null)}); pull again.`,
+        "pages",
+      );
+    }
+    pages.push(sanitize({
+      pageId: entry.pageId,
+      resourceId: entry.resourceId,
+      path: linkedPath,
+      title: typeof entry.title === "string" ? entry.title : "",
+      status: entry.status,
+      templateType: entry.templateType,
+      hasDraft: entry.hasDraft === true,
+      isGenerated: entry.isGenerated === true,
+      workspaceMode: PAGE_WORKSPACE_MODE_METADATA_ONLY,
+    }));
   }
   const redirects = documents.get("redirects.json");
   // A fixture hash is a local placeholder, not authority to mutate the original site.
@@ -242,10 +286,18 @@ export async function initializeFixture(invocation, validate) {
   try {
     for (const [file, value] of documents) await writeWorkspaceJson(destination, file, value);
     const result = await validate({ ...invocation, init: false, cwd, fixturePath: destination });
-    invocation.onProgress?.(`Initialized a sanitized fixture with ${pages.length} editable page(s).`);
+    invocation.onProgress?.(
+      `Initialized a sanitized fixture with ${editablePageCount} editable page(s)`
+        + `${pages.length > editablePageCount ? ` and ${pages.length - editablePageCount} linked page(s)` : ""}.`,
+    );
     return {
       ...result,
-      initialized: { directory: destination, pages: pages.length, skippedPages: source.pages.length - pages.length },
+      initialized: {
+        directory: destination,
+        pages: editablePageCount,
+        linkedPages: pages.length - editablePageCount,
+        skippedPages: source.pages.length - pages.length,
+      },
     };
   } catch (error) {
     await rm(destination, { recursive: true, force: true });

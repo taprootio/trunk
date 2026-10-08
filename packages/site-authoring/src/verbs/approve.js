@@ -1,8 +1,14 @@
-import { listSitePages, PAGE_STATUS_DELETED, publishDrafts, withRefusalGuidance } from "../api.js";
+import {
+  listSitePages,
+  PAGE_STATUS_APPROVED,
+  PAGE_STATUS_DELETED,
+  publishDrafts,
+  withRefusalGuidance,
+} from "../api.js";
 import { VERB_APPROVE } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
-import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import { normalizePagePath, readManifest, writeManifest } from "../workspace.js";
+import { boundedByBytes, boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
+import { displayPagePath, normalizePagePath, readManifest, writeManifest } from "../workspace.js";
 
 /**
  * `approve` — publish the site's drafts.
@@ -19,6 +25,8 @@ import { normalizePagePath, readManifest, writeManifest } from "../workspace.js"
  */
 
 const MAXIMUM_REPORTED = 200;
+// Room for the unknown-path list inside the 64 KiB result, beside the envelope.
+const ALTERNATIVES_BYTES = 16 * 1024;
 // `PublishDrafts` resolves the credential from the first page id in the batch,
 // so batches stay one-site and bounded rather than unbounded and clever.
 const MAXIMUM_BATCH = 100;
@@ -71,31 +79,71 @@ export async function approve(invocation) {
         { field: "pages" },
       );
     }
+    const pathOf = (summary) => normalizePagePath(summary.path) ?? summary.path;
     const candidates = pages.filter((summary) =>
       summary.status !== PAGE_STATUS_DELETED
       && summary.hasDraft
       && manifestByPageId.has(summary.pageId)
-      && (requestedPaths === undefined || requestedPaths.has(normalizePagePath(summary.path) ?? summary.path)));
+      && (requestedPaths === undefined || requestedPaths.has(pathOf(summary))));
 
+    // A requested page with nothing to approve is reported, not refused, so
+    // one already-approved path does not stop the rest of the batch. A path
+    // that names no page this workspace tracks is still refused by name.
+    const skipped = [];
     if (requestedPaths !== undefined) {
-      const matched = new Set(candidates.map((summary) => normalizePagePath(summary.path) ?? summary.path));
-      const missing = [...requestedPaths].filter((value) => !matched.has(value)).sort();
-      if (missing.length > 0) {
-        // The homepage normalizes to the empty path, which the result
-        // emitters drop as falsy; name it by its documented '/' spelling so
-        // the stable error contract keeps a field for every unknown path.
+      const matched = new Set(candidates.map(pathOf));
+      const unknown = [];
+      for (const requested of [...requestedPaths].filter((value) => !matched.has(value)).sort()) {
+        const summary = pages.find((page) => page.status !== PAGE_STATUS_DELETED && pathOf(page) === requested);
+        if (summary === undefined || !manifestByPageId.has(summary.pageId)) {
+          unknown.push(displayPagePath(requested));
+          continue;
+        }
+        skipped.push({
+          pageId: summary.pageId,
+          path: displayPagePath(requested),
+          status: summary.status,
+          reason: summary.status === PAGE_STATUS_APPROVED ? "already_approved" : "no_pending_draft",
+        });
+      }
+      if (unknown.length > 0) {
+        // Every path is named on progress, since the message and the
+        // alternatives list are both bounded.
+        for (const value of unknown) onProgress(`No page this workspace tracks is at '${value}'.`);
+        const shown = unknown.slice(0, 5).map((value) => `'${value}'`).join(", ");
+        const listed = boundedByBytes(unknown.slice(0, 100), ALTERNATIVES_BYTES).items;
         throw new SiteAuthoringError(
           "approve.page_not_found",
-          `No approvable draft was found for page path '${missing[0] || "/"}'.`,
-          { field: missing[0] || "/" },
+          `${unknown.length} requested path(s) name no page this workspace tracks. The first ${listed.length} are `
+            + "in alternatives and every one is on progress output. Nothing was approved. Run 'taproot-site pull' if "
+            + `a page was created elsewhere. ${shown}${unknown.length > 5 ? ", …" : ""}`,
+          { field: unknown[0], alternatives: listed },
         );
       }
+      for (const item of skipped) {
+        onProgress(`${item.path} has no pending draft (${item.reason.replaceAll("_", " ")}); skipping it.`);
+      }
     }
+    const reportedSkipped = boundedList(skipped, MAXIMUM_REPORTED);
+    const skippedResult = skipped.length > 0
+      ? {
+        skipped: {
+          total: skipped.length,
+          items: reportedSkipped.items,
+          ...(reportedSkipped.truncated ? { itemsTruncated: true } : {}),
+        },
+      }
+      : {};
 
     if (candidates.length === 0) {
-      onProgress("No page in this workspace is carrying a draft; there is nothing to approve.");
+      onProgress(
+        skipped.length > 0
+          ? "Nothing to approve: the requested page(s) have no pending draft."
+          : "No page in this workspace is carrying a draft; there is nothing to approve.",
+      );
       return successResult(VERB_APPROVE, siteId, {
         approved: { total: 0, items: [] },
+        ...skippedResult,
         stagedNotDeployed: true,
         nextStep: "deploy --staging",
       });
@@ -110,7 +158,7 @@ export async function approve(invocation) {
         const summaries = await publishDrafts(client, batch.map((summary) => summary.pageId));
         manifestDirty = true;
         for (const summary of summaries) {
-          approved.push({ pageId: summary.pageId, path: summary.path, status: summary.status });
+          approved.push({ pageId: summary.pageId, path: displayPagePath(summary.path), status: summary.status });
           const entry = manifestByPageId.get(summary.pageId);
           if (entry !== undefined) {
             entry.status = summary.status;
@@ -131,6 +179,7 @@ export async function approve(invocation) {
         items: reported.items,
         ...(reported.truncated ? { itemsTruncated: true } : {}),
       },
+      ...skippedResult,
       // Said explicitly so a caller cannot read "approve" as "live".
       stagedNotDeployed: true,
       nextStep: "deploy --staging",
