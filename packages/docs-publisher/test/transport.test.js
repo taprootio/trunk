@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LIMITS } from "../src/constants.js";
-import { DocsApiClient } from "../src/transport.js";
+import { ApiError, DocsApiClient } from "../src/transport.js";
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -210,6 +210,59 @@ test("rejects oversized API responses without incorporating response bytes in it
     (error) => error?.code === "transport.response_too_large" && !error.message.includes(secret),
   );
   assert.equal(calls, 1);
+});
+
+/** The transcoded FailedPrecondition a deployment allowance or bandwidth refusal arrives as. */
+function planLimitBody(reason, metadata, domain = "sites.taproot.io") {
+  return {
+    code: 9,
+    message: "server sentence",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason,
+      domain,
+      ...(metadata === undefined ? {} : { metadata }),
+    }],
+  };
+}
+
+test("names the plan limit and its reset when Stage or Promote is refused for an allowance", async (testContext) => {
+  for (const reason of ["DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", "BANDWIDTH_ALLOWANCE_EXCEEDED"]) {
+    await testContext.test(reason, () => {
+      const error = new ApiError(400, planLimitBody(reason, { resets_at: "2026-11-01T00:00:00.1234567Z" }));
+      assert.equal(error.refusal, "plan_limit");
+      assert.equal(error.resetsAt, "2026-11-01T00:00:00.123Z");
+      if (reason === "BANDWIDTH_ALLOWANCE_EXCEEDED") {
+        // Not an unconditional reset: the instant is only the earliest it can lift.
+        assert.match(error.message, /after a month ends under the allowance \(no earlier than 2026-11-01T00:00:00\.123Z\)/u);
+        assert.doesNotMatch(error.message, /resets at/u);
+      } else {
+        assert.match(error.message, /resets at 2026-11-01T00:00:00\.123Z/u);
+      }
+      assert.equal(error.status, "grpc:9");
+    });
+  }
+
+  await testContext.test("still names the class, without a time, when no reset is reported", () => {
+    const error = new ApiError(400, planLimitBody("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED"));
+    assert.equal(error.refusal, "plan_limit");
+    assert.equal(error.resetsAt, undefined);
+    assert.match(error.message, /Upgrade the site's plan/u);
+  });
+
+  await testContext.test("is not claimed for a foreign domain or another reason", () => {
+    for (
+      const body of [
+        planLimitBody("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", undefined, "billing.taproot.io"),
+        planLimitBody("SOMETHING_ELSE"),
+        { code: 9 },
+      ]
+    ) {
+      const error = new ApiError(400, body);
+      assert.equal(error.refusal, undefined);
+      assert.match(error.message, /^Taproot rejected the request/u);
+    }
+  });
 });
 
 test("uploads exact bytes with only signed headers and never forwards the bearer token", async () => {

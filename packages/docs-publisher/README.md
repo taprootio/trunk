@@ -21,7 +21,7 @@ does not create a catch-all Trunk package.
 First-party repositories pin the exact released CLI:
 
 ```bash
-npm install --save-dev --save-exact @taprootio/docs-publisher@1.4.0
+npm install --save-dev --save-exact @taprootio/docs-publisher@1.5.0
 ```
 
 Then build the configured site and publish its exact artifact:
@@ -192,7 +192,7 @@ adds `productionOrigin`. A version 1.2.0 consumer rejects that new closed key.
 
 | Surface                     | `mode: "managed"`                      | `mode: "prebuilt"`                       |
 | --------------------------- | -------------------------------------- | ---------------------------------------- |
-| Publisher package           | `@taprootio/docs-publisher@1.4.0`      | `@taprootio/docs-publisher@1.4.0`        |
+| Publisher package           | `@taprootio/docs-publisher@1.5.0`      | `@taprootio/docs-publisher@1.5.0`        |
 | Publisher config            | `configVersion: 1` or `2`              | `configVersion: 1` or `2`                |
 | Artifact package dependency | exact `@taprootio/docs-artifact@1.2.0` | exact `@taprootio/docs-artifact@1.2.0`   |
 | Artifact manifest           | `taproot-docs-manifest.json`           | `taproot-docs-prebuilt-manifest.json`    |
@@ -285,7 +285,12 @@ ids, the shared output release id, and staging/production pointer versions.
 It also includes `readiness.warnings`, a bounded list of stable prebuilt
 discovery `{ code, field }` records. Failure output is also schema version 2
 and contains a stable error code, optional field/status, and optional bounded
-`error.diagnostics` records; the process exits nonzero.
+`error.diagnostics` records; the process exits nonzero. When a licence
+allowance refuses the release (the pages-generated-per-period allowance or the
+bandwidth pause), `error.refusal` names the class (`plan_limit`) and
+`error.resetsAt` carries the reset time when the server knows it; for the
+bandwidth pause it is only the earliest time the pause can lift, because the
+pause lifts after a month ends under the allowance, or when the site upgrades.
 
 When `GITHUB_OUTPUT` names the existing Actions output file, the command appends
 the same JSON through a random delimiter block named `taproot_docs_result` and

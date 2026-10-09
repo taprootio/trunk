@@ -14,6 +14,8 @@ export function failureResult(error) {
   };
   if (error.field) result.error.field = error.field;
   if (error.status) result.error.status = error.status;
+  if (error.refusal) result.error.refusal = error.refusal;
+  if (error.resetsAt) result.error.resetsAt = error.resetsAt;
   if (error.diagnostics?.length) result.error.diagnostics = error.diagnostics;
   return result;
 }
@@ -108,7 +110,8 @@ export async function writeGithubActionsOutput(outputPath, result) {
 export function humanFailure(error) {
   const field = error.field ? ` field=${sanitizeDiagnostic(error.field, "unknown")}` : "";
   const status = error.status ? ` status=${sanitizeDiagnostic(error.status, "unknown")}` : "";
-  return `taproot docs publish failed [${error.code}]${field}${status}: ${sanitizeDiagnostic(error.message)}`;
+  const refusal = error.refusal ? ` refusal=${sanitizeDiagnostic(error.refusal, "unknown")}` : "";
+  return `taproot docs publish failed [${error.code}]${field}${status}${refusal}: ${sanitizeDiagnostic(error.message)}`;
 }
 
 export function serializeResult(result) {

@@ -1,5 +1,13 @@
 import { awaitWithSignal } from "./abort.js";
-import { ARCHIVE_CONTENT_TYPE, LIMITS, PUBLISHER_NAME, PUBLISHER_VERSION } from "./constants.js";
+import {
+  ARCHIVE_CONTENT_TYPE,
+  LIMITS,
+  PLAN_LIMIT_REFUSAL_DOMAIN,
+  PLAN_LIMIT_REFUSAL_REASONS,
+  PUBLISHER_NAME,
+  PUBLISHER_VERSION,
+  REFUSAL_PLAN_LIMIT,
+} from "./constants.js";
 import { PublisherError } from "./errors.js";
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -97,16 +105,66 @@ function fieldViolations(value) {
   return [...fields].sort();
 }
 
+/**
+ * The pages-generated allowance or bandwidth-pause refusal Stage and Promote attach
+ * as a `google.rpc.ErrorInfo` detail (TR00445), or undefined. Keyed on the
+ * namespaced domain and reason, never the message sentence. `resetsAt` is the
+ * server's `resets_at` re-serialized as an ISO-8601 UTC instant, or undefined
+ * when it is absent or does not parse.
+ */
+function planLimitRefusal(value) {
+  const queue = [{ value, depth: 0 }];
+  let work = 0;
+  while (queue.length > 0 && work < 1_000) {
+    const current = queue.shift();
+    work += 1;
+    if (!current || current.depth > 8 || current.value === null || typeof current.value !== "object") continue;
+    const detail = current.value;
+    if (
+      detail.domain === PLAN_LIMIT_REFUSAL_DOMAIN
+      && typeof detail.reason === "string"
+      && Object.hasOwn(PLAN_LIMIT_REFUSAL_REASONS, detail.reason)
+    ) {
+      const raw = detail.metadata !== null && typeof detail.metadata === "object"
+        ? detail.metadata.resets_at
+        : undefined;
+      const resetsAt = typeof raw === "string" ? new Date(raw) : undefined;
+      return {
+        reason: detail.reason,
+        resetsAt: resetsAt !== undefined && !Number.isNaN(resetsAt.getTime()) ? resetsAt.toISOString() : undefined,
+      };
+    }
+    for (const child of Object.values(detail)) {
+      if (child !== null && typeof child === "object") queue.push({ value: child, depth: current.depth + 1 });
+    }
+  }
+  return undefined;
+}
+
 export class ApiError extends PublisherError {
   constructor(httpStatus, body) {
     const grpcCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
     const fields = fieldViolations(body);
+    const planLimit = planLimitRefusal(body);
     super(
       "api.request_rejected",
-      fields.length > 0
+      planLimit !== undefined
+        ? `Taproot refused the request: ${PLAN_LIMIT_REFUSAL_REASONS[planLimit.reason]}.`
+          + (planLimit.resetsAt === undefined
+            ? " Upgrade the site's plan, then publish again."
+            : planLimit.reason === "BANDWIDTH_ALLOWANCE_EXCEEDED"
+            // Not an unconditional reset: it lifts after a month ends under the allowance.
+            ? ` Upgrade the site's plan, or publish again after a month ends under the allowance (no earlier than ${planLimit.resetsAt}).`
+            : ` It resets at ${planLimit.resetsAt}; upgrade the site's plan to publish sooner.`)
+        : fields.length > 0
         ? `Taproot rejected the request field '${fields[0]}'.`
         : `Taproot rejected the request with HTTP ${httpStatus}.`,
-      { field: fields[0], status: grpcCode === undefined ? `http:${httpStatus}` : `grpc:${grpcCode}` },
+      {
+        field: fields[0],
+        status: grpcCode === undefined ? `http:${httpStatus}` : `grpc:${grpcCode}`,
+        refusal: planLimit === undefined ? undefined : REFUSAL_PLAN_LIMIT,
+        resetsAt: planLimit?.resetsAt,
+      },
     );
     this.httpStatus = httpStatus;
     this.grpcCode = grpcCode;

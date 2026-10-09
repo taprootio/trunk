@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { runCli } from "../src/cli.js";
 import { PublisherError } from "../src/errors.js";
+import { ApiError } from "../src/transport.js";
 
 function sink() {
   let value = "";
@@ -16,7 +17,7 @@ function successResult() {
   return {
     schemaVersion: 2,
     ok: true,
-    publisher: { name: "@taprootio/docs-publisher", version: "1.4.0" },
+    publisher: { name: "@taprootio/docs-publisher", version: "1.5.0" },
     compatibility: {
       configVersion: 2,
       artifactPackageVersion: "1.2.0",
@@ -123,7 +124,7 @@ test("exposes help and version at the binary and product-command levels", async 
   for (const arguments_ of [["--version"], ["docs", "publish", "--version"]]) {
     const stdout = sink();
     assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
-    assert.equal(stdout.read(), "1.4.0\n");
+    assert.equal(stdout.read(), "1.5.0\n");
   }
 });
 
@@ -148,6 +149,36 @@ test("strips terminal controls from stable fields and human diagnostics", async 
   assert.doesNotMatch(stderr.read().slice(0, -1), /[\r\n]/u);
 });
 
+
+test("reports a plan-limit refusal with its class and reset in both outputs", async () => {
+  const stdout = sink();
+  const stderr = sink();
+  const exitCode = await runCli({
+    arguments_: ["docs", "publish"],
+    environment: {},
+    stdout,
+    stderr,
+    publish: async () => {
+      throw new ApiError(400, {
+        code: 9,
+        details: [{
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "BANDWIDTH_ALLOWANCE_EXCEEDED",
+          domain: "sites.taproot.io",
+          metadata: { resets_at: "2026-11-01T00:00:00Z" },
+        }],
+      });
+    },
+  });
+  assert.equal(exitCode, 1);
+  assert.deepEqual(JSON.parse(stdout.read()).error, {
+    code: "api.request_rejected",
+    status: "grpc:9",
+    refusal: "plan_limit",
+    resetsAt: "2026-11-01T00:00:00.000Z",
+  });
+  assert.match(stderr.read(), /status=grpc:9 refusal=plan_limit: .*no earlier than 2026-11-01T00:00:00\.000Z/u);
+});
 
 test("superseded GitHub main pushes exit successfully without deployment outputs", async (testContext) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "taproot-docs-superseded-"));

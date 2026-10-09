@@ -1,5 +1,5 @@
 export const PUBLISHER_NAME = "@taprootio/docs-publisher";
-export const PUBLISHER_VERSION = "1.4.0";
+export const PUBLISHER_VERSION = "1.5.0";
 export const PUBLISH_RESULT_SCHEMA_VERSION = 2;
 export const CONFIG_FILE_NAME = "taproot-docs-publisher.json";
 export const CONFIG_VERSION = 2;
@@ -64,3 +64,18 @@ export const LIMITS = Object.freeze({
   diagnosticScalars: 2_000,
   githubOutputBytes: 64 * 1024,
 });
+
+/**
+ * The `google.rpc.ErrorInfo` reasons a Stage or Promote carries when the site
+ * has hit a commercial ceiling no retry can clear (TR00445, TR01201): the
+ * pages-generated-per-billing-period allowance, or the bandwidth pause. Wire identities matched
+ * exactly, within the `sites.taproot.io` domain. The refusal names its class
+ * `plan_limit` so a workflow can tell "upgrade or wait for the reset" from a
+ * rejected request.
+ */
+export const PLAN_LIMIT_REFUSAL_DOMAIN = "sites.taproot.io";
+export const PLAN_LIMIT_REFUSAL_REASONS = Object.freeze({
+  DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED: "the site's pages-generated allowance for this billing period is used",
+  BANDWIDTH_ALLOWANCE_EXCEEDED: "new deployments are paused because the site used more than its monthly bandwidth for two months in a row",
+});
+export const REFUSAL_PLAN_LIMIT = "plan_limit";

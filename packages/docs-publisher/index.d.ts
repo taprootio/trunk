@@ -16,7 +16,7 @@ export interface DocsPublishSuccess {
   schemaVersion: 2;
   ok: true;
   outcome?: "published";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.4.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.0" };
   compatibility: {
     configVersion: 1 | 2;
     artifactPackageVersion: "1.2.0";
@@ -37,7 +37,7 @@ export interface DocsPublishSuperseded {
   schemaVersion: 2;
   ok: true;
   outcome: "superseded";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.4.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.0" };
   siteId: string;
   mode: DocsPublicationMode;
   release: { id: string; status: string; sourceRevision: string };
@@ -60,6 +60,10 @@ export class PublisherError extends Error {
   readonly code: string;
   readonly field?: string;
   readonly status?: string;
+  /** `plan_limit` when the site's pages-generated allowance or bandwidth pause refused the request. */
+  readonly refusal?: "plan_limit";
+  /** ISO-8601 instant a `plan_limit` refusal can next lift on its own, when the server reported one. */
+  readonly resetsAt?: string;
   readonly diagnostics?: ReadonlyArray<{ code: string; field: string }>;
   readonly exitCode: number;
 }

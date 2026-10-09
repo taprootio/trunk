@@ -25,6 +25,10 @@ export class PublisherError extends Error {
         return code && field ? [{ code, field }] : [];
       }))
       : undefined;
+    // A refusal the publisher can name: the class (`plan_limit`) and, when the
+    // server reported one, the ISO-8601 instant it can next lift on its own.
+    this.refusal = typeof options.refusal === "string" ? sanitizeDiagnostic(options.refusal, "") || undefined : undefined;
+    this.resetsAt = typeof options.resetsAt === "string" ? sanitizeDiagnostic(options.resetsAt, "") || undefined : undefined;
     this.exitCode = Number.isSafeInteger(options.exitCode) && options.exitCode >= 1 && options.exitCode <= 255
       ? options.exitCode
       : 1;
