@@ -110,6 +110,9 @@ export const VERB_PLAN = "plan";
 export const VERB_APPLY = "apply";
 export const VERB_PLACES_SEARCH = "places search";
 export const VERB_PLACES_SELECT = "places select";
+export const VERB_PLACES_CATEGORY_SET = "places category set";
+export const VERB_PLACES_CATEGORY_CLEAR = "places category clear";
+export const VERB_PLACES_CATEGORY_LIST = "places category list";
 /** The identity `plan` reports and `apply --plan` requires. */
 export const PLAN_HASH = /^sha256:[0-9a-f]{64}$/u;
 export const VERB_ENV = "env";
@@ -203,6 +206,19 @@ export const CAPABILITY_REFUSAL_REASON = "SITE_AUTHORING_CAPABILITY_MISSING";
  * off the wire, which is why nothing matches an incoming field against it.
  */
 export const CAPABILITY_REFUSAL_FIELD = "GrantedCapabilities";
+
+/**
+ * The `google.rpc.ErrorInfo` reasons a deploy carries when the site has hit a
+ * commercial ceiling that no retry can clear (TR00445): the deployments-per-
+ * billing-period allowance, or the bandwidth pause. Wire identities matched
+ * exactly, within {@link SITE_DEPLOYMENT_REFUSAL_DOMAIN}. The refusal is
+ * classified `plan_limit`, the same class as the page-count `UpgradePrompt`
+ * field, because the right next move is the same: upgrade, or wait for the
+ * reset the server names in `resets_at`.
+ */
+export const DEPLOYMENT_ALLOWANCE_REFUSAL_REASON = "DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED";
+export const BANDWIDTH_ALLOWANCE_REFUSAL_REASON = "BANDWIDTH_ALLOWANCE_EXCEEDED";
+export const SITE_DEPLOYMENT_REFUSAL_DOMAIN = "sites.taproot.io";
 
 // gRPC `ResourceExhausted`. Transcoded responses carry the numeric code in the
 // body; the HTTP mapping is 429.

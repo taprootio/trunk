@@ -76,7 +76,9 @@ const FIELD_HELP = Object.freeze({
     required: true,
     description:
       "The Taproot place being reviewed. The site fills in its name, address and coordinates from this record. Find "
-      + "it with 'places search <name and city>' and 'places select <googlePlaceId> <sessionToken>'.",
+      + "it with 'places search <name and city>' and 'places select <googlePlaceId> <sessionToken>'. The site publishes the "
+      + "place's category in the byline and files the review under /places/<category>; change it for this site with "
+      + "'places category set <placeId> <category>'.",
   },
   place: {
     type: "UUID",

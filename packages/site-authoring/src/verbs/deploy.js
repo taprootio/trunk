@@ -4,6 +4,7 @@ import {
   DEPLOYMENT_REQUEST_OUTCOME_COALESCED,
   DEPLOYMENT_STATUS_COMPLETED,
   deploySite,
+  describePageEstimate,
   getDeploySelection,
   getPublishingReadiness,
   listDeployments,
@@ -67,9 +68,6 @@ const REDIRECT_ACTIVATION_NOTE =
  */
 
 const MAXIMUM_REPORTED_BLOCKERS = 50;
-// Staged page ids ride in the readiness query string, so a very large candidate
-// is checked at site level instead of pushing an unbounded URL at the API.
-const MAXIMUM_READINESS_PAGE_IDS = 100;
 
 function usageError(code, message, field) {
   return new SiteAuthoringError(code, message, { field, exitCode: 2 });
@@ -157,6 +155,8 @@ function reportReadiness(readiness) {
     redirectsChanged: readiness.redirectsChanged,
     formsChanged: readiness.formsChanged,
     videosChanged: readiness.videosChanged,
+    // The pages this deployment generates and the allowance left: what staging is charged (TR01201).
+    ...(readiness.pageEstimate === null ? {} : { pageEstimate: readiness.pageEstimate }),
     blockers: blockers.items,
     ...(blockers.truncated ? { blockersTruncated: true } : {}),
   };
@@ -341,8 +341,10 @@ export async function deploy(invocation) {
     );
     const readiness = await getPublishingReadiness(client, siteId, {
       ...candidate,
-      stagedPageIds: stagedPageIds.length > MAXIMUM_READINESS_PAGE_IDS ? undefined : stagedPageIds,
       useExactPageSelection: stagedPageIds.length === 0,
+      includePageEstimate: true,
+      // The estimate must recognize the request it is about to be followed by.
+      ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
     });
     if (readiness.blockers.length > 0) {
       throw new SiteAuthoringError(
@@ -368,11 +370,29 @@ export async function deploy(invocation) {
     if (!readiness.hasCandidateChanges) {
       onProgress("Taproot reports this candidate contains no changes; deploying it anyway would be a no-op.");
     }
+    // The plan is the charge: the same page count admission uses, shown before anything is sent.
+    if (readiness.pageEstimate !== null) {
+      onProgress(describePageEstimate(readiness.pageEstimate));
+      if (readiness.pageEstimate.exceedsAllowance) {
+        const estimate = readiness.pageEstimate;
+        throw new SiteAuthoringError(
+          "deploy.page_allowance_exceeded",
+          `This candidate generates ${estimate.plannedPageCount.toLocaleString("en-US")} ${
+            estimate.plannedPageCount === 1 ? "page" : "pages"
+          } but the site has ${(estimate.pagesGeneratedRemaining ?? 0).toLocaleString("en-US")} left for this billing `
+            + `period${estimate.periodEnd === null ? "" : ` (it resets ${estimate.periodEnd})`}. Stage a smaller change, `
+            + "or upgrade the site's plan for a larger allowance. Nothing was sent.",
+          { field: "plannedPageCount" },
+        );
+      }
+    }
 
     const created = await deploySite(client, siteId, {
       siteId,
       environment: DEPLOYMENT_ENVIRONMENT_STAGING,
       ...candidate,
+      // Confirms the number just shown: the server refuses if the plan has grown since.
+      ...(readiness.pageEstimate === null ? {} : { expectedPageCount: readiness.pageEstimate.plannedPageCount }),
       ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
     });
     onProgress(`Staging deployment ${created.id} accepted; waiting for it to complete.`);

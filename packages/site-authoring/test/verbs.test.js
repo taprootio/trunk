@@ -499,6 +499,8 @@ const STAGING_PREVIEW_ROOT = /^\/$/u;
 const SITE_IMAGES = /\/sites\/[^/]+\/images$/u;
 const PLACES_SEARCH = /^\/api\/v1\/places\/search$/u;
 const PLACES_SELECT = /^\/api\/v1\/places\/select$/u;
+const PLACE_CATEGORY = /^\/api\/v1\/sites\/[^/]+\/places\/[^/]+\/category$/u;
+const PLACE_CATEGORIES = /^\/api\/v1\/standard-types$/u;
 const BROKEN_REFERENCES = /\/sites\/[^/]+\/broken-references$/u;
 const REQUEST_UPLOAD = /\/images\/request-upload$/u;
 const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
@@ -575,7 +577,7 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "POST", pattern: PRESENTATION, permission: "site.theme.manage" },
   { method: "GET", pattern: DEPLOY_REVIEW, permission: "site.deploy" },
   { method: "POST", pattern: STAGING_MINT, permission: "site.staging.view" },
-  { method: "GET", pattern: READINESS, permission: "site.deploy" },
+  { method: "POST", pattern: READINESS, permission: "site.deploy" },
   { method: "POST", pattern: DEPLOY, permission: "site.deploy" },
   { method: "GET", pattern: DEPLOYMENTS, permission: "site.deployments.view_any" },
   { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
@@ -593,11 +595,14 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "DELETE", pattern: PREVIEW_STATUS, permission: "site.pages.edit_any" },
   { method: "GET", pattern: PLACES_SEARCH, permission: "site.pages.edit_any" },
   { method: "POST", pattern: PLACES_SELECT, permission: "site.pages.edit_any" },
+  { method: "PUT", pattern: PLACE_CATEGORY, permission: "site.pages.edit_any" },
+  { method: "DELETE", pattern: PLACE_CATEGORY, permission: "site.pages.edit_any" },
 ]);
 
 // Reached with the account sign-in rather than a site credential, so no site
 // capability applies: the exchange itself, and the two things a sign-in can do.
-const UNGATED_API_PATH = /^\/api\/v1\/site-authoring\//u;
+// The standard-types read is public, so `places category list` needs no capability for it.
+const UNGATED_API_PATH = /^\/api\/v1\/(?:site-authoring\/|standard-types$)/u;
 
 /**
  * The transcoded shape `SiteAuthoringKeyDenial` produces: gRPC PermissionDenied
@@ -9538,7 +9543,7 @@ function deployRoutes({
       },
     },
     {
-      method: "GET",
+      method: "POST",
       pattern: READINESS,
       reply: {
         state: "PAGE_PUBLISHING_READINESS_STATE_READY",
@@ -9614,10 +9619,10 @@ test("deploy --staging checks readiness, sends the candidate, and polls to compl
   const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
   const result = await deploy(invocation);
 
-  const readiness = wire.matching("GET", READINESS)[0];
-  assert.deepEqual(readiness.query.getAll("stagedPageIds"), [ABOUT_PAGE_ID]);
-  assert.deepEqual(readiness.query.getAll("selectedSettingsTypes"), ["SETTING_TYPE_SITE_HEADER"]);
-  assert.equal(readiness.query.get("includeNavigation"), "true");
+  const readiness = wire.matching("POST", READINESS)[0];
+  assert.deepEqual((readiness.body.stagedPageIds ?? []), [ABOUT_PAGE_ID]);
+  assert.deepEqual((readiness.body.selectedSettingsTypes ?? []), ["SETTING_TYPE_SITE_HEADER"]);
+  assert.equal(readiness.body.includeNavigation, true);
 
   const sent = wire.matching("POST", DEPLOY)[0];
   assert.deepEqual(sent.body, {
@@ -9642,6 +9647,146 @@ test("deploy --staging checks readiness, sends the candidate, and polls to compl
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.deployments.staging.id, DEPLOYMENT_ID);
   assert.equal(manifest.deployments.staging.status, "DEPLOYMENT_STATUS_COMPLETED");
+});
+
+test("deploy --staging plans the candidate in pages before it sends anything (TR01201)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    readiness: {
+      plannedPageCount: 74,
+      pagesGeneratedLimit: 1000,
+      pagesGeneratedRemaining: 940,
+      pagesGeneratedPeriodEnd: "2026-11-01T00:00:00Z",
+    },
+  }));
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  const result = await deploy(invocation);
+
+  assert.equal(wire.matching("POST", READINESS)[0].body.includePageEstimate, true);
+  assert.ok(progress.includes(
+    "This will generate 74 pages · 940 of 1,000 left this period (resets 2026-11-01T00:00:00.000Z)",
+  ));
+  assert.deepEqual(result.readiness.pageEstimate, {
+    plannedPageCount: 74,
+    pagesGeneratedLimit: 1000,
+    pagesGeneratedRemaining: 940,
+    periodEnd: "2026-11-01T00:00:00.000Z",
+    exceedsAllowance: false,
+  });
+  assert.equal(wire.matching("POST", DEPLOY).length, 1);
+  // The number shown is the number the server must not exceed.
+  assert.equal(wire.matching("POST", DEPLOY)[0].body.expectedPageCount, 74);
+});
+
+test("deploy --staging tells the user to confirm again when the plan grew after the estimate", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    readiness: { plannedPageCount: 74 },
+    deployReply: () =>
+      jsonResponse(
+        violation("ExpectedPageCount", "This publish now generates 80 pages, more than the 74 you were shown."),
+        400,
+      ),
+  }));
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  await assert.rejects(deploy(invocation), (error) => {
+    assert.equal(error.code, "deploy.page_estimate_changed");
+    assert.match(error.message, /now generates 80 pages, more than the 74 you were shown/u);
+    assert.match(error.message, /Nothing was staged; run the command again/u);
+    return true;
+  });
+});
+
+test("deploy --staging reports one page in the singular and an unlimited licence without a limit", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({ readiness: { plannedPageCount: 1 } }));
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  const result = await deploy(invocation);
+
+  assert.ok(progress.includes("This will generate 1 page"));
+  assert.equal(result.readiness.pageEstimate.pagesGeneratedLimit, null);
+  assert.equal(result.readiness.pageEstimate.periodEnd, null);
+});
+
+test("deploy --staging retries a staging that used the last pages, because the server reports no new charge", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    readiness: { plannedPageCount: 5, pagesGeneratedLimit: 5, pagesGeneratedRemaining: 0 },
+  }));
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  await deploy(invocation);
+
+  assert.equal(wire.matching("POST", DEPLOY).length, 1);
+  assert.equal(wire.matching("POST", DEPLOY)[0].body.expectedPageCount, 5);
+});
+
+test("deploy --staging sends no expected page count when the server could not plan the candidate", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes());
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  await deploy(invocation);
+
+  assert.ok(progress.every((line) => !line.includes("This will generate")));
+  assert.equal(wire.matching("POST", DEPLOY)[0].body.expectedPageCount, undefined);
+});
+
+test("deploy --staging stops before sending when the planned pages do not fit, naming the pages", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({
+    readiness: {
+      plannedPageCount: 74,
+      pagesGeneratedLimit: 1000,
+      pagesGeneratedRemaining: 40,
+      pagesGeneratedPeriodEnd: "2026-11-01T00:00:00Z",
+      plannedPagesExceedAllowance: true,
+    },
+  }));
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+
+  await assert.rejects(deploy(invocation), (error) => {
+    assert.equal(error.code, "deploy.page_allowance_exceeded");
+    assert.match(
+      error.message,
+      /generates 74 pages but the site has 40 left for this billing period \(it resets 2026-11-01T00:00:00\.000Z\)/u,
+    );
+    assert.doesNotMatch(error.message, /deployment/u);
+    return true;
+  });
+  assert.equal(wire.matching("POST", DEPLOY).length, 0);
+});
+
+test("deploy --production neither asks for nor shows a page estimate, because a promotion generates nothing", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({ readiness: { plannedPageCount: 74, pagesGeneratedLimit: 1, pagesGeneratedRemaining: 0 } }));
+  const { invocation, progress } = invoke(workspace, wire, {
+    verb: "deploy",
+    deployTarget: "production",
+    stagingDeploymentId: DEPLOYMENT_ID,
+  });
+
+  await deploy(invocation);
+
+  assert.equal(wire.matching("POST", READINESS)[0].body.includePageEstimate, undefined);
+  assert.ok(progress.every((line) => !line.includes("This will generate")));
 });
 
 test("deploy --staging warns without failing when the configured host does not resolve to the site", async (site) => {
@@ -9696,7 +9841,7 @@ test("deploy --staging refuses an empty candidate before it reaches the API", as
     },
     // Nothing selected, and Taproot sees no other change (no edited redirect map).
     {
-      method: "GET",
+      method: "POST",
       pattern: READINESS,
       reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
     },
@@ -9724,7 +9869,7 @@ test("deploy --staging stages an edited redirect map when nothing else is select
   const result = await deploy(invocation);
 
   assert.equal(result.ok, true);
-  assert.equal(wire.matching("GET", READINESS)[0].query.get("useExactPageSelection"), "true");
+  assert.equal(wire.matching("POST", READINESS)[0].body.useExactPageSelection, true);
   assert.equal(wire.matching("POST", DEPLOY).length, 1);
   assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
   // Readiness here names no site-wide change, so the generic line is the fallback.
@@ -9735,7 +9880,7 @@ test("deploy --staging excludes a deselected failed-media page from redirect rea
   const workspace = await fixture(site);
   const routes = deployRoutes().map((route) => route.pattern !== READINESS ? route : {
     ...route,
-    reply: (call) => call.query.get("useExactPageSelection") === "true"
+    reply: (call) => call.body.useExactPageSelection === true
       ? { state: "PAGE_PUBLISHING_READINESS_STATE_READY", approvedPageCount: 1, selectedPageCount: 0,
         hasCandidateChanges: true, redirectsChanged: true, blockers: [] }
       : { state: "PAGE_PUBLISHING_READINESS_STATE_FAILED", hasCandidateChanges: true,
@@ -9754,20 +9899,21 @@ test("deploy --staging excludes a deselected failed-media page from redirect rea
   const result = await deploy(invocation);
 
   assert.equal(result.ok, true);
-  const readiness = wire.matching("GET", READINESS)[0];
-  assert.equal(readiness.query.get("useExactPageSelection"), "true");
-  assert.deepEqual(readiness.query.getAll("stagedPageIds"), []);
+  const readiness = wire.matching("POST", READINESS)[0];
+  assert.equal(readiness.body.useExactPageSelection, true);
+  assert.deepEqual((readiness.body.stagedPageIds ?? []), []);
   assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds ?? [], []);
 });
 
-test("deploy --staging retains the site-wide readiness fallback for a large page selection", async (site) => {
+test("deploy --staging plans a large page selection exactly, not every approved page", async (site) => {
   const workspace = await fixture(site);
   const pageIds = Array.from({ length: 101 }, (_, index) =>
     `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`);
+  // Approved pages the owner did not select must stay out of the estimate.
   const wire = api([
     { method: "GET", pattern: DEPLOY_REVIEW,
       reply: { stagedPages: pageIds.map(pageId => ({ pageId })), settingsChanges: [], navigationChanged: false } },
-    ...deployRoutes({ readiness: { approvedPageCount: 101, selectedPageCount: 101 } }),
+    ...deployRoutes({ readiness: { approvedPageCount: 160, selectedPageCount: 101 } }),
   ]);
   const { invocation } = invoke(workspace, wire, {
     verb: "deploy", deployTarget: "staging", stagedPageIds: pageIds, selectedSettingsTypes: [], includeNavigation: false,
@@ -9776,9 +9922,9 @@ test("deploy --staging retains the site-wide readiness fallback for a large page
   const result = await deploy(invocation);
 
   assert.equal(result.ok, true);
-  const readiness = wire.matching("GET", READINESS)[0];
-  assert.deepEqual(readiness.query.getAll("stagedPageIds"), []);
-  assert.equal(readiness.query.get("useExactPageSelection"), "false");
+  const readiness = wire.matching("POST", READINESS)[0];
+  assert.deepEqual(readiness.body.stagedPageIds, pageIds);
+  assert.equal(readiness.body.useExactPageSelection, false);
   assert.deepEqual(wire.matching("POST", DEPLOY)[0].body.stagedPageIds, pageIds);
 });
 
@@ -9906,6 +10052,45 @@ test("deploy surfaces a plan-limit refusal prominently and keeps it classified",
   assert.match(announcement, /This plan allows 20 published pages\./u);
   // The CLI never invents the numeric ceiling it was not told.
   assert.doesNotMatch(announcement, /\b\d+ pages? remaining\b/u);
+});
+
+test("deploy names the plan limit and its reset when refused for the pages allowance or bandwidth", async (site) => {
+  const refusal = (reason) => ({
+    code: 9,
+    message: "server sentence",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason,
+      domain: "sites.taproot.io",
+      metadata: { resets_at: "2026-11-01T00:00:00.0000000Z", requested_pages: "74", remaining_pages: "40" },
+    }],
+  });
+  for (
+    const [reason, wording] of [
+      ["DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", /it generates 74 pages and the site has 40 left for this billing period/u],
+      ["BANDWIDTH_ALLOWANCE_EXCEEDED", /bandwidth was over its monthly allowance for two months in a row/u],
+    ]
+  ) {
+    const workspace = await fixture(site, {
+      ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+    });
+    const wire = api(deployRoutes({ deployReply: () => jsonResponse(refusal(reason), 400) }));
+    const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+    await assert.rejects(
+      deploy(invocation),
+      (error) => error?.refusalKind() === "plan_limit" && error.planLimit?.reason === reason,
+    );
+    const announcement = progress.join("\n");
+    assert.match(announcement, new RegExp(`PLAN LIMIT \\(refusal=plan_limit, reason=${reason}\\)`, "u"));
+    assert.match(announcement, wording);
+    if (reason === "BANDWIDTH_ALLOWANCE_EXCEEDED") {
+      // Not an unconditional reset: the instant is only the earliest it can lift.
+      assert.match(announcement, /resume after a month ends under the allowance \(no earlier than 2026-11-01T00:00:00\.000Z\)/u);
+      assert.doesNotMatch(announcement, /Resets at:/u);
+    } else {
+      assert.match(announcement, /Resets at: 2026-11-01T00:00:00\.000Z\./u);
+    }
+  }
 });
 
 test("a plan limit names the operation that was actually refused", async (site) => {
@@ -10754,7 +10939,7 @@ test("status reports deployments, readiness, image processing and broken-referen
   const workspace = await fixture(site);
   const wire = api([
     {
-      method: "GET",
+      method: "POST",
       pattern: READINESS,
       reply: {
         state: "PAGE_PUBLISHING_READINESS_STATE_WAITING",
@@ -10836,7 +11021,7 @@ test("status reports deployments, readiness, image processing and broken-referen
 test("status says when the deployment log it read is only one page", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
-    { method: "GET", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
     {
       method: "GET",
       pattern: DEPLOYMENTS,
@@ -11562,7 +11747,7 @@ test("no verb ever emits the credential, upload capability, or page contents", a
     },
     ...uploadRoutes(),
     {
-      method: "GET",
+      method: "POST",
       pattern: READINESS,
       reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: true, blockers: [] },
     },
@@ -11785,7 +11970,7 @@ test("status refuses a denied or malformed broken-reference report instead of cl
     await context.test(name, async (child) => {
       const workspace = await fixture(child);
       const wire = api([
-        { method: "GET", pattern: READINESS, reply: {} },
+        { method: "POST", pattern: READINESS, reply: {} },
         { method: "GET", pattern: DEPLOYMENTS, reply: {} },
         { method: "GET", pattern: SITE_IMAGES, reply: {} },
         { method: "GET", pattern: BROKEN_REFERENCES, reply },
@@ -11807,7 +11992,7 @@ test("status bounds broken-reference pages and targets and reports every truncat
     missingPagePaths: Array.from({ length: 51 }, (_, target) => `/missing-${target}`),
   }));
   const wire = api([
-    { method: "GET", pattern: READINESS, reply: {} },
+    { method: "POST", pattern: READINESS, reply: {} },
     { method: "GET", pattern: DEPLOYMENTS, reply: {} },
     { method: "GET", pattern: SITE_IMAGES, reply: {} },
     { method: "GET", pattern: BROKEN_REFERENCES, reply: { pages } },
@@ -11841,10 +12026,10 @@ test("deploy and status select only the release changes shown by the UI", async 
   assert.deepEqual(sent.selectedSettingsTypes, []);
   assert.equal(sent.includeNavigation, false);
   assert.equal(result.readiness.hasSuccessfulStagingDeployment, true);
-  for (const call of wire.matching("GET", READINESS)) {
-    assert.deepEqual(call.query.getAll("stagedPageIds"), [STORY_PAGE_ID]);
-    assert.deepEqual(call.query.getAll("selectedSettingsTypes"), []);
-    assert.equal(call.query.get("includeNavigation"), "false");
+  for (const call of wire.matching("POST", READINESS)) {
+    assert.deepEqual(call.body.stagedPageIds, [STORY_PAGE_ID]);
+    assert.deepEqual(call.body.selectedSettingsTypes ?? [], []);
+    assert.equal(call.body.includeNavigation, false);
   }
 });
 
@@ -12157,6 +12342,20 @@ test("preview failure reports typed diagnostic context without renderer content"
   );
 });
 
+test("deploy --staging asks for the estimate with the same failed-preview override it will send", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About" }]),
+  });
+  const wire = api(deployRoutes({ readiness: { plannedPageCount: 3 } }));
+  await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation);
+  await deploy(
+    invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", allowFailedPreview: true }).invocation,
+  );
+
+  assert.equal(wire.matching("POST", READINESS)[0].body.allowFailedPreview, undefined);
+  assert.equal(wire.matching("POST", READINESS)[1].body.allowFailedPreview, true);
+});
+
 test("deploy names a failed candidate preview and sends its override only when explicit", async (site) => {
   const workspace = await fixture(site);
   const wire = api(deployRoutes({
@@ -12254,7 +12453,7 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
         navigationChanged: true,
       },
     },
-    { method: "GET", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
     { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
   ]);
   const result = await status(invoke(workspace, wire, { verb: "status", surface: "docs-presentation" }).invocation);
@@ -12271,10 +12470,10 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
   assert.equal(result.brokenReferences.covered, false);
   assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
   assert.equal(wire.matching("GET", BROKEN_REFERENCES).length, 0);
-  const readinessCall = wire.matching("GET", READINESS)[0];
-  assert.deepEqual(readinessCall.query.getAll("stagedPageIds"), []);
-  assert.equal(readinessCall.query.get("includeNavigation"), "false");
-  assert.deepEqual(readinessCall.query.getAll("selectedSettingsTypes"), ["SETTING_TYPE_BRAND"]);
+  const readinessCall = wire.matching("POST", READINESS)[0];
+  assert.deepEqual((readinessCall.body.stagedPageIds ?? []), []);
+  assert.equal(readinessCall.body.includeNavigation, false);
+  assert.deepEqual((readinessCall.body.selectedSettingsTypes ?? []), ["SETTING_TYPE_BRAND"]);
 });
 
 // ── delivery check (TR00824) ───────────────────────────────────────────────
@@ -12975,7 +13174,9 @@ function cliRun(site, arguments_, wire, content = REAL_CONTENT) {
     fetch: wire === undefined
       ? async () => assert.fail("an offline verb made a request")
       : capabilityGatedFetch(
-        Object.hasOwn(VERB_CAPABILITIES, arguments_.slice(0, 2).join(" ")) ? arguments_.slice(0, 2).join(" ") : arguments_[0],
+        // The longest leading words that name a verb: "places category set" before "places".
+        [3, 2].map((count) => arguments_.slice(0, count).join(" ")).find((name) => Object.hasOwn(VERB_CAPABILITIES, name))
+          ?? arguments_[0],
         wire.fetch,
       ),
   }).then((exitCode) => ({ exitCode, result: JSON.parse(stdout), stderr }));
@@ -14482,6 +14683,92 @@ test("places search and select find the Taproot place a review names, in one bil
     assert.equal(usage.result.error.code, "places.selection_invalid");
   }
   assert.equal(wire.matching("POST", PLACES_SELECT).length, 2);
+});
+
+test("places category set, clear and list change this site's category for one place", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([
+    {
+      method: "PUT",
+      pattern: PLACE_CATEGORY,
+      reply: { siteId: SITE_ID, placeId: TYPED_PLACE_ID, category: "Park", placeCategory: "Other", isOverride: true },
+    },
+    {
+      method: "DELETE",
+      pattern: PLACE_CATEGORY,
+      reply: { siteId: SITE_ID, placeId: TYPED_PLACE_ID, category: "Other", placeCategory: "Other", isOverride: false },
+    },
+    {
+      method: "GET",
+      pattern: PLACE_CATEGORIES,
+      reply: { standardTypes: [{ id: "1", name: "Bakery" }, { id: "2", name: "Park" }] },
+    },
+  ]);
+
+  const set = await cliRun(workspace, ["places", "category", "set", TYPED_PLACE_ID, "park"], wire);
+  assert.equal(set.exitCode, 0, set.stderr);
+  assert.deepEqual(set.result.placeCategory, {
+    placeId: TYPED_PLACE_ID,
+    category: "Park",
+    placeCategory: "Other",
+    isOverride: true,
+  });
+  const put = wire.matching("PUT", PLACE_CATEGORY)[0];
+  assert.equal(put.pathname, `/api/v1/sites/${SITE_ID}/places/${TYPED_PLACE_ID}/category`);
+  assert.deepEqual(put.body, { siteId: SITE_ID, placeId: TYPED_PLACE_ID, category: "park" });
+
+  const cleared = await cliRun(workspace, ["places", "category", "clear", TYPED_PLACE_ID], wire);
+  assert.equal(cleared.exitCode, 0, cleared.stderr);
+  assert.equal(cleared.result.placeCategory.isOverride, false);
+  assert.equal(wire.matching("DELETE", PLACE_CATEGORY).length, 1);
+
+  const listed = await cliRun(workspace, ["places", "category", "list"], wire);
+  assert.equal(listed.exitCode, 0, listed.stderr);
+  assert.deepEqual(listed.result.categories, ["Bakery", "Park"]);
+  const list = wire.matching("GET", PLACE_CATEGORIES)[0];
+  assert.equal(list.query.get("typeGroup"), "place_category");
+});
+
+test("places category set and clear refuse a malformed command before any request", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([]);
+  for (const command of [
+    ["set", "not-a-place-id", "Park"],
+    ["set", TYPED_PLACE_ID],
+    ["set", TYPED_PLACE_ID, "Park", "Trail"],
+    ["set", TYPED_PLACE_ID, "x".repeat(101)],
+    ["clear"],
+    ["clear", "not-a-place-id"],
+    ["clear", TYPED_PLACE_ID, "extra"],
+  ]) {
+    const usage = await cliRun(workspace, ["places", "category", ...command], wire);
+    assert.equal(usage.exitCode, 2, command.join(" "));
+    assert.equal(usage.result.error.code, "places.category_invalid");
+  }
+  assert.equal(wire.calls.filter((call) => PLACE_CATEGORY.test(call.pathname)).length, 0);
+});
+
+test("places category set reports the server's refusal of a category outside the closed list", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([{
+    method: "PUT",
+    pattern: PLACE_CATEGORY,
+    reply: jsonResponse({
+      code: 3,
+      message: "Validation failed.",
+      details: [{
+        "@type": "type.googleapis.com/google.rpc.BadRequest",
+        fieldViolations: [{ field: "Category", description: "Category must be one of: Bakery, Park." }],
+      }],
+    }, 400),
+  }]);
+
+  const refused = await cliRun(workspace, ["places", "category", "set", TYPED_PLACE_ID, "Dive Bar"], wire);
+
+  assert.notEqual(refused.exitCode, 0);
+  assert.equal(refused.result.error.code, "api.request_rejected");
+  assert.equal(refused.result.error.field, "Category");
+  assert.equal(wire.matching("PUT", PLACE_CATEGORY).length, 1);
 });
 
 test("places search refuses a prediction whose Google place id Taproot could not store", async (site) => {

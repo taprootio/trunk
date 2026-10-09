@@ -1206,7 +1206,7 @@ function statusRoutes(exchange = exchangeRoute()) {
     exchange,
     { method: "GET", pathname: /\/deploy\/review$/u, reply: {} },
     {
-      method: "GET",
+      method: "POST",
       pathname: READINESS,
       reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
     },
@@ -2067,7 +2067,7 @@ test("a Docs-presentation exchange asks only for the capabilities the surface of
     }),
     { method: "GET", pathname: /\/deploy\/review$/u, reply: {} },
     {
-      method: "GET",
+      method: "POST",
       pathname: READINESS,
       reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
     },

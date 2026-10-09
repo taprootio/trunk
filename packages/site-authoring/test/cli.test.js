@@ -813,7 +813,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 35,
+          referenceVersion: 36,
           topic: scenario.topic,
         },
       );

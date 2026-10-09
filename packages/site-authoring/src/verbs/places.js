@@ -1,7 +1,21 @@
 import { randomUUID } from "node:crypto";
 
-import { isGooglePlaceId, searchPlaces, selectPlace, withRefusalGuidance } from "../api.js";
-import { VERB_PLACES_SEARCH, VERB_PLACES_SELECT } from "../constants.js";
+import {
+  clearPlaceCategory,
+  isGooglePlaceId,
+  listPlaceCategories,
+  searchPlaces,
+  selectPlace,
+  setPlaceCategory,
+  withRefusalGuidance,
+} from "../api.js";
+import {
+  VERB_PLACES_CATEGORY_CLEAR,
+  VERB_PLACES_CATEGORY_LIST,
+  VERB_PLACES_CATEGORY_SET,
+  VERB_PLACES_SEARCH,
+  VERB_PLACES_SELECT,
+} from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { openSession, successResult } from "../session.js";
 
@@ -18,6 +32,9 @@ import { openSession, successResult } from "../session.js";
  */
 
 const MAXIMUM_QUERY_LENGTH = 200;
+const MAXIMUM_CATEGORY_LENGTH = 100;
+// Any UUID version: the server mints place ids from a sequential-style generator.
+const PLACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const SESSION_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 export async function placesSearch(invocation) {
@@ -58,4 +75,57 @@ export async function placesSelect(invocation) {
     await selectPlace(client, siteId, { googlePlaceId, sessionToken }));
   onProgress(`Selected ${place.name}: use placeId ${place.placeId} in the page's front matter.`);
   return successResult(VERB_PLACES_SELECT, siteId, { place });
+}
+
+/**
+ * `places category set|clear|list` — this site's own category for a place
+ * (TR01203).
+ *
+ * A place's category is shared by every site, and Google's types do not always
+ * give the one an owner wants. The override is the site's alone: its place
+ * reviews and `/places/<category>` pages use it from the next deployment, and
+ * the platform-wide place is never changed. The server owns the closed list, so
+ * the CLI sends the name as given and lets the server check it.
+ */
+export async function placesCategorySet(invocation) {
+  const [placeId, category, ...extra] = Array.isArray(invocation.placeCategory) ? invocation.placeCategory : [];
+  if (!PLACE_ID.test(placeId ?? "") || extra.length > 0 || typeof category !== "string"
+    || category.trim() === "" || category.length > MAXIMUM_CATEGORY_LENGTH) {
+    throw new SiteAuthoringError(
+      "places.category_invalid",
+      "places category set takes the placeId, then one category from 'places category list'.",
+      { field: "category", exitCode: 2 },
+    );
+  }
+  const session = await openSession(invocation);
+  const { client, siteId, onProgress } = session;
+  const state = await withRefusalGuidance(onProgress, "place category", async () =>
+    await setPlaceCategory(client, siteId, { placeId, category: category.trim() }));
+  onProgress(`This site now files ${placeId} under ${state.category}; deploy for pages to use it.`);
+  return successResult(VERB_PLACES_CATEGORY_SET, siteId, { placeCategory: state });
+}
+
+export async function placesCategoryClear(invocation) {
+  const [placeId, ...extra] = Array.isArray(invocation.placeId) ? invocation.placeId : [];
+  if (!PLACE_ID.test(placeId ?? "") || extra.length > 0) {
+    throw new SiteAuthoringError(
+      "places.category_invalid",
+      "places category clear takes the placeId of the place whose category this site set.",
+      { field: "placeId", exitCode: 2 },
+    );
+  }
+  const session = await openSession(invocation);
+  const { client, siteId, onProgress } = session;
+  const state = await withRefusalGuidance(onProgress, "place category", async () =>
+    await clearPlaceCategory(client, siteId, { placeId }));
+  onProgress(`This site files ${placeId} under ${state.category} again; deploy for pages to use it.`);
+  return successResult(VERB_PLACES_CATEGORY_CLEAR, siteId, { placeCategory: state });
+}
+
+export async function placesCategoryList(invocation) {
+  const session = await openSession(invocation);
+  const { client, siteId, onProgress } = session;
+  const categories = await withRefusalGuidance(onProgress, "place categories", async () =>
+    await listPlaceCategories(client));
+  return successResult(VERB_PLACES_CATEGORY_LIST, siteId, { categories });
 }

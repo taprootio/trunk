@@ -132,10 +132,7 @@ export async function status(invocation) {
     const selection = presentationOnly
       ? { ...reviewed, stagedPageIds: [], includeNavigation: false }
       : reviewed;
-    const readiness = await getPublishingReadiness(client, siteId, {
-      ...selection,
-      stagedPageIds: selection.stagedPageIds.length > 100 ? undefined : selection.stagedPageIds,
-    });
+    const readiness = await getPublishingReadiness(client, siteId, selection);
     onProgress("Reading the deployment log.");
     const {
       deployments,

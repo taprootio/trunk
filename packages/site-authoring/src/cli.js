@@ -34,6 +34,9 @@ import {
   VERB_NAV_PUSH,
   VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
+  VERB_PLACES_CATEGORY_CLEAR,
+  VERB_PLACES_CATEGORY_LIST,
+  VERB_PLACES_CATEGORY_SET,
   VERB_PLACES_SEARCH,
   VERB_PLACES_SELECT,
   VERB_PLAN,
@@ -349,6 +352,39 @@ const VERBS = Object.freeze([
     note: "Takes the googlePlaceId from 'places search', then that search's sessionToken. The place is recorded "
       + "once for every site, so selecting it again returns the same placeId. Use it as placeId in a place review, "
       + "or as place in an article or album.",
+  },
+  {
+    name: VERB_PLACES_CATEGORY_SET,
+    surface: SURFACE_STANDARD,
+    // Changes what the site's place reviews publish, so it needs page editing.
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["places", "category", "set"],
+    positionals: "placeCategory",
+    summary: "Set this site's category for a place, from the closed category list.",
+    note: "Takes the placeId from 'places select' (or a page's front matter), then one category from "
+      + "'places category list', which prints the closed list; a name outside it is refused, and capitalization is "
+      + "ignored. Use it when Google's own category for a place is not the one this site wants, such as a park filed "
+      + "under Other. The category is this site's alone and applies to every review of that place here: the place "
+      + "itself and other sites do not change. Place-review bylines and the /places/<category> pages use it from the "
+      + "next deployment, which a changed category alone is enough to start. Undo it with 'places category clear'.",
+  },
+  {
+    name: VERB_PLACES_CATEGORY_CLEAR,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["places", "category", "clear"],
+    positionals: "placeId",
+    summary: "Remove this site's category for a place, so the place's own category applies again.",
+    note: "Takes the placeId. Clearing a place this site never set succeeds and changes nothing. Pages use the "
+      + "place's own category from the next deployment.",
+  },
+  {
+    name: VERB_PLACES_CATEGORY_LIST,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["places", "category", "list"],
+    summary: "List the place categories 'places category set' accepts.",
+    note: "The list is closed: a category outside it is refused.",
   },
   {
     name: VERB_PLAN,
@@ -713,7 +749,7 @@ upgrade. Once a run has recorded a newer release, help, validate, and whoami
 refuse the same way offline. --version and --help always answer.
 
 Verbs:
-${VERBS.map((verb) => `  ${verb.tokens.join(" ").padEnd(14)} ${verb.summary}`).join("\n")}
+${VERBS.map((verb) => `  ${verb.tokens.join(" ").padEnd(20)} ${verb.summary}`).join("\n")}
 
 Configuration:
   Site verbs read taproot-site.json, found by walking up from the current
@@ -756,6 +792,10 @@ function verbHelp(verb) {
     ? " <query...>"
     : verb.positionals === "placeSelection"
     ? " <google-place-id> <session-token>"
+    : verb.positionals === "placeCategory"
+    ? " <place-id> <category>"
+    : verb.positionals === "placeId"
+    ? " <place-id>"
     : verb.positionals === "metaPagePath"
     ? " <page-path> [--title <text>] [--description <text>] [--author <handle-or-email>]"
     : verb.positionals === "authorHandle"

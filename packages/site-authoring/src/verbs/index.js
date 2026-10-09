@@ -16,6 +16,9 @@ import {
   VERB_NAV_PUSH,
   VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
+  VERB_PLACES_CATEGORY_CLEAR,
+  VERB_PLACES_CATEGORY_LIST,
+  VERB_PLACES_CATEGORY_SET,
   VERB_PLACES_SEARCH,
   VERB_PLACES_SELECT,
   VERB_PLAN,
@@ -48,7 +51,7 @@ import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
 import { pagesMetaSet } from "./pages-meta-set.js";
 import { pagesPush } from "./pages-push.js";
-import { placesSearch, placesSelect } from "./places.js";
+import { placesCategoryClear, placesCategoryList, placesCategorySet, placesSearch, placesSelect } from "./places.js";
 import { apply, plan } from "./plan.js";
 import { previewPage } from "./preview-page.js";
 import { previewRevoke } from "./preview-revoke.js";
@@ -106,6 +109,8 @@ import { whoami } from "./whoami.js";
  *                  //   with none, every file under forms/
  *   placeQuery,    // places search: the words of the query
  *   placeSelection, // places select: [googlePlaceId, sessionToken]
+ *   placeCategory, // places category set: [placeId, category]
+ *   placeId,       // places category clear: [placeId]
  *   pagePaths,     // approve: narrow to these page paths; with none, every
  *                  //   draft the workspace manifest tracks is staged
  *   authorHandle,  // authors add: the handle of the site author to create
@@ -148,6 +153,9 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_PLAN]: plan,
   [VERB_PLACES_SEARCH]: placesSearch,
   [VERB_PLACES_SELECT]: placesSelect,
+  [VERB_PLACES_CATEGORY_SET]: placesCategorySet,
+  [VERB_PLACES_CATEGORY_CLEAR]: placesCategoryClear,
+  [VERB_PLACES_CATEGORY_LIST]: placesCategoryList,
   [VERB_APPLY]: apply,
   [VERB_REDIRECTS_CHECK]: redirectsCheck,
   [VERB_REDIRECTS_PULL]: redirectsPull,

@@ -1,5 +1,6 @@
 import { normalizeLatestCliVersion } from "./cli-release.js";
 import {
+  BANDWIDTH_ALLOWANCE_REFUSAL_REASON,
   CANONICAL_TIMESTAMP,
   CAPABILITY_REFUSAL_FIELD,
   CLI_UPGRADE_COMMAND,
@@ -437,6 +438,34 @@ export function announceRefusal(error, onProgress, action = "request") {
   }
   if (kind === REFUSAL_PLAN_LIMIT) {
     onProgress("");
+    if (error.planLimit !== undefined) {
+      // The allowance and bandwidth refusals ride an ErrorInfo detail, not the
+      // UpgradePrompt field, and name when they can next lift on their own.
+      const bandwidth = error.planLimit.reason === BANDWIDTH_ALLOWANCE_REFUSAL_REASON;
+      onProgress(`PLAN LIMIT (refusal=plan_limit, reason=${error.planLimit.reason})`);
+      onProgress(
+        bandwidth
+          ? `  Taproot paused this ${action}: the site's measured bandwidth was over its monthly allowance for two `
+            + "months in a row. The published site keeps serving; only new deployments wait."
+          : error.planLimit.requestedPages === undefined
+          ? `  Taproot refused this ${action}: it generates more pages than the site's allowance for this billing period has left.`
+          : `  Taproot refused this ${action}: it generates ${pagesLabel(error.planLimit.requestedPages)} and the site has ${
+            (error.planLimit.remainingPages ?? 0).toLocaleString("en-US")
+          } left for this billing period.`,
+      );
+      // The bandwidth pause is not an unconditional reset: it lifts only after
+      // a month ends under the allowance (or on upgrade), so the instant is
+      // the earliest that can happen.
+      onProgress(
+        error.planLimit.resetsAt === undefined
+          ? "  Upgrade the site's plan, then run the request again."
+          : bandwidth
+          ? `  Upgrade the site's plan, or deployments resume after a month ends under the allowance (no earlier than ${error.planLimit.resetsAt}).`
+          : `  Resets at: ${error.planLimit.resetsAt}. Upgrade the site's plan to continue sooner.`,
+      );
+      onProgress("");
+      return;
+    }
     onProgress("PLAN LIMIT (refusal=plan_limit, field=UpgradePrompt)");
     onProgress(
       `  Taproot refused this ${action} against a plan ceiling rather than a content problem.`,
@@ -996,6 +1025,45 @@ export async function selectPlace(client, siteId, { googlePlaceId, sessionToken 
   };
 }
 
+function normalizeSiteCategory(value) {
+  const state = requireObject(value, "api.place_contract", "site place category");
+  return {
+    placeId: requireIdentifier(state.placeId, "api.place_contract", "placeId"),
+    category: text(state.category),
+    placeCategory: text(state.placeCategory),
+    isOverride: state.isOverride === true,
+  };
+}
+
+/** Sets this site's own category for a place; the place itself and other sites are unchanged. */
+export async function setPlaceCategory(client, siteId, { placeId, category }) {
+  return normalizeSiteCategory(
+    await client.request(sitePath(siteId, `places/${encodeURIComponent(placeId)}/category`), {
+      method: "PUT",
+      body: { siteId, placeId, category },
+    }),
+  );
+}
+
+/** Removes this site's category for a place, so the place's own category applies again. */
+export async function clearPlaceCategory(client, siteId, { placeId }) {
+  return normalizeSiteCategory(
+    await client.request(sitePath(siteId, `places/${encodeURIComponent(placeId)}/category`), { method: "DELETE" }),
+  );
+}
+
+/** The closed list of place categories, in Taproot's order. */
+export async function listPlaceCategories(client) {
+  const response = requireObject(
+    await client.request(`v1/standard-types${query([["typeGroup", "place_category"], ["maxResults", 1000]])}`),
+    "api.place_contract",
+    "place categories",
+  );
+  return (Array.isArray(response.standardTypes) ? response.standardTypes : [])
+    .map((type) => text(requireObject(type, "api.place_contract", "place category").name))
+    .filter((name) => name !== "");
+}
+
 /**
  * Processing is observed through `ListSiteImages`; `GetImageById` is
  * session-only under TR00602's read list, so a key-authorized client watches
@@ -1122,18 +1190,20 @@ export async function getDeploySelection(client, siteId) {
 }
 
 export async function getPublishingReadiness(client, siteId, selection = {}) {
+  // A body, not a query: the exact selection can run past a URL's limit, and the
+  // estimate must plan the pages the deploy will stage (TR01201).
   const response = requireObject(
-    await client.request(sitePath(
-      siteId,
-      `publishing/readiness${
-        query([
-          ["stagedPageIds", selection.stagedPageIds],
-          ["selectedSettingsTypes", selection.selectedSettingsTypes],
-          ["includeNavigation", selection.includeNavigation],
-          ["useExactPageSelection", selection.useExactPageSelection],
-        ])
-      }`,
-    )),
+    await client.request(sitePath(siteId, "publishing/readiness"), {
+      method: "POST",
+      body: {
+        stagedPageIds: selection.stagedPageIds,
+        selectedSettingsTypes: selection.selectedSettingsTypes,
+        includeNavigation: selection.includeNavigation,
+        useExactPageSelection: selection.useExactPageSelection,
+        includePageEstimate: selection.includePageEstimate,
+        allowFailedPreview: selection.allowFailedPreview,
+      },
+    }),
     "api.readiness_contract",
     "publishing readiness",
   );
@@ -1154,8 +1224,48 @@ export async function getPublishingReadiness(client, siteId, selection = {}) {
     redirectsChanged: response.redirectsChanged === true,
     formsChanged: response.formsChanged === true,
     videosChanged: response.videosChanged === true,
+    // The pages staging this candidate would generate, which is the number charged (TR01201).
+    // Absent unless asked for and the candidate could be planned.
+    pageEstimate: pageEstimate(response),
     blockers,
   };
+}
+
+/**
+ * The server's plan for a candidate: the pages staging it generates, the
+ * allowance left this period and when it resets. The CLI never computes any of
+ * it; limit, remaining and period end are null for an unlimited licence.
+ */
+function pageEstimate(response) {
+  if (!Number.isSafeInteger(response.plannedPageCount) || response.plannedPageCount < 0) return null;
+  const periodEnd = typeof response.pagesGeneratedPeriodEnd === "string"
+    ? new Date(response.pagesGeneratedPeriodEnd)
+    : undefined;
+  return {
+    plannedPageCount: response.plannedPageCount,
+    pagesGeneratedLimit: Number.isSafeInteger(response.pagesGeneratedLimit) ? response.pagesGeneratedLimit : null,
+    pagesGeneratedRemaining: Number.isSafeInteger(response.pagesGeneratedRemaining)
+      ? response.pagesGeneratedRemaining
+      : null,
+    periodEnd: periodEnd !== undefined && !Number.isNaN(periodEnd.getTime()) ? periodEnd.toISOString() : null,
+    exceedsAllowance: response.plannedPagesExceedAllowance === true,
+  };
+}
+
+const pagesLabel = (count) => `${count.toLocaleString("en-US")} ${count === 1 ? "page" : "pages"}`;
+
+/**
+ * The one line that states a candidate's plan in pages (TR01201), shared by the
+ * progress output and the refusal so the two never word it differently.
+ */
+export function describePageEstimate(estimate) {
+  const generates = `This will generate ${pagesLabel(estimate.plannedPageCount)}`;
+  if (estimate.pagesGeneratedLimit === null || estimate.pagesGeneratedRemaining === null) return generates;
+  const left = `${estimate.pagesGeneratedRemaining.toLocaleString("en-US")} of ${
+    estimate.pagesGeneratedLimit.toLocaleString("en-US")
+  } left this period`;
+  const resets = estimate.periodEnd === null ? "" : ` (resets ${estimate.periodEnd})`;
+  return `${generates} · ${left}${resets}`;
 }
 
 export async function getStagingPreviewStatus(client, siteId) {
@@ -1351,6 +1461,14 @@ export async function deploySite(client, siteId, body) {
         (error.descriptionFor("AuthoringPreviewFailed") ?? "A retained preview of a selected page failed.")
           + " Use --allow-failed-preview only to explicitly override this refusal.",
         { field: "AuthoringPreviewFailed", status: error.status },
+      );
+    }
+    if (error instanceof ApiError && error.hasField("ExpectedPageCount")) {
+      throw new SiteAuthoringError(
+        "deploy.page_estimate_changed",
+        `${error.descriptionFor("ExpectedPageCount") ?? "The pages this publish generates have grown since the estimate."} `
+          + "Nothing was staged; run the command again to confirm the new count.",
+        { field: "ExpectedPageCount", status: error.status },
       );
     }
     throw error;

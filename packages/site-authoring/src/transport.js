@@ -1,10 +1,12 @@
 import {
+  BANDWIDTH_ALLOWANCE_REFUSAL_REASON,
   CAPABILITY_REFUSAL_FIELD,
   CAPABILITY_REFUSAL_REASON,
   CLI_NAME,
   CLI_UPGRADE_REFUSAL_FIELD,
   CLI_VERSION,
   CREDENTIAL_REFUSAL_FIELD,
+  DEPLOYMENT_ALLOWANCE_REFUSAL_REASON,
   GRPC_RESOURCE_EXHAUSTED,
   GRPC_UNAUTHENTICATED,
   HTTP_TOO_MANY_REQUESTS,
@@ -21,6 +23,7 @@ import {
   REFUSAL_THROTTLED,
   REFUSAL_UNCLASSIFIED,
   ROLLOUT_REFUSAL_FIELD,
+  SITE_DEPLOYMENT_REFUSAL_DOMAIN,
 } from "./constants.js";
 import { Readable } from "node:stream";
 
@@ -409,15 +412,10 @@ function capabilityNames(value) {
  * keys on it rather than on `@type`, which a future packing could reshape.
  */
 export function capabilityRefusal(value) {
-  const queue = [{ value, depth: 0 }];
-  let work = 0;
-  while (queue.length > 0 && work < 1_000) {
-    const current = queue.shift();
-    work += 1;
-    if (!current || current.depth > 8 || current.value === null || typeof current.value !== "object") continue;
-    const metadata = current.value.metadata;
+  return findErrorInfo(value, (detail) => {
+    const metadata = detail.metadata;
     if (
-      current.value.reason === CAPABILITY_REFUSAL_REASON
+      detail.reason === CAPABILITY_REFUSAL_REASON
       && metadata !== null
       && typeof metadata === "object"
       && !Array.isArray(metadata)
@@ -434,6 +432,61 @@ export function capabilityRefusal(value) {
         });
       }
     }
+    return undefined;
+  });
+}
+
+/**
+ * The pages-generated allowance or bandwidth-pause refusal the deploy API attaches
+ * as a `google.rpc.ErrorInfo` detail (TR00445, TR01201), or undefined. Keyed on the
+ * namespaced domain and reason, never the message sentence. `resetsAt` is the
+ * server's `resets_at` re-serialized as an ISO-8601 UTC instant, or undefined
+ * when it is absent (a licence that grants no deployments has no period) or
+ * does not parse. `requestedPages` and `remainingPages` are present on the
+ * allowance refusal only.
+ */
+export function planLimitRefusal(value) {
+  return findErrorInfo(value, (detail) => {
+    if (
+      detail.domain !== SITE_DEPLOYMENT_REFUSAL_DOMAIN
+      || (detail.reason !== DEPLOYMENT_ALLOWANCE_REFUSAL_REASON && detail.reason !== BANDWIDTH_ALLOWANCE_REFUSAL_REASON)
+    ) {
+      return undefined;
+    }
+    const metadata = detail.metadata !== null && typeof detail.metadata === "object" ? detail.metadata : {};
+    const resetsAt = typeof metadata.resets_at === "string" ? new Date(metadata.resets_at) : undefined;
+    return Object.freeze({
+      reason: detail.reason,
+      resetsAt: resetsAt !== undefined && !Number.isNaN(resetsAt.getTime()) ? resetsAt.toISOString() : undefined,
+      // The pages the refused request needed and the period had left (TR01201).
+      requestedPages: pageCount(metadata.requested_pages),
+      remainingPages: pageCount(metadata.remaining_pages),
+    });
+  });
+}
+
+/** A page count the server reported as a decimal string, or undefined. */
+function pageCount(value) {
+  const count = typeof value === "string" && /^[0-9]{1,9}$/u.test(value) ? Number(value) : undefined;
+  return Number.isSafeInteger(count) ? count : undefined;
+}
+
+/**
+ * The first object in `value`, breadth first, for which `match` returns a
+ * result. Transcoded `details[]` entries are `Any`-packed and nested, so one
+ * pinned path through them would silently empty every extractor on a contract
+ * change; the walk is bounded in depth and in work so a hostile body cannot
+ * stall it.
+ */
+function findErrorInfo(value, match) {
+  const queue = [{ value, depth: 0 }];
+  let work = 0;
+  while (queue.length > 0 && work < 1_000) {
+    const current = queue.shift();
+    work += 1;
+    if (!current || current.depth > 8 || current.value === null || typeof current.value !== "object") continue;
+    const found = match(current.value);
+    if (found !== undefined) return found;
     for (const child of Object.values(current.value)) {
       if (child !== null && typeof child === "object") queue.push({ value: child, depth: current.depth + 1 });
     }
@@ -459,6 +512,7 @@ export class ApiError extends SiteAuthoringError {
     const grpcCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
     const fields = fieldViolations(body);
     const capability = capabilityRefusal(body);
+    const planLimit = planLimitRefusal(body);
     // Only the known upgrade refusal may supply a human message. Other server
     // errors can contain internal diagnostics and retain their generic output.
     const upgradeMessage = fields.includes(CLI_UPGRADE_REFUSAL_FIELD)
@@ -472,6 +526,10 @@ export class ApiError extends SiteAuthoringError {
       "api.request_rejected",
       upgradeMessage || (fields.length > 0
         ? `Taproot rejected the request field '${fields[0]}'.`
+        : planLimit !== undefined
+        ? planLimit.reason === BANDWIDTH_ALLOWANCE_REFUSAL_REASON
+          ? "Taproot paused deployments: the site used more than its monthly bandwidth for two months in a row."
+          : "Taproot refused the request: it generates more pages than the site's allowance for this billing period has left."
         : capability !== undefined
         ? `Taproot refused the request: this credential does not carry a capability granting '${
           capability.permission
@@ -491,6 +549,7 @@ export class ApiError extends SiteAuthoringError {
     this.fields = fields;
     this.violationDescriptions = fieldDescriptions(body);
     this.capability = capability;
+    this.planLimit = planLimit;
     // The `retry-after` trailer (TR00839's deployment throttle, or any other
     // ResourceExhausted refusal that sets it) transcodes to an ordinary
     // response header. Undefined when absent or unparseable — callers must
@@ -545,10 +604,12 @@ export class ApiError extends SiteAuthoringError {
    *   left it unclassified: no `refusal` in the JSON result, and nothing said
    *   on the human channel. The field arrives only from the in-transaction
    *   re-validation, which does attach `ExternalApiKey`.
-   * - `plan_limit` (field `UpgradePrompt`) — a commercial ceiling, surfaced at
+   * - `plan_limit` (field `UpgradePrompt`, or `ErrorInfo` reason
+   *   `DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED` / `BANDWIDTH_ALLOWANCE_EXCEEDED`
+   *   with the server's `resets_at`) — a commercial ceiling, surfaced at
    *   deploy time because no pre-flight read of the published-page quota
-   *   exists on the contract. **Upgrade** (or publish fewer pages); the CLI
-   *   never invents the numeric limit.
+   *   exists on the contract. **Upgrade** (or publish fewer pages, or wait for
+   *   the named reset); the CLI never invents the numeric limit.
    * - `throttled` (gRPC `ResourceExhausted` / HTTP 429) — the per-key
    *   throttle. **Back off** and retry with delay.
    * - `capability_missing` (`ErrorInfo` reason `SITE_AUTHORING_CAPABILITY_MISSING`)
@@ -568,7 +629,7 @@ export class ApiError extends SiteAuthoringError {
     if (this.hasField(CLI_UPGRADE_REFUSAL_FIELD)) return REFUSAL_CLI_OUTDATED;
     if (this.hasField(ROLLOUT_REFUSAL_FIELD)) return REFUSAL_PLATFORM_PAUSED;
     if (this.hasField(CREDENTIAL_REFUSAL_FIELD)) return REFUSAL_CREDENTIAL_REJECTED;
-    if (this.hasField(PLAN_LIMIT_REFUSAL_FIELD)) return REFUSAL_PLAN_LIMIT;
+    if (this.hasField(PLAN_LIMIT_REFUSAL_FIELD) || this.planLimit !== undefined) return REFUSAL_PLAN_LIMIT;
     // The named detail ranks with the fields and above the status mappings, for
     // the same reason: it is the specific statement about this refusal.
     if (this.capability !== undefined) return REFUSAL_CAPABILITY_MISSING;

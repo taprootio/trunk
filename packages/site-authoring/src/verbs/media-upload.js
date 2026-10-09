@@ -354,7 +354,6 @@ const VIDEO_REFUSAL_FIELDS = Object.freeze([
   "Video",
   "UpgradePrompt",
   "VideoNotIncluded",
-  "VideoPendingDowngrade",
 ]);
 
 /**

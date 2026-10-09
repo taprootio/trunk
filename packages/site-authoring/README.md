@@ -464,7 +464,8 @@ moved since this workspace last reconciled with it, naming both revisions;
 names and reports predictions with a session token; `places select
 <googlePlaceId> <sessionToken>` records the match as a Taproot place and
 reports the `placeId` a place review's front matter needs. An article or an
-album can name its place the same way with `place:`.
+album can name its place the same way with `place:`. `places category set
+<placeId> <category>` changes the category this site shows for a place.
 
 `plan` checks the whole workspace against the live site — pages, the media
 they reference and the images the settings name, the footer and the pages it
@@ -567,8 +568,10 @@ paused; retry later), `credential_rejected` (stop and re-issue),
 not exchanged for a capability the request needs; the refusal carries
 `field: "GrantedCapabilities"`, and the CLI's human progress names the
 granted and required capabilities, so report the verb's declared set rather
-than re-issuing the key), `plan_limit` (the plan's published-page allowance,
-surfaced at deploy), and `throttled` (back off).
+than re-issuing the key), `plan_limit` (the plan's published-page allowance or
+its pages-generated allowance, or the bandwidth pause on deploys,
+surfaced at deploy; the allowance shows its reset time, while the bandwidth pause shows the earliest
+time it can lift, since it lifts only after a month ends under the allowance or on upgrade), and `throttled` (back off).
 
 When `GITHUB_OUTPUT` names the runner's existing output file, every
 operational verb appends the same JSON under `taproot_site_result` through a
@@ -635,17 +638,49 @@ Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal `<br>` tags are rejecte
 with the exact fact field path. A label is optional and stays outside the value's link. See
 `taproot-site help page free-form` and `taproot-site help component cta`.
 
-### Link rel in 0.15.0
+### Place categories in 0.18.0
 
-A link publishes followed unless its author chooses otherwise. A link mark's
-`rel` takes space-separated link types (`nofollow`, `sponsored`, `ugc`, `me`,
-and the other standard types except `opener`), on any link; `target: "_blank"`
-opens a new tab with `noopener noreferrer` added. In Markdown, write
-`[Shop](https://shop.example){rel="sponsored nofollow" target="_blank"}`
-(either attribute alone works). Other tokens and
-targets are refused (`content.link_rel`, `content.link_target`). The editor's
-old default, `noopener noreferrer nofollow`, reads as no choice. See
-`taproot-site help page free-form`.
+A place has one category for every site, taken from Google's types, and a place
+that Taproot could not classify is filed under `Other`. A site can file a place
+under a category of its own:
+
+```
+taproot-site places category list
+taproot-site places category set <placeId> park
+taproot-site places category clear <placeId>
+```
+
+`list` prints the closed list `set` accepts; a name outside it is refused, and
+capitalization is ignored. The category is the site's alone and applies to every
+review of that place on the site: the place itself and other sites do not
+change. Place-review bylines and the `/places/<category>` pages use it from the
+site's next deployment, including reviews nobody has edited. `clear` removes it.
+Both need the same page-editing permission as `places select`.
+
+### Pages generated in 0.18.0
+
+A site's licence allows a number of pages generated per billing period, and
+`deploy --staging` is charged by the pages it generates, not by the deployment.
+The deploy asks Taproot to plan the candidate first and reports the plan before
+it sends anything: `This will generate 74 pages · 940 of 1,000 left this period
+(resets 2026-11-01T00:00:00.000Z)`. The same figures are in `readiness.pageEstimate`
+(`plannedPageCount`, `pagesGeneratedLimit`, `pagesGeneratedRemaining`, `periodEnd`
+and `exceedsAllowance`; a limit and what remains are `null` on an unlimited
+licence). The number shown is the number charged. Promoting a staged release to
+production generates nothing and costs no pages.
+
+A candidate that does not fit stops with `deploy.page_allowance_exceeded`, naming
+the pages it needs, the pages left, and the reset. A deploy refused by the server
+for the same reason, or for the bandwidth pause, reports `plan_limit` with the
+time it can lift (and `requested_pages` and `remaining_pages` for the allowance):
+the allowance's reset, or for the bandwidth pause the earliest month end that can
+clear it (an upgrade clears it at once).
+
+### Deployment allowances in 0.18.0
+
+A deploy refused for the bandwidth pause reports `plan_limit` with the time it
+can lift: the earliest month end that can clear it (an upgrade clears it at
+once).
 
 ### Authoring feedback in 0.16.0
 
@@ -665,6 +700,18 @@ old default, `noopener noreferrer nofollow`, reads as no choice. See
 - `validate` checks a real pulled workspace offline (`validate --init` keeps the
   generated pages navigation links to), and `validate` and `pages push` warn on
   links that look made by autolinking (`content.link_autolinked`).
+
+### Link rel in 0.15.0
+
+A link publishes followed unless its author chooses otherwise. A link mark's
+`rel` takes space-separated link types (`nofollow`, `sponsored`, `ugc`, `me`,
+and the other standard types except `opener`), on any link; `target: "_blank"`
+opens a new tab with `noopener noreferrer` added. In Markdown, write
+`[Shop](https://shop.example){rel="sponsored nofollow" target="_blank"}`
+(either attribute alone works). Other tokens and
+targets are refused (`content.link_rel`, `content.link_target`). The editor's
+old default, `noopener noreferrer nofollow`, reads as no choice. See
+`taproot-site help page free-form`.
 
 ### Staging verification and deployment evidence
 

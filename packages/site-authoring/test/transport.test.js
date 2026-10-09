@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from "../src/constants.js";
-import { ApiError, capabilityRefusal, fieldViolations, SiteApiClient } from "../src/transport.js";
+import { ApiError, capabilityRefusal, fieldViolations, planLimitRefusal, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
 
 const API_BASE_URL = "https://app.taproot.test/api";
@@ -55,6 +55,24 @@ function capabilityDetail(metadata) {
       reason: CAPABILITY_REFUSAL_REASON,
       domain: "taproot-site-authoring",
       metadata,
+    }],
+  };
+}
+
+/**
+ * The transcoded shape a deployment allowance or bandwidth-pause refusal takes
+ * (TR00445): `FailedPrecondition` with one `google.rpc.ErrorInfo` detail in
+ * the `sites.taproot.io` domain and the reset instant in `resets_at`.
+ */
+function allowanceDetail(reason, metadata, domain = "sites.taproot.io") {
+  return {
+    code: 9,
+    message: "server sentence",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      reason,
+      domain,
+      ...(metadata === undefined ? {} : { metadata }),
     }],
   };
 }
@@ -664,6 +682,66 @@ test("collects nested field violations without unbounded or unsafe values", () =
   );
 });
 
+test("reads the deployment allowance and bandwidth refusals out of their packed error detail", async (testContext) => {
+  for (const reason of ["DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", "BANDWIDTH_ALLOWANCE_EXCEEDED"]) {
+    await testContext.test(`${reason} carries its reset as an ISO instant`, () => {
+      assert.deepEqual(
+        planLimitRefusal(allowanceDetail(reason, { resets_at: "2026-11-01T00:00:00.1234567Z" })),
+        { reason, resetsAt: "2026-11-01T00:00:00.123Z", requestedPages: undefined, remainingPages: undefined },
+      );
+    });
+  }
+
+  await testContext.test("the allowance refusal carries the pages it needed and the period had left", () => {
+    assert.deepEqual(
+      planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", {
+        resets_at: "2026-11-01T00:00:00.0000000Z",
+        requested_pages: "74",
+        remaining_pages: "40",
+      })),
+      {
+        reason: "DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED",
+        resetsAt: "2026-11-01T00:00:00.000Z",
+        requestedPages: 74,
+        remainingPages: 40,
+      },
+    );
+    for (const unreadable of ["-1", "many", "", "1e3", "99999999999"]) {
+      const refusal = planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", {
+        requested_pages: unreadable,
+        remaining_pages: unreadable,
+      }));
+      assert.equal(refusal.requestedPages, undefined, unreadable);
+      assert.equal(refusal.remainingPages, undefined, unreadable);
+    }
+  });
+
+  await testContext.test("a refusal with no reset, or an unreadable one, still classifies without a time", () => {
+    assert.deepEqual(planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED")), {
+      reason: "DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED",
+      resetsAt: undefined,
+      requestedPages: undefined,
+      remainingPages: undefined,
+    });
+    assert.equal(
+      planLimitRefusal(allowanceDetail("BANDWIDTH_ALLOWANCE_EXCEEDED", { resets_at: "not a date" })).resetsAt,
+      undefined,
+    );
+  });
+
+  await testContext.test("a foreign domain, another reason, or no detail is not this refusal", () => {
+    for (
+      const body of [
+        allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", undefined, "billing.taproot.io"),
+        allowanceDetail("SOMETHING_ELSE"),
+        { code: 9 },
+      ]
+    ) {
+      assert.equal(planLimitRefusal(body), undefined);
+    }
+  });
+});
+
 test("reads the key-mode capability denial out of its packed error detail", async (testContext) => {
   await testContext.test("the shipped shape", () => {
     assert.deepEqual(capabilityRefusal(DESIGN_ONLY_PAGE_LIST), {
@@ -762,6 +840,18 @@ test("classifies every refusal the authoring surface speaks", async (testContext
       kind: "credential_rejected",
     },
     { name: "plan limit", status: 400, body: { code: 3, ...violation("UpgradePrompt") }, kind: "plan_limit" },
+    {
+      name: "deployment allowance",
+      status: 400,
+      body: allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", { resets_at: "2026-11-01T00:00:00.0000000Z" }),
+      kind: "plan_limit",
+    },
+    {
+      name: "bandwidth pause",
+      status: 400,
+      body: allowanceDetail("BANDWIDTH_ALLOWANCE_EXCEEDED", { resets_at: "2026-11-01T00:00:00.0000000Z" }),
+      kind: "plan_limit",
+    },
     // The credential is valid, correctly scoped, and simply narrower than the
     // request. Classified apart from `credential_rejected` because re-issuing
     // the same credential cannot help: the verb table is what is wrong.
