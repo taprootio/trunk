@@ -5,7 +5,7 @@ import { contactFieldId, validateDefinition } from "./field-validation.js";
  * The workspace contract for a form (TR01061).
  *
  * A form is one JSON file, `forms/<key>.json`, holding what an author decides:
- * its key, name, sink, retention and definition. The definition holds the fields
+ * its key, name, sink, retention, owner-notification preference and definition. The definition holds the fields
  * and the form's own settings (`contact_field`, `submit_label`, `after_submit`),
  * exactly as the site stores it, so one validator reads one shape. The
  * definition's own rules belong to `shared/field-validation.ts` and are run
@@ -27,6 +27,7 @@ export const FORM_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 export const FORM_KEY_MAXIMUM_LENGTH = 64;
 export const FORM_SINKS = Object.freeze(["none", "newsletter"]);
 export const FORM_DEFAULT_SINK = "none";
+export const FORM_DEFAULT_NOTIFY_OWNER = false;
 export const FORM_RETENTION_DAYS = Object.freeze({ minimum: 30, maximum: 730, default: 365 });
 export const FORM_LIMITS = Object.freeze({
   nameCharacters: 120,
@@ -35,7 +36,7 @@ export const FORM_LIMITS = Object.freeze({
   fileBytes: 256 * 1024,
 });
 
-const FORM_FILE_KEYS = ["key", "name", "sink", "retention_days", "definition"];
+const FORM_FILE_KEYS = ["key", "name", "sink", "retention_days", "notify_owner", "definition"];
 // The order `forms pull` writes, which `forms push` writes back after a save.
 // Fixed rather than inherited from the response so the same form is always the
 // same bytes.
@@ -101,14 +102,24 @@ function describeDefinitionErrors(errors) {
   return `${shown.join("; ")}${more}`;
 }
 
+/** Checks newsletter admission after the definition has passed shared validation. */
+export function validateNewsletterDefinition(file, definition) {
+  const fields = definition.fields;
+  const contact = fields.find((field) => field.id === contactFieldId(definition));
+  if (contact?.type !== "email" || contact.required !== true || !fields.some((field) => field.type === "consent")) {
+    throw invalid(file, "a newsletter sink requires a required email contact field and at least one consent checkbox.", "definition");
+  }
+}
+
 /**
  * Validates one parsed form file and returns it unchanged in meaning.
  *
  * `expectedKey` is the key the file's name promises; a mismatch is refused
  * because a rename on disk would otherwise push a different form than the one
  * the author thinks they are editing.
+ * Only `forms push` defers newsletter admission until it compares the site's baseline.
  */
-export function validateFormDocument(document_, expectedKey) {
+export function validateFormDocument(document_, expectedKey, { deferNewsletterSemantics = false } = {}) {
   const file = formFileName(expectedKey);
   if (!isPlainObject(document_)) throw invalid(file, "the file must contain one JSON object.", "$");
   for (const name of Object.keys(document_)) {
@@ -138,6 +149,9 @@ export function validateFormDocument(document_, expectedKey) {
   if (document_.sink !== undefined && !FORM_SINKS.includes(document_.sink)) {
     throw invalid(file, `sink must be one of: ${FORM_SINKS.join(", ")}.`, "sink");
   }
+  if (Object.hasOwn(document_, "notify_owner") && typeof document_.notify_owner !== "boolean") {
+    throw invalid(file, "notify_owner must be true or false.", "notify_owner");
+  }
   const days = document_.retention_days;
   if (
     days !== undefined
@@ -156,6 +170,7 @@ export function validateFormDocument(document_, expectedKey) {
   if (errors.length > 0) {
     throw invalid(file, `the definition is invalid: ${describeDefinitionErrors(errors)}`, "definition");
   }
+  if (document_.sink === "newsletter" && !deferNewsletterSemantics) validateNewsletterDefinition(file, document_.definition);
   if (anyUnstorableString(document_.definition)) {
     throw invalid(file, "the definition cannot contain NUL or unpaired surrogate characters.", "definition");
   }
@@ -238,6 +253,16 @@ function rejectNonTarget(file, pages, id, field, name) {
   );
 }
 
+/** Operational settings in the same order for workspace files and saved baselines. */
+export function projectFormSettings(form) {
+  return {
+    name: form.name,
+    sink: form.sink ?? FORM_DEFAULT_SINK,
+    retention_days: form.retention_days ?? FORM_RETENTION_DAYS.default,
+    notify_owner: form.notify_owner ?? FORM_DEFAULT_NOTIFY_OWNER,
+  };
+}
+
 function canonicalField(field) {
   const ordered = {};
   for (const name of FIELD_KEY_ORDER) if (field[name] !== undefined) ordered[name] = field[name];
@@ -266,9 +291,7 @@ export function projectFormForWorkspace(form, pathById) {
   }
   return {
     key: form.key,
-    name: form.name,
-    sink: form.sink ?? FORM_DEFAULT_SINK,
-    retention_days: form.retention_days ?? FORM_RETENTION_DAYS.default,
+    ...projectFormSettings(form),
     definition,
   };
 }

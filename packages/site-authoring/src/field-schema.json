@@ -17,6 +17,11 @@
       "description": "The id of the email field whose value the API copies to subject_email. It must name an email field. Omit it when the form has one email field (that field is the contact); it is required with two or more.",
       "$ref": "#/$defs/id"
     },
+    "newsletter_audience_id": {
+      "description": "The active manual newsletter audience on the form's site that receives the reader after email confirmation. Omit it for newsletter only. The server checks ownership and availability when saving.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
     "submit_label": {
       "description": "The text on the submit button. Omit it for Taproot's default. Must contain more than whitespace; the validator also rejects a blank label, which a schema cannot express.",
       "type": "string",

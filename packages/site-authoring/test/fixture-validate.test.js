@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
+import { convertWorkspacePageSource, readWorkspacePageSource } from "../src/verbs/pages-push.js";
+import { readMediaManifest } from "../src/workspace.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
 
 // The complete example fixture the package ships (TR00647). It is the default
@@ -21,10 +23,12 @@ const SHIPPED_FIXTURE = shippedFixtureDirectory();
 const TAPROOT_FIXTURE = monorepoPath("business", "playbooks", "www-launch", "fixtures", "taproot-www");
 // The package's copy of the representative section composition, pinned
 // byte-for-byte to the canonical shared fixture by renderer-parity.test.js.
-const SHY_COMPOSITION = fileURLToPath(new URL(
-  "./fixtures/free-form-section-composition.fixture.json",
-  import.meta.url,
-));
+const SHY_COMPOSITION = fileURLToPath(
+  new URL(
+    "./fixtures/free-form-section-composition.fixture.json",
+    import.meta.url,
+  ),
+);
 // The package's copy of the seeded default theme, pinned byte-for-byte to the
 // canonical shared artifact by renderer-parity.test.js. The shipped fixture's
 // theme pair is that artifact plus its authored groups and its one pin.
@@ -195,7 +199,9 @@ test("validate reports a fit lint the theme's own validation cannot see", async 
     assert.match(warning, /^(?:light|dark): contexts\.fit-band fit lint [a-z-]+ — /u);
   }
   assert.ok(
-    json.warnings.items.some((warning) => warning.startsWith("light: contexts.fit-band fit lint action-anchor-inversion — ")),
+    json.warnings.items.some((warning) =>
+      warning.startsWith("light: contexts.fit-band fit lint action-anchor-inversion — ")
+    ),
     json.warnings.items.join("\n"),
   );
   assert.equal(json.warnings.count, json.warnings.items.length);
@@ -281,7 +287,9 @@ test("the shipped fixture keeps every example value inside the reserved example 
   }
 });
 
-test("the public CLI validates the complete TR00621 Taproot-www fixture without credentials, network, or writes", { skip: MONOREPO_ONLY }, async () => {
+test("the public CLI validates the complete TR00621 Taproot-www fixture without credentials, network, or writes", {
+  skip: MONOREPO_ONLY,
+}, async () => {
   const before = await treeDigest(TAPROOT_FIXTURE);
   const result = await runValidation(TAPROOT_FIXTURE, { quiet: false });
 
@@ -297,6 +305,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       offline: json.offline,
       contractVersion: json.fixture.contractVersion,
       pages: json.validated.pages.total,
+      forms: json.validated.forms.count,
       navigationItems: json.validated.navigation.items,
       themes: json.validated.themes,
       appearanceSettings: json.validated.appearanceSettings,
@@ -308,13 +317,95 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       verb: "validate",
       offline: true,
       contractVersion: 1,
-      pages: 8,
+      pages: 9,
+      forms: 1,
       navigationItems: 10,
       themes: 2,
       appearanceSettings: 23,
       footer: true,
     },
   );
+  const form = JSON.parse(await readFile(path.join(TAPROOT_FIXTURE, "forms/stay-informed.json"), "utf8"));
+  assert.deepEqual(form, {
+    key: "stay-informed",
+    name: "Stay informed",
+    sink: "newsletter",
+    retention_days: 365,
+    definition: {
+      fields: [
+        { id: "email", type: "email", label: "Email address", required: true },
+        {
+          id: "consent",
+          type: "consent",
+          label:
+            "I agree to receive occasional Taproot product and launch updates by email. I can unsubscribe at any time.",
+        },
+      ],
+      submit_label: "Stay informed",
+      after_submit: {
+        show: "message",
+        message:
+          "Thanks. If confirmation is needed and this address can receive updates, we'll email a link. Please confirm to receive updates.",
+      },
+    },
+  });
+  const manifest = JSON.parse(await readFile(path.join(TAPROOT_FIXTURE, "manifest.fixture.json"), "utf8"));
+  const mediaManifest = await readMediaManifest(TAPROOT_FIXTURE, manifest.siteId);
+  assert.deepEqual(manifest.forms, {
+    items: { "stay-informed": { id: "00000000-0000-4000-8000-000001010671", version: 1 } },
+  });
+  const stayInformed = manifest.pages.find((page) => page.path === "stay-informed");
+  assert.deepEqual(stayInformed, {
+    pageId: "00000000-0000-4000-8000-000001010670",
+    resourceId: "00000000-0000-4000-8000-000001010672",
+    path: "stay-informed",
+    title: "Stay informed",
+    status: "PAGE_STATUS_DRAFT",
+    templateType: "TEMPLATE_TYPE_FREE_FORM",
+    hasDraft: true,
+    isGenerated: false,
+    workspaceMode: "editable",
+    file: "pages/stay-informed.md",
+    sourceFormat: "markdown",
+  });
+  assert.ok(
+    json.validated.pages.items.some((page) => page.path === stayInformed.path && page.file === stayInformed.file),
+  );
+
+  function componentsIn(node) {
+    const own = node.type === "componentBlock"
+      ? [{ type: node.attrs.componentType, data: JSON.parse(node.attrs.componentData) }]
+      : [];
+    return [...own, ...(node.content ?? []).flatMap(componentsIn)];
+  }
+  for (const page of manifest.pages) {
+    const source = await readWorkspacePageSource({
+      workspaceDir: TAPROOT_FIXTURE,
+      file: page.file,
+      manifestEntry: page,
+    });
+    assert.equal(source.pagePath, page.path);
+    const doc = await convertWorkspacePageSource({ source, mediaManifest });
+    const components = componentsIn(doc);
+    if (page.path === stayInformed.path) {
+      assert.deepEqual(components.find((component) => component.type === "form")?.data, { formKey: form.key });
+    } else {
+      assert.deepEqual(components.find((component) => component.type === "hero-section")?.data.primaryAction, {
+        label: "Stay informed",
+        url: `/${stayInformed.path}`,
+      });
+      const cta = components.find((component) => component.type === "cta")?.data;
+      assert.equal(cta?.buttonText, "Stay informed", page.file);
+      assert.equal(cta?.buttonUrl, `/${stayInformed.path}`, page.file);
+    }
+  }
+  const publishing = JSON.parse(
+    await readFile(path.join(TAPROOT_FIXTURE, "settings/site-publishing-preferences.json"), "utf8"),
+  );
+  const footerCta = publishing.settings.footerSettings.asideCta;
+  assert.equal(footerCta.label, "Stay informed");
+  assert.equal(footerCta.pageResourceId, stayInformed.resourceId);
+  assert.equal(Object.hasOwn(footerCta, "externalUrl"), false);
   // The www fixture declares roles beside the seeded default mappings, and
   // its marker claims none of them — so the resolver recompiles those tokens
   // and the cached values are never applied (TR00801, TR00852). The CLI says
@@ -350,25 +441,29 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
   assert.match(result.stderr, /without credentials or mutation\.\n$/u);
 });
 
-test("validate drops the header-width hint once the workspace opts into the wide header", { skip: MONOREPO_ONLY }, async (context) => {
-  // The www fixture owns this case: the hint needs a full-bleed root-band
-  // component on a page, and the shipped fixture deliberately has none so its
-  // README-promised run is clean.
-  const { fixture } = await copiedFixture(context, "wide header fixture", TAPROOT_FIXTURE);
-  const headerPath = path.join(fixture, "settings", "site-header.json");
-  const header = JSON.parse(await readFile(headerPath, "utf8"));
-  header.settings.headerWidth = "wide";
-  header.settings.headerLayout = "centered-menu";
-  await writeFile(headerPath, `${JSON.stringify(header, null, 2)}\n`);
+test(
+  "validate drops the header-width hint once the workspace opts into the wide header",
+  { skip: MONOREPO_ONLY },
+  async (context) => {
+    // The www fixture owns this case: the hint needs a full-bleed root-band
+    // component on a page, and the shipped fixture deliberately has none so its
+    // README-promised run is clean.
+    const { fixture } = await copiedFixture(context, "wide header fixture", TAPROOT_FIXTURE);
+    const headerPath = path.join(fixture, "settings", "site-header.json");
+    const header = JSON.parse(await readFile(headerPath, "utf8"));
+    header.settings.headerWidth = "wide";
+    header.settings.headerLayout = "centered-menu";
+    await writeFile(headerPath, `${JSON.stringify(header, null, 2)}\n`);
 
-  const result = await runValidation(fixture, { quiet: false });
+    const result = await runValidation(fixture, { quiet: false });
 
-  assert.equal(result.exitCode, 0);
-  const json = JSON.parse(result.stdout);
-  assert.deepEqual(json.hints, []);
-  assert.doesNotMatch(result.stderr, /Hint:/u);
-  assert.equal(json.validated.appearanceSettings, 23);
-});
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.deepEqual(json.hints, []);
+    assert.doesNotMatch(result.stderr, /Hint:/u);
+    assert.equal(json.validated.appearanceSettings, 23);
+  },
+);
 
 test("validate refuses a redirect source that a fixture page occupies under any spelling, naming the authored entry", async (context) => {
   // The site compares paths case-insensitively (citext), so the offline check
@@ -491,13 +586,19 @@ async function placeVideoOnVisitPage(fixture, videoId) {
   page.sourceFormat = "prosemirror";
   await writeFile(
     path.join(fixture, page.file),
-    `${JSON.stringify({
-      type: "doc",
-      content: [{
-        type: "componentBlock",
-        attrs: { componentType: "video", componentData: JSON.stringify({ videoId }) },
-      }],
-    }, undefined, 2)}\n`,
+    `${
+      JSON.stringify(
+        {
+          type: "doc",
+          content: [{
+            type: "componentBlock",
+            attrs: { componentType: "video", componentData: JSON.stringify({ videoId }) },
+          }],
+        },
+        undefined,
+        2,
+      )
+    }\n`,
   );
   await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
 }
@@ -573,10 +674,16 @@ test("offline failures retain the push validators' stable code and field", async
         page.sourceFormat = "prosemirror";
         await writeFile(
           path.join(fixture, page.file),
-          `${JSON.stringify({
-            type: "doc",
-            content: [{ type: "rawHtml", attrs: { html: "<aside>unsafe fixture markup</aside>" } }],
-          }, undefined, 2)}\n`,
+          `${
+            JSON.stringify(
+              {
+                type: "doc",
+                content: [{ type: "rawHtml", attrs: { html: "<aside>unsafe fixture markup</aside>" } }],
+              },
+              undefined,
+              2,
+            )
+          }\n`,
         );
         await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
       },
@@ -588,8 +695,7 @@ test("offline failures retain the push validators' stable code and field", async
       mutate: async (fixture) => {
         const manifestPath = path.join(fixture, "manifest.fixture.json");
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        manifest.pages.find((entry) => entry.path === "recipes/green-smoothie").templateType =
-          "TEMPLATE_TYPE_ARTICLE";
+        manifest.pages.find((entry) => entry.path === "recipes/green-smoothie").templateType = "TEMPLATE_TYPE_ARTICLE";
         await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
       },
       code: "pages.template_immutable",

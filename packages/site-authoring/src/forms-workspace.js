@@ -1,12 +1,12 @@
 import { SiteAuthoringError } from "./errors.js";
 import {
-  FORM_DEFAULT_SINK,
+  FORM_DEFAULT_NOTIFY_OWNER,
   FORM_FILE_EXTENSION,
-  FORM_RETENTION_DAYS,
   FORM_LIMITS,
   FORMS_DIRECTORY,
   formFileName,
   isFormKey,
+  projectFormSettings,
   validateFormDocument,
 } from "./forms-contract.js";
 import { readWorkspaceJson, walkWorkspaceFiles } from "./workspace.js";
@@ -18,8 +18,9 @@ import { readWorkspaceJson, walkWorkspaceFiles } from "./workspace.js";
  * typo never reads as a successful empty push. With none, every file under
  * `forms/` is read. A file whose name is not a form key is refused rather than
  * skipped: skipping it would report success with one form left behind.
+ * Newsletter admission is strict by default; `forms push` defers it for baseline comparison.
  */
-export async function readWorkspaceForms(workspaceDir, keys) {
+export async function readWorkspaceForms(workspaceDir, keys, validationOptions = {}) {
   const files = await walkWorkspaceFiles(workspaceDir, FORMS_DIRECTORY, [FORM_FILE_EXTENSION]);
   const known = new Map();
   for (const file of files) {
@@ -46,7 +47,7 @@ export async function readWorkspaceForms(workspaceDir, keys) {
       );
     }
     const document_ = await readWorkspaceJson(workspaceDir, file, FORM_LIMITS.fileBytes);
-    forms.push({ key, file, document: validateFormDocument(document_, key) });
+    forms.push({ key, file, document: validateFormDocument(document_, key, validationOptions) });
   }
   return forms;
 }
@@ -54,10 +55,9 @@ export async function readWorkspaceForms(workspaceDir, keys) {
 /**
  * The forms baseline in the pull manifest (TR01061).
  *
- * The site has no compare-and-set for a form, so `forms push` fences itself:
- * it writes a form only when the site's current version is the one the last
- * pull or push recorded here. A form edited in the browser since then makes
- * the push refuse toward pull instead of overwriting it.
+ * A browser edit since the last pull or push makes the next push refuse rather
+ * than overwrite it. Each mutation also sends this baseline so the site can
+ * refuse an edit made after the CLI compared them.
  */
 export const FORMS_MANIFEST_KEY = "forms";
 
@@ -67,15 +67,16 @@ function isObject(value) {
 
 /**
  * The settings half of a baseline, from the form exactly as the site returned
- * it. Name, sink and retention change without appending a version, so the
+ * it. Operational settings change without appending a version, so the
  * version alone cannot say they moved.
  */
 export function siteSettingsBaseline(siteForm) {
-  return {
+  return projectFormSettings({
     name: siteForm.name,
-    sink: siteForm.sink ?? FORM_DEFAULT_SINK,
-    retention_days: siteForm.retentionDays ?? FORM_RETENTION_DAYS.default,
-  };
+    sink: siteForm.sink,
+    retention_days: siteForm.retentionDays,
+    notify_owner: siteForm.notifyOwner,
+  });
 }
 
 /** The recorded baseline for one key, or undefined when this workspace never saw that form. */
@@ -85,7 +86,15 @@ export function recordedForm(manifest, key) {
   const entry = items[key];
   return isObject(entry) && typeof entry.id === "string" && Number.isSafeInteger(entry.version)
       && isObject(entry.settings)
-    ? { id: entry.id, version: entry.version, settings: entry.settings }
+    ? {
+      id: entry.id,
+      version: entry.version,
+      // Old baselines can prove only the default opt-out, never a remote opt-in.
+      settings: {
+        ...entry.settings,
+        notify_owner: Object.hasOwn(entry.settings, "notify_owner") ? entry.settings.notify_owner : FORM_DEFAULT_NOTIFY_OWNER,
+      },
+    }
     : undefined;
 }
 

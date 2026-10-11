@@ -1,7 +1,7 @@
 import { listSitePages, sitePath } from "./api.js";
 import { HTTP_NOT_FOUND } from "./constants.js";
 import { isCanonicalUuid, SiteAuthoringError } from "./errors.js";
-import { FORM_DEFAULT_SINK, FORM_SINKS, isFormKey, normalizePagePath } from "./forms-contract.js";
+import { FORM_DEFAULT_NOTIFY_OWNER, FORM_DEFAULT_SINK, FORM_SINKS, isFormKey, normalizePagePath } from "./forms-contract.js";
 import { ApiError } from "./transport.js";
 
 /**
@@ -38,12 +38,16 @@ function normalizeForm(value) {
   if (!isCanonicalUuid(value.id) || !isFormKey(value.key)) {
     throw contract("Taproot returned a form with no usable id or a key this workspace cannot store.", "form");
   }
+  if (Object.hasOwn(value, "notifyOwner") && typeof value.notifyOwner !== "boolean") {
+    throw contract("Taproot returned an owner notification setting that is not a boolean.", "notifyOwner");
+  }
   return {
     id: value.id,
     key: value.key,
     name: typeof value.name === "string" ? value.name : "",
     sink: sinkFromWire(value.sink),
     retentionDays: Number.isSafeInteger(value.retentionDays) ? value.retentionDays : undefined,
+    notifyOwner: value.notifyOwner ?? FORM_DEFAULT_NOTIFY_OWNER,
     archived: value.status === STATUS_ARCHIVED_WIRE,
     currentVersion: Number.isSafeInteger(value.currentVersion) ? value.currentVersion : 0,
   };
@@ -140,6 +144,7 @@ export async function createSiteForm(client, siteId, form) {
         name: form.name,
         sink: SINK_WIRE[form.sink],
         retentionDays: form.retention_days,
+        notifyOwner: form.notify_owner,
         definition: JSON.stringify(form.definition),
       },
       maximumResponseBytes: FORMS_RESPONSE_BYTES,
@@ -160,12 +165,14 @@ export async function updateSiteFormSettings(client, siteId, formId, form, expec
         name: form.name,
         sink: SINK_WIRE[form.sink],
         retentionDays: form.retention_days,
+        notifyOwner: form.notify_owner,
         ...(expected === undefined
           ? {}
           : {
             expectedName: expected.name,
             expectedSink: SINK_WIRE[expected.sink],
             expectedRetentionDays: expected.retention_days,
+            expectedNotifyOwner: expected.notify_owner,
           }),
       },
       maximumResponseBytes: FORMS_RESPONSE_BYTES,

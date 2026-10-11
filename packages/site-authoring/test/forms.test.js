@@ -34,6 +34,35 @@ const CONTACT_FORM = Object.freeze({
   },
 });
 
+const CONTACT_WITHOUT_NEWSLETTER_PROOF = Object.freeze({
+  ...CONTACT_FORM,
+  definition: {
+    fields: CONTACT_FORM.definition.fields.filter((field) => field.type !== "consent")
+      .map((field) => field.id === "email" ? { ...field, required: false } : field),
+  },
+});
+
+const LEGACY_NEWSLETTER_FORM = Object.freeze({ ...CONTACT_WITHOUT_NEWSLETTER_PROOF, sink: "newsletter" });
+
+test("newsletter sinks require explicit consent and a required canonical email contact", () => {
+  const newsletter = { ...structuredClone(CONTACT_FORM), sink: "newsletter" };
+  assert.doesNotThrow(() => validateFormDocument(newsletter, "contact"));
+  for (const defect of ["optional", "no-email", "no-consent", "different-contact"]) {
+    const invalid = structuredClone(newsletter);
+    const fields = invalid.definition.fields;
+    if (defect === "optional") fields.find((field) => field.id === "email").required = false;
+    if (defect === "no-email") fields.find((field) => field.id === "email").type = "text";
+    if (defect === "no-consent") invalid.definition.fields = fields.filter((field) => field.type !== "consent");
+    if (defect === "different-contact") {
+      fields.push({ id: "other_email", type: "email", label: "Other email", required: false });
+      invalid.definition.contact_field = "other_email";
+    }
+    assert.throws(() => validateFormDocument(invalid, "contact"));
+    invalid.sink = "none";
+    assert.doesNotThrow(() => validateFormDocument(invalid, "contact"));
+  }
+});
+
 async function workspace(testContext, files = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), "taproot-site-forms-"));
   testContext.after(() => rm(base, { recursive: true, force: true }));
@@ -81,6 +110,14 @@ test("forms validate accepts a well-formed form file and reports it", async (t) 
     count: 1,
     items: [{ key: "contact", file: "forms/contact.json", fields: 4, sink: "none" }],
   });
+});
+
+test("forms validate still refuses a legacy newsletter definition offline", async (t) => {
+  const site = await workspace(t, { [formFileName("contact")]: LEGACY_NEWSLETTER_FORM });
+  const { exit, result } = await run(site, ["forms", "validate"]);
+  assert.equal(exit, 1);
+  assert.equal(result.error.code, "forms.file_invalid");
+  assert.equal(result.error.field, "forms/contact.json:definition");
 });
 
 test("forms validate with no forms directory reports zero forms", async (t) => {
@@ -183,7 +220,8 @@ test("the workspace projection is canonical and stable when applied twice", () =
     key: "contact",
   };
   const once = projectFormForWorkspace(shuffled);
-  assert.deepEqual(Object.keys(once), ["key", "name", "sink", "retention_days", "definition"]);
+  assert.deepEqual(Object.keys(once), ["key", "name", "sink", "retention_days", "notify_owner", "definition"]);
+  assert.equal(once.notify_owner, false);
   assert.equal(once.definition.contact_field, "email");
   assert.deepEqual(Object.keys(once.definition.fields[0]), ["id", "type", "label", "required", "max_length"]);
   assert.equal(JSON.stringify(projectFormForWorkspace(once)), JSON.stringify(once));
@@ -229,6 +267,23 @@ function jsonResponse(value, httpStatus = 200) {
   return new Response(JSON.stringify(value), { status: httpStatus, headers: { "content-type": "application/json" } });
 }
 
+function fieldRefusal(field, description = "changed") {
+  return jsonResponse(
+    { code: 3, message: "invalid", details: [{ fieldViolations: [{ field, description }] }] },
+    400,
+  );
+}
+
+function newsletterDefinitionRefusal(sink, definition) {
+  if (sink !== "SITE_FORM_SINK_NEWSLETTER") return undefined;
+  try {
+    validateFormDocument({ ...CONTACT_FORM, sink: "newsletter", definition: JSON.parse(definition) }, "contact");
+  } catch {
+    return fieldRefusal("Definition", "newsletter_definition_required");
+  }
+  return undefined;
+}
+
 function wireForm(form, { version = 1, id = FORM_ID, status = "SITE_FORM_STATUS_ACTIVE" } = {}) {
   return {
     form: {
@@ -238,6 +293,7 @@ function wireForm(form, { version = 1, id = FORM_ID, status = "SITE_FORM_STATUS_
       name: form.name,
       sink: form.sink === "newsletter" ? "SITE_FORM_SINK_NEWSLETTER" : "SITE_FORM_SINK_NONE",
       retentionDays: form.retention_days,
+      ...(form.notify_owner === undefined ? {} : { notifyOwner: form.notify_owner }),
       status,
       currentVersion: version,
     },
@@ -257,6 +313,8 @@ function scriptedSite(state) {
     const method = init.method ?? "GET";
     const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
     calls.push({ method, pathname: target.pathname, body });
+    const refusal = method === "GET" ? undefined : await state.beforeWrite?.({ method, pathname: target.pathname, body });
+    if (refusal !== undefined) return refusal;
     const base = `/api/v1/sites/${SITE_ID}`;
     if (method === "GET" && target.pathname === `/api/v1/pages/by_site/${SITE_ID}`) {
       return jsonResponse({
@@ -282,12 +340,15 @@ function scriptedSite(state) {
       return entry ? jsonResponse(entry) : jsonResponse({ code: 5, message: "not found" }, 404);
     }
     if (method === "POST" && target.pathname === `${base}/forms`) {
+      const semanticRefusal = newsletterDefinitionRefusal(body.sink, body.definition);
+      if (semanticRefusal !== undefined) return semanticRefusal;
       const created = wireForm({
         key: body.key,
         name: body.name,
         sink: body.sink === "SITE_FORM_SINK_NEWSLETTER" ? "newsletter" : "none",
         // The site picks its plan's default when the request names none.
         retention_days: body.retentionDays ?? state.defaultRetention ?? 365,
+        notify_owner: state.acceptedNotifyOwner ?? body.notifyOwner,
         definition: JSON.parse(body.definition),
       });
       state.forms[body.key] = created;
@@ -299,25 +360,32 @@ function scriptedSite(state) {
       // The site checks the caller's recorded settings under its own lock.
       if (
         (body.expectedName !== undefined && body.expectedName !== entry.form.name)
+        || (body.expectedSink !== undefined && body.expectedSink !== entry.form.sink)
         || (body.expectedRetentionDays !== undefined && body.expectedRetentionDays !== entry.form.retentionDays)
+        || (body.expectedNotifyOwner !== undefined && body.expectedNotifyOwner !== (entry.form.notifyOwner ?? false))
       ) {
-        return jsonResponse(
-          { code: 3, message: "invalid", details: [{ fieldViolations: [{ field: "ExpectedSettings", description: "changed" }] }] },
-          400,
-        );
+        return fieldRefusal("ExpectedSettings");
       }
-      Object.assign(entry.form, { name: body.name, sink: body.sink, retentionDays: body.retentionDays });
+      const semanticRefusal = entry.form.sink === "SITE_FORM_SINK_NEWSLETTER"
+        ? undefined
+        : newsletterDefinitionRefusal(body.sink, entry.currentVersion.definition);
+      if (semanticRefusal !== undefined) return semanticRefusal;
+      Object.assign(entry.form, {
+        name: body.name,
+        sink: body.sink,
+        retentionDays: body.retentionDays,
+        notifyOwner: state.acceptedNotifyOwner ?? body.notifyOwner ?? entry.form.notifyOwner ?? false,
+      });
       return jsonResponse(entry.form);
     }
     const versions = target.pathname.match(new RegExp(`^${base}/forms/([^/]+)/versions$`, "u"));
     if (method === "POST" && versions) {
       const entry = Object.values(state.forms).find((candidate) => candidate.form.id === versions[1]);
       if (body.expectedVersion !== undefined && body.expectedVersion !== entry.form.currentVersion) {
-        return jsonResponse(
-          { code: 3, message: "invalid", details: [{ fieldViolations: [{ field: "ExpectedVersion", description: "changed" }] }] },
-          400,
-        );
+        return fieldRefusal("ExpectedVersion");
       }
+      const semanticRefusal = newsletterDefinitionRefusal(entry.form.sink, body.definition);
+      if (semanticRefusal !== undefined) return semanticRefusal;
       entry.form.currentVersion += 1;
       entry.currentVersion = {
         formId: entry.form.id,
@@ -351,6 +419,240 @@ async function readText(site, relative) {
   return await readFile(path.join(site.workspaceDir, ...relative.split("/")), "utf8");
 }
 
+async function readContactBaseline(site) {
+  return JSON.parse(await readText(site, ".taproot-site-manifest.json")).forms.items.contact;
+}
+
+async function editContactFile(site, change) {
+  const document = JSON.parse(await readText(site, "forms/contact.json"));
+  change(document);
+  await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(document, undefined, 2)}\n`);
+}
+
+for (const value of ["true", "false", 0, 1, null, [], {}]) {
+  test(`forms push refuses a nonboolean notify_owner (${JSON.stringify(value)}) before requests`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST, "forms/contact.json": { ...CONTACT_FORM, notify_owner: value } });
+    const scripted = scriptedSite({ forms: {} });
+    const refused = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(refused.result.error.code, "forms.file_invalid");
+    assert.equal(refused.result.error.field, "forms/contact.json:notify_owner");
+    assert.deepEqual(scripted.calls, []);
+  });
+}
+
+for (const value of ["true", "false", 0, null]) {
+  test(`forms pull refuses a nonboolean wire notifyOwner (${JSON.stringify(value)})`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const remote = wireForm(CONTACT_FORM);
+    remote.form.notifyOwner = value;
+    const scripted = scriptedSite({ forms: { contact: remote } });
+    const refused = await runWithSite(site, scripted, ["forms", "pull"]);
+    assert.equal(refused.result.error.code, "api.forms_contract");
+    assert.equal(refused.result.error.field, "notifyOwner");
+    assert.deepEqual(writes(scripted), []);
+    await assert.rejects(readText(site, "forms/contact.json"), { code: "ENOENT" });
+  });
+}
+
+for (const flag of [false, true]) {
+  test(`forms pull and push round-trip explicit notify_owner ${flag} without a version write`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm({ ...CONTACT_FORM, notify_owner: flag }, { version: 4 }) } };
+    const scripted = scriptedSite(state);
+    const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+    assert.equal(pulled.exit, 0, pulled.stderr);
+    const file = JSON.parse(await readText(site, "forms/contact.json"));
+    assert.equal(file.notify_owner, flag);
+    assert.deepEqual(Object.keys(file), ["key", "name", "sink", "retention_days", "notify_owner", "definition"]);
+    const baseline = await readContactBaseline(site);
+    assert.equal(baseline.settings.notify_owner, flag);
+    assert.deepEqual(Object.keys(baseline.settings), ["name", "sink", "retention_days", "notify_owner"]);
+    const noOp = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(noOp.exit, 0, noOp.stderr);
+    assert.deepEqual(writes(scripted), []);
+
+    await editContactFile(site, (document) => { document.notify_owner = !flag; });
+    const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(pushed.exit, 0, pushed.stderr);
+    assert.deepEqual(pushed.result.forms.items, [{ key: "contact", action: "update", version: 4 }]);
+    assert.equal(pushed.result.nextStep, undefined);
+    const [settings] = writes(scripted);
+    assert.deepEqual(writes(scripted).map((call) => call.method), ["PUT"]);
+    assert.deepEqual(settings.body, {
+      name: "Contact", sink: "SITE_FORM_SINK_NONE", retentionDays: 365, notifyOwner: !flag,
+      expectedName: "Contact", expectedSink: "SITE_FORM_SINK_NONE", expectedRetentionDays: 365, expectedNotifyOwner: flag,
+    });
+    assert.equal((await readContactBaseline(site)).settings.notify_owner, !flag);
+    assert.equal(JSON.parse(await readText(site, "forms/contact.json")).notify_owner, !flag);
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), CONTACT_FORM.definition);
+  });
+}
+
+for (const flag of [undefined, false, true]) {
+  test(`forms push creates notify_owner ${flag} with omitted default false`, async (t) => {
+    const document = { ...CONTACT_FORM, ...(flag === undefined ? {} : { notify_owner: flag }) };
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST, "forms/contact.json": document });
+    const scripted = scriptedSite({ forms: {} });
+    const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(pushed.exit, 0, pushed.stderr);
+    const [created] = writes(scripted);
+    assert.equal(created.body.notifyOwner, flag ?? false);
+    assert.equal(JSON.parse(created.body.definition).notify_owner, undefined);
+    assert.equal(JSON.parse(await readText(site, "forms/contact.json")).notify_owner, flag ?? false);
+    assert.equal((await readContactBaseline(site)).settings.notify_owner, flag ?? false);
+  });
+}
+
+test("forms push preserves remote true when an existing file omits the flag", async (t) => {
+  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+  const scripted = scriptedSite({ forms: { contact: wireForm({ ...CONTACT_FORM, notify_owner: true }) } });
+  await runWithSite(site, scripted, ["forms", "pull"]);
+  await editContactFile(site, (document) => { delete document.notify_owner; });
+  const omittedBytes = await readText(site, "forms/contact.json");
+  const noOp = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(noOp.exit, 0, noOp.stderr);
+  assert.deepEqual(writes(scripted), []);
+  assert.equal(await readText(site, "forms/contact.json"), omittedBytes);
+  await editContactFile(site, (document) => { document.name = "Contact us"; });
+  const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(pushed.exit, 0, pushed.stderr);
+  const [settings] = writes(scripted);
+  assert.equal(settings.body.notifyOwner, true);
+  assert.equal(settings.body.expectedNotifyOwner, true);
+  assert.equal(JSON.parse(await readText(site, "forms/contact.json")).notify_owner, true);
+});
+
+for (const remoteFlag of [undefined, false, true]) {
+  test(`a legacy baseline lacking notify_owner matches only remote false (${remoteFlag})`, async (t) => {
+    const baseline = { id: FORM_ID, version: 1, settings: { name: "Contact", sink: "none", retention_days: 365 } };
+    const site = await workspace(t, {
+      ".taproot-site-manifest.json": { ...MANIFEST, forms: { items: { contact: baseline } } },
+      "forms/a-new.json": { ...CONTACT_FORM, key: "a-new" },
+      "forms/contact.json": { ...CONTACT_FORM, name: "Contact us" },
+    });
+    const scripted = scriptedSite({ forms: { contact: wireForm({ ...CONTACT_FORM, ...(remoteFlag === undefined ? {} : { notify_owner: remoteFlag }) }) } });
+    const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+    if (remoteFlag === true) {
+      assert.equal(pushed.result.error.code, "forms.concurrent_modification");
+      assert.deepEqual(writes(scripted), []);
+      assert.deepEqual(await readContactBaseline(site), baseline);
+    } else {
+      assert.equal(pushed.exit, 0, pushed.stderr);
+      const settings = writes(scripted).find((call) => call.method === "PUT");
+      assert.equal(settings.body.expectedNotifyOwner, false);
+      assert.equal(settings.body.notifyOwner, false);
+      assert.equal((await readContactBaseline(site)).settings.notify_owner, false);
+    }
+  });
+}
+
+for (const flag of [false, true]) {
+  test(`forms push refuses a changed remote flag from baseline ${flag} before any writes`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm({ ...CONTACT_FORM, notify_owner: flag }) } };
+    const scripted = scriptedSite(state);
+    await runWithSite(site, scripted, ["forms", "pull"]);
+    await editContactFile(site, (document) => { document.name = "Contact us"; delete document.notify_owner; });
+    state.forms.contact.form.notifyOwner = !flag;
+    const refused = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(refused.result.error.code, "forms.concurrent_modification");
+    assert.deepEqual(writes(scripted), []);
+  });
+}
+
+test("the settings precondition refuses a flag changed after planning", async (t) => {
+  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+  const state = { forms: { contact: wireForm({ ...CONTACT_FORM, notify_owner: false }) } };
+  const scripted = scriptedSite(state);
+  await runWithSite(site, scripted, ["forms", "pull"]);
+  await editContactFile(site, (document) => { document.notify_owner = true; document.name = "Contact us"; });
+  state.beforeWrite = () => { state.forms.contact.form.notifyOwner = true; };
+  const refused = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(refused.result.error.code, "forms.concurrent_modification");
+  assert.equal(writes(scripted)[0].body.expectedNotifyOwner, false);
+  assert.equal(state.forms.contact.form.name, "Contact");
+  assert.equal((await readContactBaseline(site)).settings.notify_owner, false);
+});
+
+test("a partial settings write records the accepted opt-in and retries only the failed definition", async (t) => {
+  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+  const state = { forms: { contact: wireForm(CONTACT_FORM) } };
+  const scripted = scriptedSite(state);
+  await runWithSite(site, scripted, ["forms", "pull"]);
+  await editContactFile(site, (document) => {
+    document.notify_owner = true;
+    document.definition.fields.push({ id: "phone", type: "tel", label: "Phone" });
+  });
+  state.beforeWrite = ({ pathname }) => pathname.endsWith("/versions") ? fieldRefusal("ExpectedVersion") : undefined;
+  const failed = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(failed.result.error.code, "forms.concurrent_modification");
+  assert.deepEqual(failed.result.error.completedWrites, ["contact"]);
+  assert.match(failed.stderr, /settings were applied.*definition was not/iu);
+  assert.equal((await readContactBaseline(site)).settings.notify_owner, true);
+  assert.equal((await readContactBaseline(site)).version, 1);
+  delete state.beforeWrite;
+  scripted.calls.length = 0;
+  const retry = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(retry.exit, 0, retry.stderr);
+  assert.deepEqual(writes(scripted).map((call) => call.method), ["POST"]);
+  assert.ok(writes(scripted)[0].pathname.endsWith("/versions"));
+  assert.equal((await readContactBaseline(site)).settings.notify_owner, true);
+  assert.equal((await readContactBaseline(site)).version, 2);
+});
+
+test("newsletter conversion records its definition before a failed opt-in settings write and resumes", async (t) => {
+  const { site, state, scripted } = await newsletterConversion(t);
+  await editContactFile(site, (document) => { document.notify_owner = true; });
+  state.beforeWrite = ({ pathname }) => pathname.endsWith("/settings") ? fieldRefusal("ExpectedSettings") : undefined;
+  const failed = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(failed.result.error.code, "forms.concurrent_modification");
+  assert.equal((await readContactBaseline(site)).version, 2);
+  assert.equal((await readContactBaseline(site)).settings.notify_owner, false);
+  delete state.beforeWrite;
+  scripted.calls.length = 0;
+  const retry = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(retry.exit, 0, retry.stderr);
+  assert.deepEqual(writes(scripted).map((call) => call.method), ["PUT"]);
+  assert.equal(writes(scripted)[0].body.expectedNotifyOwner, false);
+  assert.equal(writes(scripted)[0].body.notifyOwner, true);
+  assert.equal((await readContactBaseline(site)).settings.notify_owner, true);
+  assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NEWSLETTER");
+});
+
+for (const action of ["create", "update"]) {
+  for (const accepted of [false, true]) {
+    test(`forms ${action} rewrites server-accepted notify_owner ${accepted}`, async (t) => {
+      const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+      const state = { forms: action === "create" ? {} : { contact: wireForm({ ...CONTACT_FORM, notify_owner: accepted }) } };
+      const scripted = scriptedSite(state);
+      if (action === "update") await runWithSite(site, scripted, ["forms", "pull"]);
+      await mkdir(path.join(site.workspaceDir, "forms"), { recursive: true });
+      await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify({ ...CONTACT_FORM, notify_owner: !accepted }, undefined, 2)}\n`);
+      state.acceptedNotifyOwner = accepted;
+      const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+      assert.equal(pushed.exit, 0, pushed.stderr);
+      assert.equal(writes(scripted)[0].body.notifyOwner, !accepted);
+      assert.equal(JSON.parse(await readText(site, "forms/contact.json")).notify_owner, accepted);
+      assert.equal((await readContactBaseline(site)).settings.notify_owner, accepted);
+      scripted.calls.length = 0;
+      const noOp = await runWithSite(site, scripted, ["forms", "push"]);
+      assert.equal(noOp.exit, 0, noOp.stderr);
+      assert.deepEqual(writes(scripted), []);
+    });
+  }
+}
+
+async function newsletterConversion(t) {
+  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+  const state = { forms: { contact: wireForm(CONTACT_WITHOUT_NEWSLETTER_PROOF) } };
+  const scripted = scriptedSite(state);
+  await runWithSite(site, scripted, ["forms", "pull"]);
+  const desired = { ...CONTACT_FORM, name: "Newsletter signup", sink: "newsletter" };
+  await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(desired, undefined, 2)}\n`);
+  scripted.calls.length = 0;
+  return { site, state, scripted, desired };
+}
+
 test("forms pull writes canonical files, records versions, and reports archived forms without writing them", async (t) => {
   const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
   const scripted = scriptedSite({
@@ -369,27 +671,128 @@ test("forms pull writes canonical files, records versions, and reports archived 
     items: [{ key: "contact", file: "forms/contact.json" }],
     archived: ["old"],
   });
-  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(CONTACT_FORM, undefined, 2)}\n`);
+  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(projectFormForWorkspace(CONTACT_FORM), undefined, 2)}\n`);
   const manifest = JSON.parse(await readText(site, ".taproot-site-manifest.json"));
   assert.deepEqual(manifest.forms, {
-    items: { contact: { id: FORM_ID, version: 3, settings: { name: "Contact", sink: "none", retention_days: 365 } } },
+    items: { contact: { id: FORM_ID, version: 3, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false } } },
   });
   assert.deepEqual(writes(scripted), []);
 });
 
-test("forms push after pull is unchanged and leaves the file bytes alone", async (t) => {
+for (const form of [CONTACT_FORM, LEGACY_NEWSLETTER_FORM]) {
+  test(`forms push after pull is unchanged for ${form.sink} and leaves the file bytes alone`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const scripted = scriptedSite({ forms: { contact: wireForm(form, { version: 2 }) } });
+    const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+    assert.equal(pulled.exit, 0, pulled.stderr);
+    const before = await readText(site, "forms/contact.json");
+    const { exit, result } = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(exit, 0);
+    assert.deepEqual(result.forms.items, [{ key: "contact", action: "unchanged", version: 2 }]);
+    assert.equal(result.written.count, 0);
+    assert.equal(result.nextStep, undefined);
+    assert.equal(await readText(site, "forms/contact.json"), before);
+    assert.deepEqual(writes(scripted), []);
+  });
+}
+
+for (const metadata of [{ name: "Newsletter signup" }, { retention_days: 400 }, { notify_owner: true }]) {
+  test(`forms push changes legacy newsletter ${Object.keys(metadata).join(", ")} with one settings write`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm(LEGACY_NEWSLETTER_FORM, { version: 2 }) } };
+    const scripted = scriptedSite(state);
+    const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+    assert.equal(pulled.exit, 0, pulled.stderr);
+    const desired = { ...JSON.parse(await readText(site, "forms/contact.json")), ...metadata };
+    await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(desired, undefined, 2)}\n`);
+
+    const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+
+    assert.equal(pushed.exit, 0, pushed.stderr);
+    assert.deepEqual(pushed.result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
+    const [settings] = writes(scripted);
+    assert.deepEqual(writes(scripted).map((call) => call.method), ["PUT"]);
+    assert.ok(settings.pathname.endsWith("/settings"));
+    assert.equal(settings.body.expectedName, LEGACY_NEWSLETTER_FORM.name);
+    assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NEWSLETTER");
+    assert.equal(settings.body.expectedRetentionDays, LEGACY_NEWSLETTER_FORM.retention_days);
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), LEGACY_NEWSLETTER_FORM.definition);
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 2, settings: { name: desired.name, sink: "newsletter", retention_days: desired.retention_days, notify_owner: desired.notify_owner },
+    });
+    const noOp = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(noOp.exit, 0, noOp.stderr);
+    assert.deepEqual(noOp.result.forms.items, [{ key: "contact", action: "unchanged", version: 2 }]);
+    assert.equal(writes(scripted).length, 1);
+  });
+}
+
+test("forms push repairs a legacy newsletter definition after its metadata write", async (t) => {
   const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
-  const scripted = scriptedSite({ forms: { contact: wireForm(CONTACT_FORM, { version: 2 }) } });
-  await runWithSite(site, scripted, ["forms", "pull"]);
-  const before = await readText(site, "forms/contact.json");
+  const state = { forms: { contact: wireForm(LEGACY_NEWSLETTER_FORM) } };
+  const scripted = scriptedSite(state);
+  const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+  assert.equal(pulled.exit, 0, pulled.stderr);
+  const desired = { ...CONTACT_FORM, name: "Newsletter signup", sink: "newsletter" };
+  await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(desired, undefined, 2)}\n`);
+  state.beforeWrite = async ({ pathname }) => {
+    if (!pathname.endsWith("/versions")) return undefined;
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 1, settings: { name: desired.name, sink: "newsletter", retention_days: 365, notify_owner: false },
+    });
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), LEGACY_NEWSLETTER_FORM.definition);
+    return undefined;
+  };
+
   const { exit, result } = await runWithSite(site, scripted, ["forms", "push"]);
-  assert.equal(exit, 0);
-  assert.deepEqual(result.forms.items, [{ key: "contact", action: "unchanged", version: 2 }]);
-  assert.equal(result.written.count, 0);
-  assert.equal(result.nextStep, undefined);
-  assert.equal(await readText(site, "forms/contact.json"), before);
-  assert.deepEqual(writes(scripted), []);
+
+  assert.equal(exit, 0, JSON.stringify(result));
+  assert.deepEqual(result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
+  const [settings, version] = writes(scripted);
+  assert.deepEqual(writes(scripted).map((call) => call.method), ["PUT", "POST"]);
+  assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NEWSLETTER");
+  assert.equal(version.body.expectedVersion, 1);
+  assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), desired.definition);
+  assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NEWSLETTER");
+  assert.deepEqual(await readContactBaseline(site), {
+    id: FORM_ID, version: 2, settings: { name: desired.name, sink: "newsletter", retention_days: 365, notify_owner: false },
+  });
 });
+
+for (const mutation of ["create", "changed", "legacy-changed", "enable"]) {
+  test(`forms push refuses an invalid newsletter ${mutation} before writing any form`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const invalid = {
+      ...LEGACY_NEWSLETTER_FORM,
+      key: "waitlist",
+      name: "Waitlist",
+      definition: { ...LEGACY_NEWSLETTER_FORM.definition, submit_label: "Subscribe" },
+    };
+    const state = { forms: { contact: wireForm(CONTACT_FORM) } };
+    if (mutation !== "create") {
+      const current = mutation === "changed"
+        ? { ...CONTACT_FORM, key: "waitlist", name: "Waitlist", sink: "newsletter" }
+        : mutation === "enable"
+        ? { ...invalid, sink: "none" }
+        : { ...invalid, definition: LEGACY_NEWSLETTER_FORM.definition };
+      state.forms.waitlist = wireForm(current, { id: WAITLIST_ID });
+    }
+    const scripted = scriptedSite(state);
+    const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+    assert.equal(pulled.exit, 0, pulled.stderr);
+    await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify({ ...CONTACT_FORM, name: "Contact us" }, undefined, 2)}\n`);
+    await writeFile(path.join(site.workspaceDir, "forms", "waitlist.json"), `${JSON.stringify(invalid, undefined, 2)}\n`);
+    scripted.calls.length = 0;
+
+    const refused = await runWithSite(site, scripted, ["forms", "push"]);
+
+    assert.equal(refused.exit, 1);
+    assert.equal(refused.result.error.code, "forms.file_invalid");
+    assert.equal(refused.result.error.field, "forms/waitlist.json:definition");
+    assert.deepEqual(writes(scripted), []);
+    assert.equal(state.forms.contact.form.name, "Contact");
+  });
+}
 
 test("forms push creates a new form, rewrites the file canonically and records the baseline", async (t) => {
   const shuffled = {
@@ -410,10 +813,10 @@ test("forms push creates a new form, rewrites the file canonically and records t
   // The file named no retention, so the request names none: the site chooses.
   assert.equal(create.body.retentionDays, undefined);
   assert.deepEqual(JSON.parse(create.body.definition), CONTACT_FORM.definition);
-  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(CONTACT_FORM, undefined, 2)}\n`);
+  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(projectFormForWorkspace(CONTACT_FORM), undefined, 2)}\n`);
   const manifest = JSON.parse(await readText(site, ".taproot-site-manifest.json"));
   assert.deepEqual(manifest.forms, {
-    items: { contact: { id: FORM_ID, version: 1, settings: { name: "Contact", sink: "none", retention_days: 365 } } },
+    items: { contact: { id: FORM_ID, version: 1, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false } } },
   });
 });
 
@@ -437,7 +840,7 @@ test("forms push updates settings and appends a version only for what changed", 
   assert.deepEqual(manifest.forms.items.contact, {
     id: FORM_ID,
     version: 2,
-    settings: { name: "Contact us", sink: "none", retention_days: 365 },
+    settings: { name: "Contact us", sink: "none", retention_days: 365, notify_owner: false },
   });
 
   // A settings-only edit appends no version.
@@ -448,6 +851,105 @@ test("forms push updates settings and appends a version only for what changed", 
   assert.equal(renamed.exit, 0);
   assert.deepEqual(writes(scripted).slice(before).map((call) => call.method), ["PUT"]);
 });
+
+test("forms push saves a newsletter conversion's required email and consent before enabling its sink", async (t) => {
+  const { site, state, scripted, desired } = await newsletterConversion(t);
+  state.beforeWrite = async ({ method, pathname }) => {
+    if (method !== "PUT" || !pathname.endsWith("/settings")) return undefined;
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 2, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false },
+    });
+    assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NONE");
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), desired.definition);
+    return undefined;
+  };
+
+  const { exit, result } = await runWithSite(site, scripted, ["forms", "push"]);
+
+  assert.equal(exit, 0, JSON.stringify(result));
+  assert.deepEqual(result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
+  const [version, settings] = writes(scripted);
+  assert.deepEqual(writes(scripted).map((call) => call.method), ["POST", "PUT"]);
+  assert.ok(version.pathname.endsWith("/versions"));
+  assert.equal(version.body.expectedVersion, 1);
+  assert.ok(settings.pathname.endsWith("/settings"));
+  assert.equal(settings.body.expectedName, "Contact");
+  assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NONE");
+  assert.equal(settings.body.expectedRetentionDays, 365);
+  assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NEWSLETTER");
+  assert.deepEqual(await readContactBaseline(site), {
+    id: FORM_ID, version: 2, settings: { name: desired.name, sink: desired.sink, retention_days: 365, notify_owner: false },
+  });
+  assert.deepEqual(JSON.parse(await readText(site, "forms/contact.json")), projectFormForWorkspace(desired));
+});
+
+for (const failure of ["server", "precondition"]) {
+  test(`forms push resumes a newsletter conversion after a settings ${failure} failure`, async (t) => {
+    const { site, state, scripted, desired } = await newsletterConversion(t);
+    state.beforeWrite = async ({ method, pathname }) => {
+      if (method !== "PUT" || !pathname.endsWith("/settings")) return undefined;
+      assert.deepEqual(await readContactBaseline(site), {
+        id: FORM_ID, version: 2, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false },
+      });
+      return failure === "precondition" ? fieldRefusal("ExpectedSettings") : jsonResponse({ code: 13, message: "boom" }, 500);
+    };
+
+    const failed = await runWithSite(site, scripted, ["forms", "push"]);
+
+    assert.equal(failed.exit, 1);
+    assert.equal(failed.result.error.code, failure === "precondition" ? "forms.concurrent_modification" : "api.request_rejected");
+    assert.deepEqual(failed.result.error.completedWrites, ["contact"]);
+    if (failure === "precondition") assert.match(failed.stderr, /Its definition was applied; its settings were not/u);
+    assert.deepEqual(writes(scripted).map((call) => call.method), ["POST", "PUT"]);
+    assert.equal(state.forms.contact.form.currentVersion, 2);
+    assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NONE");
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 2, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false },
+    });
+
+    delete state.beforeWrite;
+    scripted.calls.length = 0;
+    const retry = await runWithSite(site, scripted, ["forms", "push"]);
+
+    assert.equal(retry.exit, 0, retry.stderr);
+    assert.deepEqual(retry.result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
+    assert.deepEqual(writes(scripted).map((call) => call.method), ["PUT"]);
+    const [settings] = writes(scripted);
+    assert.equal(settings.body.expectedName, "Contact");
+    assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NONE");
+    assert.equal(settings.body.expectedRetentionDays, 365);
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 2, settings: { name: desired.name, sink: desired.sink, retention_days: 365, notify_owner: false },
+    });
+    assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NEWSLETTER");
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), desired.definition);
+  });
+}
+
+for (const [initial, expectedWrites, version] of [
+  [{ ...CONTACT_FORM, sink: "newsletter" }, ["PUT", "POST"], 2],
+  [LEGACY_NEWSLETTER_FORM, ["PUT"], 1],
+]) {
+  test(`forms push disables newsletter capture with ${expectedWrites.length} writes even without consent`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm(initial) } };
+    const scripted = scriptedSite(state);
+    await runWithSite(site, scripted, ["forms", "pull"]);
+    await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(CONTACT_WITHOUT_NEWSLETTER_PROOF, undefined, 2)}\n`);
+    scripted.calls.length = 0;
+
+    const { exit, result } = await runWithSite(site, scripted, ["forms", "push"]);
+
+    assert.equal(exit, 0, JSON.stringify(result));
+    assert.deepEqual(writes(scripted).map((call) => call.method), expectedWrites);
+    assert.deepEqual(result.forms.items, [{ key: "contact", action: "update", version }]);
+    assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NONE");
+    assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), CONTACT_WITHOUT_NEWSLETTER_PROOF.definition);
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version, settings: { name: "Contact", sink: "none", retention_days: 365, notify_owner: false },
+    });
+  });
+}
 
 test("forms push refuses a form that changed on the site, before writing any form", async (t) => {
   const other = { ...CONTACT_FORM, key: "waitlist", name: "Waitlist" };
@@ -488,11 +990,15 @@ test("forms push refuses a form the workspace never pulled and an archived form"
 });
 
 test("forms push needs a pulled workspace and validates before any request", async (t) => {
-  const site = await workspace(t, { "forms/contact.json": { ...CONTACT_FORM, name: "" } });
   const scripted = scriptedSite({ forms: {} });
-  const invalid = await runWithSite(site, scripted, ["forms", "push"]);
-  assert.equal(invalid.result.error.code, "forms.file_invalid");
-  assert.equal(scripted.calls.length, 0);
+  const invalidDefinition = structuredClone(LEGACY_NEWSLETTER_FORM);
+  invalidDefinition.definition.fields[1].max_length = 0;
+  for (const document of [{ ...CONTACT_FORM, name: "" }, invalidDefinition]) {
+    const site = await workspace(t, { "forms/contact.json": document });
+    const invalid = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(invalid.result.error.code, "forms.file_invalid");
+    assert.equal(scripted.calls.length, 0);
+  }
   const clean = await workspace(t, { "forms/contact.json": CONTACT_FORM });
   const unpulled = await runWithSite(clean, scripted, ["forms", "push"]);
   assert.equal(unpulled.result.error.code, "workspace.manifest_missing");
@@ -575,49 +1081,55 @@ test("help forms names the capability that carries form authoring and the one no
   assert.match(details, /not marked 'Required'/u);
 });
 
-test("forms push refuses when only the site's name, sink or retention changed since the pull", async (t) => {
-  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
-  const state = { forms: { contact: wireForm(CONTACT_FORM, { version: 1 }) } };
-  const scripted = scriptedSite(state);
-  await runWithSite(site, scripted, ["forms", "pull"]);
-  const edited = JSON.parse(await readText(site, "forms/contact.json"));
-  edited.definition.fields.push({ id: "phone", type: "tel", label: "Phone" });
-  await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(edited, undefined, 2)}\n`);
-  // Renamed in the browser: no new version, so only the settings fence can see it.
-  state.forms.contact.form.name = "Contact (renamed on the site)";
-  scripted.calls.length = 0;
+for (const form of [CONTACT_FORM, LEGACY_NEWSLETTER_FORM]) {
+  test(`forms push refuses changed site settings for ${form.sink} before semantic admission`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm(form, { version: 1 }) } };
+    const scripted = scriptedSite(state);
+    await runWithSite(site, scripted, ["forms", "pull"]);
+    const edited = JSON.parse(await readText(site, "forms/contact.json"));
+    edited.definition.fields.push({ id: "phone", type: "tel", label: "Phone" });
+    await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(edited, undefined, 2)}\n`);
+    // Renamed in the browser: no new version, so only the settings fence can see it.
+    state.forms.contact.form.name = "Contact (renamed on the site)";
+    scripted.calls.length = 0;
 
-  const refusal = await runWithSite(site, scripted, ["forms", "push"]);
+    const refusal = await runWithSite(site, scripted, ["forms", "push"]);
 
-  assert.equal(refusal.result.error.code, "forms.concurrent_modification");
-  assert.deepEqual(writes(scripted), []);
-});
+    assert.equal(refusal.result.error.code, "forms.concurrent_modification");
+    assert.deepEqual(writes(scripted), []);
+  });
 
-test("forms push records applied settings at once when the version save then fails", async (t) => {
-  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
-  const state = { forms: { contact: wireForm(CONTACT_FORM, { version: 1 }) } };
-  const scripted = scriptedSite(state);
-  await runWithSite(site, scripted, ["forms", "pull"]);
-  const edited = JSON.parse(await readText(site, "forms/contact.json"));
-  edited.name = "Contact us";
-  edited.definition.fields.push({ id: "phone", type: "tel", label: "Phone" });
-  await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(edited, undefined, 2)}\n`);
-  const original = scripted.fetchImpl;
-  const failing = {
-    calls: scripted.calls,
-    fetchImpl: async (url, init = {}) =>
-      (init.method === "POST" && String(url).endsWith("/versions")) ? jsonResponse({ code: 13, message: "boom" }, 500) : original(url, init),
-  };
+  test(`forms push records applied ${form.sink} settings at once when the version save then fails`, async (t) => {
+    const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+    const state = { forms: { contact: wireForm(form, { version: 1 }) } };
+    const scripted = scriptedSite(state);
+    await runWithSite(site, scripted, ["forms", "pull"]);
+    const edited = JSON.parse(await readText(site, "forms/contact.json"));
+    edited.name = "Contact us";
+    edited.definition = structuredClone(CONTACT_FORM.definition);
+    edited.definition.fields.push({ id: "phone", type: "tel", label: "Phone" });
+    await writeFile(path.join(site.workspaceDir, "forms", "contact.json"), `${JSON.stringify(edited, undefined, 2)}\n`);
+    const original = scripted.fetchImpl;
+    const failing = {
+      calls: scripted.calls,
+      fetchImpl: async (url, init = {}) =>
+        (init.method === "POST" && String(url).endsWith("/versions")) ? jsonResponse({ code: 13, message: "boom" }, 500) : original(url, init),
+    };
 
-  const failed = await runWithSite(site, failing, ["forms", "push"]);
+    const failed = await runWithSite(site, failing, ["forms", "push"]);
 
-  assert.equal(failed.exit, 1);
-  assert.deepEqual(failed.result.error.completedWrites, ["contact"]);
-  // The settings write stands, so a retry is not read as someone else's edit.
-  const retry = await runWithSite(site, scripted, ["forms", "push"]);
-  assert.equal(retry.exit, 0, retry.stderr);
-  assert.deepEqual(retry.result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
-});
+    assert.equal(failed.exit, 1);
+    assert.deepEqual(failed.result.error.completedWrites, ["contact"]);
+    assert.deepEqual(await readContactBaseline(site), {
+      id: FORM_ID, version: 1, settings: { name: edited.name, sink: form.sink, retention_days: 365, notify_owner: false },
+    });
+    // The settings write stands, so a retry is not read as someone else's edit.
+    const retry = await runWithSite(site, scripted, ["forms", "push"]);
+    assert.equal(retry.exit, 0, retry.stderr);
+    assert.deepEqual(retry.result.forms.items, [{ key: "contact", action: "update", version: 2 }]);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // The button text and what happens after a response is sent
@@ -726,7 +1238,7 @@ test("forms push stores a page_path by the page's resource id and rewrites nothi
   const [create] = writes(scripted);
   assert.deepEqual(JSON.parse(create.body.definition).after_submit, { show: "page", page_resource_id: THANKS_ID });
   assert.equal(JSON.parse(create.body.definition).submit_label, "Send message");
-  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(THANKS_FORM, undefined, 2)}\n`);
+  assert.equal(await readText(site, "forms/contact.json"), `${JSON.stringify(projectFormForWorkspace(THANKS_FORM), undefined, 2)}\n`);
 
   // Pointing the file at another page, and dropping the button text, appends a version that names the new resource id.
   const otherId = "eeee5555-ffff-4555-8555-aaaa55555555";

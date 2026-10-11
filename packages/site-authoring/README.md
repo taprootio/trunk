@@ -524,6 +524,13 @@ Submissions are never pulled. `help forms` states the file shape and every
 refusal, and placing a form on a page is the free-form `form`
 component.
 
+The optional top-level `notify_owner` boolean opts a form into hourly,
+counts-only owner email. New forms default to false; omitting it on an
+existing form preserves the site's preference. It is independent of the sink
+and takes effect without publishing or a new form version. Delivery requires
+Taproot's rollout and email provider readiness; opt-in does not enable either
+or backfill earlier submissions. The CLI never pulls visitor answers.
+
 `preview page <page-path-or-id>` renders one persisted draft behind the
 staging gate and mints a browser handoff URL, reported only in the final JSON
 result. **Each handoff is single-use.** Opening the URL consumes it; a reused,

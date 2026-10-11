@@ -773,14 +773,19 @@ const WORKFLOW_REFERENCES = Object.freeze({
     details: Object.freeze([
       `Run 'pull' once first: 'forms pull' and 'forms push' need the pulled workspace's manifest, which records the `
       + "version of each form this workspace last saw. 'forms validate' needs only taproot-site.json.",
-      `The file is { key, name, sink, retention_days, definition }. key must equal the file's name `
+      `The file is { key, name, sink, retention_days, notify_owner, definition }. key must equal the file's name `
       + `and is lowercase letters, digits, and single hyphens, at most ${FORM_KEY_MAXIMUM_LENGTH} characters. name is `
       + `1 to ${FORM_LIMITS.nameCharacters} characters. sink is one of ${FORM_SINKS.join(", ")} and defaults to `
-      + "'none' (store submissions only); 'newsletter' also subscribes the contact address to the site's newsletter. "
+      + "'none' (store submissions only); 'newsletter' requests double-opt-in confirmation for the contact address. "
+      + "A newsletter sink requires a required email contact field and at least one consent checkbox; every consent checkbox must be checked. "
       + `retention_days is ${FORM_RETENTION_DAYS.minimum} to ${FORM_RETENTION_DAYS.maximum} (a site's plan may cap it lower): `
       + "submissions are deleted that many days after they arrive. Leave it out and the site chooses on creation (its "
       + "plan's default, usually 365) and keeps the current value on an update. Shortening it deletes the submissions that fall outside it, "
       + "so a key cannot do it; the site refuses it, and an owner or admin must make that change.",
+      "notify_owner is an optional top-level boolean, independent of the sink. New forms default to false; omitting it "
+      + "on an existing form preserves the site's preference. It opts into hourly counts-only email to the current site "
+      + "account owner, never visitor answers or addresses. This setting takes effect without a new version or publishing. "
+      + "Delivery also requires Taproot's rollout and email provider readiness; opt-in enables neither, and earlier submissions are not backfilled.",
       `definition is { fields, contact_field?, submit_label?, after_submit? } (contact_field only with several email fields). Each field is { id, type, label, hint?, ...constraints }; the closed `
       + `field types are ${FIELD_TYPES.join(", ")}. hint is optional helper text of up to ${MAX_HINT_LENGTH} `
       + "characters, drawn under the field on the published form; it is the only author-defined text printed there, so a required "
@@ -835,7 +840,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "'unchanged' and leaves the bytes as they were. Write your own files in that order and a push rewrites "
       + "nothing you did not change.",
       "'forms push' validates every file and compares every form with the site before the first write. It refuses "
-      + "forms.concurrent_modification when the site's version moved since this workspace last read it, "
+      + "forms.concurrent_modification when the site's version or operational settings moved since this workspace last read it, "
       + "forms.pull_required when the site has a form with that key this workspace never pulled, and forms.archived "
       + "when the form is archived on the site. Reconcile with 'forms pull' and retry; nothing was written.",
       "Submissions are never pulled or pushed. They are visitors' personal data: read, mark, export and delete "
@@ -854,6 +859,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       name: "Contact",
       sink: "none",
       retention_days: 365,
+      notify_owner: false,
       definition: Object.freeze({
         fields: Object.freeze([
           Object.freeze({ id: "name", type: "text", label: "Your name", required: true, max_length: 120 }),

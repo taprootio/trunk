@@ -41,9 +41,7 @@ export async function formsPull(invocation) {
     }
     const document_ = projectFormForWorkspace({
       key: form.key,
-      name: form.name,
-      sink: form.sink,
-      retention_days: form.retentionDays,
+      ...siteSettingsBaseline(form),
       definition: version.definition,
     }, pages?.pathById);
     await writeWorkspaceJson(config.workspaceDir, formFileName(form.key), document_);
