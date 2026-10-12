@@ -352,11 +352,14 @@ const SPACER = Object.freeze({
 
 /**
  * A form defined under Site → Forms (or with `forms push`), placed by key. The
- * key is checked against the site's forms when the page is published, not here:
- * this table only knows the shape.
+ * workspace names a form by its key so the same files push to any site; the site
+ * stores the form's id, and `pages push` and `pages pull` translate between the
+ * two (TR01216). The key is checked against the site's forms when the page is
+ * pushed, not here: this table only knows the shape.
  */
 const FORM = Object.freeze({
-  formKey: str(),
+  // Required: a placement with no form chosen can never publish, so it is refused here, not at deploy.
+  formKey: str({ required: true, nonWhitespace: true }),
 });
 
 function deepFreeze(value) {
@@ -648,9 +651,9 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     FORM,
     "Form",
     "A form from Site → Forms that visitors fill in and submit.",
-    { formKey: "" },
+    {},
     [
-      "Set formKey to the key of an existing form ('forms push' creates it); an unknown or archived key fails the publish.",
+      "Set formKey to the key of an existing form ('forms push' creates it); 'pages push' refuses an unknown or archived key, and the site stores the form's id, not the key.",
       "The button text and what happens after a response is sent belong to the form, not the page: set submit_label and after_submit in the form's file (see 'help forms').",
       "The form's field labels are its accessible names; write each so it makes sense out of context.",
     ],

@@ -239,7 +239,9 @@ const VERBS = Object.freeze([
       + "and announced on the human channel. New downloads and compared bodies are excluded. "
       + "A page Taproot generates (a tag, an archive, a place, a folder) is pulled as an update-only '.pm.json' "
       + "(template 'generated'): you edit its custom title, breadcrumb title, custom description and introduction, "
-      + "and the manifest keeps the title and description the site reports.",
+      + "and the manifest keeps the title and description the site reports. "
+      + "A form a page places is written back by its key, the name 'forms/<key>.json' uses, though the site stores "
+      + "the form's id.",
   },
   {
     name: VERB_PAGES_META_SET,
@@ -305,6 +307,8 @@ const VERBS = Object.freeze([
     positionals: "pagePaths",
     note:
       "Positional page paths narrow the push to those pages; with none, every workspace page is validated and sent. "
+      + "A page names a form by key (formKey); the push looks each key up on the site, sends the form's id, and "
+      + "refuses a key the site does not have or has archived (pages.form_unknown, pages.form_archived) before writing. "
       + "A link in a page being sent whose address is only http(s):// plus its own text is reported in linkWarnings "
       + "(content.link_autolinked) without refusing. "
       + "A page is created without an author unless its source names one ('author:' in the front matter, or 'pages "
@@ -394,7 +398,7 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
     tokens: ["plan"],
     summary: "Check the whole workspace against the live site and order what is left to send. Writes nothing.",
-    note: "Runs every check the pushes run — each page against the site's pages, revisions and videos; media that "
+    note: "Runs every check the pushes run — each page against the site's pages, revisions, videos and forms; media that "
       + "pages reference and media upload has not sent; the theme, appearance and footer colors against the site's "
       + "presentation revision; the footer against its draft; navigation against the live page list — and lists "
       + "every problem with its area, file, code and field. It then orders the steps that remain: media upload, "

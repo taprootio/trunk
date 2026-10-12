@@ -21,6 +21,7 @@ import {
 } from "../authors-contract.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { autolinkWarnings } from "../content/link-warnings.js";
+import { placedFormKeys, readFormIndex, withFormIds } from "../form-references.js";
 import { ApiError } from "../transport.js";
 import { waitForProcessing } from "./media-upload.js";
 import { SiteAuthoringError } from "../errors.js";
@@ -879,6 +880,46 @@ export async function placedVideoProblems(client, siteId, planned) {
 }
 
 /**
+ * The pages that place a form the site does not have, or has archived, and the
+ * site's forms by key for the wire (TR01216). A page is stored with the form's id,
+ * so a key that names no active form cannot be sent at all. Pages that will not be
+ * sent are not asked about, and a push that places no form reads nothing.
+ */
+export async function placedFormProblems(client, siteId, planned) {
+  const placements = new Map();
+  for (const page of planned) {
+    if (page.unchanged) continue;
+    for (const key of placedFormKeys(page.document)) {
+      if (!placements.has(key)) placements.set(key, page.file);
+    }
+  }
+  if (placements.size === 0) return { problems: [], idByKey: new Map() };
+
+  const index = await readFormIndex(client, siteId);
+  const problems = [];
+  for (const [key, file] of placements) {
+    if (index.idByKey.has(key)) continue;
+    problems.push(...problemsOf(
+      index.archivedKeys.has(key)
+        ? documentError(
+          "pages.form_archived",
+          `'${file}' places the form '${key}', which is archived. Restore the form under Site → Forms or remove it `
+            + "from the page.",
+          file,
+        )
+        : documentError(
+          "pages.form_unknown",
+          `'${file}' places the form '${key}', which this site does not have. Run 'taproot-site forms push' to create `
+            + "it, or fix the key.",
+          file,
+        ),
+      { area: CHECK_AREA.pages, file },
+    ));
+  }
+  return { problems, idByKey: index.idByKey };
+}
+
+/**
  * Gives each `video-embed` block that has no poster the provider's thumbnail,
  * copied into the site's images by the server (TR01109). One request per provider
  * and id for the whole push. A refusal leaves that block without a poster, since
@@ -1565,6 +1606,9 @@ export async function pagesPush(invocation) {
     // push, before anything is written, so a page cannot be sent that
     // publishing would then refuse.
     plan.problems.push(...await placedVideoProblems(client, siteId, planned));
+    // Likewise a form: pages store its id, which only the site's own forms can supply.
+    const placedForms = await placedFormProblems(client, siteId, planned);
+    plan.problems.push(...placedForms.problems);
 
     // Under apply, the workspace read ledger has already held every source and
     // manifest to the plan. What it cannot see is the site: every page the plan
@@ -1634,7 +1678,7 @@ export async function pagesPush(invocation) {
           path: page.pagePath,
           title: page.title,
           shortDescription: page.description,
-          template: wireTemplate(page.document),
+          template: wireTemplate(withFormIds(page.document, placedForms.idByKey)),
           ...wirePageFields(page.document),
           // Only a name the site has not been told: repeating the author a page
           // already has would let a later change of that person's permissions

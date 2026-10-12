@@ -506,6 +506,7 @@ const REQUEST_UPLOAD = /\/images\/request-upload$/u;
 const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
 const PRESIGNED_PUT = /^\/upload$/u;
 const SITE_VIDEOS = /\/sites\/[^/]+\/videos$/u;
+const SITE_FORMS = /\/sites\/[^/]+\/forms$/u;
 const REQUEST_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/request-upload$/u;
 const CONFIRM_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/confirm-upload$/u;
 const IMPORT_VIDEO_EMBED_POSTER = /\/sites\/[^/]+\/videos\/import-embed-poster$/u;
@@ -542,6 +543,7 @@ const PERMISSION_CAPABILITIES = Object.freeze({
   "site.pages.publish_any": [CAPABILITY_CONTENT],
   "site.theme.manage": [CAPABILITY_DESIGN],
   "site.media.manage": [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
+  "site.forms.manage": [CAPABILITY_CONTENT],
   "site.staging.view": [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
   "site.deploy": [CAPABILITY_DEPLOYMENTS],
   "site.deployments.view_any": [CAPABILITY_DEPLOYMENTS],
@@ -583,6 +585,8 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
   { method: "GET", pattern: SITE_IMAGES, permission: "site.media.manage" },
   { method: "GET", pattern: SITE_VIDEOS, permission: "site.media.manage" },
+  // A page names a form by key here and by id on the site, so a push and a pull read the site's forms (TR01216).
+  { method: "GET", pattern: SITE_FORMS, permission: "site.forms.manage" },
   { method: "POST", pattern: REQUEST_VIDEO_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: IMPORT_VIDEO_EMBED_POSTER, permission: "site.media.manage" },
@@ -9004,6 +9008,143 @@ test("pages push asks the video library nothing when no page places a video", as
   await pagesPush(invocation);
 
   assert.equal(wire.matching("GET", SITE_VIDEOS).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// pages push and pull: a page that places a form (TR01216)
+// ---------------------------------------------------------------------------
+
+const CONTACT_FORM_ID = "0b5c6f7e-0000-4000-8000-000000000001";
+const ARCHIVED_FORM_ID = "0b5c6f7e-0000-4000-8000-000000000002";
+
+function siteForm(id, key, status = "SITE_FORM_STATUS_ACTIVE") {
+  return { id, key, name: `The ${key} form`, sink: "SITE_FORM_SINK_NONE", retentionDays: 365, status, currentVersion: 1 };
+}
+
+function formsRoute(forms = [siteForm(CONTACT_FORM_ID, "contact"), siteForm(ARCHIVED_FORM_ID, "old", "SITE_FORM_STATUS_ARCHIVED")]) {
+  return { method: "GET", pattern: SITE_FORMS, reply: { forms } };
+}
+
+function formPage(formKey) {
+  return {
+    ...PUSH_WORKSPACE,
+    "pages/about.md": "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\nHello.\n\n"
+      + `\`\`\`component:form\n${JSON.stringify({ formKey })}\n\`\`\`\n`,
+  };
+}
+
+test("pages push sends the id of a form the workspace names by key", async (site) => {
+  const workspace = await fixture(site, formPage("contact"));
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  const result = await pagesPush(invocation);
+
+  assert.equal(result.pages.created, 1);
+  assert.equal(wire.matching("GET", SITE_FORMS).length, 1);
+  const sent = wire.matching("POST", PAGES_COLLECTION)[0].body.template.freeFormData.body;
+  const block = sent.content.find((node) => node.type === "componentBlock");
+  assert.equal(block.attrs.componentType, "form");
+  assert.deepEqual(JSON.parse(block.attrs.componentData), { formId: CONTACT_FORM_ID });
+  // The workspace file keeps the key, so it still pushes to a site whose ids differ.
+  assert.match(await readWorkspaceText(workspace, "pages/about.md"), /"formKey":"contact"/u);
+});
+
+test("pages push refuses a form key the site does not have before anything is written", async (site) => {
+  const workspace = await fixture(site, formPage("missing"));
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  await assert.rejects(
+    pagesPush(invocation),
+    (error) => error?.code === "pages.form_unknown" && error?.field === "pages/about.md",
+  );
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+test("pages push refuses a form block that names no form, before anything is written", async (site) => {
+  const workspace = await fixture(site, formPage(""));
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  await assert.rejects(pagesPush(invocation), (error) => /formKey/u.test(`${error?.field ?? ""} ${error?.message ?? ""}`));
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+  assert.equal(wire.matching("GET", SITE_FORMS).length, 0);
+});
+
+test("pages push refuses a form the site has archived", async (site) => {
+  const workspace = await fixture(site, formPage("old"));
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  await assert.rejects(pagesPush(invocation), (error) => error?.code === "pages.form_archived");
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("pages push --dry-run reports the same refusal and sends nothing", async (site) => {
+  const workspace = await fixture(site, formPage("missing"));
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT, dryRun: true });
+
+  await assert.rejects(pagesPush(invocation), (error) => error?.code === "pages.form_unknown");
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+});
+
+test("pages push asks the site for its forms only when a page places one", async (site) => {
+  const workspace = await fixture(site, PUSH_WORKSPACE);
+  const wire = api(pushRoutes());
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+  await pagesPush(invocation);
+
+  assert.equal(wire.matching("GET", SITE_FORMS).length, 0);
+});
+
+function formBodyPage(pageId, formId) {
+  return {
+    ...freeFormPageDetail(pageId, "x"),
+    template: {
+      templateType: "TEMPLATE_TYPE_FREE_FORM",
+      templateVersion: "1.0",
+      freeFormData: {
+        body: {
+          type: "doc",
+          content: [{
+            type: "componentBlock",
+            attrs: { componentType: "form", componentData: JSON.stringify({ formId }) },
+          }],
+        },
+      },
+    },
+  };
+}
+
+test("pull writes a placed form back by its key, and keeps an id the site no longer has", async (site) => {
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [pageSummary({ pageId: ABOUT_PAGE_ID, path: "about" }), pageSummary({ pageId: STORY_PAGE_ID, path: "story", title: "Story" })], nextPageToken: "" } },
+    {
+      method: "GET",
+      pattern: PAGE_BY_ID,
+      reply: (call) => {
+        const pageId = call.pathname.split("/").pop();
+        return formBodyPage(pageId, pageId === ABOUT_PAGE_ID ? CONTACT_FORM_ID : "0b5c6f7e-0000-4000-8000-0000000000ee");
+      },
+    },
+    formsRoute(),
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+  ]);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const fileOf = (pageId) => manifest.pages.find((entry) => entry.pageId === pageId).file;
+  const about = await readWorkspaceText(workspace, fileOf(ABOUT_PAGE_ID));
+  const story = await readWorkspaceText(workspace, fileOf(STORY_PAGE_ID));
+  assert.match(about, /formKey/u);
+  assert.doesNotMatch(about, new RegExp(CONTACT_FORM_ID, "u"));
+  assert.match(story, /formId/u);
+  // One read of the forms serves every page.
+  assert.equal(wire.matching("GET", SITE_FORMS).length, 1);
 });
 
 // ---------------------------------------------------------------------------

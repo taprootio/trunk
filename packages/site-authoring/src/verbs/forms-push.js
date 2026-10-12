@@ -5,11 +5,12 @@ import {
   createSiteForm,
   getPageIndex,
   getSiteFormByKey,
+  listSiteForms,
   saveSiteFormVersion,
   updateSiteFormSettings,
 } from "../forms-api.js";
 import { afterSubmitPage, formFileName, projectFormForWorkspace, storedDefinition, validateNewsletterDefinition } from "../forms-contract.js";
-import { readWorkspaceForms, recordedForm, siteSettingsBaseline, withRecordedForm } from "../forms-workspace.js";
+import { comparableFormName, readWorkspaceForms, recordedForm, siteSettingsBaseline, withRecordedForm } from "../forms-workspace.js";
 import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { ApiError } from "../transport.js";
 import { readManifest, writeManifest, writeWorkspaceJson } from "../workspace.js";
@@ -153,6 +154,26 @@ export async function formsPush(invocation) {
         ? { ...plan, wireDefinition: storedDefinition(form.file, (plan.request ?? plan.desired).definition, pages) }
         : plan,
     );
+  }
+
+  // A form name is unique on the site, ignoring case, so a name another form holds is refused here with
+  // the rest of the checks, not by the first write that reaches it.
+  const naming = plans.filter((plan) => plan.action === "create" || plan.settingsChanged);
+  if (naming.length > 0) {
+    const siteForms = await withRefusalGuidance(onProgress, "forms push", async () => await listSiteForms(client, siteId));
+    for (const plan of naming) {
+      const name = comparableFormName(plan.desired.name);
+      const holder = siteForms.find((siteForm) => siteForm.key !== plan.form.key && comparableFormName(siteForm.name) === name);
+      if (holder !== undefined) {
+        throw new SiteAuthoringError(
+          "forms.name_taken",
+          `${formFileName(plan.form.key)}: the site's form '${holder.key}'${holder.archived ? " (archived)" : ""} already `
+            + `has the name '${plan.desired.name}'. A form name is unique on a site, ignoring case; rename one of them. `
+            + "Nothing was written.",
+          { field: `${formFileName(plan.form.key)}:name` },
+        );
+      }
+    }
   }
 
   const results = [];

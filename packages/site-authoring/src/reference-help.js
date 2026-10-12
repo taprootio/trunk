@@ -86,7 +86,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getThemeReference };
 
-export const REFERENCE_VERSION = 36;
+export const REFERENCE_VERSION = 37;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -775,7 +775,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "version of each form this workspace last saw. 'forms validate' needs only taproot-site.json.",
       `The file is { key, name, sink, retention_days, notify_owner, definition }. key must equal the file's name `
       + `and is lowercase letters, digits, and single hyphens, at most ${FORM_KEY_MAXIMUM_LENGTH} characters. name is `
-      + `1 to ${FORM_LIMITS.nameCharacters} characters. sink is one of ${FORM_SINKS.join(", ")} and defaults to `
+      + `1 to ${FORM_LIMITS.nameCharacters} characters and unique on the site, ignoring case: two files, or a file and another form on the site, with the same name `
+      + "are refused (forms.name_duplicate, forms.name_taken) before anything is written. "
+      + `sink is one of ${FORM_SINKS.join(", ")} and defaults to `
       + "'none' (store submissions only); 'newsletter' requests double-opt-in confirmation for the contact address. "
       + "A newsletter sink requires a required email contact field and at least one consent checkbox; every consent checkbox must be checked. "
       + `retention_days is ${FORM_RETENTION_DAYS.minimum} to ${FORM_RETENTION_DAYS.maximum} (a site's plan may cap it lower): `
@@ -846,8 +848,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Submissions are never pulled or pushed. They are visitors' personal data: read, mark, export and delete "
       + "them on the site's Forms page.",
       "To show a form, place the free-form component 'form' on a page (a component:form block) with formKey set "
-      + "to the form's key ('help component form' lists its properties). Push the form first and deploy: the release "
-      + "freezes the form it was built with.",
+      + "to the form's key ('help component form' lists its properties). Push the form first: 'pages push' turns the "
+      + "key into the form's id for the site and refuses a key the site does not have or has archived, and 'pages pull' "
+      + "turns the id back into the key. Then deploy: the release freezes the form it was built with.",
       "The delegation.content capability carries site.forms.manage, which every forms verb needs: it covers "
       + "definitions, settings and status. Visitors' submissions are in no capability: reading them "
       + "(site.forms.submissions.read) and finding, marking or deleting them (site.forms.submissions.manage) belong "

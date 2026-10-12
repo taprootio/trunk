@@ -49,7 +49,31 @@ export async function readWorkspaceForms(workspaceDir, keys, validationOptions =
     const document_ = await readWorkspaceJson(workspaceDir, file, FORM_LIMITS.fileBytes);
     forms.push({ key, file, document: validateFormDocument(document_, key, validationOptions) });
   }
+  requireDistinctNames(forms);
   return forms;
+}
+
+/** A form name as the site compares it: trimmed, ignoring case (TR01216). */
+export function comparableFormName(name) {
+  return String(name).trim().toLowerCase();
+}
+
+/** Names are unique per site, so two files in one push cannot share one. */
+function requireDistinctNames(forms) {
+  const seen = new Map();
+  for (const form of forms) {
+    const name = comparableFormName(form.document.name);
+    const other = seen.get(name);
+    if (other !== undefined) {
+      throw new SiteAuthoringError(
+        "forms.name_duplicate",
+        `${form.file} and ${other} both name the form '${form.document.name}'. A form name is unique on a site, `
+          + "ignoring case; rename one of them.",
+        { field: `${form.file}:name` },
+      );
+    }
+    seen.set(name, form.file);
+  }
 }
 
 /**

@@ -527,7 +527,7 @@ for (const remoteFlag of [undefined, false, true]) {
     const baseline = { id: FORM_ID, version: 1, settings: { name: "Contact", sink: "none", retention_days: 365 } };
     const site = await workspace(t, {
       ".taproot-site-manifest.json": { ...MANIFEST, forms: { items: { contact: baseline } } },
-      "forms/a-new.json": { ...CONTACT_FORM, key: "a-new" },
+      "forms/a-new.json": { ...CONTACT_FORM, key: "a-new", name: "A new form" },
       "forms/contact.json": { ...CONTACT_FORM, name: "Contact us" },
     });
     const scripted = scriptedSite({ forms: { contact: wireForm({ ...CONTACT_FORM, ...(remoteFlag === undefined ? {} : { notify_owner: remoteFlag }) }) } });
@@ -1385,6 +1385,37 @@ test("the component help names resolves to the registered form component", async
   const named = JSON.parse(stdout).reference.details.join("\n").match(/'help component ([a-z-]+)'/u)?.[1];
   assert.equal(named, "form");
   assert.ok(getComponentReference(named));
+});
+
+test("forms push refuses a name another site form holds, ignoring case, before any write", async (t) => {
+  const site = await workspace(t, {
+    ".taproot-site-manifest.json": MANIFEST,
+    "forms/other.json": { ...CONTACT_FORM, key: "other", name: "CONTACT" },
+  });
+  const scripted = scriptedSite({ forms: { contact: wireForm(CONTACT_FORM, { status: "SITE_FORM_STATUS_ARCHIVED" }) } });
+
+  const { exit, result, stderr } = await runWithSite(site, scripted, ["forms", "push"]);
+
+  assert.notEqual(exit, 0);
+  assert.equal(result.error.code, "forms.name_taken");
+  assert.match(stderr, /'contact' \(archived\)/u);
+  assert.deepEqual(writes(scripted), []);
+});
+
+test("forms validate and push refuse two files that share a name, ignoring case", async (t) => {
+  const site = await workspace(t, {
+    ".taproot-site-manifest.json": MANIFEST,
+    "forms/contact.json": CONTACT_FORM,
+    "forms/second.json": { ...CONTACT_FORM, key: "second", name: "CONTACT" },
+  });
+
+  const validated = await run(site, ["forms", "validate"]);
+  assert.equal(validated.result.error.code, "forms.name_duplicate");
+
+  const scripted = scriptedSite({ forms: {} });
+  const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(pushed.result.error.code, "forms.name_duplicate");
+  assert.deepEqual(writes(scripted), []);
 });
 
 test("forms push creates a form without retention on a plan whose default is shorter, and records what the site chose", async (t) => {

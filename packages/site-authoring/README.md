@@ -645,6 +645,24 @@ Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal `<br>` tags are rejecte
 with the exact fact field path. A label is optional and stays outside the value's link. See
 `taproot-site help page free-form` and `taproot-site help component cta`.
 
+### Forms by id in 0.20.0
+
+A page stores the form it places by the form's id, so renaming a form never
+breaks a page, but a workspace still names a form by its key: `forms/<key>.json`
+and the `formKey` of a `component:form` block are unchanged, and the same files
+still push to a fresh site whose ids all differ. `pages push` looks each key up
+on the site, sends the form's id, and refuses a key the site does not have
+(`pages.form_unknown`) or has archived (`pages.form_archived`) before it writes
+anything; `plan` reports the same. `pages pull` writes the key back. An id the
+site no longer has stays an id in the pulled file, and a push of it is refused
+until you choose a form. Form names are now unique on a site, ignoring case.
+The deploy that introduces this rewrites the stored page bodies, which changes the
+body revision of every page that places a form, so the first `pages pull` after it
+can report `pages.pull_conflict` for such a Markdown page even though its content
+is the same. Run `taproot-site pages push <path>` for that page, or delete the file
+and pull again. `forms validate` and `forms push` also refuse two forms with the
+same name (`forms.name_duplicate`, `forms.name_taken`).
+
 ### Place categories in 0.18.0
 
 A place has one category for every site, taken from Google's types, and a place

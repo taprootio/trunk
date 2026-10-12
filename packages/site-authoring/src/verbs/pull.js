@@ -33,6 +33,7 @@ import {
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
+import { placesFormIds, readFormIndex, withFormKeys } from "../form-references.js";
 import {
   generatedIdentity,
   isAuthorableTemplateType,
@@ -643,6 +644,15 @@ async function requireWorkspaceBelongsToSite(workspaceDir, siteId) {
 
 export async function pull(invocation) {
   const { client, config, siteId, surface, now, onProgress } = await openSession(invocation);
+  // A page names its forms by id on the site and by key in the workspace (TR01216). The
+  // site's forms are read once, and only when a page body places one.
+  let formKeys;
+  const workspaceBodyFromPage = async (page, listedTemplateType) => {
+    const body = workspaceDocumentFromPage(page, listedTemplateType);
+    if (body === undefined || !placesFormIds(body)) return body;
+    formKeys ??= readFormIndex(client, siteId).then((index) => index.keyById);
+    return withFormKeys(body, await formKeys);
+  };
   await ensureWorkspaceRoot(config);
 
   await requireWorkspaceBelongsToSite(config.workspaceDir, siteId);
@@ -891,7 +901,7 @@ export async function pull(invocation) {
       if (source === undefined) continue;
       onProgress(`Reading page '${summary.path}'.`);
       const page = await getPage(client, summary.pageId, bodyStatusFor(summary));
-      const body = workspaceDocumentFromPage(page, summary.templateType);
+      const body = await workspaceBodyFromPage(page, summary.templateType);
       const description = typeof page.shortDescription === "string" ? page.shortDescription : "";
       if (body === undefined) {
         // The site's body is unreadable, but the workspace file is still this
@@ -1261,7 +1271,7 @@ export async function pull(invocation) {
         }
         onProgress(`Reading page '${summary.path}'.`);
         const page = await getPage(client, summary.pageId, bodyStatusFor(summary));
-        const body = workspaceDocumentFromPage(page, summary.templateType);
+        const body = await workspaceBodyFromPage(page, summary.templateType);
         entry.description = typeof page.shortDescription === "string" ? page.shortDescription : "";
         entry.title = titleFromRead(page, summary);
         entry.path = pathFromRead(page, summary);

@@ -45,6 +45,7 @@ import { navPush, validateNavigationWorkspaceDocument } from "./nav-push.js";
 import {
   liveAuthorsRefresher,
   pagesPush,
+  placedFormProblems,
   placedVideoProblems,
   planPages,
   plannedPageItem,
@@ -283,6 +284,7 @@ async function preflight(session, invocation) {
     });
     problems.push(...pages.problems);
     problems.push(...await placedVideoProblems(client, siteId, pages.planned));
+    problems.push(...(await placedFormProblems(client, siteId, pages.planned)).problems);
     const sending = pages.planned.filter((page) => !page.unchanged);
 
     // An image a page names must be one the site holds; an image this plan
@@ -433,7 +435,7 @@ function planReport(planned) {
     ready: problems.length === 0,
     steps,
     checked: [
-      "every page source, against the live site's pages, revisions, and video library",
+      "every page source, against the live site's pages, revisions, video library, and the forms it places",
       "media under media/ that pages reference and media upload has not sent",
       "the theme, appearance, and footer colors, against the site's presentation revision",
       "the footer document, against the site's footer draft and the pages it still holds",
@@ -441,7 +443,7 @@ function planReport(planned) {
       "navigation shape and page targets, against the live page list and navigation",
     ],
     notChecked: [
-      "redirects and forms: run 'redirects push' and 'forms push' on their own",
+      "redirects, and the forms files themselves: run 'redirects push' and 'forms push' on their own",
       "rendering: preview pages before approving them",
       "approval, staging, and production, which stay separate commands",
     ],

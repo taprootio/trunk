@@ -769,7 +769,7 @@ export const COVER_IMAGE_UNUSED_MESSAGE = "The selected cover image must be used
  * component JSON, so a string that only parses once decoded is read the way the
  * server reads it.
  */
-function parseComponentData(text) {
+export function parseComponentData(text) {
   let decoded = text;
   for (let round = 0; round < 3 && /&(?:quot|amp|#39|lt|gt);/u.test(decoded); round += 1) {
     decoded = decoded.replace(/&quot;/gu, "\"").replace(/&#39;/gu, "'").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")

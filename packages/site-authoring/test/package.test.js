@@ -145,6 +145,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-workspace.js",
+    // Where a page's form key and the site's form id translate (TR01216).
+    "src/form-references.js",
     "src/forms-api.js",
     "src/forms-contract.js",
     "src/forms-workspace.js",
