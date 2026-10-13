@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.taproot.test/integrations/webhooks/v1/installation.created.schema.json",
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "type": { "const": "installation.created" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["installation", "claimCode", "claimExpiresAt"],
+          "properties": {
+            "installation": { "$ref": "common.schema.json#/$defs/installationState" },
+            "claimCode": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "claimExpiresAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    }
+  ]
+}

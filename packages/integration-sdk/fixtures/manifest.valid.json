@@ -1,0 +1,28 @@
+{
+  "slug": "fixture-fitness",
+  "displayName": "Fixture Fitness Publisher",
+  "webhookEndpointUrl": "https://receiver.example.test/webhooks",
+  "settingsUrl": "https://receiver.example.test/settings",
+  "requestedCapabilities": [
+    "pages.manage_own",
+    "data.manage_own",
+    "media.manage_own",
+    "publish",
+    "site.pages.read"
+  ],
+  "offeredComponents": [],
+  "externalScriptOrigins": [],
+  "defaultPublishPolicy": "stage",
+  "recommendedUninstallDisposition": "freeze",
+  "contractVersion": "1",
+  "pricingOptions": [
+    {
+      "id": "free",
+      "version": "1",
+      "quantityMin": 1,
+      "quantityMax": null,
+      "cadence": "free",
+      "catalogueItemKey": null
+    }
+  ]
+}

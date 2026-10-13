@@ -1,0 +1,9 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "signingSecretBase64": "SmVmZQ==",
+  "timestamp": 1735689600,
+  "keyId": "90000000-0000-4000-8000-000000000001",
+  "bodyFile": "examples/installation.created.json",
+  "bodySha256": "01a0fcd0a324d46ede4a7ba87dcd2a3239996f1b1b17cb44abcd24d3a9a19114",
+  "header": "t=1735689600,k=90000000-0000-4000-8000-000000000001,v1=b13fa92de238838f31de4b2ac3f9149ce87c5f5061893b194cd2104f918ddccf"
+}

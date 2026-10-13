@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.taproot.test/integrations/webhooks/v1/page.published.schema.json",
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "type": { "const": "page.published" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pageId", "externalId", "publishedRevision", "url"],
+          "properties": {
+            "pageId": { "type": "string", "format": "uuid" },
+            "externalId": { "type": "string", "minLength": 1 },
+            "publishedRevision": { "type": "integer", "minimum": 0 },
+            "url": { "type": "string", "format": "uri-reference" }
+          }
+        }
+      }
+    }
+  ]
+}

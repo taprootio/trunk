@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.taproot.test/integrations/webhooks/v1/common.schema.json",
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "version", "occurredAt", "integrationId", "installationId", "siteId", "data"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "type": { "type": "string" },
+        "version": { "const": "1" },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "integrationId": { "type": "string", "format": "uuid" },
+        "installationId": { "type": "string", "format": "uuid" },
+        "siteId": { "type": "string", "format": "uuid" },
+        "data": true
+      }
+    },
+    "installationState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "revision", "grantedCapabilities", "publishPolicy", "contractVersion", "sourceKind", "sourceEngagementId", "sourceTerminationReason"],
+      "properties": {
+        "status": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "grantedCapabilities": { "type": "array", "items": { "type": "string" } },
+        "publishPolicy": { "enum": ["auto", "stage"] },
+        "contractVersion": { "type": "string" },
+        "sourceKind": { "enum": ["owner", "engagement"] },
+        "sourceEngagementId": { "type": ["string", "null"], "format": "uuid" },
+        "sourceTerminationReason": { "type": ["string", "null"] }
+      }
+    },
+    "publishedCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "revision"],
+      "properties": {
+        "candidateId": { "type": "string", "format": "uuid" },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

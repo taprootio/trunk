@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.taproot.test/integrations/webhooks/v1/publish.completed.schema.json",
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "type": { "const": "publish.completed" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deploymentId", "candidates"],
+          "properties": {
+            "deploymentId": { "type": "string", "format": "uuid" },
+            "candidates": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/publishedCandidate" } }
+          }
+        }
+      }
+    }
+  ]
+}

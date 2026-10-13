@@ -1,0 +1,44 @@
+{
+  "name": "@taprootio/integration-sdk",
+  "version": "0.1.1",
+  "description": "Public contracts and client for Taproot push integrations",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taprootio/trunk.git",
+    "directory": "packages/integration-sdk"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./schema": "./schema/taproot-integration-manifest.v1.schema.json",
+    "./fixtures/manifest.valid.json": "./fixtures/manifest.valid.json",
+    "./fixtures/webhooks/v1/schema-index.json": "./fixtures/webhooks/v1/schema-index.json",
+    "./fixtures/webhooks/v1/signature-vector.json": "./fixtures/webhooks/v1/signature-vector.json",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "fixtures/",
+    "schema/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "prepack": "npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

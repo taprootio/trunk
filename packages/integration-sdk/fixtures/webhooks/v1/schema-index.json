@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "events": {
+    "ping": "ping.schema.json",
+    "installation.created": "installation.created.schema.json",
+    "installation.updated": "installation.updated.schema.json",
+    "installation.suspended": "installation.suspended.schema.json",
+    "installation.resumed": "installation.resumed.schema.json",
+    "installation.uninstalled": "installation.uninstalled.schema.json",
+    "sync.requested": "sync.requested.schema.json",
+    "placement.created": "placement.created.schema.json",
+    "placement.updated": "placement.updated.schema.json",
+    "placement.deleted": "placement.deleted.schema.json",
+    "publish.completed": "publish.completed.schema.json",
+    "publish.failed": "publish.failed.schema.json",
+    "page.published": "page.published.schema.json",
+    "page.deleted": "page.deleted.schema.json"
+  }
+}

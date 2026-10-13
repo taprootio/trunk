@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.taproot.test/integrations/webhooks/v1/sync.requested.schema.json",
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "type": { "const": "sync.requested" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason", "syncId", "candidateIds"],
+          "properties": {
+            "reason": { "enum": ["scheduled", "owner", "placement_changed", "reconcile"] },
+            "syncId": { "type": "string", "format": "uuid" },
+            "candidateIds": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+          }
+        }
+      }
+    }
+  ]
+}
