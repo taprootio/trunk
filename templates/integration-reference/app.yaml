@@ -1,0 +1,94 @@
+# DigitalOcean App Platform production template. Before creating the app,
+# create a managed PostgreSQL cluster separately in the target VPC and replace
+# `REPLACE_WITH_PRECREATED_CLUSTER_NAME`, `REPLACE_WITH_REPOSITORY`, and domain.
+# This template deliberately does not provision a $7 development database.
+name: taproot-integration-reference
+region: nyc
+services:
+  - name: reference
+    github:
+      repo: REPLACE_WITH_REPOSITORY
+      branch: main
+      deploy_on_push: false
+    # This exported template is standalone. A deployment sourced directly from
+    # taprootio/trunk must instead use /templates/integration-reference.
+    source_dir: /
+    environment_slug: node-js
+    build_command: npm ci --ignore-scripts --no-audit --no-fund
+    run_command: npm start
+    http_port: 8080
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    health_check:
+      # /healthz remains healthy in manifest-only bootstrap mode so App
+      # Platform can route the registration manifest before active secrets exist.
+      http_path: /healthz
+      initial_delay_seconds: 15
+      period_seconds: 10
+      timeout_seconds: 3
+      failure_threshold: 3
+      success_threshold: 1
+    envs:
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: HOST
+        value: 0.0.0.0
+        scope: RUN_TIME
+      - key: DATABASE_URL
+        value: ${reference-db.DATABASE_PRIVATE_URL}
+        scope: RUN_TIME
+      - key: DATABASE_CA_CERT
+        value: ${reference-db.CA_CERT}
+        type: SECRET
+        scope: RUN_TIME
+      - key: PUBLIC_ORIGIN
+        value: https://REPLACE_WITH_DOMAIN
+        scope: RUN_TIME
+      - key: TAPROOT_API_URL
+        value: https://app.taproot.io/api
+        scope: RUN_TIME
+      - key: INTEGRATION_ID
+        value: REPLACE_WITH_INTEGRATION_ID
+        scope: RUN_TIME
+      - key: WEBHOOK_MAX_ATTEMPTS
+        value: "8"
+        scope: RUN_TIME
+      - key: WEBHOOK_LEASE_SECONDS
+        value: "60"
+        scope: RUN_TIME
+      - key: WEBHOOK_POLL_MILLISECONDS
+        value: "1000"
+        scope: RUN_TIME
+      - key: REFERENCE_SYNC_MODE
+        value: full
+        scope: RUN_TIME
+      - key: REFERENCE_BOOTSTRAP_MANIFEST_ONLY
+        value: "false"
+        scope: RUN_TIME
+      - key: PUBLISHER_CREDENTIAL
+        value: REPLACE_WITH_PUBLISHER_CREDENTIAL
+        type: SECRET
+        scope: RUN_TIME
+      - key: TAPROOT_WEBHOOK_SIGNING_KEYS
+        value: REPLACE_WITH_SIGNING_KEYS_JSON
+        type: SECRET
+        scope: RUN_TIME
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        value: REPLACE_WITH_32_BYTE_BASE64_KEY
+        type: SECRET
+        scope: RUN_TIME
+      - key: TAPROOT_HANDOFF_ISSUER
+        value: https://app.taproot.io
+        scope: RUN_TIME
+      - key: TAPROOT_HANDOFF_JWKS_URL
+        value: https://app.taproot.io/api/.well-known/taproot-integrations-jwks.json
+        scope: RUN_TIME
+databases:
+  - name: reference-db
+    engine: PG
+    version: "17"
+    production: true
+    cluster_name: REPLACE_WITH_PRECREATED_CLUSTER_NAME
+    db_name: taproot_reference
+    db_user: doadmin

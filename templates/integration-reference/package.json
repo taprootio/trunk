@@ -1,0 +1,21 @@
+{
+  "name": "taproot-integration-reference",
+  "version": "0.1.1",
+  "private": true,
+  "description": "A public Node 22 and PostgreSQL reference implementation of the Taproot integrations contract.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "migrate": "node src/migrate.js",
+    "upload-bundle": "node scripts/upload-bundle.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@taprootio/integration-sdk": "0.1.1",
+    "pg": "8.16.3"
+  },
+  "license": "ISC"
+}
