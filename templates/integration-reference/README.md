@@ -9,7 +9,7 @@ installation credentials, lease fencing, bounded settings handoffs, and a
 publisher-only bundle upload.
 
 The only Taproot runtime package is the public `@taprootio/integration-sdk`
-`0.1.1`. The PostgreSQL `pg` `8.16.3` dependency is the service's only other
+`0.1.2`. The PostgreSQL `pg` `8.16.3` dependency is the service's only other
 runtime dependency; it provides the durable receipt, operation journal, and
 session state required to recover safely after a process restart. There are no
 private Taproot imports, fixture imports, local `file:` dependencies, or
