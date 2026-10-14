@@ -6,7 +6,7 @@ export { INTEGRATION_OPENAPI_OPERATIONS, INTEGRATION_OPENAPI_SCHEMAS, INTEGRATIO
 type OperationRequest<Name extends keyof IntegrationOpenApiOperationMap> = IntegrationOpenApiOperationMap[Name]["request"];
 type OperationResponse<Name extends keyof IntegrationOpenApiOperationMap> = IntegrationOpenApiOperationMap[Name]["response"];
 
-export const INTEGRATION_SDK_VERSION: "0.1.1";
+export const INTEGRATION_SDK_VERSION: "0.1.2";
 export const WEBHOOK_VERSION: "1";
 export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[];
 export const INTEGRATION_CAPABILITIES: readonly IntegrationCapability[];

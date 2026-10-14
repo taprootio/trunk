@@ -1,6 +1,6 @@
 import { INTEGRATION_WEBHOOK_EVENTS } from "./openapi-contract.js";
 
-export const INTEGRATION_SDK_VERSION = "0.1.1";
+export const INTEGRATION_SDK_VERSION = "0.1.2";
 export const WEBHOOK_VERSION = "1";
 export const WEBHOOK_EVENT_TYPES = Object.freeze(Object.keys(INTEGRATION_WEBHOOK_EVENTS));
 export const INTEGRATION_CAPABILITIES = Object.freeze([
