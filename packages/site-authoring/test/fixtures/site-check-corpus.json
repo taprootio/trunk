@@ -1,0 +1,666 @@
+{
+  "version": 1,
+  "about": "Cases both the C# evaluator (Taproot.Domain/SiteChecks) and the TypeScript evaluator (shared/site-checks.ts) must pass. 'links' pin the internal link extractor, 'redirectSources' pin source normalization and the redirect source rules, 'pageLinks' pin the link.page_missing findings for one page.",
+  "links": [
+    {
+      "name": "html anchors and an entity-encoded componentData are read",
+      "currentPath": "guides/start",
+      "templateData": {
+        "html": "<a href='/missing/raw'>Raw</a>",
+        "componentData": "{&quot;items&quot;:[{&quot;url&quot;:&quot;/missing/card&quot;}]}"
+      },
+      "expected": [
+        "/missing/card",
+        "/missing/raw"
+      ]
+    },
+    {
+      "name": "an encoded query delimiter is cut after decoding",
+      "currentPath": "home",
+      "templateData": {
+        "href": "/guides/start%3Fpreview=true"
+      },
+      "expected": [
+        "/guides/start"
+      ]
+    },
+    {
+      "name": "an encoded fragment delimiter is cut after decoding",
+      "currentPath": "home",
+      "templateData": {
+        "href": "/guides/start%23details"
+      },
+      "expected": [
+        "/guides/start"
+      ]
+    },
+    {
+      "name": "rich-text link marks resolve relative to the page's folder",
+      "currentPath": "guides/start",
+      "templateData": {
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "/about"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "next"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "../up/"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "./same"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        "/about",
+        "/guides/next",
+        "/guides/same",
+        "/up"
+      ]
+    },
+    {
+      "name": "external, fragment, query, protocol-relative, mail and asset targets are not pages",
+      "currentPath": "home",
+      "templateData": {
+        "items": [
+          {
+            "href": "https://example.com/page"
+          },
+          {
+            "href": "mailto:a@example.com"
+          },
+          {
+            "href": "tel:+15555550100"
+          },
+          {
+            "href": "#part"
+          },
+          {
+            "href": "?q=1"
+          },
+          {
+            "href": "//cdn.example.com/x"
+          },
+          {
+            "href": "/images/photo.webp"
+          },
+          {
+            "href": "/files/report.PDF"
+          },
+          {
+            "href": "/back\\slash"
+          },
+          {
+            "href": ""
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "the site root, a trailing slash and a query are normalized",
+      "currentPath": "home",
+      "templateData": {
+        "a": {
+          "href": "/"
+        },
+        "b": {
+          "href": "/about/"
+        },
+        "c": {
+          "href": "/pricing?plan=pro#top"
+        }
+      },
+      "expected": [
+        "/",
+        "/about",
+        "/pricing"
+      ]
+    },
+    {
+      "name": "targets differing by case are one link, and the first spelling is kept",
+      "currentPath": "home",
+      "templateData": {
+        "a": {
+          "href": "/About"
+        },
+        "b": {
+          "href": "/about"
+        }
+      },
+      "expected": [
+        "/About"
+      ]
+    },
+    {
+      "name": "property names match without regard to case",
+      "currentPath": "home",
+      "templateData": {
+        "a": {
+          "HREF": "/one"
+        },
+        "b": {
+          "Url": "/two"
+        },
+        "c": {
+          "LINK": "/three"
+        },
+        "d": {
+          "pagePath": "/four"
+        }
+      },
+      "expected": [
+        "/four",
+        "/one",
+        "/three",
+        "/two"
+      ]
+    },
+    {
+      "name": "a componentData string that is not JSON is read as HTML",
+      "currentPath": "home",
+      "templateData": {
+        "componentData": "<a href=\"/from-html\">x</a>"
+      },
+      "expected": [
+        "/from-html"
+      ]
+    },
+    {
+      "name": "bare strings in an array are not examined",
+      "currentPath": "home",
+      "templateData": {
+        "items": [
+          "/not-a-link"
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "a relative link that climbs above the root is dropped",
+      "currentPath": "start",
+      "templateData": {
+        "href": "../../x"
+      },
+      "expected": []
+    },
+    {
+      "name": "named and numeric character references in an address are decoded",
+      "currentPath": "home",
+      "templateData": {
+        "a": {
+          "href": "/caf&eacute;"
+        },
+        "b": {
+          "href": "/na&#239;ve"
+        },
+        "c": {
+          "href": "/a&amp;b"
+        },
+        "d": {
+          "href": "/&alpha;&beta;"
+        },
+        "e": {
+          "href": "/x&hellip;"
+        }
+      },
+      "expected": [
+        "/a&b",
+        "/café",
+        "/naïve",
+        "/x…",
+        "/αβ"
+      ]
+    }
+  ],
+  "redirectSources": [
+    {
+      "submitted": "/",
+      "normalized": "/",
+      "rule": null
+    },
+    {
+      "submitted": "/about",
+      "normalized": "/about",
+      "rule": null
+    },
+    {
+      "submitted": "faqs.html",
+      "normalized": "/faqs.html",
+      "rule": null
+    },
+    {
+      "submitted": "/trailing/",
+      "normalized": "/trailing",
+      "rule": null
+    },
+    {
+      "submitted": "  /padded  ",
+      "normalized": "/padded",
+      "rule": null
+    },
+    {
+      "submitted": "/index.htm",
+      "normalized": "/index.htm",
+      "rule": null
+    },
+    {
+      "submitted": "/my-index.html.old",
+      "normalized": "/my-index.html.old",
+      "rule": null
+    },
+    {
+      "submitted": "/caf%C3%A9",
+      "normalized": "/caf%C3%A9",
+      "rule": null
+    },
+    {
+      "submitted": "/old%20page",
+      "normalized": "/old%20page",
+      "rule": null
+    },
+    {
+      "submitted": "/favicon.ico.bak",
+      "normalized": "/favicon.ico.bak",
+      "rule": null
+    },
+    {
+      "submitted": "/taproot",
+      "normalized": "/taproot",
+      "rule": null
+    },
+    {
+      "submitted": "/taproot/about",
+      "normalized": "/taproot/about",
+      "rule": null
+    },
+    {
+      "submitted": "/taproot/5.0",
+      "normalized": "/taproot/5.0",
+      "rule": null
+    },
+    {
+      "submitted": "/taproot/5.0.62x",
+      "normalized": "/taproot/5.0.62x",
+      "rule": null
+    },
+    {
+      "submitted": "/taproot/5.0.62-",
+      "normalized": "/taproot/5.0.62-",
+      "rule": null
+    },
+    {
+      "submitted": "/s",
+      "normalized": "/s",
+      "rule": null
+    },
+    {
+      "submitted": "/s/",
+      "normalized": "/s",
+      "rule": null
+    },
+    {
+      "submitted": "/sx/abc",
+      "normalized": "/sx/abc",
+      "rule": null
+    },
+    {
+      "submitted": "",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "   ",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a?b",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a#b",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a\\b",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a b",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/café",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a%zz",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/x/../visit",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/x/./y",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a//b",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "///",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/%2e%2e/visit",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/%2E%2E/visit",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a%2fb",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/a%2F%2Fb",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/robots%2Etxt",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/.",
+      "normalized": null,
+      "rule": "redirect.source_invalid"
+    },
+    {
+      "submitted": "/index.html",
+      "normalized": "/index.html",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/about/index.html",
+      "normalized": "/about/index.html",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/About/INDEX.HTML",
+      "normalized": "/About/INDEX.HTML",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/%69ndex.html",
+      "normalized": "/%69ndex.html",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/about/%69ndex.html",
+      "normalized": "/about/%69ndex.html",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/about/index.html/legacy",
+      "normalized": "/about/index.html/legacy",
+      "rule": "redirect.source_index_html"
+    },
+    {
+      "submitted": "/integrations/old",
+      "normalized": "/integrations/old",
+      "rule": "redirect.source_integration_data"
+    },
+    {
+      "submitted": "/Integrations",
+      "normalized": "/Integrations",
+      "rule": "redirect.source_integration_data"
+    },
+    {
+      "submitted": "/%69ntegrations/old",
+      "normalized": "/%69ntegrations/old",
+      "rule": "redirect.source_integration_data"
+    },
+    {
+      "submitted": "/s/abc",
+      "normalized": "/s/abc",
+      "rule": "redirect.source_share_link"
+    },
+    {
+      "submitted": "/S/abc",
+      "normalized": "/S/abc",
+      "rule": "redirect.source_share_link"
+    },
+    {
+      "submitted": "/s/a/b",
+      "normalized": "/s/a/b",
+      "rule": "redirect.source_share_link"
+    },
+    {
+      "submitted": "/%73/abc",
+      "normalized": "/%73/abc",
+      "rule": "redirect.source_share_link"
+    },
+    {
+      "submitted": "/taproot/5.0.62/manifest.json",
+      "normalized": "/taproot/5.0.62/manifest.json",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/taproot/5.0.62",
+      "normalized": "/taproot/5.0.62",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/Taproot/5.0.62/old",
+      "normalized": "/Taproot/5.0.62/old",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/%74aproot/5.0.62/old",
+      "normalized": "/%74aproot/5.0.62/old",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/taproot/5.1.0-rc.1/old",
+      "normalized": "/taproot/5.1.0-rc.1/old",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/taproot/5.1.0+build.7/old",
+      "normalized": "/taproot/5.1.0+build.7/old",
+      "rule": "redirect.source_runtime_mirror"
+    },
+    {
+      "submitted": "/404.html",
+      "normalized": "/404.html",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/404.html/old",
+      "normalized": "/404.html/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/sitemap.xml",
+      "normalized": "/sitemap.xml",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/Sitemap.xml/old",
+      "normalized": "/Sitemap.xml/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/%73itemap.xml",
+      "normalized": "/%73itemap.xml",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/robots.txt",
+      "normalized": "/robots.txt",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/favicon.ico",
+      "normalized": "/favicon.ico",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/favicon.ico/old",
+      "normalized": "/favicon.ico/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/.well-known/old",
+      "normalized": "/.well-known/old",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/con",
+      "normalized": "/con",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/Com1.txt",
+      "normalized": "/Com1.txt",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/a%25b",
+      "normalized": "/a%25b",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/a%3Fb",
+      "normalized": "/a%3Fb",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/a%23b",
+      "normalized": "/a%23b",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/a%C2%85b",
+      "normalized": "/a%C2%85b",
+      "rule": "redirect.source_not_storable"
+    },
+    {
+      "submitted": "/old..page",
+      "normalized": "/old..page",
+      "rule": "redirect.source_not_storable"
+    }
+  ],
+  "pageLinks": [
+    {
+      "name": "a link to a page the site has is not reported, case and slashes aside",
+      "currentPath": "guides/start",
+      "templateData": {
+        "a": {
+          "href": "/About/"
+        },
+        "b": {
+          "href": "next"
+        }
+      },
+      "sitePagePaths": [
+        "about",
+        "guides/next",
+        "other"
+      ],
+      "expected": []
+    },
+    {
+      "name": "links to pages the site lacks are reported in order",
+      "currentPath": "guides/start",
+      "templateData": {
+        "a": {
+          "href": "/team"
+        },
+        "b": {
+          "href": "/about"
+        },
+        "c": {
+          "href": "gone"
+        }
+      },
+      "sitePagePaths": [
+        "about",
+        "/guides/start"
+      ],
+      "expected": [
+        "/guides/gone",
+        "/team"
+      ]
+    },
+    {
+      "name": "a named character reference matches the page it spells",
+      "currentPath": "home",
+      "templateData": {
+        "a": {
+          "href": "/&alpha;"
+        }
+      },
+      "sitePagePaths": [
+        "α"
+      ],
+      "expected": []
+    }
+  ]
+}

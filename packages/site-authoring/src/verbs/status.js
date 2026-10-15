@@ -1,15 +1,17 @@
 import {
   getDeploySelection,
   getPublishingReadiness,
-  getSiteBrokenReferences,
+  getSiteHealth,
   IMAGE_PROCESSING_STATE_COMPLETE,
   IMAGE_PROCESSING_STATE_FAILED,
   listDeployments,
   listSiteImages,
   withRefusalGuidance,
 } from "../api.js";
+import { installedWhatsNew } from "../changelog.js";
 import { isBehindLatest } from "../cli-release.js";
 import {
+  changelogCommandSince,
   CLI_UPGRADE_COMMAND,
   CLI_VERSION,
   EXTERNAL_WRITES_SETTING_KEY,
@@ -24,13 +26,12 @@ import { boundedList, openSession, successResult } from "../session.js";
 
 /**
  * `status` — the platform authoring switch, CLI release, deployments,
- * publishing readiness, image processing, and broken-reference pages.
+ * publishing readiness, image processing, and the site checks' findings.
  */
 const MAXIMUM_DEPLOYMENTS = 20;
 const MAXIMUM_FAILED_IMAGES = 50;
 const MAXIMUM_BLOCKERS = 50;
-const MAXIMUM_BROKEN_REFERENCE_PAGES = 50;
-const MAXIMUM_MISSING_TARGETS = 50;
+const MAXIMUM_HEALTH_FINDINGS = 100;
 
 const PLATFORM_UNKNOWN_NOTE =
   "Taproot never reported the platform authoring switch on this run: either no sign-in token exchange happened "
@@ -61,9 +62,15 @@ const CLI_RELEASE_UNKNOWN_NOTE =
  */
 function reportCliRelease(release, onProgress) {
   const latestVersion = release?.latestVersion;
+  // The installed release's one-line note, from the same record `changelog` prints.
+  const whatsNew = installedWhatsNew();
+  const whatsNewField = whatsNew === undefined ? {} : { whatsNew };
+  if (whatsNew !== undefined) {
+    onProgress(`What's new in ${CLI_VERSION}: ${whatsNew.note} ('${changelogCommandSince("<version>")}' lists the details.)`);
+  }
   if (latestVersion === undefined) {
     onProgress(`CLI release: ${CLI_VERSION}. Latest not known on this run. ${CLI_RELEASE_UNKNOWN_NOTE}`);
-    return { version: CLI_VERSION, latestKnown: false, reason: CLI_RELEASE_UNKNOWN_NOTE };
+    return { version: CLI_VERSION, latestKnown: false, reason: CLI_RELEASE_UNKNOWN_NOTE, ...whatsNewField };
   }
   const behind = isBehindLatest(latestVersion);
   onProgress(
@@ -71,9 +78,16 @@ function reportCliRelease(release, onProgress) {
       ? `CLI release: ${CLI_VERSION} is BEHIND the latest published release ${latestVersion}, and Taproot accepts `
         + `only the latest, so every online verb is refused (refusal=${REFUSAL_CLI_OUTDATED}). Upgrade with: `
         + CLI_UPGRADE_COMMAND
+        + `. Once upgraded, run '${changelogCommandSince(CLI_VERSION)}' to see what changed.`
       : `CLI release: ${CLI_VERSION}; latest published release ${latestVersion}.`,
   );
-  return { version: CLI_VERSION, latestVersion, behind };
+  return {
+    version: CLI_VERSION,
+    latestVersion,
+    behind,
+    ...whatsNewField,
+    ...(behind ? { changelogCommand: changelogCommandSince(CLI_VERSION) } : {}),
+  };
 }
 
 /**
@@ -104,12 +118,12 @@ function reportPlatform(platform, onProgress) {
 /**
  * What a managed Docs site's status leaves out (TR00790), said the same way
  * the platform switch says "unknown": by shape. The image library and the
- * broken-reference report are page-authoring reads a Docs site refuses, so
+ * site-health read are page-authoring reads a Docs site refuses, so
  * they are reported as not covered rather than as empty — an automation
  * reading `failed: 0` off a report that was never made would be reading a lie.
  */
 const DOCS_SITE_NOT_COVERED_NOTE =
-  "This is a managed Docs site: its pages come from the Docs artifact, so the image library and broken-reference "
+  "This is a managed Docs site: its pages come from the Docs artifact, so the image library and site-health "
   + "reads do not apply and were not made.";
 
 export async function status(invocation) {
@@ -144,25 +158,14 @@ export async function status(invocation) {
     let images = [];
     let summary = { totalImages: 0, processingImages: 0 };
     let truncated = false;
-    let brokenReferencePages = [];
+    let health = { findings: [], errorCount: 0, warningCount: 0, pageCount: 0, truncated: false };
     if (!presentationOnly) {
       onProgress("Reading image processing state.");
       ({ images, summary, truncated } = await listSiteImages(client, siteId));
-      onProgress("Reading broken references.");
-      brokenReferencePages = await getSiteBrokenReferences(client, siteId);
+      onProgress("Reading site health.");
+      health = await getSiteHealth(client, siteId);
     }
-    const reportedBrokenPages = boundedList(brokenReferencePages, MAXIMUM_BROKEN_REFERENCE_PAGES);
-    const brokenPages = reportedBrokenPages.items.map((page) => {
-      const images = boundedList(page.missingImageIds, MAXIMUM_MISSING_TARGETS);
-      const paths = boundedList(page.missingPagePaths, MAXIMUM_MISSING_TARGETS);
-      return {
-        ...page,
-        missingImageIds: images.items,
-        missingPagePaths: paths.items,
-        ...(images.truncated ? { missingImageIdsTruncated: true } : {}),
-        ...(paths.truncated ? { missingPagePathsTruncated: true } : {}),
-      };
-    });
+    const reportedFindings = boundedList(health.findings, MAXIMUM_HEALTH_FINDINGS);
 
     const byState = {};
     for (const image of images) {
@@ -182,7 +185,9 @@ export async function status(invocation) {
     const blockers = boundedList(readiness.blockers, MAXIMUM_BLOCKERS);
 
     if (!presentationOnly) {
-      onProgress(`Broken references: ${brokenReferencePages.length} page(s) with missing targets.`);
+      onProgress(
+        `Site health: ${health.errorCount} problem(s) and ${health.warningCount} warning(s) on ${health.pageCount} page(s).`,
+      );
     }
 
     return successResult(VERB_STATUS, siteId, {
@@ -221,11 +226,13 @@ export async function status(invocation) {
         ...(failedImages.truncated ? { failedItemsTruncated: true } : {}),
         ...(truncated ? { listTruncated: true } : {}),
       },
-      brokenReferences: presentationOnly ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE } : {
+      siteHealth: presentationOnly ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE } : {
         covered: true,
-        totalPages: brokenReferencePages.length,
-        pages: brokenPages,
-        ...(reportedBrokenPages.truncated ? { pagesTruncated: true } : {}),
+        errors: health.errorCount,
+        warnings: health.warningCount,
+        pages: health.pageCount,
+        findings: reportedFindings.items,
+        ...(reportedFindings.truncated || health.truncated ? { findingsTruncated: true } : {}),
       },
     });
   });

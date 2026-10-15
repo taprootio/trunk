@@ -41,6 +41,7 @@ import {
   shippedFixtureDirectory,
 } from "../../src/fixture-contract.js";
 import { SETTINGS_GROUPS } from "../../src/settings-catalog.js";
+import { getTypedPageReference, LEGAL_PLATFORM_LINK_GUIDANCE } from "../../src/typed-page-reference.js";
 import { MANIFEST_VERSION } from "../../src/workspace.js";
 import { FREE_FORM_SECTION_REGISTRY } from "../../src/content/free-form-sections.js";
 
@@ -55,8 +56,8 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 37);
-  assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated"]);
+  assert.equal(REFERENCE_VERSION, 38);
+  assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
   const componentTypes = listComponentTypeReferences().map((component) => component.type);
@@ -809,4 +810,16 @@ test("the video embed reference documents the link form and its link example exp
   const videoNotes = getComponentReference("video").authoringNotes;
   assert.equal(videoNotes.length, 1);
   assert.match(videoNotes[0], /site's image max height and border/u);
+});
+
+test("the Taproot link guidance is one text shared by the legal and free-form topics, with a valid sample sentence", async () => {
+  assert.deepEqual(getTypedPageReference("legal").platformLink, LEGAL_PLATFORM_LINK_GUIDANCE);
+  const { legalAndPrivacyPages } = getPageTypeReference("free-form").document;
+  assert.equal(legalAndPrivacyPages.rule, LEGAL_PLATFORM_LINK_GUIDANCE.rule);
+  assert.equal(legalAndPrivacyPages.example, LEGAL_PLATFORM_LINK_GUIDANCE.example);
+
+  const { doc } = await markdownToProseMirror(LEGAL_PLATFORM_LINK_GUIDANCE.example, { resolveImage: () => null });
+  assert.deepEqual(validateDocument(doc).errors, []);
+  const link = doc.content[0].content.find((node) => node.marks?.some((mark) => mark.type === "link"));
+  assert.equal(link.marks.find((mark) => mark.type === "link").attrs.href, "https://www.taproot.io");
 });

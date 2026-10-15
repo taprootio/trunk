@@ -1078,7 +1078,8 @@ test("help forms names the capability that carries form authoring and the one no
   assert.match(details, /submissions are in no capability/iu);
   assert.match(details, /site\.forms\.submissions\.manage/u);
   assert.match(details, /hint\?, \.\.\.constraints \}/u);
-  assert.match(details, /not marked 'Required'/u);
+  assert.match(details, /'\* Required' legend/u);
+  assert.doesNotMatch(details, /not marked 'Required'/u);
 });
 
 for (const form of [CONTACT_FORM, LEGACY_NEWSLETTER_FORM]) {

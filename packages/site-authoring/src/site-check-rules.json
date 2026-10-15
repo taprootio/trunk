@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "about": "The catalogue of site checks (TR01085). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body, 'site' rules read the site's own records. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline), deploy, health. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
+  "runPoints": ["save", "validate", "deploy", "health"],
+  "rules": [
+    { "id": "link.page_missing", "severity": "warning", "scope": "page", "runsAt": ["save", "validate", "health"], "subject": "page_path", "detail": "none" },
+    { "id": "image.missing", "severity": "warning", "scope": "page", "runsAt": ["save", "health"], "subject": "image_id", "detail": "none" },
+    { "id": "form.none_chosen", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "none", "detail": "none" },
+    { "id": "form.unreadable", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_reference_text", "detail": "none" },
+    { "id": "form.missing", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_id", "detail": "none" },
+    { "id": "form.archived", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_id", "detail": "form_name" },
+    { "id": "form.after_submit_page_unpublished", "severity": "error", "scope": "site", "runsAt": ["deploy"], "subject": "page_path", "detail": "form_name" },
+    { "id": "form.after_submit_page_not_allowed", "severity": "error", "scope": "site", "runsAt": ["deploy"], "subject": "page_path", "detail": "form_name" },
+    { "id": "redirect.source_invalid", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "none" },
+    { "id": "redirect.source_index_html", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "redirect.source_integration_data", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "redirect.source_share_link", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "redirect.source_runtime_mirror", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "redirect.source_generated_file", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "redirect.source_not_storable", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" }
+  ]
+}

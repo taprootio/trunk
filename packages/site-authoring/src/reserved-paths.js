@@ -5,17 +5,11 @@
  * `/taproot/<semver>/...` (TR01144), and Cloudflare answers a matching request
  * before the Worker runs, so a page or redirect authored there could never be
  * reached. This is the one place the package owns that prefix; page push and
- * the redirect map both ask here. The API is the authority and mirrors the rule
- * in `PublishedOutputPaths.IsRuntimeMirrorPath`; both are pinned by the same
- * test vectors.
+ * the redirect map both ask here. The API is the authority
+ * (`PublishedOutputPaths.IsRuntimeMirrorPath`); both pass the site-check corpus.
  */
-const RUNTIME_MIRROR_PATH =
-  /^taproot\/[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\/|$)/iu;
-
-/** Whether a site-relative path (no leading slash) is `taproot/<semver>` or under it. */
-export function isRuntimeMirrorPath(path) {
-  return RUNTIME_MIRROR_PATH.test(path);
-}
+// The rule itself lives in the shared site-check source, which the redirect source rules also read.
+export { isRuntimeMirrorPath } from "./site-checks.js";
 
 export const RUNTIME_MIRROR_PATH_REASON =
   "'/taproot/<version>/' is reserved for the published-site runtime, which the platform answers before any page "

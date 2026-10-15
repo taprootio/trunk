@@ -45,6 +45,12 @@ import {
   validateAndLintThemePair,
 } from "./theme-validation.js";
 import {
+  describeSettingField,
+  formatSettingsReference,
+  PAGE_BACKGROUND_IMAGE_RENDERING,
+  PAGE_BACKGROUND_VERSUS_CANVAS,
+} from "./setting-reference.js";
+import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "./settings-catalog.js";
@@ -273,14 +279,23 @@ const THEME_GROUPS = Object.freeze([
   }),
   Object.freeze({
     name: "surface-assets",
-    summary: "Preserve pulled asset fields; use appearance image ids for site-owned canvas art.",
+    summary:
+      "Preserve pulled asset fields; use appearance image ids for the logos, favicon and canvas image. The page "
+      + "background image is a theme field behind the page content, unlike the canvas image, which paints only the "
+      + "side margins (help settings has both).",
     fields: Object.freeze([
       themeField("stylesheets", "Agent-authored site themes must keep this exact array empty.", { exact: [] }),
       themeField(
         "pageBackgroundImage",
-        "CSS background-image; the complete Taproot workspace includes an empty value.",
+        "CSS background-image (the app's Page style > Background image). " + PAGE_BACKGROUND_IMAGE_RENDERING
+          + " Today it is a CSS url(...) of a delivered image, the src that .taproot-site-media.json records; it tiles "
+          + "at the image's natural pixel size from the top-left. The complete Taproot workspace includes an empty value.",
       ),
-      themeField("pageBackgroundImageOpacity", "Page background opacity.", { minimum: 0, maximum: 1 }),
+      themeField(
+        "pageBackgroundImageOpacity",
+        "How strongly the page background image shows, from 0 (invisible) to 1 (fully opaque).",
+        { minimum: 0, maximum: 1 },
+      ),
       themeField("boxBackgroundImage", "Optional inherited box-surface background image."),
       themeField("boxBackgroundImageOpacity", "Optional box background opacity.", { minimum: 0, maximum: 1 }),
       themeField("vellumOpacity", "Optional modal-vellum opacity.", { minimum: 0, maximum: 1 }),
@@ -418,6 +433,9 @@ export function getThemeReference() {
   };
 }
 
+// "linkHoverColor" reads "link hover color", so a new footer color token needs no second table.
+const footerColorLabel = (name) => name.replace(/([A-Z])/gu, " $1").toLowerCase();
+
 function appearanceColorReference(definition) {
   return definition.type === "appearance-color"
     ? {
@@ -432,6 +450,7 @@ export function getAppearanceReference() {
   const scalarFields = APPEARANCE_SCALAR_FIELDS.map((field) => ({
     file: APPEARANCE_FILES[field.settingsType],
     path: "settings." + field.name,
+    ...describeSettingField(field.settingsType, field.name),
     type: field.type,
     ...(field.values ? { values: field.values } : {}),
     ...(field.minimum !== undefined ? { minimum: field.minimum, maximum: field.maximum } : {}),
@@ -447,27 +466,36 @@ export function getAppearanceReference() {
       {
         file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES],
         path: "settings.lightTheme",
+        ...describeSettingField(SETTINGS_TYPE_TAPROOT_STYLES, "lightTheme"),
         type: "complete-espalier-theme",
       },
       {
         file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES],
         path: "settings.darkTheme",
+        ...describeSettingField(SETTINGS_TYPE_TAPROOT_STYLES, "darkTheme"),
         type: "complete-espalier-theme",
       },
       ...scalarFields,
       ...APPEARANCE_FOOTER_COLOR_FIELDS.map((field) => ({
         file: field.file,
         path: field.path,
+        appLabel: "Footer",
+        description: `The footer's ${footerColorLabel(field.name)} in the ${field.scheme} scheme. footer push owns the rest of the footer.`,
+        renders: "The footer, once footerSettings.enabled is true (default false).",
         type: field.type,
         ...appearanceColorReference(field),
         default: field.default,
       })),
     ],
     readOnlyProjections: APPEARANCE_READ_ONLY_FIELDS,
+    pageBackgroundVersusCanvas: PAGE_BACKGROUND_VERSUS_CANVAS,
+    fieldMap: CLI_BINARY_NAME + " help settings maps every pulled field, including the read-only ones, to its app control.",
     imageReferences:
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
       "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting. "
+      + "Each takes one image id: upload the highest-resolution file you have and assign it. An @2x or @3x suffix is only "
+      + "part of a filename, nothing pairs it with another file, and the platform generates the sizes. "
       + "Prefer transparent PNG or WebP artwork with genuine alpha so the header background shows through, including "
       + "inside letter counters. Avoid baked-in background rectangles unless the brand intentionally uses a badge. "
       + "Keep padding tight and verify the delivered image preserves transparency. Logo style and coloration are "
@@ -776,11 +804,17 @@ export function formatPresentationReference(reference) {
   }
   if (reference.referenceKind === "appearance") {
     return reference.title + "\nUsage: " + reference.usage + "\n\nWritable fields:\n"
-      + reference.fields.map((field) => "  " + field.file + " :: " + field.path + " — " + fieldConstraint(field)).join(
-        "\n",
-      )
+      + reference.fields.map((field) =>
+        "  " + field.file + " :: " + field.path + " — " + fieldConstraint(field)
+        + "\n      app: " + field.appLabel + ". " + field.description
+        + (field.renders === undefined ? "" : "\n      renders: " + field.renders)
+      ).join("\n")
       + "\n\nRead-only server projections:\n"
       + reference.readOnlyProjections.map((field) => "  " + field.file + " :: " + field.path).join("\n")
+      + "\n\nPage background image versus canvas image:\n  - " + reference.pageBackgroundVersusCanvas.pageBackground
+      + "\n  - " + reference.pageBackgroundVersusCanvas.canvas
+      + "\n  - " + reference.pageBackgroundVersusCanvas.shared
+      + "\n\nField map: " + reference.fieldMap
       + "\n\nImages: " + reference.imageReferences + "\nLogos: " + reference.logoContract
       + "\nLogo contrast: " + reference.logoContrastContract
       + "\nFavicon: " + reference.faviconContract
@@ -794,6 +828,7 @@ export function formatPresentationReference(reference) {
       + "\nRetry: " + reference.retry
       + "\nRecovery: " + reference.recovery + "\n";
   }
+  if (reference.referenceKind === "settings") return formatSettingsReference(reference);
   if (reference.referenceKind === "footer") {
     const messages = reference.messages.map((message) =>
       message.name + " (unlisted fields rejected)\n"

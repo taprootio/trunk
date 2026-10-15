@@ -1,0 +1,71 @@
+{
+  "entries": [
+    {
+      "version": "0.21.0",
+      "note": "Review URLs stay out of deploy output unless you ask; deploy --staging waits until staging serves the new release; validate reports site checks; help corrections for free-form h1, legal pages, settings and logos; this changelog.",
+      "behavior": [
+        "deploy --staging and redirects check no longer report a live single-use review URL: stagingPreview.url is empty and stagingPreview.reason is staging.handoff_not_requested. Pass --handoff for a fresh URL in the result, or run staging review. --no-handoff states the default.",
+        "staging review takes --path <page> to open the review on that page instead of the home page; deploy --staging --handoff and redirects check --handoff take --review-path <page>. The path is checked offline (staging.review_path_invalid).",
+        "pull and nav push write nav.json without default-only fields (no empty externalUrl, resourceId or children), and nav push rewrites nav.json from the saved tree after a successful save; either form is accepted.",
+        "Footer text runs omit bold, italic and underline when they are false, in pull and footer push; either form is accepted.",
+        "New command: changelog [--since <version>] prints these notes offline, and status reports the installed version's note. The cli_outdated refusal now carries latestVersion and the changelog command to run after upgrading.",
+        "deploy --staging on a Standard site waits, bounded at 180 seconds, until staging serves the new release before it finishes, and reports stagingServed as served, propagating or unverified; the result never fails on the wait. Propagation can take up to about 120 seconds after the deployment completes.",
+        "validate runs the shared site check rules it can run offline and reports findings (ruleId, severity, pageId, subject) and siteChecks (ranOffline, checkedBySite, checkedAtDeploy); redirect refusals keep their codes and carry the rule id. status reads the site health summary; the broken-references report is gone, so an older CLI needs this upgrade.",
+        "Published forms mark required fields with an asterisk and a legend; help forms describes the mark.",
+        "Help corrections: a free-form page renders no automatic heading and its first level-1 heading is the h1; help pages lists the read-only legal page type and help page legal describes it; the new help settings topic maps every pulled setting to the app control that writes it and says where it renders; logo.png and logo@2x.png are not paired, so assign the highest-resolution file.",
+        "Espalier 6.3.0: a field fills one layer above the surface that contains it; the default site theme was rebuilt for it."
+      ],
+      "help": [
+        "walkthrough",
+        "nav",
+        "redirects",
+        "preview",
+        "forms",
+        "pages",
+        "page",
+        "settings",
+        "appearance",
+        "theme",
+        "media",
+        "delivery"
+      ]
+    },
+    {
+      "version": "0.20.0",
+      "note": "Pages place a form by its id, so renaming a form never breaks a page; form names are unique on a site.",
+      "behavior": [
+        "pages push turns a component:form formKey into the form's id, and refuses a key the site does not have (pages.form_unknown) or has archived (pages.form_archived) before writing anything; plan reports the same. pages pull writes the key back, and keeps an id the site no longer has.",
+        "forms validate and forms push refuse two forms with the same name, ignoring case (forms.name_duplicate, forms.name_taken).",
+        "The first pages pull after the server release can report pages.pull_conflict for a Markdown page that places a form, though its content is the same; run pages push for that page, or delete the file and pull again."
+      ],
+      "help": [
+        "forms",
+        "component"
+      ]
+    },
+    {
+      "version": "0.19.0",
+      "note": "Forms can email the site owner an hourly count of new submissions, and a newsletter sink needs a consent checkbox.",
+      "behavior": [
+        "A form file takes an optional top-level notify_owner boolean. New forms default to false, omitting it on an existing form keeps the site's choice, and it takes effect without a new version or publishing.",
+        "A newsletter sink requires a required email contact field and at least one consent checkbox, and every consent checkbox must be checked.",
+        "forms.concurrent_modification is also raised when the site's operational settings moved since the last read."
+      ],
+      "help": [
+        "forms"
+      ]
+    },
+    {
+      "version": "0.18.0",
+      "note": "Place categories can be set per site, and deploy shows the pages it will generate before it sends anything.",
+      "behavior": [
+        "New commands: places category list, places category set <placeId> <category> and places category clear <placeId> change the category this site files a place review under.",
+        "deploy --staging plans the candidate first and reports the pages it will generate and the allowance left (readiness.pageEstimate); a candidate that does not fit stops with deploy.page_allowance_exceeded before anything is sent.",
+        "A deploy refused for the pages-generated allowance or the bandwidth pause reports plan_limit with the time it can lift."
+      ],
+      "help": [
+        "page"
+      ]
+    }
+  ]
+}

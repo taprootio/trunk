@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { changelogEntryFor } from "../src/changelog.js";
 import { runCli } from "../src/cli.js";
 import {
+  changelogCommandSince,
   CLI_UPGRADE_REFUSAL_FIELD,
   CLI_VERSION,
   EXTERNAL_WRITES_SETTING_KEY,
@@ -1216,7 +1218,7 @@ function statusRoutes(exchange = exchangeRoute()) {
       pathname: SITE_IMAGES,
       reply: { images: [], totalImages: 0, processingImages: 0, nextPageToken: "" },
     },
-    { method: "GET", pathname: /\/broken-references$/u, reply: {} },
+    { method: "GET", pathname: /\/health$/u, reply: {} },
   ];
 }
 
@@ -1559,6 +1561,19 @@ test("the exchange sends this CLI's version and records the latest Taproot named
   assert.equal(result.cliRelease.latestVersion, "9.9.9");
   assert.equal(result.cliRelease.behind, true);
   assert.ok(progress.some((line) => line.includes("9.9.9")));
+  // The installed release's note comes from the changelog record, and a CLI that is behind says what to run after upgrading (TR01225).
+  // While the batch's changelog entry is still "unreleased" the installed version has no entry, and status
+  // reports no note rather than an empty one; test/changelog.test.js is what requires the stamp.
+  const recorded = changelogEntryFor(CLI_VERSION);
+  if (recorded === undefined) {
+    assert.equal(result.cliRelease.whatsNew, undefined);
+    assert.ok(!progress.some((line) => line.startsWith("What's new in")));
+  } else {
+    assert.equal(result.cliRelease.whatsNew.version, CLI_VERSION);
+    assert.equal(result.cliRelease.whatsNew.note, recorded.note);
+    assert.ok(progress.some((line) => line.startsWith("What's new in")));
+  }
+  assert.equal(result.cliRelease.changelogCommand, changelogCommandSince(CLI_VERSION));
 
   // Recorded with the sign-in, which is the only thing that lets the offline
   // verbs refuse later.
@@ -1660,6 +1675,10 @@ test("the offline verbs refuse once a newer release has been recorded", async (t
     const environment = await runOffline(site, ["env"]);
     assert.equal(environment.exitCode, 0, environment.stderr);
     assert.equal(environment.result.ok, true);
+    // `changelog` too: it is how the upgraded CLI explains what moved (TR01225).
+    const changelog = await runOffline(site, ["changelog", "--since", "0.18.0"]);
+    assert.equal(changelog.exitCode, 0, changelog.stderr);
+    assert.equal(changelog.result.ok, true);
   });
 });
 

@@ -22,6 +22,7 @@ import { authorWarnings, descriptionWarnings } from "../page-metadata.js";
 import { CHECK_AREA, collectProblems, refuseProblems } from "../problems.js";
 import { isRedirectMapRevision, REDIRECT_KIND_GONE, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
 import { boundedList, successResult } from "../session.js";
+import { evaluateOfflineSiteChecks } from "../site-check-findings.js";
 import { SETTINGS_GROUPS } from "../settings-catalog.js";
 import { checkWorkspace } from "../workspace-check.js";
 import {
@@ -648,6 +649,20 @@ function pageHints(checked, onProgress) {
   return hints;
 }
 
+/**
+ * The offline site checks (TR01085) over the planned pages: the rules the shared
+ * catalogue lists for `validate`, with the rest named as checked by the site.
+ */
+function offlineSiteChecks(checked, manifest, onProgress) {
+  if (checked.settingsOnly) return {};
+  return evaluateOfflineSiteChecks({
+    planned: checked.pages?.planned,
+    pagePaths: manifest.pages.map((entry) => normalizePagePath(entry?.path)).filter((value) => value !== undefined),
+    pagesComplete: manifest.pagesTruncated !== true,
+    onProgress,
+  });
+}
+
 export async function validateFixture(invocation = {}) {
   if (invocation.init) return await initializeFixture(invocation, validateFixture);
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
@@ -736,6 +751,7 @@ export async function validateFixture(invocation = {}) {
     ...autolinkWarnings(checked.pages?.planned, onProgress),
     ...descriptionWarnings(checked.pages?.planned, onProgress),
     ...authorWarnings(checked.pages?.planned, onProgress),
+    ...offlineSiteChecks(checked, manifest, onProgress),
   };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -765,6 +781,8 @@ export async function validateFixture(invocation = {}) {
       "credential authorization or live site ownership",
       "remote concurrency or current revisions",
       "server normalization and pull round trips",
+      "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
+        + "siteHealth, or siteChecks.checkedAtDeploy, which only a deploy applies",
       "preview or published rendering",
     ],
     nextStep: "Run a real pull and authorized preview before approval or deployment.",
@@ -801,6 +819,7 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       ...autolinkWarnings(checked.pages.planned, onProgress),
       ...descriptionWarnings(checked.pages.planned, onProgress),
       ...authorWarnings(checked.pages.planned, onProgress),
+      ...offlineSiteChecks(checked, manifest, onProgress),
     };
   onProgress(
     checked.settingsOnly
@@ -826,6 +845,8 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       "credential authorization or live site ownership",
       "pages, revisions, or videos that changed on the site since the pull",
       "server normalization and pull round trips",
+      "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
+        + "siteHealth, or siteChecks.checkedAtDeploy, which only a deploy applies",
       "preview or published rendering",
     ],
     nextStep: "Run 'taproot-site plan' to check the workspace against the live site and see the ordered apply.",

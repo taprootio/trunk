@@ -1,4 +1,5 @@
 import { getSiteRedirectMap, mintStagingPreviewHandoff } from "./api.js";
+import { CLI_BINARY_NAME } from "./constants.js";
 import { sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
 const COOKIE = "__Host-taproot_staging_preview";
@@ -6,8 +7,8 @@ const CHECK = "__taproot_preview_check";
 const TIMEOUT = 5_000;
 const REPORT_BYTES = 28_000;
 
-async function request(client, url, cookie, signal) {
-  const response = await client.fetch(url, {
+async function send(client, url, cookie, signal, userAgent) {
+  return await client.fetch(url, {
     method: "GET",
     redirect: "manual",
     signal: AbortSignal.any([
@@ -17,10 +18,19 @@ async function request(client, url, cookie, signal) {
     ]),
     headers: {
       accept: "text/html",
-      "user-agent": "taproot-site/staging-redirect-check",
+      "user-agent": userAgent,
       ...(cookie ? { cookie } : {}),
     },
   });
+}
+
+/** One GET on the staging host with the checker's cookie; the caller owns the body. */
+export async function fetchStagingPage(client, url, cookie, signal) {
+  return await send(client, url, cookie, signal, "taproot-site/staging-served-check");
+}
+
+async function request(client, url, cookie, signal) {
+  const response = await send(client, url, cookie, signal, "taproot-site/staging-redirect-check");
   await response.body?.cancel().catch(() => {});
   return response;
 }
@@ -154,11 +164,36 @@ export async function checkStagingRedirects(client, siteId, onProgress, now) {
 }
 
 /**
- * The staging redirect check and a fresh preview handoff, as redirects check and
- * deploy --staging report them. A check that cannot finish keeps the same shape,
- * with the reason.
+ * What deploy --staging and redirects check report in place of a review URL
+ * when no handoff was asked for (TR01233). The URL is a live single-use
+ * credential, so it stays out of the JSON that agents save to logs unless the
+ * caller passes --handoff. The staging origin is not secret and is kept.
  */
-export async function inspectStagingPreview(client, siteId, onProgress, now) {
+export function handoffNotRequested(stagingUrl) {
+  return {
+    url: "",
+    ...(stagingUrl ? { stagingUrl } : {}),
+    reason: "staging.handoff_not_requested",
+    recovery: `Run '${CLI_BINARY_NAME} staging review' to mint a single-use review URL (add --path <page> to land on `
+      + "a page), or rerun this command with --handoff.",
+  };
+}
+
+export const HANDOFF_NOT_REQUESTED_PROGRESS =
+  `No review URL was minted. Run '${CLI_BINARY_NAME} staging review' when you want one, or pass --handoff.`;
+
+/**
+ * The staging redirect check and, only when `handoff` is true, a fresh preview
+ * handoff, as redirects check and deploy --staging report them. A check that
+ * cannot finish keeps the same shape, with the reason.
+ */
+export async function inspectStagingPreview(
+  client,
+  siteId,
+  onProgress,
+  now,
+  { handoff = false, returnPath = "/" } = {},
+) {
   let routeCheck;
   let redirects;
   let stagingUrl;
@@ -184,9 +219,13 @@ export async function inspectStagingPreview(client, siteId, onProgress, now) {
       error: redirectCheckError(error),
     };
   }
+  if (!handoff) {
+    onProgress(HANDOFF_NOT_REQUESTED_PROGRESS);
+    return { routeCheck, redirects, stagingPreview: handoffNotRequested(stagingUrl) };
+  }
   try {
     // Mint after checks so the final single-use URL has never been consumed.
-    const stagingPreview = await mintStagingPreviewHandoff(client, siteId, { now });
+    const stagingPreview = await mintStagingPreviewHandoff(client, siteId, { now, returnPath });
     return { routeCheck, redirects, stagingPreview };
   } catch {
     onProgress("Warning: a staging handoff could not be minted.");
@@ -196,7 +235,7 @@ export async function inspectStagingPreview(client, siteId, onProgress, now) {
       stagingPreview: {
         url: "",
         ...(stagingUrl ? { stagingUrl } : {}),
-        warning: "Staging handoff unavailable; run redirects check to retry.",
+        warning: `Staging handoff unavailable; run '${CLI_BINARY_NAME} staging review' to mint one.`,
       },
     };
   }

@@ -20,7 +20,7 @@ export async function stagingReview(invocation) {
   const { client, siteId, now, onProgress } = await openSession(invocation);
   return await withRefusalGuidance(onProgress, "staging review", async () => {
     onProgress("Minting a fresh single-use staging review handoff.");
-    const handoff = await mintStagingPreviewHandoff(client, siteId, { now });
+    const handoff = await mintStagingPreviewHandoff(client, siteId, { now, returnPath: invocation.reviewPath });
     onProgress(`Staging review handoff minted for ${handoff.stagingUrl}. ${STAGING_REVIEW_GUIDANCE}`);
     return successResult(VERB_STAGING_REVIEW, siteId, {
       stagingPreview: { ...handoff, review: STAGING_REVIEW_GUIDANCE },

@@ -52,6 +52,17 @@ const ROUTES = [
   { arguments_: ["approve"], verb: "approve" },
   { arguments_: ["deploy", "--staging"], verb: "deploy", deployTarget: "staging" },
   { arguments_: ["deploy", "--production"], verb: "deploy", deployTarget: "production" },
+  { arguments_: ["deploy", "--staging", "--handoff"], verb: "deploy", deployTarget: "staging", handoff: true },
+  { arguments_: ["deploy", "--no-handoff", "--staging"], verb: "deploy", deployTarget: "staging", handoff: false },
+  { arguments_: ["redirects", "check", "--handoff"], verb: "redirects check", handoff: true },
+  { arguments_: ["staging", "review", "--path", "about"], verb: "staging review", reviewPath: "/about" },
+  {
+    arguments_: ["deploy", "--staging", "--handoff", "--review-path", "/posts/one"],
+    verb: "deploy",
+    deployTarget: "staging",
+    handoff: true,
+    reviewPath: "/posts/one",
+  },
   { arguments_: ["preview", "page", PAGE_ID, "--json"], verb: "preview page", pageSelector: PAGE_ID },
   // The documented homepage spelling must survive positional validation, which
   // refuses the raw empty string the manifest records for the root page.
@@ -92,6 +103,8 @@ test("routes every verb to its own handler with the parsed invocation", async (t
       assert.equal(invocations[0].configPath, "site config.json");
       assert.equal(invocations[0].quiet, quiet);
       assert.equal(invocations[0].deployTarget, route.deployTarget);
+      assert.equal(invocations[0].handoff, route.handoff);
+      assert.equal(invocations[0].reviewPath, route.reviewPath);
       assert.equal(invocations[0].pageSelector, route.pageSelector);
       assert.equal(invocations[0].keyName, route.keyName);
       assert.deepEqual(invocations[0].previewIds, route.previewIds);
@@ -175,7 +188,7 @@ test("the shipped status handler honors explicit config from a config-free cwd a
       body = { deployments: [], nextPageToken: "" };
     } else if (url.pathname.endsWith("/images")) {
       body = { images: [], totalImages: 0, processingImages: 0, nextPageToken: "" };
-    } else if (url.pathname.endsWith("/broken-references")) {
+    } else if (url.pathname.endsWith("/health")) {
       body = {};
     } else {
       assert.fail(`unexpected request path ${url.pathname}`);
@@ -292,6 +305,20 @@ test("usage faults exit 2 with stable codes", async (testContext) => {
     { arguments_: ["deploy"], code: "cli.deploy_target" },
     { arguments_: ["deploy", "--staging", "--production"], code: "cli.deploy_target" },
     { arguments_: ["deploy", "--staging", "--staging"], code: "cli.duplicate_option" },
+    { arguments_: ["deploy", "--staging", "--handoff", "--handoff"], code: "cli.duplicate_option" },
+    { arguments_: ["deploy", "--staging", "--handoff", "--no-handoff"], code: "cli.handoff_conflict" },
+    { arguments_: ["redirects", "check", "--no-handoff", "--handoff"], code: "cli.handoff_conflict" },
+    { arguments_: ["deploy", "--production", "--handoff"], code: "cli.handoff_target", field: "handoff" },
+    { arguments_: ["pull", "--handoff"], code: "cli.unknown_option" },
+    { arguments_: ["staging", "review", "--path"], code: "staging.review_path_invalid" },
+    { arguments_: ["staging", "review", "--path", "--json"], code: "staging.review_path_invalid" },
+    { arguments_: ["staging", "review", "--path", "//attacker.example"], code: "staging.review_path_invalid" },
+    { arguments_: ["staging", "review", "--path", "about", "--path", "faq"], code: "cli.duplicate_option" },
+    { arguments_: ["pull", "--path", "about"], code: "cli.unknown_option" },
+    { arguments_: ["deploy", "--staging", "--review-path", "about"], code: "cli.review_path_requires_handoff" },
+    { arguments_: ["redirects", "check", "--review-path", "about"], code: "cli.review_path_requires_handoff" },
+    { arguments_: ["staging", "review", "--review-path", "about"], code: "cli.unknown_option" },
+    { arguments_: ["staging", "review", "--handoff"], code: "cli.unknown_option" },
     { arguments_: ["pull", "--allow-raw-html"], code: "cli.unknown_option" },
     { arguments_: ["pages", "push", "--allow-raw-html"], code: "cli.unknown_option" },
     { arguments_: ["status", "stray-positional"], code: "cli.unexpected_argument" },
@@ -593,7 +620,7 @@ test("serves page and component reference help without configuration, credential
   const cases = [
     { arguments_: ["help"], match: /^Usage: taproot-site help/u },
     { arguments_: ["help", "--help"], match: /^Usage: taproot-site help/u },
-    { arguments_: ["help", "pages"], match: /^Authorable page types:/u },
+    { arguments_: ["help", "pages"], match: /^Page types:/u },
     {
       arguments_: ["help", "page", "free-form"],
       match: /^Free-form page \(free-form\)/u,
@@ -608,6 +635,45 @@ test("serves page and component reference help without configuration, credential
         "Inline facts:",
         "```inline-facts",
         "tel: remains a native link",
+        "Headings and the h1:",
+        "Legal and privacy pages:",
+        "link the first mention to https://www.taproot.io by default",
+        "[Taproot](https://www.taproot.io)",
+        "A free-form page renders no automatic heading",
+        "open the Markdown with '# Page title'",
+        "renders as an h2, like the other top-level sections",
+      ],
+    },
+    {
+      // A site-authoring key cannot author a legal page, so the topic states what the CLI does see (TR01221).
+      arguments_: ["help", "page", "legal"],
+      match: /^Legal page \(legal\)/u,
+      contains: [
+        "TEMPLATE_TYPE_LEGAL",
+        "metadata-only",
+        "automatic <h1>",
+        "/<path>/<version>",
+        "Assigned by Taproot when the document is promoted to production",
+        "site.legal_documents.manage",
+        "open owner decision",
+        "Linking Taproot: Where a privacy policy or other legal page names Taproot",
+        "'approve' stages every tracked page with a draft",
+        "every production promotion of a release staged after that approval is refused",
+        "no automatic heading",
+      ],
+    },
+    {
+      arguments_: ["help", "settings"],
+      match: /^Site settings: what each field is/u,
+      contains: [
+        "Page background image versus canvas image:",
+        "Brand & style > Page canvas > Canvas image",
+        "settings.lightCanvasImageId",
+        "tiles at its natural pixel size",
+        "App controls stored inside the theme",
+        "Menu font and Menu weight",
+        "default {\"enabled\":false}",
+        "Features > Time zone",
       ],
     },
     { arguments_: ["help", "components"], match: /^Free-form components:/u },
@@ -619,7 +685,15 @@ test("serves page and component reference help without configuration, credential
     {
       arguments_: ["help", "media"],
       match: /^Media upload contract/u,
-      contains: ["workspace root", "logo@2x.png", "imageId", "src", "urls"],
+      contains: [
+        "workspace root",
+        "logo@2x.png",
+        "nothing pairs it with logo.png",
+        "never a 1x and a 2x pair",
+        "imageId",
+        "src",
+        "urls",
+      ],
     },
     {
       // The whole contract an agent needs to author redirects.json without
@@ -642,7 +716,7 @@ test("serves page and component reference help without configuration, credential
         "the count the last pull recorded",
         "redirects.concurrent_modification",
         "Converting an engagement's CSV into this file is the agent's job",
-        "no separate propagation delay",
+        `up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes`,
         "cannot name a file the site generates",
         "\"kind\": \"gone\"",
       ],
@@ -685,7 +759,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 6\.2\.0 complete site-theme contract/u,
+      match: /^Espalier 6\.3\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -695,6 +769,8 @@ test("serves page and component reference help without configuration, credential
         "lightLogoId",
         "darkLogoId",
         "no separate compact-logo",
+        "upload the highest-resolution file you have and assign it",
+        "nothing pairs it with another file",
         "Logo contrast: Evaluate lightLogoId against the rendered light-scheme header",
         "Transparent pixels provide no contrast",
         "desktop and compact/mobile widths",
@@ -768,6 +844,8 @@ test("serves page and component reference help without configuration, credential
       assert.equal(exitCode, 0);
       assert.match(stdout.read(), scenario.match);
       for (const text of scenario.contains ?? []) assert.ok(stdout.read().includes(text), `missing '${text}'`);
+      // No topic may tell an agent to prepare a 1x and a 2x logo pair (TR01235).
+      assert.doesNotMatch(stdout.read(), /@2x copy/u);
     });
   }
 });
@@ -788,6 +866,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
     { arguments_: ["help", "preview", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "theme", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "appearance", "--json"], topic: "presentation", field: "reference" },
+    { arguments_: ["help", "settings", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "footer", "--json"], topic: "presentation", field: "reference" },
     { arguments_: ["help", "fixture", "--json"], topic: "workflow", field: "reference" },
     { arguments_: ["help", "import", "--json"], topic: "workflow", field: "reference" },
@@ -813,7 +892,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 37,
+          referenceVersion: 38,
           topic: scenario.topic,
         },
       );
@@ -895,6 +974,7 @@ test("reference help reports stable usage errors with valid alternatives", async
         "walkthrough",
         "theme",
         "appearance",
+        "settings",
         "footer",
         "import",
         "fonts",
@@ -909,7 +989,7 @@ test("reference help reports stable usage errors with valid alternatives", async
     {
       arguments_: ["help", "page", "poem", "--json"],
       code: "help.page_type_unknown",
-      alternatives: ["free-form", "article", "recipe", "album", "place-review", "generated"],
+      alternatives: ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"],
     },
     {
       arguments_: ["help", "component", "carousel", "--json"],
@@ -1003,6 +1083,7 @@ test("reference help rejects malformed topic shapes with help.usage", async (con
       ["help", "pages", "free-form"],
       ["help", "components", "hero-section"],
       ["help", "footer", "extra"],
+      ["help", "settings", "extra"],
       ["help", "redirects", "gone"],
       ["help", "fonts", "serif", "display"],
       ["help", "components", "--json", "--json"],

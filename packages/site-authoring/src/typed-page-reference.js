@@ -323,9 +323,120 @@ const TYPE_DETAILS = Object.freeze({
   },
 });
 
-export const TYPED_PAGE_TYPES = Object.freeze(Object.keys(TYPE_DETAILS));
-/** The templates a Markdown source can declare: every typed page but the update-only generated one. */
-export const MARKDOWN_PAGE_TYPES = Object.freeze(TYPED_PAGE_TYPES.filter((type) => type !== TEMPLATE_GENERATED));
+/**
+ * The legal page type (TR01221). It is described here and nowhere else in the
+ * CLI: it has no template name in `typed-pages.js` because a site-authoring
+ * key cannot author it, so `pull` records it as a metadata-only page and
+ * `pages push` never sees a source for it.
+ */
+export const LEGAL_PAGE_TYPE = "legal";
+
+export const TYPED_PAGE_TYPES = Object.freeze([...Object.keys(TYPE_DETAILS), LEGAL_PAGE_TYPE]);
+/** The templates a Markdown source can declare: the authorable typed pages, not generated or legal. */
+export const MARKDOWN_PAGE_TYPES = Object.freeze(
+  TYPED_PAGE_TYPES.filter((type) => type !== TEMPLATE_GENERATED && type !== LEGAL_PAGE_TYPE),
+);
+
+/**
+ * The default for any privacy policy or other legal text that names the
+ * platform (TR01224). `help page free-form` prints it too, because a policy
+ * written through the CLI is a free-form page.
+ */
+export const LEGAL_PLATFORM_LINK_GUIDANCE = Object.freeze({
+  rule:
+    "Where a privacy policy or other legal page names Taproot, link the first mention to https://www.taproot.io by "
+    + "default, so readers can learn how the platform affects them. Leave it plain only if the owner asks.",
+  example: "This site is published on [Taproot](https://www.taproot.io).",
+});
+
+function legalReference() {
+  return Object.freeze({
+    type: LEGAL_PAGE_TYPE,
+    displayName: "Legal page",
+    summary:
+      "A versioned legal document such as a privacy policy or terms: an automatic h1, a version and effective date, and "
+      + "permanent links to each version. The CLI sees it as metadata only; it is created and published in the app.",
+    readOnly: true,
+    workspace: Object.freeze({
+      directory: `${PAGES_DIRECTORY}/`,
+      templateType: "TEMPLATE_TYPE_LEGAL",
+      sourceRule:
+        "A legal page has no source file. 'pull' lists it in .taproot-site-manifest.json with templateType "
+        + "TEMPLATE_TYPE_LEGAL and workspaceMode \"metadata-only\" and writes nothing under pages/ for it, so 'pages push' has "
+        + "nothing to send.",
+    }),
+    fields: Object.freeze([
+      Object.freeze({ name: "title", description: "The page title. It prints as the page's h1, so the body should not open with its own title." }),
+      Object.freeze({
+        name: "body",
+        description: "The rich-text document. A table of contents is built from its level-2 headings.",
+      }),
+      Object.freeze({
+        name: "documentKey",
+        description:
+          "The document's stable identity, set in the app. The permanent version address exists only once the page has "
+          + "a document key and a version.",
+      }),
+      Object.freeze({
+        name: "documentRole",
+        description:
+          "The typed purpose of the document, such as membership_terms or privacy_notice. Selected in the app; fixed for membership terms.",
+      }),
+      Object.freeze({ name: "summaryOfChanges", description: "A short note on what this version changed, written by the owner." }),
+      Object.freeze({
+        name: "material",
+        description: "Set by a person: this version's changes need readers to accept again when the site's policy asks for that.",
+      }),
+      Object.freeze({
+        name: "version, effectiveDate, supersedesVersion",
+        description:
+          "Assigned by Taproot when the document is promoted to production: the version number, the promotion date, and "
+          + "the version it replaces. They cannot be written, so a document that has not been promoted shows none of them.",
+      }),
+    ]),
+    rendering: Object.freeze([
+      "An automatic <h1> from the title, then an Effective, Version and Supersedes list, a download link for a PDF of "
+      + "the version, the summary of changes, and a table of contents, once those exist.",
+      "Two addresses once published: the current document at /<path>, and an immutable copy of each version at "
+      + "/<path>/<version> (and /<path>/<version>.pdf). Later versions never change an earlier address.",
+    ]),
+    authoring: Object.freeze({
+      cli:
+        "Read-only. 'pull' records the page's identity, path, title and status. No verb creates, edits, converts, "
+        + "approves or publishes one. A bare 'approve' stages every tracked page with a draft, a pending legal draft "
+        + "included, and the request holding it is refused (up to 100 pages go in one request): name the pages ('approve <path>').",
+      key:
+        "A site-authoring key cannot create or publish a legal page, and a production deploy whose selected pages include "
+        + "one is refused for a key, because the permission that governs legal documents (site.legal_documents.manage) is "
+        + "outside the key's delegation.content, delegation.design and delegation.deployments capabilities. Until a "
+        + "person promotes an app-approved legal page, every production promotion of a release staged after that approval is refused. This is how keys work today; whether a key should ever author a legal page is an open owner decision.",
+      app:
+        "A signed-in person who may manage the site's legal documents creates the page, writes its body, and publishes it "
+        + "with a production deployment in the app. Taproot assigns the version and effective date at that point.",
+    }),
+    choosing: Object.freeze({
+      legal:
+        "Choose a legal page when readers must be able to see which version applied and when it took effect, such as a "
+        + "privacy policy, terms of service or membership terms.",
+      freeForm:
+        "A free-form page is an ordinary page. It has no version history, no effective date, no permanent version "
+        + "addresses and no automatic heading: open its Markdown with a '# ' line holding the title (see "
+        + `'${CLI_BINARY_NAME} help page free-form'). The CLI cannot author a legal page, so a policy written here is an ordinary `
+        + "page, free-form unless another template fits: put the date it was last updated in its text, and tell the owner it is not versioned.",
+    }),
+    platformLink: LEGAL_PLATFORM_LINK_GUIDANCE,
+    workflow: Object.freeze([
+      Object.freeze({
+        command: `${CLI_BINARY_NAME} pull`,
+        result: "Records the page as metadata-only in the manifest; nothing to edit.",
+      }),
+      Object.freeze({
+        command: "the app",
+        result: "A person with the legal permission edits the draft and promotes it with a production deployment.",
+      }),
+    ]),
+  });
+}
 
 function typedReference(type) {
   const details = TYPE_DETAILS[type];
@@ -389,7 +500,11 @@ function typedReference(type) {
   });
 }
 
-const REFERENCES = Object.freeze(Object.fromEntries(TYPED_PAGE_TYPES.map((type) => [type, typedReference(type)])));
+const REFERENCES = Object.freeze(
+  Object.fromEntries(
+    TYPED_PAGE_TYPES.map((type) => [type, type === LEGAL_PAGE_TYPE ? legalReference() : typedReference(type)]),
+  ),
+);
 
 /** The reference for one non-free-form template, or `undefined`. */
 export function getTypedPageReference(type) {
@@ -400,8 +515,17 @@ function formatField(field) {
   return `  ${field.name.padEnd(18)} ${field.type}; ${field.required ? "required" : "optional"}; ${field.description}`;
 }
 
+function formatLegalReference(page) {
+  return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace (${page.workspace.directory}):\n  source rule           ${page.workspace.sourceRule}\n\nFields (set in the app):\n${
+    page.fields.map((field) => `  ${field.name}: ${field.description}`).join("\n")
+  }\n\nHow it renders:\n${page.rendering.map((line) => `  - ${line}`).join("\n")}\n\nWho can author it:\n  CLI                   ${page.authoring.cli}\n  site-authoring key    ${page.authoring.key}\n  app                   ${page.authoring.app}\n\nLegal page or free-form page:\n  legal                 ${page.choosing.legal}\n  free-form             ${page.choosing.freeForm}\n\nLinking Taproot: ${page.platformLink.rule}\n  example               ${page.platformLink.example}\n\nWorkflow:\n${
+    page.workflow.map((step) => `  ${step.command}: ${step.result}`).join("\n")
+  }\n\nUse --json for the exact structure.\n`;
+}
+
 /** The plain-text `help page <type>` rendering. */
 export function formatTypedPageReference(page) {
+  if (page.type === LEGAL_PAGE_TYPE) return formatLegalReference(page);
   const markdown = page.workspace.formats.find((format) => format.extension === ".md");
   const json = page.workspace.formats.find((format) => format.extension === ".pm.json");
   const markdownSection = markdown === undefined

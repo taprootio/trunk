@@ -23,6 +23,7 @@ import {
   readWorkspaceJson,
   workspaceFileExists,
   WORKSPACE_LIMITS,
+  writeWorkspaceJson,
 } from "../workspace.js";
 
 /**
@@ -52,7 +53,9 @@ const MAXIMUM_REPORTED = 100;
 const MAXIMUM_ITEMS = 1_000;
 const MAXIMUM_TITLE_LENGTH = 200;
 const MAXIMUM_URL_LENGTH = CONTACT_OR_WEB_URL_MAX_LENGTH;
-const ITEM_KEYS = new Set(["id", "kind", "title", "resourceId", "externalUrl", "children"]);
+// The item keys in the order the workspace file spells them; validation and projection share this list.
+const NAVIGATION_ITEM_KEY_ORDER = Object.freeze(["id", "kind", "title", "resourceId", "externalUrl", "children"]);
+const ITEM_KEYS = new Set(NAVIGATION_ITEM_KEY_ORDER);
 
 // `SaveSiteNavigation` maps both `id` and `resourceId` through
 // `RequestValidation.RequireGuid`. A value that is not a GUID comes back as a
@@ -180,6 +183,36 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     externalUrl: item.kind === NAV_ITEM_KIND_EXTERNAL_URL ? item.externalUrl : "",
     children: validated,
   };
+}
+
+/**
+ * The one workspace spelling of a navigation tree (TR01232): the item keys in a
+ * fixed order, with the fields that only carry a default left out. The API prints
+ * proto3 defaults (`externalUrl: ""`, `children: []`) and `nav push` validates into
+ * the same full shape, so without this a pull after a push rewrote nav.json with
+ * values nobody wrote. Both `pull` and `nav push` write this form, and either form
+ * is accepted on the way in.
+ */
+export function projectNavigationForWorkspace(items) {
+  if (!Array.isArray(items)) return items;
+  return items.map((item) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return item;
+    const projected = {};
+    const keys = [
+      ...NAVIGATION_ITEM_KEY_ORDER.filter((key) => Object.hasOwn(item, key)),
+      ...Object.keys(item).filter((key) => !NAVIGATION_ITEM_KEY_ORDER.includes(key)),
+    ];
+    for (const key of keys) {
+      const value = item[key];
+      if ((key === "resourceId" || key === "externalUrl") && value === "") continue;
+      if (key === "children" && Array.isArray(value)) {
+        if (value.length > 0) projected.children = projectNavigationForWorkspace(value);
+        continue;
+      }
+      projected[key] = value;
+    }
+    return projected;
+  });
 }
 
 function collectIds(items, into = new Set()) {
@@ -325,6 +358,21 @@ export async function navPush(invocation) {
 
     const saved = await saveNavigation(client, siteId, navItems);
     onProgress(`Replaced the navigation tree with ${validated.items} items.`);
+    try {
+      // The file now holds what the site stored, in the form pull writes, so the next pull is byte-identical.
+      const stored = saved.length > 0 || navItems.length === 0 ? saved : navItems;
+      // siteId and navItems first, in pull's order; any other key the author kept follows.
+      const { siteId: _siteId, navItems: _navItems, ...extras } = parsed;
+      await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, {
+        siteId,
+        navItems: projectNavigationForWorkspace(stored),
+        ...extras,
+      });
+    } catch (error) {
+      // The site already holds the new tree; only the local file is stale, so say the tree was replaced.
+      if (error instanceof SiteAuthoringError) throw error.withCompletedWrites(["navigationTree"]);
+      throw error;
+    }
 
     const removedReport = boundedList(removed, MAXIMUM_REPORTED);
     const addedReport = boundedList(added, MAXIMUM_REPORTED);

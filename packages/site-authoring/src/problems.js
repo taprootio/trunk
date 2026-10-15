@@ -39,7 +39,12 @@ function withContext(problem, context, error) {
 export function problemsOf(error, context = {}) {
   const own = Array.isArray(error.problems) && error.problems.length > 0
     ? error.problems
-    : [{ code: error.code, ...(error.field === undefined ? {} : { field: error.field }), message: error.message }];
+    : [{
+      code: error.code,
+      ...(error.field === undefined ? {} : { field: error.field }),
+      ...(error.rule === undefined ? {} : { rule: error.rule }),
+      message: error.message,
+    }];
   return own.map((problem) => withContext(problem, context, error));
 }
 

@@ -130,6 +130,8 @@ export class SiteAuthoringError extends Error {
     this.previewDiagnostic = normalizePreviewDiagnostic(options.previewDiagnostic);
     this.field = typeof options.field === "string" ? sanitizeDiagnostic(options.field, "") : undefined;
     this.status = typeof options.status === "string" ? sanitizeDiagnostic(options.status, "") : undefined;
+    // The site check rule (shared/site-check-rules.json) this refusal comes from, when it comes from one.
+    this.rule = typeof options.rule === "string" && /^[a-z0-9_.]+$/u.test(options.rule) ? options.rule : undefined;
     this.alternatives = Array.isArray(options.alternatives)
       ? options.alternatives
         .filter((value) => typeof value === "string")
@@ -191,6 +193,7 @@ export class SiteAuthoringError extends Error {
         ...(typeof problem.file === "string" ? { file: sanitizeDiagnostic(problem.file, "") } : {}),
         code: /^[a-z0-9_.-]+$/u.test(problem.code) ? problem.code : "site.failed",
         ...(typeof problem.field === "string" ? { field: sanitizeDiagnostic(problem.field, "") } : {}),
+        ...(typeof problem.rule === "string" && /^[a-z0-9_.]+$/u.test(problem.rule) ? { rule: problem.rule } : {}),
         message: sanitizeDiagnostic(problem.message),
       }));
     this.problemCount = list.length;

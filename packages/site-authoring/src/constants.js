@@ -106,6 +106,12 @@ export const VERB_STAGING_REVIEW = "staging review";
 export const VERB_SITES = "sites";
 export const VERB_USE = "use";
 export const VERB_WHOAMI = "whoami";
+export const VERB_CHANGELOG = "changelog";
+
+/** The command that lists what changed since a version, for the CLI to name after an upgrade (TR01225). */
+export function changelogCommandSince(version) {
+  return `${CLI_BINARY_NAME} ${VERB_CHANGELOG} --since ${version}`;
+}
 export const VERB_PLAN = "plan";
 export const VERB_APPLY = "apply";
 export const VERB_PLACES_SEARCH = "places search";
@@ -256,6 +262,19 @@ export const LIMITS = Object.freeze({
   deploymentMilliseconds: 30 * 60_000,
   previewMilliseconds: 5 * 60_000,
   pollIntervalMilliseconds: 2_000,
+  // How long after a staging deployment completes the edge can still serve the
+  // previous release (TR01236): up to a minute for Workers KV to propagate the
+  // route, plus the Worker's 30-second KV read cache and 30-second isolate cache
+  // (docs/operations/published-site-worker-runbook.md, "Route resolution
+  // freshness budget"). The wait is longer than the ceiling so one slow read does
+  // not turn a propagating release into a false warning.
+  stagingPropagationCeilingSeconds: 120,
+  stagingServedMilliseconds: 180_000,
+  stagingServedPollMilliseconds: 3_000,
+  // Two reads in a row, because each read lands on one cached copy of the route.
+  stagingServedConfirmations: 2,
+  // The review notice sits at the end of the page, so the whole document is read.
+  stagingServedPageBytes: 4 * 1024 * 1024,
   requestAttempts: 4,
   uploadAttempts: 4,
   diagnosticScalars: 2_000,

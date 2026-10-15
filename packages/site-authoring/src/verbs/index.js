@@ -5,6 +5,7 @@ import {
   VERB_AUTHORS_LIST,
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
+  VERB_CHANGELOG,
   VERB_ENV,
   VERB_FOOTER_PUSH,
   VERB_FORMS_PULL,
@@ -38,6 +39,7 @@ import {
 } from "../constants.js";
 import { approve } from "./approve.js";
 import { authorsAdd, authorsList } from "./authors.js";
+import { changelog } from "./changelog.js";
 import { deliveryCheck } from "./delivery-check.js";
 import { deploy } from "./deploy.js";
 import { env } from "./env.js";
@@ -174,6 +176,7 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_USE]: use,
   [VERB_WHOAMI]: whoami,
   [VERB_ENV]: env,
+  [VERB_CHANGELOG]: changelog,
   [VERB_STATUS]: status,
   [VERB_DELIVERY_CHECK]: deliveryCheck,
   [VERB_STAGING_REVIEW]: stagingReview,

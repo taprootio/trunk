@@ -1,4 +1,5 @@
 import {
+  changelogCommandSince,
   CLI_UPGRADE_COMMAND,
   CLI_UPGRADE_REFUSAL_FIELD,
   CLI_VERSION,
@@ -131,6 +132,11 @@ export function isBehindLatest(latestVersion, currentVersion = CLI_VERSION) {
  * `api.request_rejected`.
  */
 class CliOutdatedError extends SiteAuthoringError {
+  constructor(code, message, options, latestVersion) {
+    super(code, message, options);
+    this.latestVersion = latestVersion;
+  }
+
   refusalKind() {
     return REFUSAL_CLI_OUTDATED;
   }
@@ -146,7 +152,9 @@ export function cliOutdatedError(latestVersion) {
     `This CLI is version ${CLI_VERSION}, and the last Taproot sign-in exchange reported ${latestVersion} as the `
       + "latest published release. Taproot accepts only the latest, so every online verb is refused until this "
       + `package is upgraded. Upgrade with: ${CLI_UPGRADE_COMMAND}. If ${latestVersion} was published in the last `
-      + "few minutes, npm may not serve it yet — wait a moment and retry the upgrade.",
+      + "few minutes, npm may not serve it yet — wait a moment and retry the upgrade. Once upgraded, run "
+      + `'${changelogCommandSince(CLI_VERSION)}' to see what changed.`,
     { field: CLI_UPGRADE_REFUSAL_FIELD },
+    latestVersion,
   );
 }

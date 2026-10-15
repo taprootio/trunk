@@ -1,5 +1,20 @@
 import { SiteAuthoringError } from "./errors.js";
-import { RUNTIME_MIRROR_PATH_REASON, isRuntimeMirrorPath } from "./reserved-paths.js";
+import { RUNTIME_MIRROR_PATH_REASON } from "./reserved-paths.js";
+import {
+  isRequestSpelling,
+  normalizeRedirectPath,
+  redirectSourceRule,
+  resolvesAway,
+  RULE_REDIRECT_SOURCE_GENERATED_FILE,
+  RULE_REDIRECT_SOURCE_INDEX_HTML,
+  RULE_REDIRECT_SOURCE_INTEGRATION_DATA,
+  RULE_REDIRECT_SOURCE_INVALID,
+  RULE_REDIRECT_SOURCE_NOT_STORABLE,
+  RULE_REDIRECT_SOURCE_RUNTIME_MIRROR,
+  RULE_REDIRECT_SOURCE_SHARE_LINK,
+} from "./site-checks.js";
+
+export { normalizeRedirectPath };
 
 /**
  * The redirect map's workspace contract (TR00702).
@@ -64,64 +79,14 @@ const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/u;
 const ENTRY_KEYS = new Set(["path", "kind", "target", "status", "origin"]);
 const SHA256 = /^[0-9a-f]{64}$/u;
 
-// An empty interior segment, or a dot or slash hidden behind percent-encoding.
-// '//' is also where a protocol-relative URL hides, which is why the leading
-// case is covered by this rule rather than by a separate prefix check.
-const RESOLVABLE_SPELLING = /\/\/|%2e|%2f/iu;
-
-// A spelling no browser would send as a pathname: anything outside printable
-// ASCII, one of the characters a URL parser escapes on sight, or a '%' that is
-// not an escape.
-// No `i` flag: under Unicode case folding it would let U+212A (KELVIN SIGN)
-// and U+017F (LONG S) through `[^!-~]`, which the site refuses.
-const UNSENDABLE_SPELLING = /[^!-~]|["<>`{}]|%(?![0-9a-fA-F]{2})/u;
-
-/**
- * Whether a path is already written the way a browser sends a pathname.
- *
- * The published-site edge keys on `url.pathname`, which the URL parser has
- * already percent-encoded, and its `normalizePathname` decodes nothing — while
- * every rule here compares the string as written. So '/old%20page -> /old page'
- * is two different strings to loop detection and one path to the edge, which
- * matches '/old%20page', resolves the target with `new URL` back to
- * '/old%20page', and serves a permanent self-loop. A source written with a
- * literal space or a non-ASCII character is the same mismatch the other way,
- * stored under a key no request pathname ever matches.
- *
- * Refused rather than encoded here. URL escaping is not reproducibly canonical
- * between the API's .NET and the edge's WHATWG parser, so a spelling this pass
- * encoded would still not be the one the Worker computes and the layers would
- * go on comparing different strings. Write what a browser sends and every layer
- * compares it unchanged — and the byte bounds then measure that same spelling.
- */
-function isRequestSpelling(value) {
-  return !UNSENDABLE_SPELLING.test(value);
-}
-
-/**
- * Whether a path names one thing to this pass and another wherever it is
- * resolved.
- *
- * Every rule here compares the string as written, and nothing downstream does:
- * the generator resolves a source with path.resolve, so '/x/../visit' writes
- * over the page rendered at '/visit', and the published-site edge resolves a
- * target with `new URL`, so '/a -> /x/../a' is the self-loop that loop
- * detection just passed. Percent-encoded dots and slashes are the same trick
- * spelled so a segment scan cannot see it, so they are refused wherever they
- * appear rather than decoded and re-examined.
- */
-function resolvesAway(value) {
-  if (RESOLVABLE_SPELLING.test(value)) return true;
-  return value.split("/").some((segment) => segment === "." || segment === "..");
-}
 
 /** Whether the value is a redirect-map revision as the server mints one. */
 export function isRedirectMapRevision(value) {
   return typeof value === "string" && SHA256.test(value);
 }
 
-function entryError(code, message, field) {
-  return new SiteAuthoringError(code, `${field}: ${message}`, { field });
+function entryError(code, message, field, rule) {
+  return new SiteAuthoringError(code, `${field}: ${message}`, { field, rule });
 }
 
 function isPlainObject(value) {
@@ -133,93 +98,32 @@ function utf8Length(value) {
 }
 
 /**
- * Normalizes a source path exactly as the published-site Worker's
- * `normalizePathname` does: require the leading slash, strip trailing slashes,
- * change nothing else. A `.html` suffix survives, which is the whole point —
- * `/faqs.html` is a real legacy URL and has to be representable. A spelling
- * some other layer would resolve away is refused rather than repaired (see
- * `resolvesAway`), and so is one no browser would send as a pathname (see
- * `isRequestSpelling`, which subsumes the control-character refusal).
+ * Why a source rule refuses a path, in the words the CLI shows. The rule ids are
+ * the site checks' (shared/site-check-rules.json); the decisions themselves are
+ * made by `redirectSourceRule` in the shared source, which the API's C#
+ * implementation also passes the same corpus for.
  */
-export function normalizeRedirectPath(value) {
-  if (typeof value !== "string") return undefined;
-  const candidate = value.trim();
-  if (
-    candidate === ""
-    || /[?#\\]/u.test(candidate)
-    || !isRequestSpelling(candidate)
-    || resolvesAway(candidate)
-  ) {
-    return undefined;
-  }
-  const withSlash = candidate.startsWith("/") ? candidate : `/${candidate}`;
-  const trimmed = withSlash.replace(/\/+$/u, "");
-  return trimmed === "" ? "/" : trimmed;
-}
+const SOURCE_RULE_REASONS = Object.freeze({
+  [RULE_REDIRECT_SOURCE_INDEX_HTML]: () =>
+    "the platform already redirects every '…/index.html' address to its directory, so it cannot also be "
+    + "a redirect source, and the page or home file there is generated.",
+  [RULE_REDIRECT_SOURCE_INTEGRATION_DATA]: (first) =>
+    `'/${first}' is reserved for integration data, so nothing under it can be a redirect source.`,
+  [RULE_REDIRECT_SOURCE_SHARE_LINK]: () =>
+    "'/s/' is reserved for share links, so nothing under it can be a redirect source.",
+  [RULE_REDIRECT_SOURCE_RUNTIME_MIRROR]: () => RUNTIME_MIRROR_PATH_REASON,
+  [RULE_REDIRECT_SOURCE_GENERATED_FILE]: (first) =>
+    `'/${first}' is a file the site generates, so neither it nor anything under it can be a redirect source.`,
+  [RULE_REDIRECT_SOURCE_NOT_STORABLE]: () =>
+    "a redirect is stored as a file in the published site, and this path cannot be one (no dot-prefixed "
+    + "segments, reserved device names, '..', escaped percent signs, or segments over 200 bytes).",
+});
 
-// The root segment the published output reserves for integration data; the release
-// inventory leaves everything under it out.
-const RESERVED_INTEGRATION_DATA_SEGMENT = "integrations";
-
-// Root-level files the site generates. A redirect is a marker file inside the
-// published site (TR00968), so a source that names one has nowhere to live.
-const GENERATED_ROOT_FILES = Object.freeze(["404.html", "sitemap.xml", "robots.txt", "favicon.ico"]);
-// The longest decoded path segment a marker file name may have; the API rule and the
-// generator use the same 200 bytes.
-const MAX_MARKER_SEGMENT_BYTES = 200;
-const WINDOWS_DEVICE_STEMS = new Set(["con", "prn", "aux", "nul"]);
-
-function isWindowsDeviceSegment(segment) {
-  const stem = segment.split(".", 1)[0].toLowerCase();
-  return WINDOWS_DEVICE_STEMS.has(stem) || /^(?:com|lpt)[1-9]$/u.test(stem);
-}
-
-/**
- * Why a normalized source path cannot be a redirect, or undefined when it can.
- * A mirror of `SiteRedirectMapContract.SourceRefusalReason` on the server (the
- * API is the authority; both run the same test vectors): `…/index.html` is
- * answered by the platform for every page, the generator writes the files
- * named above, and the marker is stored under the decoded spelling, so a path
- * that cannot be stored once decoded (an escaped percent sign, a dot-prefixed
- * segment, a reserved device name) is refused. The site root is left to the
- * occupancy rule.
- */
-export function redirectSourceRefusalReason(path) {
-  if (path === "/") return undefined;
-  // Every rule reads the decoded spelling: it is the name the marker is stored
-  // under, and the name the generator's own files use (`/%69ndex.html` is
-  // `/index.html`).
-  let decoded;
-  try {
-    decoded = path.replace(/^\/+|\/+$/gu, "").split("/").map(decodeURIComponent).join("/");
-  } catch {
-    return "it holds a percent escape that does not decode.";
-  }
-  const segments = decoded.split("/");
-  const first = segments[0].toLowerCase();
-  if (segments.some((segment) => segment.toLowerCase() === "index.html")) {
-    return "the platform already redirects every '…/index.html' address to its directory, so it cannot also be "
-      + "a redirect source, and the page or home file there is generated.";
-  }
-  if (first === RESERVED_INTEGRATION_DATA_SEGMENT) {
-    return `'/${segments[0]}' is reserved for integration data, so nothing under it can be a redirect source.`;
-  }
-  if (isRuntimeMirrorPath(decoded)) return RUNTIME_MIRROR_PATH_REASON;
-  if (GENERATED_ROOT_FILES.includes(first)) {
-    return `'/${segments[0]}' is a file the site generates, so neither it nor anything under it can be a redirect source.`;
-  }
-  if (
-    decoded.includes("..")
-    || decoded !== decoded.normalize("NFC")
-    || segments.some((segment) =>
-      segment === "" || segment.startsWith(".") || /[%\\?#\u0000-\u001F\u007F-\u009F]/u.test(segment)
-      || isWindowsDeviceSegment(segment) || new TextEncoder().encode(segment).length > MAX_MARKER_SEGMENT_BYTES
-    )
-  ) {
-    return "a redirect is stored as a file in the published site, and this path cannot be one (no dot-prefixed "
-      + "segments, reserved device names, '..', escaped percent signs, or segments over 200 bytes).";
-  }
-  return undefined;
+/** The refusal for a normalized source: its site-check rule id and the reason, or undefined when it can be a redirect. */
+export function redirectSourceRefusal(path) {
+  const refusal = redirectSourceRule(path);
+  if (refusal === undefined) return undefined;
+  return { ruleId: refusal.ruleId, reason: SOURCE_RULE_REASONS[refusal.ruleId](refusal.detail) };
 }
 
 function looksAbsolute(value) {
@@ -281,6 +185,7 @@ function validateEntry(value, index, seen) {
         + "or '..' segment, no empty segment, and no percent-encoded dot or slash. Write the percent-encoded "
         + "spelling a browser sends (/caf%C3%A9, /old%20page), never the raw one.",
       `${field}.path`,
+      RULE_REDIRECT_SOURCE_INVALID,
     );
   }
   // The site root is not refused here. A home page rename records an entry at
@@ -303,9 +208,14 @@ function validateEntry(value, index, seen) {
       `${field}.path`,
     );
   }
-  const sourceRefusal = redirectSourceRefusalReason(path);
+  const sourceRefusal = redirectSourceRefusal(path);
   if (sourceRefusal !== undefined) {
-    throw entryError("redirects.path_unpublishable", `'${path}': ${sourceRefusal}`, `${field}.path`);
+    throw entryError(
+      "redirects.path_unpublishable",
+      `'${path}': ${sourceRefusal.reason}`,
+      `${field}.path`,
+      sourceRefusal.ruleId,
+    );
   }
   // The marker is stored under the decoded spelling, so `/a%41` and `/aA` are one
   // file, and the second would silently replace the first.

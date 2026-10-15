@@ -3,12 +3,14 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 
 import {
+  changelogCommandSince,
   CLI_BINARY_NAME,
   CLI_NAME,
   CLI_VERSION,
   GITHUB_OUTPUT_KEY_PREFIX,
   GITHUB_OUTPUT_RESULT_KEY,
   LIMITS,
+  REFUSAL_CLI_OUTDATED,
   REFUSAL_UNCLASSIFIED,
   RESULT_SCHEMA_VERSION,
 } from "./constants.js";
@@ -37,6 +39,7 @@ export function failureResult(error) {
     error: { code: error.code },
   };
   if (error.field) result.error.field = error.field;
+  if (error.rule) result.error.rule = error.rule;
   if (error.details?.length) result.error.details = error.details;
   if (error.status) result.error.status = error.status;
   if (Array.isArray(error.alternatives) && error.alternatives.length > 0) {
@@ -67,6 +70,12 @@ export function failureResult(error) {
   if (previewRecovery) result.error.preview = previewRecovery;
   const refusal = typeof error.refusalKind === "function" ? error.refusalKind() : undefined;
   if (typeof refusal === "string" && refusal !== REFUSAL_UNCLASSIFIED) result.error.refusal = refusal;
+  if (refusal === REFUSAL_CLI_OUTDATED) {
+    const latestVersion = typeof error.latestCliVersion === "function" ? error.latestCliVersion() : error.latestVersion;
+    if (typeof latestVersion === "string") result.error.latestVersion = latestVersion;
+    // What to run once the upgrade is done, so the agent need not diff the help topics.
+    result.error.changelogCommand = changelogCommandSince(CLI_VERSION);
+  }
   return result;
 }
 

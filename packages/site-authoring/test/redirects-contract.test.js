@@ -251,3 +251,23 @@ test("a target too long to store as metadata is refused offline", () => {
   const error = refusal([{ path: "/a", kind: "redirect", target: `https://elsewhere.example.test/?q=${"é".repeat(300)}` }]);
   assert.equal(error.code, "redirects.target_too_long_to_store");
 });
+
+test("a refused redirect source names the site-check rule that refuses it, and keeps its code", () => {
+  for (
+    const [path, rule] of [
+      ["/s/abc", "redirect.source_share_link"],
+      ["/index.html", "redirect.source_index_html"],
+      ["/sitemap.xml", "redirect.source_generated_file"],
+      ["/integrations/x", "redirect.source_integration_data"],
+      ["/taproot/5.0.62/x", "redirect.source_runtime_mirror"],
+      ["/.hidden", "redirect.source_not_storable"],
+    ]
+  ) {
+    const error = refusal([{ path, target: "/faq" }]);
+    assert.equal(error.code, "redirects.path_unpublishable", path);
+    assert.equal(error.rule, rule, path);
+  }
+  const malformed = refusal([{ path: "/a?b", target: "/faq" }]);
+  assert.equal(malformed.code, "redirects.path_invalid");
+  assert.equal(malformed.rule, "redirect.source_invalid");
+});

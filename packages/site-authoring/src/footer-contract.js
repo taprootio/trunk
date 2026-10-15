@@ -278,11 +278,13 @@ function richText(value, path, maximumLength, maximumParagraphs, knownPageResour
       if (text.length === 0) continue;
       totalLength += text.length;
       totalRuns += 1;
+      // A style flag that is off is left out, so a run carries only what it sets and a hand-written
+      // file matches what pull writes (TR01232).
       normalizedRuns.push({
         text,
-        bold: boolean(run.bold, false, `${runPath}.bold`),
-        italic: boolean(run.italic, false, `${runPath}.italic`),
-        underline: boolean(run.underline, false, `${runPath}.underline`),
+        ...(boolean(run.bold, false, `${runPath}.bold`) ? { bold: true } : {}),
+        ...(boolean(run.italic, false, `${runPath}.italic`) ? { italic: true } : {}),
+        ...(boolean(run.underline, false, `${runPath}.underline`) ? { underline: true } : {}),
         ...(run.link === undefined || run.link === null
           ? {}
           : { link: inlineLink(run.link, `${runPath}.link`, knownPageResourceIds, tolerateStoredValues) }),

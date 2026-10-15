@@ -23,6 +23,7 @@ import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
 import { projectRedirectMapForWorkspace, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
 import { redirectsManifestEntry } from "../redirects-workspace.js";
+import { projectNavigationForWorkspace } from "./nav-push.js";
 import { boundedList, openSession, successResult } from "../session.js";
 import {
   projectSettingsGroup,
@@ -1314,7 +1315,10 @@ export async function pull(invocation) {
     if (!presentationOnly) {
       onProgress("Reading the navigation tree.");
       navItems = await getNavigation(client, siteId);
-      await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, { siteId, navItems });
+      await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, {
+        siteId,
+        navItems: projectNavigationForWorkspace(navItems),
+      });
     }
 
     if (redirectMap !== undefined) {

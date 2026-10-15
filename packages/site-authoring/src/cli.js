@@ -1,3 +1,5 @@
+import { normalizeStagingReviewPath } from "./api.js";
+import { parseCliVersion } from "./cli-release.js";
 import { CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS, CAPABILITY_DESIGN } from "./capabilities.js";
 import { capabilitiesForSurface } from "./surface.js";
 import {
@@ -22,6 +24,7 @@ import {
   VERB_DELIVERY_CHECK,
   VERB_DEPLOY,
   VERB_STAGING_REVIEW,
+  VERB_CHANGELOG,
   VERB_ENV,
   VERB_FOOTER_PUSH,
   VERB_FORMS_PULL,
@@ -69,6 +72,7 @@ import {
   getDesignBlueprint,
   getFooterReference,
   getPageTypeReference,
+  getSettingsReference,
   getThemeReference,
   getWorkflowReference,
   listComponentTypeReferences,
@@ -118,7 +122,12 @@ const VERBS = Object.freeze([
       + "rather than one per run. A pulled workspace is checked offline against the pages (generated ones included, "
       + "so navigation to a section or tag page resolves), images, and baselines its manifests recorded at the pull. "
       + "A link whose address is only http(s):// plus its own text (left by older editor autolinking) is reported in "
-      + "linkWarnings without refusing; pages push reports the same for the pages it sends. This proves local structure and semantics only. It does not prove "
+      + "linkWarnings without refusing; pages push reports the same for the pages it sends. "
+      + "The site checks that can run offline are reported in findings (a rule id, severity, file, and the value "
+      + "found, such as link.page_missing for a link to a page the workspace does not have) and never refuse a "
+      + "warning; siteChecks.checkedBySite names the rules that need the site's own records (images, forms), which "
+      + "'status' reports under siteHealth. A redirect source the site would refuse names its rule in "
+      + "error.problems[].rule. This proves local structure and semantics only. It does not prove "
       + "authorization, live site ownership, concurrency, persisted round trips, or rendering: 'plan' checks a "
       + "workspace against the live site, and 'pages push --dry-run' does that for pages alone. "
       + `See '${CLI_BINARY_NAME} help fixture' for the fixture manifest contract and for the path of the complete `
@@ -199,6 +208,21 @@ const VERBS = Object.freeze([
       + `network or the credential does not. Reports whether ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} is set, but never `
       + "its value. The sign-in secret is never printed; the credential is named by id and display prefix, which are "
       + "what an owner needs to revoke it.",
+  },
+  {
+    name: VERB_CHANGELOG,
+    tokens: ["changelog"],
+    summary: "List what changed in each CLI release, offline.",
+    credentialFree: true,
+    configFree: true,
+    offline: true,
+    sinceOption: true,
+    note: "Only the latest CLI is accepted, so an upgrade can be forced at any time. After one, run "
+      + "'changelog --since <the version you upgraded from>' to see every release's note and the behavior it changed, "
+      + "and which help topics (help <topic>) to read again. With no --since it prints the installed release's entry. "
+      + "It reads the package's own record, needs no sign-in or site, and still runs when this CLI is outdated. "
+      + "The result lists entries newest first, each { version, note, behavior, help }; complete is false when "
+      + "--since starts before the oldest release the record covers. 'status' reports the installed release's note.",
   },
   {
     name: VERB_ENV,
@@ -440,9 +464,12 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["redirects", "check"],
     summary: "Check the current redirect map through the authenticated staging edge.",
+    handoffOptions: true,
     note: "Reports each entry's path, HTTP status and Location in redirects.items, and redirects.verified, without "
       + "following redirects. A redirect is live only with the release that carries it, so this reads the staged release. "
-      + "The result includes a fresh single-use staging handoff in stagingPreview.url; keep it private.",
+      + "The check authenticates with its own handoff and never reports it. The result carries no review URL unless "
+      + "you pass --handoff, which adds a fresh single-use one in stagingPreview.url (keep it private); "
+      + "'staging review' mints one at any time.",
   },
   {
     name: VERB_REDIRECTS_PULL,
@@ -589,11 +616,19 @@ const VERBS = Object.freeze([
     tokens: ["deploy"],
     summary: "Deploy to staging, or promote staging to production.",
     target: true,
-    note: "deploy --staging returns a single-use review handoff in stagingPreview.url, on a managed Docs site too, "
-      + "where it stages settings only: open the URL once, then switch the site's theme toggle to review both "
-      + "schemes before deploy --production. If no handoff could be minted, stagingPreview.reason names why and "
+    handoffOptions: true,
+    note: "deploy --staging does not report a review URL, because the URL is a live single-use credential and this "
+      + "JSON is often saved to logs. Run 'staging review' to mint one, or pass --handoff to get a fresh "
+      + "single-use one in stagingPreview.url (on a managed Docs site too, where it stages settings only): open it "
+      + "once, then switch the site's theme toggle to review both schemes before deploy --production. Without "
+      + "--handoff, stagingPreview.reason is staging.handoff_not_requested and stagingPreview.recovery names the "
+      + "command. If a requested handoff could not be minted, stagingPreview.reason names why and "
       + "stagingPreview.recovery the next step; 'staging review' mints another. On a Standard site the result also "
-      + "carries the automatic redirect check: routeCheck and redirects (see 'help redirects').",
+      + "carries the automatic redirect check: routeCheck and redirects (see 'help redirects'). The edge can keep "
+      + `serving the previous release for up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes, so a Standard site's `
+      + "deploy --staging waits until staging serves the new release and reports stagingServed: state served, "
+      + "propagating (still the previous release at the bound) or unverified (the change cannot be attributed to this deployment, or the last read did not name the previous release), "
+      + "with the time to wait or the seconds waited.",
   },
   {
     name: VERB_PREVIEW_PAGE,
@@ -653,20 +688,23 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_DEPLOYMENTS],
     tokens: ["staging", "review"],
     summary: "Mint a fresh single-use review handoff for the site's staging host.",
+    reviewPath: true,
     note: "The handoff URL is reported only in the final JSON as stagingPreview.url, is single-use, and expires two "
-      + "minutes after it is minted; keep it private. Open it once, then use the site's theme toggle to review both "
-      + "schemes. This is the recovery when deploy --staging could not mint a handoff, on a managed Docs site too.",
+      + "minutes after it is minted; keep it private. --path <page> opens the review on that page instead of the "
+      + "home page: a page path as 'pull' records it ('about', '/posts/one'), optionally with a query. Open it once, then use the site's theme toggle to review both "
+      + "schemes. deploy --staging and redirects check report no review URL unless you pass --handoff, so this is "
+      + "the usual way to get one, on a managed Docs site too.",
   },
   {
     name: VERB_STATUS,
     surface: SURFACE_DOCS_PRESENTATION,
     // Readiness and the deployment log are Deployments; the image list is
-    // Content, as is the broken-reference report.
+    // Content, as is the site-health read.
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DEPLOYMENTS],
     tokens: ["status"],
     summary:
-      "Report the platform authoring switch, CLI release, deployments, readiness, image processing, and broken references.",
-    note: "Broken references list pages with missing image IDs or page paths in their latest editable body."
+      "Report the platform authoring switch, CLI release, deployments, readiness, image processing, and site health.",
+    note: "Site health lists the site checks' findings (a rule id, severity, page, and the value found) for the latest editable body of each page."
       + " Content permission is required; a refused or failed read fails status rather than reporting a clean site.",
   },
 ]);
@@ -733,7 +771,8 @@ credentials, and it expires 24 hours after it is issued.
 
 Verbs write one JSON result to stdout and human progress to stderr. validate,
 help, whoami, and env are offline and read-only. login, logout, sites, use,
-whoami, and env need no configuration and no site. The offline help family is
+whoami, and env need no configuration and no site. So does changelog, which
+also still runs when this CLI is outdated. The offline help family is
 human-readable by default; add --json for stable reference data. Exit codes: 0
 success, 1 failure, 2 usage fault.
 
@@ -816,6 +855,18 @@ function verbHelp(verb) {
     ? `\n  --staging        Deploy the staged site to staging.
   --production     Promote the completed staging deployment to production.
   --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
+    : "";
+  const handoffOption = verb.handoffOptions
+    ? `\n  --handoff        Also mint a fresh single-use review URL and report it in stagingPreview.url.
+  --no-handoff     Report no review URL (the default); accepted so scripts can say so explicitly.`
+    : "";
+  const sinceOption = verb.sinceOption
+    ? "\n  --since <version>  List the releases after this one, up to the installed release."
+    : "";
+  const reviewPathOption = verb.reviewPath
+    ? "\n  --path <page>    Open the review on this page instead of the home page, such as 'about' or '/posts/one'."
+    : verb.handoffOptions
+    ? "\n  --review-path <page>  With --handoff, open the review URL on this page instead of the home page."
     : "";
   const metaOptions = verb.metaOptions
     ? `\n  --title <text>       The page's title.
@@ -907,7 +958,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
+${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
 `;
 }
 
@@ -968,6 +1019,7 @@ function parseReferenceArguments(arguments_) {
       || topic === "preview"
       || topic === "theme"
       || topic === "appearance"
+      || topic === "settings"
       || topic === "footer"
       || topic === "fixture"
       || topic === "redirects"
@@ -1070,6 +1122,8 @@ function referenceResult(parsed) {
       return { ...result, topic: "presentation", referenceKind: "theme", reference: getThemeReference() };
     case "appearance":
       return { ...result, topic: "presentation", referenceKind: "appearance", reference: getAppearanceReference() };
+    case "settings":
+      return { ...result, topic: "presentation", referenceKind: "settings", reference: getSettingsReference() };
     case "footer":
       return { ...result, topic: "presentation", referenceKind: "footer", reference: getFooterReference() };
     default:
@@ -1249,6 +1303,9 @@ function parseArguments(arguments_) {
   let propagationWaitSeconds;
   let browser;
   let allowFailedPreview = false;
+  let handoff;
+  let reviewPath;
+  let since;
   let dryRun = false;
   let json = false;
   let keyName;
@@ -1312,6 +1369,42 @@ function parseArguments(arguments_) {
         throw usageError("cli.duplicate_option", "--allow-failed-preview may be supplied only once.");
       }
       allowFailedPreview = true;
+      continue;
+    }
+    if (verb.handoffOptions && (argument === "--handoff" || argument === "--no-handoff")) {
+      if (handoff !== undefined) {
+        throw usageError(
+          handoff === (argument === "--handoff") ? "cli.duplicate_option" : "cli.handoff_conflict",
+          handoff === (argument === "--handoff")
+            ? `${argument} may be supplied only once.`
+            : "--handoff and --no-handoff cannot be used together.",
+        );
+      }
+      handoff = argument === "--handoff";
+      continue;
+    }
+    if ((verb.reviewPath && argument === "--path") || (verb.handoffOptions && argument === "--review-path")) {
+      if (reviewPath !== undefined) {
+        throw usageError("cli.duplicate_option", `${argument} may be supplied only once.`);
+      }
+      // An option-like value would otherwise become the page '/--json' and mint a handoff to a 404.
+      const candidate = rest[index + 1];
+      reviewPath = normalizeStagingReviewPath(typeof candidate === "string" && candidate.startsWith("--") ? "" : candidate);
+      index += 1;
+      continue;
+    }
+    if (verb.sinceOption && argument === "--since") {
+      if (since !== undefined) throw usageError("cli.duplicate_option", "--since may be supplied only once.");
+      const candidate = rest[index + 1];
+      if (parseCliVersion(candidate) === undefined) {
+        throw usageError(
+          "changelog.since_invalid",
+          "--since requires a version such as 0.20.0 (the version you upgraded from).",
+          { field: "since" },
+        );
+      }
+      since = candidate;
+      index += 1;
       continue;
     }
     if (verb.dryRun && argument === "--dry-run") {
@@ -1393,6 +1486,16 @@ function parseArguments(arguments_) {
       "cli.deploy_target",
       `${verb.tokens.join(" ")} requires exactly one of --staging or --production.`,
     );
+  }
+  if (verb.handoffOptions && reviewPath !== undefined && handoff !== true) {
+    throw usageError(
+      "cli.review_path_requires_handoff",
+      "--review-path chooses the page a --handoff review URL opens on; pass --handoff with it, or use 'staging review --path'.",
+      { field: "reviewPath" },
+    );
+  }
+  if (handoff === true && verb.target && deployTarget === DEPLOY_TARGET_PRODUCTION) {
+    throw usageError("cli.handoff_target", "--handoff applies only to deploy --staging.", { field: "handoff" });
   }
   if (verb.positionals === "fixturePath" && (positionals.length > 1 || (init && positionals.length !== 1))) {
     throw usageError(
@@ -1507,6 +1610,9 @@ function parseArguments(arguments_) {
     quiet,
     deployTarget,
     allowFailedPreview,
+    ...(handoff === undefined ? {} : { handoff }),
+    ...(reviewPath === undefined ? {} : { reviewPath }),
+    ...(since === undefined ? {} : { since }),
     ...(deliveryUrl === undefined ? {} : { deliveryUrl }),
     ...(propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds }),
     ...(browser === undefined ? {} : { browser }),
@@ -1599,6 +1705,9 @@ export async function runCli({
       configPath: parsed.configPath,
       deployTarget: parsed.deployTarget,
       allowFailedPreview: parsed.allowFailedPreview,
+      ...(parsed.handoff === undefined ? {} : { handoff: parsed.handoff }),
+      ...(parsed.reviewPath === undefined ? {} : { reviewPath: parsed.reviewPath }),
+      ...(parsed.since === undefined ? {} : { since: parsed.since }),
       init: parsed.init,
       quiet: parsed.quiet,
       dryRun: parsed.dryRun,

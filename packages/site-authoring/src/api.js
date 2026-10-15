@@ -3,6 +3,7 @@ import {
   BANDWIDTH_ALLOWANCE_REFUSAL_REASON,
   CANONICAL_TIMESTAMP,
   CAPABILITY_REFUSAL_FIELD,
+  changelogCommandSince,
   CLI_UPGRADE_COMMAND,
   CLI_UPGRADE_REFUSAL_FIELD,
   CLI_VERSION,
@@ -398,6 +399,7 @@ export function announceRefusal(error, onProgress, action = "request") {
         + "and no retry of this version can succeed.",
     );
     onProgress(`  Upgrade with: ${CLI_UPGRADE_COMMAND}`);
+    onProgress(`  Then see what changed: ${changelogCommandSince(CLI_VERSION)}`);
     // The server names both versions and says when waiting is the right move
     // (a deploy that landed ahead of its npm publish). Surface it verbatim
     // rather than restating a policy this side does not own; the bounded
@@ -1123,39 +1125,51 @@ export async function listSiteImages(client, siteId, requestOptions = {}, { imag
   return { images, summary, truncated: true };
 }
 
-/** Broken targets in the latest editable page bodies, authorized by Content. */
-export async function getSiteBrokenReferences(client, siteId) {
-  const code = "api.broken_references_contract";
-  const response = requireObject(
-    await client.request(sitePath(siteId, "broken-references")),
-    code,
-    "broken-reference report",
-  );
-  // Proto3 omits empty repeated fields. A present non-array is a bad report,
-  // not evidence that the site has no broken links.
-  const repeated = (value, field) => {
-    if (value === undefined) return [];
-    if (!Array.isArray(value)) {
+/** The site checks' findings over the latest editable page bodies, authorized by Content. */
+export async function getSiteHealth(client, siteId) {
+  const code = "api.site_health_contract";
+  const response = requireObject(await client.request(sitePath(siteId, "health")), code, "site-health report");
+  // Proto3 omits empty repeated fields and zero counts. A present non-array is a
+  // bad report, not evidence that the site is healthy.
+  if (response.findings !== undefined && !Array.isArray(response.findings)) {
+    throw new SiteAuthoringError(code, "Taproot returned an invalid findings list.", { field: "findings" });
+  }
+  const count = (value, field) => {
+    if (value === undefined) return 0;
+    if (!Number.isSafeInteger(value) || value < 0) {
       throw new SiteAuthoringError(code, `Taproot returned an invalid ${field}.`, { field });
     }
     return value;
   };
-  return repeated(response.pages, "pages").map((entry) => {
-    const page = requireObject(entry, code, "broken-reference page");
-    const missingPagePaths = repeated(page.missingPagePaths, "missingPagePaths");
-    if (missingPagePaths.some((path) => typeof path !== "string")) {
-      throw new SiteAuthoringError(code, "Taproot returned an invalid missing page path.", {
-        field: "missingPagePaths",
-      });
+  const severities = {
+    SITE_FINDING_SEVERITY_ERROR: "error",
+    SITE_FINDING_SEVERITY_WARNING: "warning",
+  };
+  const findings = (response.findings ?? []).map((entry) => {
+    const finding = requireObject(entry, code, "finding");
+    const severity = severities[finding.severity];
+    if (typeof finding.ruleId !== "string" || severity === undefined) {
+      throw new SiteAuthoringError(code, "Taproot returned a finding with no rule or severity.", { field: "findings" });
     }
     return {
-      pageId: requireCanonicalUuid(page.pageId, code, "pageId"),
-      pageTitle: text(page.pageTitle),
-      missingImageIds: repeated(page.missingImageIds, "missingImageIds")
-        .map((id) => requireCanonicalUuid(id, code, "missingImageIds")),
-      missingPagePaths,
+      ruleId: finding.ruleId,
+      severity,
+      ...(finding.pageId === undefined || finding.pageId === "" ? {} : {
+        pageId: requireCanonicalUuid(finding.pageId, code, "pageId"),
+        pageTitle: text(finding.pageTitle),
+        pagePath: text(finding.pagePath),
+      }),
+      subject: text(finding.subject),
+      detail: text(finding.detail),
     };
   });
+  return {
+    findings,
+    errorCount: count(response.errorCount, "errorCount"),
+    warningCount: count(response.warningCount, "warningCount"),
+    pageCount: count(response.pageCount, "pageCount"),
+    truncated: response.truncated === true,
+  };
 }
 
 /** Use the same changed release set the Deployments page selects. */
@@ -1311,13 +1325,82 @@ export async function getStagingPreviewStatus(client, siteId) {
   return { ready: true, stagingUrl: `https://${url.hostname}/` };
 }
 
-/** Mint a site-bound handoff; its URL is emitted only in final operational JSON. */
-export async function mintStagingPreviewHandoff(client, siteId, { now = Date.now } = {}) {
+// The server accepts 2048, but the edge appends a check parameter before its own 2048 test.
+const STAGING_RETURN_PATH_MAXIMUM = 2_000;
+const STAGING_HANDOFF_PARAMETER = "__taproot_preview_handoff";
+// Transport-owned query keys the server refuses in a return path (StagingPreviewProtocol).
+const STAGING_RESERVED_QUERY_KEYS = new Set([
+  STAGING_HANDOFF_PARAMETER,
+  "__taproot_preview_check",
+  "__taproot_preview_denied",
+]);
+
+/**
+ * A page path for `staging review --path`, as the same-origin return path the
+ * server accepts (TR01230). `about`, `/about` and `posts/one?draft=true` all
+ * work; the rules mirror `StagingPreviewProtocol.TryValidateReturnPath`, so a
+ * path the server would refuse is refused here before any request.
+ */
+export function normalizeStagingReviewPath(value) {
+  const invalid = (reason) =>
+    new SiteAuthoringError(
+      "staging.review_path_invalid",
+      `A review path must be a page path on this site, such as 'about' or '/posts/one'; ${reason}.`,
+      { field: "reviewPath", exitCode: 2 },
+    );
+  if (typeof value !== "string" || value.length === 0) throw invalid("it is empty");
+  // URL parsing drops edge whitespace, so the server's URL would no longer match the path asked for.
+  if (value !== value.trim()) throw invalid("it must not start or end with whitespace");
+  const path = value.startsWith("/") ? value : `/${value}`;
+  if (path.length > STAGING_RETURN_PATH_MAXIMUM) throw invalid("it is too long");
+  // Checked before URL parsing, which would throw on some of these (such as '/\\') instead of naming the problem.
+  if (path.includes("#") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(path)) {
+    throw invalid("it must not contain a fragment, a backslash or control characters");
+  }
+  if (path.startsWith("//")) throw invalid("it must not start with two slashes");
+  const queryStart = path.indexOf("?");
+  if (queryStart >= 0) {
+    for (const pair of path.slice(queryStart + 1).split("&")) {
+      const separator = pair.indexOf("=");
+      const rawName = separator < 0 ? pair : pair.slice(0, separator);
+      let name = rawName;
+      try {
+        name = decodeURIComponent(rawName.replaceAll("+", " "));
+      } catch {
+        // A malformed escape cannot spell a reserved key once decoded; compare the raw text.
+      }
+      if (STAGING_RESERVED_QUERY_KEYS.has(name.toLowerCase())) throw invalid("it names a reserved preview parameter");
+    }
+  }
+  let resolved;
+  try {
+    resolved = new URL(path, "https://staging.invalid");
+  } catch {
+    throw invalid("it is not a valid path");
+  }
+  // Dot segments can resolve to '//x'; the edge refuses that after spending the single-use handoff.
+  if (resolved.pathname.startsWith("//")) {
+    throw invalid("it must not resolve to a path starting with two slashes");
+  }
+  // The edge re-encodes the path and query and adds its own check parameter before its length test.
+  resolved.searchParams.set("__taproot_preview_check", "1");
+  if (resolved.pathname.length + resolved.search.length > 2_048) throw invalid("it is too long once encoded");
+  return path;
+}
+
+/**
+ * Mint a site-bound handoff; its URL is emitted only in final operational JSON.
+ * `returnPath` is the page the browser lands on after the handoff is consumed;
+ * `deadline` lets a bounded wait (the served-release poller) cap the mint too.
+ */
+export async function mintStagingPreviewHandoff(client, siteId, { now = Date.now, returnPath = "/", deadline } = {}) {
   const code = "api.staging_handoff_contract";
   const result = requireObject(
     await client.request(sitePath(siteId, "staging-preview:mint-handoff"), {
       method: "POST",
-      body: { siteId },
+      body: { siteId, ...(returnPath === "/" ? {} : { returnPath }) },
+      // A poller's budget reaches the mint, so a slow API cannot stretch a bounded wait.
+      ...(deadline === undefined ? {} : { deadline, now }),
     }),
     code,
     "staging handoff",
@@ -1332,12 +1415,16 @@ export async function mintStagingPreviewHandoff(client, siteId, { now = Date.now
   }
   const expires = requireCanonicalTimestamp(result.handoffExpiresAt, code, "handoffExpiresAt");
   const current = now();
+  // The URL is the requested path plus the handoff token as the last query parameter.
+  const expectedUrl = new URL(returnPath, "https://staging.invalid");
+  const expectedQuery = expectedUrl.search.replace(/^\?/u, "").replace(/&$/u, "");
+  const tokenQuery = new RegExp(`^\\?(?:(.*)&)?${STAGING_HANDOFF_PARAMETER}=([A-Za-z0-9_-]{43})$`, "u")
+    .exec(url.search);
   if (
     result.siteId !== siteId || origin.protocol !== "https:" || !CANONICAL_HOST.test(origin.hostname)
     || origin.port || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash
-    || url.origin !== origin.origin || url.username || url.password || url.pathname !== "/" || url.hash
-    || [...url.searchParams].length !== 1
-    || !/^[A-Za-z0-9_-]{43}$/u.test(url.searchParams.get("__taproot_preview_handoff") ?? "")
+    || url.origin !== origin.origin || url.username || url.password || url.pathname !== expectedUrl.pathname
+    || url.hash || tokenQuery === null || (tokenQuery[1] ?? "") !== expectedQuery
     || expires.milliseconds <= current - AUTHORING_PREVIEW_CLOCK_SKEW_MILLISECONDS
     || expires.milliseconds > current + AUTHORING_PREVIEW_HANDOFF_LIFETIME_MILLISECONDS
         + AUTHORING_PREVIEW_CLOCK_SKEW_MILLISECONDS

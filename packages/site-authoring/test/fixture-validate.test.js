@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
+import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
+import { projectNavigationForWorkspace } from "../src/verbs/nav-push.js";
 import { convertWorkspacePageSource, readWorkspacePageSource } from "../src/verbs/pages-push.js";
 import { readMediaManifest } from "../src/workspace.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
@@ -886,4 +888,22 @@ test("a fixture's media manifest must be the fixture's own, and media paths it d
   assert.equal(JSON.parse(missing.stdout).error.code, "content.markdown_image");
   assert.match(missing.stderr, /media\/riverbend-studio\.webp/u);
   assert.match(missing.stderr, /a fixture lists it in its own copy/u);
+});
+
+test("the shipped example is already in the form pull writes for navigation and the footer (TR01232)", async () => {
+  const read = async (file) => JSON.parse(await readFile(path.join(SHIPPED_FIXTURE, file), "utf8"));
+  const navigation = await read("nav.json");
+  // Compared as text: deepEqual would not notice keys in a different order.
+  assert.equal(
+    JSON.stringify(projectNavigationForWorkspace(navigation.navItems)),
+    JSON.stringify(navigation.navItems),
+  );
+  const preferences = await readFile(path.join(SHIPPED_FIXTURE, "settings/site-publishing-preferences.json"), "utf8");
+  assert.doesNotMatch(preferences, /"(?:bold|italic|underline)": false/u);
+  // Projecting the footer's runs changes nothing: the example spells out only the flags a run sets.
+  const footer = JSON.parse(preferences).settings.footerSettings;
+  assert.equal(
+    JSON.stringify(projectFooterSettingsForWorkspace(footer).bottomContent),
+    JSON.stringify(footer.bottomContent),
+  );
 });

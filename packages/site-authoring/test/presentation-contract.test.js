@@ -91,7 +91,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", async () => {
   await assert.doesNotReject(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "6.2.0");
+  assert.equal(getThemeReference().espalierVersion, "6.3.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -158,7 +158,11 @@ test("appearance help is derived from the same ordered registries theme push exe
       default: field.default,
     })),
   ];
-  assert.deepEqual(reference.fields, expected);
+  // The prose beside each field is covered by setting-reference.test.js.
+  assert.deepEqual(
+    reference.fields.map(({ appLabel: _label, description: _description, renders: _renders, ...field }) => field),
+    expected,
+  );
   assert.deepEqual(reference.readOnlyProjections, APPEARANCE_READ_ONLY_FIELDS);
   assert.match(reference.logoContract, /no separate compact-logo setting/u);
   assert.match(reference.headerWidthContract, /'wide' moves them to the viewport edges/u);

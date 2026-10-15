@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { CLI_BINARY_NAME } from "./constants.js";
+import { CLI_BINARY_NAME, LIMITS } from "./constants.js";
 import {
   canonicalizeComponentData,
   COMPONENT_TYPES,
@@ -64,9 +64,11 @@ import {
   REDIRECTS_FILE_NAME,
 } from "./redirects-contract.js";
 import { SETTINGS_GROUPS } from "./settings-catalog.js";
+import { getSettingsReference } from "./setting-reference.js";
 import {
   formatTypedPageReference,
   getTypedPageReference,
+  LEGAL_PLATFORM_LINK_GUIDANCE,
   MARKDOWN_PAGE_TYPES,
   TYPED_PAGE_TYPES,
 } from "./typed-page-reference.js";
@@ -84,9 +86,9 @@ import {
   SYSTEM_PAGE_NOT_FOUND_PATH,
 } from "./workspace.js";
 
-export { getAppearanceReference, getFooterReference, getThemeReference };
+export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 37;
+export const REFERENCE_VERSION = 38;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -387,7 +389,7 @@ export function getDesignBlueprint(type) {
   return DESIGN_BLUEPRINTS.find((blueprint) => blueprint.type === type);
 }
 export const REFERENCE_TOPICS = Object.freeze([
-  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List authorable page types: free-form, article, recipe, album, place-review." }),
+  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List page types: free-form, article, recipe, album, place-review, generated, and the read-only legal page." }),
   Object.freeze({
     name: "page",
     usage: `${CLI_BINARY_NAME} help page <page-type>`,
@@ -451,6 +453,11 @@ export const REFERENCE_TOPICS = Object.freeze([
     summary: "Map site presentation decisions to theme-push workspace fields.",
   }),
   Object.freeze({
+    name: "settings",
+    usage: `${CLI_BINARY_NAME} help settings`,
+    summary: "Map every pulled site setting to its app control, say what it does and where it renders, and which verb writes it.",
+  }),
+  Object.freeze({
     name: "footer",
     usage: `${CLI_BINARY_NAME} help footer`,
     summary: "Author and concurrency-safely push the complete footer document.",
@@ -501,7 +508,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "part of wp:post_date). Categories beyond the first, and all tags, have no Taproot equivalent (tags are "
       + "generated per page type): list them. The featured image becomes coverImage on typed pages, and the same image must also appear in the page's own content (put it at the top of the body), or the site refuses the cover; a free-form page "
       + "has none, so list it.",
-      "Content. Convert the HTML to the Markdown subset. Keep headings from h2 to h4 (the title is the h1; deeper levels are refused, so make h5 and h6 an h4). Decode HTML entities (&amp;, &#8217;) in titles, excerpts, menu labels and term names; WordPress stores them encoded. An image "
+      "Content. Convert the HTML to the Markdown subset. Keep body headings from h2 to h4 (deeper levels are refused, so make h5 and h6 an h4). The h1 depends on the template: an article or place review prints its title as the h1, so its body starts at h2 (a recipe and an album print their titles too; their fixed level-2 headings are set out below); a free-form page prints no title, so open its Markdown with a '# ' line holding the page title (the first level-1 heading becomes the h1; see help page free-form). Decode HTML entities (&amp;, &#8217;) in titles, excerpts, menu labels and term names; WordPress stores them encoded. An image "
       + "must stand alone in its own block, so split paragraphs around images and lift images out of links; a link "
       + "to the full-size file is dropped, so list it. Tables need a header row and 2 to 12 columns, else write "
       + "a list and report it. Remove Gutenberg block comments and the more-tag marker. In a recipe, times and servings "
@@ -604,7 +611,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "contexts and intents paired across schemes. Set appearance scalars (default scheme, header, logos, favicon) "
       + "in the appearance files: help appearance.",
       "Prepare media locally: PNG, JPEG, GIF and WebP raster files only, addressed relative to the workspace root. Make "
-      + "the variants yourself with any image tool (a transparent logo, a @2x copy, a square favicon); there is no "
+      + "the variants yourself with any image tool (a transparent logo at the highest resolution you have, a square favicon); there is no "
       + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
       + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header.",
       `Validate offline: ${CLI_BINARY_NAME} validate checks the whole workspace at once — the complete pair, the `
@@ -623,10 +630,12 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "(theme.concurrent_modification) and nothing is written; keep copies of the edited files, pull, re-apply, "
       + "and push again. A lost response is safe to retry — the site answers applied=false when it already holds "
       + "the change set. footer push owns footer prose, links and imagery.",
-      `Review on staging: ${CLI_BINARY_NAME} deploy --staging stages the presentation and returns a single-use review handoff `
-      + "in stagingPreview.url (on a managed Docs site too). Open it once, then use the site's theme toggle to check "
-      + "both schemes: text, headings, links and hover, actions and focus, the header logos, the favicon. When no "
-      + "handoff could be minted, stagingPreview.reason says why and staging review mints another. A page draft is "
+      `Review on staging: ${CLI_BINARY_NAME} deploy --staging stages the presentation; it reports no review URL by default `
+      + `because the URL is a live credential, so run ${CLI_BINARY_NAME} staging review (or add --handoff to deploy) for `
+      + "a single-use handoff in stagingPreview.url (on a managed Docs site too). Open it once, then use the site's "
+      + "theme toggle to check both schemes: text, headings, links and hover, actions and focus, the header logos, the "
+      + "favicon. When a requested handoff could not be minted, stagingPreview.reason says why and staging review mints "
+      + "another (add --path <page> to open it on the page under review). A page draft is "
       + "not needed to review a presentation change; preview page renders one persisted draft and is a different tool.",
       `Promote only after review: ${CLI_BINARY_NAME} deploy --production promotes the completed staging deployment. `
       + "Never use production to discover what staging should have shown.",
@@ -650,7 +659,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
     summary: "nav push replaces the complete tree in nav.json; item IDs are author-minted canonical lowercase UUIDs.",
     usage: `${CLI_BINARY_NAME} nav push`,
     details: Object.freeze([
-      "nav.json is { siteId, navItems }, not a bare array.",
+      "nav.json is { siteId, navItems }, not a bare array. Defaults are left out: an item has no resourceId or "
+      + "externalUrl unless its kind uses one, and no children when it has none. pull and nav push both write that "
+      + "form (nav push rewrites the file after it saves), and either form is accepted on the way in, so a pull after "
+      + "a push shows no change you did not make.",
       "kind is NAV_ITEM_KIND_PAGE, NAV_ITEM_KIND_EXTERNAL_URL, or NAV_ITEM_KIND_GROUP_HEADER.",
       "PAGE uses resourceId from .taproot-site-manifest.json, never pageId or path.",
       "EXTERNAL_URL uses externalUrl; GROUP_HEADER has no target; every kind may carry children.",
@@ -664,7 +676,6 @@ const WORKFLOW_REFERENCES = Object.freeze({
         kind: "NAV_ITEM_KIND_PAGE",
         title: "Classes",
         resourceId: "<resourceId-from-manifest>",
-        children: Object.freeze([]),
       })]),
     }),
   }),
@@ -688,9 +699,12 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "release does not carry the entry (yet); re-run redirects check after the deployment completes, before promoting. Requests are bounded to 90 seconds, eight at a time; "
       + "large JSON lists are truncated explicitly with failed entries first (redirects.itemsTruncated). Progress "
       + "output reports every entry on stderr; --quiet hides it.",
-      "stagingPreview.url is a fresh, single-use two-minute handoff, minted after checks. It is emitted only "
-      + "in final JSON, excluded from progress and GITHUB_OUTPUT; keep it private. The staging cookie lasts "
-      + "five minutes and remains subject to current site/host/credential permission.",
+      "redirects check and deploy --staging report no review URL unless you pass --handoff; the check "
+      + "authenticates with its own handoff either way. With --handoff, stagingPreview.url is a fresh, single-use "
+      + "two-minute handoff, minted after checks. It is emitted only in final JSON, excluded from progress and "
+      + "GITHUB_OUTPUT; keep it private. Without it, stagingPreview.reason is staging.handoff_not_requested and "
+      + "'staging review' mints one. The staging cookie lasts five minutes and remains subject to current "
+      + "site/host/credential permission.",
       `${REDIRECTS_FILE_NAME} is { siteId, revision, entries }, not a bare array. 'redirects pull' writes it and `
       + "records the revision in .taproot-site-manifest.json; 'pull' writes it too.",
       "An entry is { path, kind, target, status }. kind is 'redirect' (the default) or 'gone'; a gone entry "
@@ -738,9 +752,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "purpose: a real migration list needs judgement about which old URLs still deserve a destination and "
       + "which are simply gone.",
       "Entries take effect on the next deploy, staging first. Each is a file inside that release, so it goes live "
-      + "exactly when the release does: staging with the staged release, production when it is promoted. There is "
-      + "no separate propagation delay; an entry a check does not see belongs to a release that is not being "
-      + "served yet.",
+      + "exactly when the release does: staging with the staged release, production when it is promoted. The edge "
+      + `can keep serving the previous release for up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes, so an entry a `
+      + "check does not see may belong to a release the edge has not switched to yet; deploy --staging waits for "
+      + "staging to serve the new release and reports stagingServed.",
       "A source cannot name a file the site generates: '/index.html' or any page's own 'index.html', '/404.html', "
       + "'/sitemap.xml', '/robots.txt', '/favicon.ico', or a path under the sitemap or robots names. Nothing under "
       + "'/taproot/<version>/' (for example '/taproot/5.0.62/manifest.json') can be a source either: the platform "
@@ -790,8 +805,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "Delivery also requires Taproot's rollout and email provider readiness; opt-in enables neither, and earlier submissions are not backfilled.",
       `definition is { fields, contact_field?, submit_label?, after_submit? } (contact_field only with several email fields). Each field is { id, type, label, hint?, ...constraints }; the closed `
       + `field types are ${FIELD_TYPES.join(", ")}. hint is optional helper text of up to ${MAX_HINT_LENGTH} `
-      + "characters, drawn under the field on the published form; it is the only author-defined text printed there, so a required "
-      + "field is not marked 'Required' and a visitor learns it from the error on submit. "
+      + "characters, drawn under the field on the published form. The published form marks a required field itself: its label "
+      + "ends with ' *' and a '* Required' legend sits above the fields, so do not write 'required' into a label or hint; the "
+      + "stored label stays exactly as written. "
       + `At most ${MAX_FIELDS} fields and ${MAX_SUBMISSION_BYTES} bytes `
       + "per submission. There are no author-supplied regular expressions: use 'format' from its closed list. "
       + "The exact constraints per type are in shared/field-schema.json, which 'forms validate' enforces by "
@@ -824,7 +840,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "a deploy whose release does not publish that page is refused, naming the form and the page. The path in "
       + "each release is the one the page has in that release, so the published form never asks the site where "
       + "to go. The page must be one you created, the home page included: a generated page (folder, tag or "
-      + "archive index), the 404 page, a legal page, a profile home and an integration-managed page are refused as forms.page_not_allowed. The button text and the confirmation belong to the form, not to the page that places it: "
+      + "archive index), the 404 page, a legal page (help page legal), a profile home and an integration-managed page are refused as forms.page_not_allowed. The button text and the confirmation belong to the form, not to the page that places it: "
       + "the 'form' component takes only formKey.",
       "A form's contact address is the value of one email field, stored with each submission. That is what lets the "
       + "owner find and delete every row for a visitor who asks. With exactly one email field, that field is the "
@@ -881,9 +897,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
     usage: `${CLI_BINARY_NAME} media upload [path...]`,
     details: Object.freeze([
       "Paths are relative to the configured workspace root, not the shell's current directory.",
-      "PNG, JPEG, GIF, and WebP are accepted; retina names such as logo@2x.png and logo@3x.png are supported.",
+      "PNG, JPEG, GIF, and WebP are accepted. Each file uploads as its own image: a name such as logo@2x.png is only a filename, nothing pairs it with logo.png, and the platform generates the display sizes from the one file you assign (see help appearance for logos).",
       "For header logos prefer genuine transparent PNG/WebP, check contrast in both themes, and include a simplified square favicon. See help appearance for branding guidance.",
-      "Prepare variants locally with any image tool before uploading: a transparent logo, its @2x copy, a scheme-specific dark logo when one asset does not read on both headers, and a square favicon. The CLI uploads what you give it; it has no recolor, crop, or SVG upload command.",
+      "Prepare variants locally with any image tool before uploading: a transparent logo at the highest resolution you have (never a 1x and a 2x pair: assign one file and the platform generates the sizes; keep it under the 32 MiB upload limit), a scheme-specific dark logo when one asset does not read on both headers, and a square favicon. The CLI uploads what you give it; it has no recolor, crop, or SVG upload command.",
       "Assign both schemes after uploading: lightLogoId and darkLogoId in settings/taproot-styles.json and brand.faviconId in settings/brand.json take the image ids .taproot-site-media.json records for those files; theme push writes them. See help walkthrough for the full design pass.",
       "Each result item reports file, imageId, deduplicated, width, height and processingState; the delivery URLs (src, urls) are in .taproot-site-media.json, not the result, so an upload of any size reports within its bound. media.total and videos.total count every file, and media.itemsTruncated or videos.itemsTruncated says that list stopped short.",
       "MP4, MOV, and WebM files are uploaded as videos (up to 250 MB each; the site's licence sets the cap, and the container is read from the file's bytes, not its name). The CLI reads each file with mediabunny. A file that is H.264 and AAC but not already an MP4 with its index first is rewritten as one without re-encoding; anything else is sent as it is and judged by the server. When the server refuses a file, its one-line message is printed as media.video_refused. A video is ready to play as soon as the upload is confirmed. The CLI sets no poster, because Node has no video decoder: the Videos page picks one automatically for a video uploaded there, and lets the owner choose another frame, so set a CLI-uploaded video's poster there, with its title and caption. The command reports videos.items: { file, videoId, title, caption, fileName, contentType, byteLength, deduplicated, durationMilliseconds, component }, where component.markdown is the component:video fence and component.block the componentBlock node that place it. Needs the site's licence to include video.",
@@ -891,8 +907,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "In Markdown, name an uploaded image by its path (such as media/photo.webp) wherever an image goes: body images, coverImage, album images, component image fields and section images. pages push resolves each path through .taproot-site-media.json, which also keeps the src/urls delivery fields a .pm.json image record carries.",
     ]),
     example: Object.freeze({
-      command: `${CLI_BINARY_NAME} media upload media/logo@2x.png`,
-      markdownImage: "media/logo@2x.png",
+      command: `${CLI_BINARY_NAME} media upload media/logo.png`,
+      markdownImage: "media/logo.png",
       pmJsonImageRecord: Object.freeze({
         imageId: "<image-uuid>",
         src: "<preferred-delivery-url>",
@@ -913,11 +929,15 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "selected page's content until a newer matching preview is ready, the content changes, or the operator "
       + "explicitly supplies --allow-failed-preview. Pending retries do not clear a known failure; previews "
       + "remain optional and old snapshots without content identity do not block deployment.",
-      "deploy --staging and redirects check return a separate fresh single-use staging handoff in "
-      + "stagingPreview.url, after authenticating headless redirect checks. Handoffs never go to GITHUB_OUTPUT.",
-      "On a managed Docs site deploy --staging stages settings only and still returns stagingPreview.url: open it "
-      + "once, then use the site's theme toggle to review both schemes; no page draft is needed to preview a "
-      + "presentation change. When no handoff can be minted the result carries stagingPreview.reason "
+      "deploy --staging and redirects check report no review URL by default, because it is a live single-use "
+      + "credential and their JSON is often saved to logs (stagingPreview.reason staging.handoff_not_requested). Run "
+      + "staging review for one, or pass --handoff to get a fresh single-use handoff in stagingPreview.url, minted "
+      + "after the headless redirect checks. staging review --path <page> (and --review-path <page> beside --handoff) "
+      + "opens the review on that page instead of the home page. Handoffs never go to GITHUB_OUTPUT.",
+      "On a managed Docs site deploy --staging stages settings only: run staging review (or deploy --staging "
+      + "--handoff) and open the URL once, then use the site's theme toggle to review both schemes; no page draft is "
+      + "needed to preview a presentation change. When a requested handoff can't be minted the result carries "
+      + "stagingPreview.reason "
       + "(staging.host_unavailable, staging.authority_denied, staging.surface_refused, or staging.handoff_unavailable) "
       + "and a recovery step; run staging review to mint another (it works on every surface). Never verify a theme "
       + "on production instead.",
@@ -1514,7 +1534,8 @@ const BACKGROUND_REFERENCE = backgroundReference();
 const FREE_FORM_REFERENCE = Object.freeze({
   type: "free-form",
   displayName: "Free-form page",
-  summary: "A page whose body is authored as validated ProseMirror, directly or through the supported Markdown subset.",
+  summary:
+    "A page whose body is authored as validated ProseMirror, directly or through the supported Markdown subset. It renders no automatic heading: open the body with a '# ' title line.",
   workspace: Object.freeze({
     directory: "pages/",
     sourceRule: Object.freeze({
@@ -1673,6 +1694,27 @@ const FREE_FORM_REFERENCE = Object.freeze({
       refusals:
         `Any other rel token, opener included, is refused (${CONTENT_ERROR_CODES.linkRel}); so is another target `
         + `(${CONTENT_ERROR_CODES.linkTarget}). The editor's old default, "noopener noreferrer nofollow", reads as no choice.`,
+    }),
+    // TR01220: a free-form page prints no title, so its first level-1 heading is the h1.
+    headings: Object.freeze({
+      rule:
+        "A free-form page renders no automatic heading: its title is not printed on the page. "
+        + "The first level-1 heading in the body becomes the page's h1, so open the Markdown with '# Page title'. A "
+        + "structured page (article, recipe, album, place review) prints its title as the h1, so its body starts at '## '.",
+      claimedFirst:
+        "A hero-section with a title claims the h1, and so does an image-banner with overlay text that opens the page; "
+        + "a '# ' heading after either is then not a second h1. A titled hero-section renders its own h1 wherever it sits, so a '# ' line before one gives the page two h1s: use one or the other. Without a hero or banner, write the '# ' heading yourself.",
+      laterHeadings:
+        "Any later '# ' heading renders as an h2, like the other top-level sections, never as a second h1, "
+        + "and the other headings are renumbered so none skips a level.",
+      depth: `The Markdown subset accepts levels 1 to 4; a deeper heading is refused (${CONTENT_ERROR_CODES.headingDepth}).`,
+      example: "# Visit the studio\n\nWe are open every day.\n\n## Hours\n\nMonday to Friday, 6 AM to 7:30 PM.",
+    }),
+    // TR01224: the default for a policy written as a free-form page.
+    legalAndPrivacyPages: Object.freeze({
+      ...LEGAL_PLATFORM_LINK_GUIDANCE,
+      choosing:
+        `A policy that needs a version and an effective date is a legal page, which the CLI cannot author: see '${CLI_BINARY_NAME} help page legal'.`,
     }),
     componentNode: Object.freeze({
       type: "componentBlock",
@@ -1889,7 +1931,7 @@ export function formatReferenceResult(result) {
         result.topics.map((topic) => `  ${topic.usage.padEnd(48)} ${topic.summary}`).join("\n")
       }\n\nAdd --json for stable machine-readable output.\n`;
     case "page-types":
-      return `Authorable page types:\n${
+      return `Page types:\n${
         result.pageTypes.map((page) =>
           `  ${page.type.padEnd(16)} ${page.summary}\n${" ".repeat(19)}Help: ${page.helpCommand}`
         ).join("\n")
@@ -1933,7 +1975,9 @@ export function formatReferenceResult(result) {
         page.document.marks.join(", ")
       }\n\nLinks:\n  markdown              ${page.document.links.markdown}\n  rel                   ${
         page.document.links.rel.join(", ")
-      }\n  default               ${page.document.links.default}\n  in Markdown           ${page.document.links.markdownRule}\n  in .pm.json           ${page.document.links.pmJson}\n  refusals              ${page.document.links.refusals}\n\nTop-level section container:\n${page.sections.example}\n\nSection attributes:\n${
+      }\n  default               ${page.document.links.default}\n  in Markdown           ${page.document.links.markdownRule}\n  in .pm.json           ${page.document.links.pmJson}\n  refusals              ${page.document.links.refusals}\n\nHeadings and the h1:\n  rule                  ${page.document.headings.rule}\n  banner and hero       ${page.document.headings.claimedFirst}\n  later headings        ${page.document.headings.laterHeadings}\n  depth                 ${page.document.headings.depth}\n  example\n${
+        page.document.headings.example.split("\n").map((line) => `    ${line}`).join("\n")
+      }\n\nLegal and privacy pages:\n  linking Taproot       ${page.document.legalAndPrivacyPages.rule}\n  example               ${page.document.legalAndPrivacyPages.example}\n  versioned policies    ${page.document.legalAndPrivacyPages.choosing}\n\nTop-level section container:\n${page.sections.example}\n\nSection attributes:\n${
         page.document.sectionNode.attrs.map(formatSectionAttr).join("\n")
       }\n\nSection photo background (closed object):\n${
         page.sections.background.fields.map((field) => formatRegistryField(field)).join("\n")

@@ -27,6 +27,7 @@ import {
 } from "./constants.js";
 import { Readable } from "node:stream";
 
+import { normalizeLatestCliVersion } from "./cli-release.js";
 import { validateApiBaseUrl } from "./config.js";
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 
@@ -572,6 +573,18 @@ export class ApiError extends SiteAuthoringError {
       if (candidate.toLowerCase() === field.toLowerCase()) return description;
     }
     return undefined;
+  }
+
+  /**
+   * The latest published release a `cli_outdated` refusal names, or undefined.
+   * Taproot states it only inside the refusal's sentence, so it is read from
+   * there and kept only if it parses as a version (TR01225).
+   */
+  latestCliVersion() {
+    if (this.refusalKind() !== REFUSAL_CLI_OUTDATED) return undefined;
+    const text = this.descriptionFor(CLI_UPGRADE_REFUSAL_FIELD) ?? this.message;
+    const match = /accepts only the latest published release, (\S+?)\. Upgrade with:/u.exec(text);
+    return match === null ? undefined : normalizeLatestCliVersion(match[1]);
   }
 
   /**

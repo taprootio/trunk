@@ -6,7 +6,10 @@ import { inspectStagingPreview } from "../staging-check.js";
 export async function redirectsCheck(invocation) {
   const { client, siteId, onProgress, now } = await openSession(invocation);
   return await withRefusalGuidance(onProgress, "staging redirects", async () => {
-    const { routeCheck, redirects, stagingPreview } = await inspectStagingPreview(client, siteId, onProgress, now);
+    const { routeCheck, redirects, stagingPreview } = await inspectStagingPreview(client, siteId, onProgress, now, {
+      handoff: invocation.handoff === true,
+      returnPath: invocation.reviewPath,
+    });
     return successResult(VERB_REDIRECTS_CHECK, siteId, { routeCheck, redirects, stagingPreview });
   });
 }

@@ -119,6 +119,22 @@ dark logo on the rendered dark header at desktop and compact/mobile widths;
 transparent canvas pixels do not count as contrast. Supply separate
 scheme-specific assets when one visible mark cannot satisfy both surfaces.
 
+`taproot-site help settings` maps every pulled setting to the app control that
+shows it, says what it does and where it renders, and names the verb that
+writes it (`help appearance` prints the same text beside each writable field,
+and the shipped help is the authority if this table drifts). The ones that are
+easy to confuse:
+
+| App control | Workspace field | Where it renders |
+| --- | --- | --- |
+| Brand & style > Page style > Background image | `lightTheme` / `darkTheme` `pageBackgroundImage` (with `pageBackgroundImageOpacity`) | One layer across the page box behind the content; the opaque header and footer cover it, so it shows behind the main content. |
+| Brand & style > Page canvas > Canvas image | `lightCanvasImageId` / `darkCanvasImageId` in `taproot-styles.json` (with the two `...CanvasImageOpacity` fields) | Only the empty side margins of a page. Not on a standard site today, whose margins are 0 px wide. |
+| Brand & style > Brand > Logo | `lightLogoId` / `darkLogoId` | The header brand, and the footer's brand once the footer is enabled. |
+| Brand & style > Brand > Favicon | `brand.json` `faviconId` | The icon set in every page's head and `/favicon.ico`. |
+
+Both background layers tile at the image's natural pixel size from the top-left;
+neither sets a size, repeat or position.
+
 `taproot-site validate` checks the pulled workspace `taproot-site.json` names,
 with no credential, no network, and no write: every page source (metadata,
 Markdown conversion, media references, content vocabulary, section contexts),
@@ -130,6 +146,15 @@ against the pages the pull recorded. It reports every problem at once in
 Warnings never refuse: `linkWarnings` names a link whose address is only
 `http(s)://` plus its own text (`content.link_autolinked`, left by older editor
 autolinking), and `pages push` reports the same for the pages it sends.
+
+`validate` also runs the site checks that need nothing but the workspace, from
+the same rule catalogue the editor and the site-health page read. `findings`
+lists each one as a rule id (`link.page_missing`, a link to a page the workspace
+does not have), a severity, the file, and the value found; a warning never
+refuses. `siteChecks.checkedBySite` names the rules that need the site's own
+records, such as placed images and forms: `status` reports those under
+`siteHealth`; `siteChecks.checkedAtDeploy` names the ones only a deploy applies. A redirect source the site would refuse also names its rule in
+`error.problems[].rule`.
 
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
 the same way: a directory laid out like a
@@ -242,7 +267,7 @@ upward from the current directory through a bounded number of parents.
 Exactly one must be found: none is `config.not_found`, more than one is
 `config.ambiguous`, and `--config <path>` placed before the verb selects one
 explicitly and bypasses discovery. `login`, `logout`, `sites`, `use`,
-`whoami`, and `env` need no configuration and no site.
+`whoami`, `env`, and `changelog` need no configuration and no site.
 
 ```json
 {
@@ -301,11 +326,12 @@ each step names the reference it relies on.
    and favicon; `help fonts` lists the font families, by category, that the
    font fields can name.
 4. **Prepare media locally.** Raster files only (PNG, JPEG, GIF, WebP),
-   relative to the workspace root; make the transparent logo, its `@2x` copy,
-   a dark-scheme logo when needed and a square favicon with your own tools,
-   upload them with `media upload`, then assign `lightLogoId`, `darkLogoId`
-   and `brand.faviconId` from the returned ids. There is no recolor, crop or
-   SVG upload command.
+   relative to the workspace root; make the transparent logo at the highest
+   resolution you have (one file, not a 1x and `@2x` pair: the platform
+   generates the sizes), a dark-scheme logo when needed and a square favicon
+   with your own tools, upload them with `media upload`, then assign
+   `lightLogoId`, `darkLogoId` and `brand.faviconId` from the returned ids. There
+   is no recolor, crop or SVG upload command.
 5. **Validate, preview, then push.** `validate` checks the whole workspace offline;
    `theme push --dry-run` reads the site and lists the JSON paths at which
    each settings file differs from it, and whether the baseline `pull`
@@ -320,10 +346,12 @@ each step names the reference it relies on.
    change set. `pull` reads the four settings documents and the revision
    from one snapshot, and `footer push` advances the recorded revision only
    when its save replaced that same revision.
-6. **Review on staging in both schemes.** `deploy --staging` returns a
-   single-use handoff in `stagingPreview.url`, on a managed Docs site too;
-   open it once and use the site's theme toggle. No page draft is needed;
-   `preview page` renders one draft and is a different tool.
+6. **Review on staging in both schemes.** `staging review` (or
+   `deploy --staging --handoff`) returns a single-use handoff in
+   `stagingPreview.url`, on a managed Docs site too; open it once and use the
+   site's theme toggle. On a Standard site `deploy --staging` first waits until
+   staging serves the new release (see `stagingServed`). No page draft is
+   needed; `preview page` renders one draft and is a different tool.
 7. **Promote only after review.** `deploy --production`.
 
 ## The authoring loop
@@ -362,7 +390,22 @@ its original publication date) and `coverImage`, which the site requires to be a
 image the page itself uses (place it in the body too; `pages.cover_image_unused`). A page's template is fixed when
 it is created: a source for another template is refused with
 `pages.template_immutable`. `taproot-site help page <type>` gives each
-template's fields and one worked example.
+template's fields and one worked example. The structured legal page (a versioned
+privacy policy or terms with an effective date) is created and published in the
+app; the CLI records it as a metadata-only page, and `taproot-site help page
+legal` says what a site-authoring key can and cannot do with one.
+A privacy policy or other legal page that names Taproot should link the first
+mention to <https://www.taproot.io>; `help page free-form` and `help page legal`
+give a sample sentence.
+
+A structured page prints its title as the page's `<h1>`, so its body starts at
+`##`. A free-form page renders no automatic heading, so open its Markdown with
+a `# Page title` line: the first level-1 heading becomes the `<h1>`. A
+`hero-section` with a title, or a leading `image-banner` with overlay text,
+claims the `<h1>` first, so do not also write a `#` line on a page with a
+titled hero. A later `#` heading is rendered as an `<h2>`, never a second
+`<h1>`, and the other headings are renumbered so none skips a level. The
+Markdown subset accepts levels 1 to 4.
 
 A `.pm.json` page's title, path, description and author live in the workspace
 manifest rather than the file. `pages meta set <path> --title <text>
@@ -495,7 +538,10 @@ choose one on the Videos page, where an upload made there gets one automatically
 title and caption there too: the poster, caption and shape are the video's own and show wherever
 it is placed. The command reports its `videoId`, title, caption and file name for a `video`
 component (`help component video`), and
-`pages push` refuses a page that places a video the site does not have. `nav push`, `theme push`, and `footer push` replace the whole
+`pages push` refuses a page that places a video the site does not have. `nav.json` and the footer
+document leave defaults out (no empty `externalUrl` or `children` on a navigation item, no `bold: false`
+on a footer text run); `pull`, `nav push` and `footer push` all write that form and accept either, so a
+pull after a push shows only changes you made. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
 settings, and the closed footer document. `pull` writes each scheme's
 complete effective theme — the stored theme resolved over the same defaults
@@ -546,14 +592,13 @@ cleaned-up snapshot answers `preview.not_found`.
 It stages; nothing reaches an audience until `deploy --staging` publishes the
 candidate and `deploy --production` promotes that completed staging
 deployment. `status` reports the platform authoring switch, the CLI release,
-deployments, readiness, image processing, and broken references under Content
-permission. `brokenReferences` names affected pages and their missing image IDs
-or internal page paths in the latest editable bodies. It reports `covered: true`,
-`totalPages`, and `pages`; an empty report means no missing targets were found.
-Output is bounded to 50 pages and 50 targets of each kind per page, with explicit
-`pagesTruncated`, `missingImageIdsTruncated`, or `missingPagePathsTruncated` flags.
-A denied, malformed, or failed read fails `status` instead of implying a clean
-site.
+deployments, readiness, image processing, and site health under Content
+permission. `siteHealth` lists the site checks' findings over the latest editable
+body of each page: a rule id, a severity (`error` or `warning`), the page, and
+the value found. It reports `covered: true`, `errors`, `warnings`, `pages`, and
+`findings`; an empty list means no check found anything. Output is bounded to 100
+findings, with an explicit `findingsTruncated` flag. A denied, malformed, or
+failed read fails `status` instead of implying a clean site.
 
 ## Output contract
 
@@ -644,6 +689,24 @@ and reading order is value then label. Unicode spaces and tabs remain valid.
 Other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal `<br>` tags are rejected
 with the exact fact field path. A label is optional and stays outside the value's link. See
 `taproot-site help page free-form` and `taproot-site help component cta`.
+
+### Staging serves the new release in 0.21.0
+
+A deployment reports `completed` once Taproot has asked Cloudflare to switch the
+host to the new release. The edge then needs up to about two minutes to follow:
+the route propagates, and the Worker keeps it cached for up to a minute more. A
+cache-busting query cannot help, because the release comes from the route and not
+the URL. `deploy --staging` on a Standard site now reads the release staging
+serves before it deploys, and after the deployment completes waits (up to three
+minutes, one read every three seconds) until a different release answers twice in
+a row. The result carries `stagingServed`: `served` with `servedAfterSeconds`,
+`propagating` when staging still showed the previous release at the bound, or
+`unverified` when the change cannot be attributed to this deployment (no readable
+baseline, another deployment under way or just completed, or a request that joined
+one already running; it carries `expectedBy`, or `waitedSeconds` when the last read at the bound
+did not name the previous release), and a managed Docs site always reports `unverified`. The check reads from the machine running the CLI, so a reviewer in another
+region can still see the previous release until the two-minute ceiling. The
+deployment itself is never failed by this wait. The redirect note no longer says there is no propagation delay.
 
 ### Forms by id in 0.20.0
 
@@ -738,15 +801,37 @@ targets are refused (`content.link_rel`, `content.link_target`). The editor's
 old default, `noopener noreferrer nofollow`, reads as no choice. See
 `taproot-site help page free-form`.
 
+### What changed between releases
+
+Taproot accepts only the latest CLI, so an upgrade can be forced at any time.
+After one, run `taproot-site changelog --since <the version you upgraded from>`:
+it prints each release's note, the behavior it changed, and the help topics
+(`taproot-site help <topic>`) to read again, newest first, offline and without a
+sign-in. With no `--since` it prints the installed release's entry; `complete:
+false` means `--since` starts before the oldest release the record covers.
+`status` reports the installed release's note in `cliRelease.whatsNew`. An
+outdated-CLI refusal carries `latestVersion` and `changelogCommand` as their own
+fields beside the message, so the command to run after upgrading is in the
+refusal itself. Every release's notes live in one file, `src/changelog.json`,
+and a package test fails when the installed version has no entry there.
+
 ### Staging verification and deployment evidence
 
 `deploy --staging` selects the same changed pages, settings groups and navigation
-as the Deployments page, and returns a single-use staging review handoff in
-`stagingPreview.url` — on a managed Docs site too, where it stages settings
-only: open the URL once, then use the site's theme toggle to review both
-schemes before promoting. When no handoff can be minted, `stagingPreview.reason`
-and `stagingPreview.recovery` say why and what to do next; `staging review`
-mints another on any surface. `status` checks that exact current candidate, so a
+as the Deployments page. It reports no review URL by default, because the URL is
+a live single-use credential and this JSON is often saved to logs:
+`stagingPreview.reason` is `staging.handoff_not_requested` and
+`stagingPreview.recovery` names `taproot-site staging review`. Run that command
+for a single-use review handoff (on a managed Docs site too, where deploy stages
+settings only), or pass `--handoff` to `deploy --staging` to get it in
+`stagingPreview.url` straight away; `--no-handoff` states the default
+explicitly. Open the URL once, then use the site's theme toggle to review both
+schemes before promoting. `staging review --path about` (or
+`deploy --staging --handoff --review-path about`) opens the review on that page
+instead of the home page; a page path as `pull` records it works, with or
+without the leading slash, and a query is allowed. When a requested handoff cannot be minted,
+`stagingPreview.reason` and `stagingPreview.recovery` say why and what to do
+next; `staging review` mints another on any surface. `status` checks that exact current candidate, so a
 completed CLI stage counts as successful until that candidate changes.
 
 A retained failed preview of selected page content refuses deployment as
@@ -770,8 +855,9 @@ Requests have a 90-second deadline with eight concurrent requests; large JSON
 lists have explicit truncation, prioritizing failures. Progress output reports
 each entry. A gate/transport failure never counts as verified.
 
-`stagingPreview.url` is a fresh single-use two-minute handoff minted **after**
-checks. Opening it consumes it and establishes a five-minute staging cookie.
+With `--handoff`, `stagingPreview.url` is a fresh single-use two-minute handoff
+minted **after** checks; without it the check still authenticates with its own
+handoff and reports none. Opening it consumes it and establishes a five-minute staging cookie.
 Minting again replaces the same authority's previous handoff and cookie. Current
 site, host and credential permission are rechecked; key revocation stops access.
 Treat the URL as secret: it is returned only in final JSON, omitted from progress

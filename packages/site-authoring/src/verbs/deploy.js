@@ -15,6 +15,7 @@ import {
 import {
   DEPLOY_TARGET_PRODUCTION,
   DEPLOY_TARGET_STAGING,
+  LIMITS,
   REFUSAL_CAPABILITY_MISSING,
   REFUSAL_CREDENTIAL_REJECTED,
   REFUSAL_UNCLASSIFIED,
@@ -23,23 +24,28 @@ import {
 } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import { inspectStagingPreview } from "../staging-check.js";
+import { HANDOFF_NOT_REQUESTED_PROGRESS, handoffNotRequested, inspectStagingPreview } from "../staging-check.js";
+import { confirmStagingServed, readStagingReleaseBefore, unverifiedStagingServed } from "../staging-served.js";
 import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
 
 /**
- * When a redirect goes live (TR00702, TR00968).
+ * When a redirect goes live (TR00702, TR00968, TR01236).
  *
  * A redirect or gone entry is a file inside the release this deploy publishes.
  * It goes live with that release and no other way: staging shows it as soon as
  * the staged release is served, production shows it when the release is
- * promoted. There is no separate store to wait on, so a check that does not see
- * an entry is looking at a release that does not carry it yet.
+ * promoted. The release itself reaches the edge after the deployment reports
+ * completed: Cloudflare propagates the route and the Worker caches it, so the
+ * previous release can answer for about two minutes (the note below quotes the
+ * ceiling). A check that does not see an entry is looking at a release that is
+ * not served yet.
  */
 const REDIRECT_ACTIVATION_NOTE =
   "Redirect and gone entries live inside the release this deploy publishes: staging serves them with the staged "
-  + "release and production serves them once that release is promoted. There is no separate propagation delay; "
-  + "an entry a check does not see belongs to a release that is not being served yet.";
+  + "release and production serves them once that release is promoted. The edge can keep serving the previous "
+  + `release for up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes, so an entry a `
+  + "check does not see may belong to a release the edge has not switched to yet.";
 
 /**
  * `deploy --staging` / `deploy --production` — readiness, deploy, poll to
@@ -208,9 +214,9 @@ function presentationHandoffUnavailable(error) {
  * It is minted after the deployment completed, bound by the server to the
  * site's exact acknowledged staging host, and single-use like every other.
  */
-async function mintPresentationStagingHandoff(client, siteId, onProgress, now) {
+async function mintPresentationStagingHandoff(client, siteId, onProgress, now, returnPath) {
   try {
-    const handoff = await mintStagingPreviewHandoff(client, siteId, { now });
+    const handoff = await mintStagingPreviewHandoff(client, siteId, { now, returnPath });
     onProgress(`Staging review handoff minted for ${handoff.stagingUrl}. ${PRESENTATION_REVIEW_GUIDANCE}`);
     return { ...handoff, review: PRESENTATION_REVIEW_GUIDANCE };
   } catch (error) {
@@ -387,6 +393,9 @@ export async function deploy(invocation) {
       }
     }
 
+    // The release staging serves now, so the wait after completion can tell when the new one replaces it
+    // (TR01236). A managed Docs site's pages carry no release stamp, so it is not read there.
+    const servedBefore = presentationOnly ? undefined : await readStagingReleaseBefore(client, siteId, now);
     const created = await deploySite(client, siteId, {
       siteId,
       environment: DEPLOYMENT_ENVIRONMENT_STAGING,
@@ -405,8 +414,22 @@ export async function deploy(invocation) {
       now,
     });
     await recordDeployment(config, manifest, "staging", completed);
+    const stagingServed = presentationOnly
+      ? unverifiedStagingServed(now(), "A managed Docs site's staging is not checked for the served release.")
+      : await confirmStagingServed(client, siteId, {
+        before: servedBefore,
+        deploymentId: created.id,
+        coalesced: created.outcome === DEPLOYMENT_REQUEST_OUTCOME_COALESCED,
+        onProgress,
+        now,
+      });
+    if (stagingServed.state !== "served") onProgress(`Warning: ${stagingServed.message}`);
     if (presentationOnly) {
-      const stagingPreview = await mintPresentationStagingHandoff(client, siteId, onProgress, now);
+      // The review URL is a live credential, so it is minted only when asked for (TR01233).
+      if (invocation.handoff !== true) onProgress(HANDOFF_NOT_REQUESTED_PROGRESS);
+      const stagingPreview = invocation.handoff === true
+        ? await mintPresentationStagingHandoff(client, siteId, onProgress, now, invocation.reviewPath)
+        : handoffNotRequested();
       return successResult(VERB_DEPLOY, siteId, {
         target,
         environment: DEPLOYMENT_ENVIRONMENT_STAGING,
@@ -419,11 +442,15 @@ export async function deploy(invocation) {
         deployment: completed,
         outcome: created.outcome,
         readiness: reportReadiness(readiness),
+        stagingServed,
         stagingPreview,
         nextStep: stagingPreview.url === "" ? "staging review" : "deploy --production",
       });
     }
-    const { routeCheck, redirects, stagingPreview } = await inspectStagingPreview(client, siteId, onProgress, now);
+    const { routeCheck, redirects, stagingPreview } = await inspectStagingPreview(client, siteId, onProgress, now, {
+      handoff: invocation.handoff === true,
+      returnPath: invocation.reviewPath,
+    });
     onProgress(REDIRECT_ACTIVATION_NOTE);
     return successResult(VERB_DEPLOY, siteId, {
       target,
@@ -436,6 +463,7 @@ export async function deploy(invocation) {
       deployment: completed,
       outcome: created.outcome,
       readiness: reportReadiness(readiness),
+      stagingServed,
       routeCheck,
       redirects,
       stagingPreview,

@@ -14,3 +14,4 @@ export {
   getFooterReference,
   getThemeReference,
 } from "./presentation-reference.js";
+export { getSettingsReference } from "./setting-reference.js";

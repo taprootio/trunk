@@ -5,7 +5,7 @@ description: An example second page for the offline authoring fixture.
 ---
 
 :::section {"contentPadding":"standard","surface":"none"}
-## Visit the studio
+# Visit the studio
 
 Riverbend Wellness is a fictional studio in the fictional town of Elm Harbor.
 Nothing on this page describes a real place, and no address, telephone number,
