@@ -659,6 +659,7 @@ function offlineSiteChecks(checked, manifest, onProgress) {
     planned: checked.pages?.planned,
     pagePaths: manifest.pages.map((entry) => normalizePagePath(entry?.path)).filter((value) => value !== undefined),
     pagesComplete: manifest.pagesTruncated !== true,
+    formKeysChecked: checked.formKeysChecked === true,
     onProgress,
   });
 }
@@ -782,7 +783,8 @@ export async function validateFixture(invocation = {}) {
       "remote concurrency or current revisions",
       "server normalization and pull round trips",
       "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
-        + "siteHealth, or siteChecks.checkedAtDeploy, which only a deploy applies",
+        + "siteHealth, siteChecks.checkedAtDeploy, which only a deploy applies, or siteChecks.checkedInEditor, "
+        + "which only the page editor evaluates (a cover, a description field, or a description's length)",
       "preview or published rendering",
     ],
     nextStep: "Run a real pull and authorized preview before approval or deployment.",
@@ -846,7 +848,8 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       "pages, revisions, or videos that changed on the site since the pull",
       "server normalization and pull round trips",
       "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
-        + "siteHealth, or siteChecks.checkedAtDeploy, which only a deploy applies",
+        + "siteHealth, siteChecks.checkedAtDeploy, which only a deploy applies, or siteChecks.checkedInEditor, "
+        + "which only the page editor evaluates (a cover, a description field, or a description's length)",
       "preview or published rendering",
     ],
     nextStep: "Run 'taproot-site plan' to check the workspace against the live site and see the ordered apply.",

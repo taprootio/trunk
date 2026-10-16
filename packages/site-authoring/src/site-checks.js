@@ -15,6 +15,7 @@
  * and re-run it.
  */
 export const RULE_LINK_PAGE_MISSING = "link.page_missing";
+export const RULE_FORM_KEY_UNKNOWN = "form.key_unknown";
 export const RULE_REDIRECT_SOURCE_INVALID = "redirect.source_invalid";
 export const RULE_REDIRECT_SOURCE_INDEX_HTML = "redirect.source_index_html";
 export const RULE_REDIRECT_SOURCE_INTEGRATION_DATA = "redirect.source_integration_data";
@@ -221,6 +222,21 @@ export function missingPageLinkFindings(templateData, currentPagePath, knownPath
     return extractPageLinks(templateData, currentPagePath)
         .filter((link) => !knownPaths.has(normalizeStoredPath(link).toLowerCase()))
         .map((link) => ({ ruleId: RULE_LINK_PAGE_MISSING, severity: "warning", subject: link, detail: "" }));
+}
+/**
+ * The `form.key_unknown` findings (TR01081): every placed form key that no form file of the
+ * workspace has. A workspace names a form by key (`forms/<key>.json`); the server stores the id.
+ * `knownKeys` is the workspace's own form keys, and a caller with no form files passes nothing
+ * to check, since a workspace for a site whose forms were created elsewhere must still push.
+ */
+export function unknownFormKeyFindings(placedKeys, knownKeys) {
+    const findings = [];
+    for (const key of new Set(placedKeys)) {
+        if (!knownKeys.has(key)) {
+            findings.push({ ruleId: RULE_FORM_KEY_UNKNOWN, severity: "error", subject: key, detail: "" });
+        }
+    }
+    return findings;
 }
 // ---------------------------------------------------------------- redirects
 const RUNTIME_MIRROR_PATH = /^taproot\/[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\/|$)/iu;

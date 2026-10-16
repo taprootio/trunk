@@ -53,6 +53,28 @@ export async function readWorkspaceForms(workspaceDir, keys, validationOptions =
   return forms;
 }
 
+/**
+ * The keys of the form files the workspace holds, read from file names alone (TR01081), or undefined
+ * when the folder cannot be read (a name outside the safe grammar, a link, too many files): the
+ * answer is only a hint for a refusal, so a workspace that cannot say changes nothing, and
+ * `forms validate` reports the folder's problem. A file whose name is not a form key is left out.
+ */
+export async function workspaceFormKeys(workspaceDir) {
+  let files;
+  try {
+    files = await walkWorkspaceFiles(workspaceDir, FORMS_DIRECTORY, [FORM_FILE_EXTENSION]);
+  } catch (error) {
+    if (error instanceof SiteAuthoringError) return undefined;
+    throw error;
+  }
+  const keys = new Set();
+  for (const file of files) {
+    const key = file.slice(FORMS_DIRECTORY.length + 1, -FORM_FILE_EXTENSION.length);
+    if (!key.includes("/") && isFormKey(key)) keys.add(key);
+  }
+  return keys;
+}
+
 /** A form name as the site compares it: trimmed, ignoring case (TR01216). */
 export function comparableFormName(name) {
   return String(name).trim().toLowerCase();

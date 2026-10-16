@@ -14236,19 +14236,19 @@ test("validate reports a link to a page the workspace lacks as a warning, and na
     uploaded: true,
     files: {
       "pages/notes.md":
-        "---\ntitle: Notes\npath: notes\n---\n\nSee [the team](/team), [this page](/notes) and [the web](https://example.com).\n",
+        "---\ntitle: Notes\npath: notes\ndescription: Notes for the team.\n---\n\n# Notes\n\nSee [the team](/team), [this page](/notes) and [the web](https://example.com).\n",
     },
   }));
   const validated = await cliRun(workspace, ["validate"]);
   assert.equal(validated.exitCode, 0, validated.stderr);
+  // The fixture's own pages carry page-structure warnings (TR00947); this test is about notes.md.
+  const forNotes = (result) => result.findings.items.filter((item) => item.file === "pages/notes.md");
   assert.deepEqual(
-    validated.result.findings.items.map((item) => [item.rule, item.severity, item.file, item.subject]),
+    forNotes(validated.result).map((item) => [item.rule, item.severity, item.file, item.subject]),
     [["link.page_missing", "warning", "pages/notes.md", "/team"]],
   );
-  assert.deepEqual(
-    [validated.result.findings.total, validated.result.findings.errors, validated.result.findings.warnings],
-    [1, 0, 1],
-  );
+  assert.equal(validated.result.findings.errors, 0);
+  assert.equal(validated.result.findings.warnings, validated.result.findings.total);
   assert.ok(validated.result.siteChecks.ranOffline.includes("link.page_missing"));
   assert.ok(validated.result.siteChecks.checkedBySite.includes("form.archived"));
   assert.ok(validated.result.siteChecks.checkedBySite.includes("image.missing"));
@@ -14256,11 +14256,175 @@ test("validate reports a link to a page the workspace lacks as a warning, and na
 
   const clean = await fixture(site, wholeWorkspace({
     uploaded: true,
-    files: { "pages/notes.md": "---\ntitle: Notes\npath: notes\n---\n\nSee [this page](/notes).\n" },
+    files: {
+      "pages/notes.md": "---\ntitle: Notes\npath: notes\ndescription: Notes for the team.\n---\n\n# Notes\n\nSee [this page](/notes).\n",
+    },
   }));
   const quiet = await cliRun(clean, ["validate"]);
   assert.equal(quiet.exitCode, 0, quiet.stderr);
-  assert.equal(quiet.result.findings.total, 0);
+  assert.deepEqual(forNotes(quiet.result), []);
+});
+
+test("validate warns when a free-form page has no h1, or a banner or earlier heading already claims it (TR00947)", async (site) => {
+  const front = (path) => `---\ntitle: Page\npath: ${path}\ndescription: A page.\n---\n\n`;
+  const workspace = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: {
+      "pages/bare.md": `${front("bare")}Just text, no heading.\n`,
+      "pages/doubled.md": `${front("doubled")}# First\n\nText.\n\n# Second\n\n### Deep\n`,
+      "pages/titled.md": `${front("titled")}# Title\n\n## Part\n`,
+      "pages/skips.md": `${front("skips")}# Title\n\n### Skipped a level\n`,
+    },
+  }));
+  const validated = await cliRun(workspace, ["validate"]);
+  assert.equal(validated.exitCode, 0, validated.stderr);
+  assert.deepEqual(
+    validated.result.findings.items
+      .filter((item) => /^pages\/(bare|doubled|titled|skips)\.md$/u.test(item.file))
+      .map((item) => [item.file, item.rule, item.subject, item.detail]),
+    [
+      ["pages/bare.md", "seo.h1_missing", "", undefined],
+      ["pages/doubled.md", "seo.h1_demoted", "Second", "heading"],
+      ["pages/skips.md", "seo.heading_renumbered", "Skipped a level", "3>2"],
+    ],
+  );
+  assert.ok(validated.result.siteChecks.ranOffline.includes("seo.h1_missing"));
+  assert.ok(validated.result.siteChecks.checkedInEditor.includes("seo.social_image_fallback"));
+  assert.ok(validated.stderr.includes("pages/bare.md has no h1"));
+  assert.ok(validated.stderr.includes("pages/doubled.md has the level 1 heading 'Second', which publishes as an h2"));
+});
+
+const WORKSPACE_CONTACT_FORM = Object.freeze({
+  key: "contact",
+  name: "Contact",
+  sink: "none",
+  retention_days: 365,
+  definition: {
+    fields: [
+      { id: "name", type: "text", label: "Your name", required: true, max_length: 120 },
+      { id: "email", type: "email", label: "Email", required: true },
+    ],
+  },
+});
+
+function aboutPlacingForm(formKey) {
+  return "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\n# About us\n\n"
+    + `\`\`\`component:form\n${JSON.stringify({ formKey })}\n\`\`\`\n`;
+}
+
+test("validate refuses a form key that no form file in the workspace has, naming the file it expected (TR01081)", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: { "forms/contact.json": WORKSPACE_CONTACT_FORM, "pages/about.md": aboutPlacingForm("contakt") },
+  }));
+  const failed = await cliRun(workspace, ["validate"]);
+
+  assert.equal(failed.exitCode, 1);
+  assert.equal(failed.result.error.code, "pages.form_unknown");
+  assert.equal(failed.result.error.rule, "form.key_unknown");
+  assert.equal(failed.result.error.field, "pages/about.md");
+  assert.match(failed.stderr, /forms\/contakt\.json/u);
+});
+
+test("validate accepts a form key a workspace form file has, and a workspace with no form files at all (TR01081)", async (site) => {
+  const withFile = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: { "forms/contact.json": WORKSPACE_CONTACT_FORM, "pages/about.md": aboutPlacingForm("contact") },
+  }));
+  const accepted = await cliRun(withFile, ["validate"]);
+  assert.equal(accepted.exitCode, 0, accepted.stderr);
+
+  // A site whose forms were created elsewhere still validates; the site is asked on push.
+  const withoutFiles = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: { "pages/about.md": aboutPlacingForm("contakt") },
+  }));
+  const elsewhere = await cliRun(withoutFiles, ["validate"]);
+  assert.equal(elsewhere.exitCode, 0, elsewhere.stderr);
+});
+
+test("validate names the form key check as skipped when no form file could be read, and reports the form file's own problem (TR01081)", async (site) => {
+  const none = await fixture(site, wholeWorkspace({ uploaded: true, files: { "pages/about.md": aboutPlacingForm("contakt") } }));
+  const skipped = await cliRun(none, ["validate"]);
+  assert.equal(skipped.exitCode, 0, skipped.stderr);
+  assert.deepEqual(skipped.result.siteChecks.skipped, ["form.key_unknown"]);
+
+  const broken = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: {
+      "forms/contact.json": WORKSPACE_CONTACT_FORM,
+      "forms/other.json": { key: "other" },
+      "pages/about.md": aboutPlacingForm("contakt"),
+    },
+  }));
+  const failed = await cliRun(broken, ["validate"]);
+  assert.equal(failed.exitCode, 1);
+  assert.match(failed.stderr, /forms\/other\.json/u);
+  assert.doesNotMatch(failed.stderr, /form\.key_unknown|contakt/u);
+});
+
+test("pages push does not read the forms folder unless a placed key is missing from the site (TR01081)", async (site) => {
+  const workspace = await fixture(site, {
+    ...formPage("contact"),
+    "forms/Bad Name.json": WORKSPACE_CONTACT_FORM,
+  });
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT });
+
+  const result = await pagesPush(invocation);
+
+  assert.equal(result.pages.created, 1);
+
+  // When the key is missing the hint is simply left out; the refusal itself stands.
+  const missing = await fixture(site, { ...formPage("nope"), "forms/Bad Name.json": WORKSPACE_CONTACT_FORM });
+  const second = invoke(missing, api([...pushRoutes(), formsRoute()]), { verb: "pages push", content: REAL_CONTENT });
+  await assert.rejects(pagesPush(second.invocation), (error) =>
+    error?.code === "pages.form_unknown" && !/workspace has no/u.test(error.message));
+});
+
+test("validate still refuses a placed form key after the workspace's last form file is deleted (TR01081)", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: { "forms/contact.json": WORKSPACE_CONTACT_FORM, "pages/about.md": aboutPlacingForm("contact") },
+  }));
+  assert.equal((await cliRun(workspace, ["validate"])).exitCode, 0);
+  await rm(path.join(workspace.workspaceDir, "forms", "contact.json"));
+
+  const failed = await cliRun(workspace, ["validate"]);
+
+  assert.equal(failed.exitCode, 1);
+  assert.equal(failed.result.error.rule, "form.key_unknown");
+  assert.match(failed.stderr, /forms\/contact\.json/u);
+});
+
+test("pages push says the workspace has no form file when the site lacks the key too (TR01081)", async (site) => {
+  const withFile = await fixture(site, { ...formPage("missing"), "forms/contact.json": WORKSPACE_CONTACT_FORM });
+  const wire = api([...pushRoutes(), formsRoute()]);
+  const { invocation } = invoke(withFile, wire, { verb: "pages push", content: REAL_CONTENT });
+  await assert.rejects(pagesPush(invocation), (error) =>
+    error?.code === "pages.form_unknown" && /workspace has no forms\/missing\.json/u.test(error.message));
+
+  // A key whose file exists locally but is not on the site yet is told to push the form.
+  const unpushed = await fixture(site, { ...formPage("contact"), "forms/contact.json": WORKSPACE_CONTACT_FORM });
+  const emptySite = api([...pushRoutes(), formsRoute([])]);
+  const second = invoke(unpushed, emptySite, { verb: "pages push", content: REAL_CONTENT });
+  await assert.rejects(pagesPush(second.invocation), (error) =>
+    error?.code === "pages.form_unknown" && /forms push/u.test(error.message) && !/workspace has no/u.test(error.message));
+});
+
+test("validate calls out a long title and a missing description on any page (TR00947)", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    uploaded: true,
+    files: {
+      "pages/long.md": `---\ntitle: ${"A very long title ".repeat(5).trim()}\npath: long\n---\n\n# Long\n`,
+    },
+  }));
+  const validated = await cliRun(workspace, ["validate"]);
+  assert.equal(validated.exitCode, 0, validated.stderr);
+  assert.deepEqual(
+    validated.result.findings.items.filter((item) => item.file === "pages/long.md").map((item) => [item.rule, item.detail]),
+    [["seo.title_long", "89"], ["seo.description_missing", undefined]],
+  );
 });
 
 test("a refusal's problem list stays inside the result bound however many pages fail", async (site) => {

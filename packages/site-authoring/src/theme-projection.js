@@ -1,17 +1,7 @@
-import {
-  buildTaprootDarkTheme,
-  buildTaprootLightTheme,
-  DEFAULT_DARK_THEME,
-  DEFAULT_LIGHT_THEME,
-  encodeTheme,
-  layerThemes,
-  mergePartials,
-  mergeTheme,
-  parseTheme,
-} from "@taprootio/espalier/shared/theme";
+import { encodeTheme, layerThemes, mergePartials, mergeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { SiteAuthoringError } from "./errors.js";
-import { authoredMappingTokens, missingThemeFields } from "./theme-validation.js";
+import { authoredMappingTokens, missingThemeFields, SCHEME_DEFAULTS } from "./theme-validation.js";
 
 /**
  * Project one stored scheme theme to the complete theme a consumer actually
@@ -19,13 +9,14 @@ import { authoredMappingTokens, missingThemeFields } from "./theme-validation.js
  *
  * Taproot stores what was written. A site whose theme was seeded or written
  * before a key existed keeps a sparse document, and every consumer — the
- * app's preview, the generator, the published runtime — resolves it by
- * layering the same defaults underneath: Espalier's scheme defaults plus,
- * for a theme Taproot still manages, the Taproot house theme with an empty
- * page background. A theme the CLI manages (`*ThemeManagedExternally`) is
- * rendered as stored over Espalier's defaults alone. `pull` writes exactly
- * that effective theme, so a fresh workspace validates and a designer edits
- * every group with its authoritative value instead of reconstructing it.
+ * app's preview, the generator, the published runtime — resolves it the same
+ * way for every theme: as stored, over Espalier's scheme defaults alone. No
+ * renderer layers the Taproot house theme under a stored theme any more
+ * (TR00879), whoever manages it. (The site editor keeps a house reference
+ * layer for its own inheritance display; it is inert for a complete theme and
+ * is not what the site publishes.) `pull` writes exactly that effective theme,
+ * so a fresh workspace validates and a designer edits every group with its
+ * authoritative value instead of reconstructing it.
  *
  * Semantic mappings are the one group that is *not* filled from defaults.
  * Espalier compiles them from `roles` at merge time, and since 4.18.0 the
@@ -52,40 +43,27 @@ import { authoredMappingTokens, missingThemeFields } from "./theme-validation.js
  * rendered before the pull.
  */
 
-const SCHEME_DEFAULTS = Object.freeze({
-  light: { defaults: DEFAULT_LIGHT_THEME, house: buildTaprootLightTheme },
-  dark: { defaults: DEFAULT_DARK_THEME, house: buildTaprootDarkTheme },
-});
+// Espalier's defaults carry no page background at all, but a stored theme must have both keys. No image is
+// the rendered truth, and the opacity of an absent image is neutral; these are the values pull has always
+// written there, so a pulled theme does not change.
+const NO_IMAGE_BACKGROUND_OPACITY = Object.freeze({ light: 0.5, dark: 0.55 });
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * The complete theme a consumer layers a stored theme onto: Espalier's
- * scheme defaults, and — unless the theme is managed externally — the
- * Taproot house theme with the empty page background both the BFF and the
- * generator clear before rendering.
- */
-export function effectiveThemeBase(scheme, { managedExternally = false } = {}) {
-  const { defaults, house } = SCHEME_DEFAULTS[scheme];
-  const houseTheme = parseTheme(house("")) ?? {};
-  if (managedExternally) {
-    // Espalier's defaults carry no page background at all; the stored
-    // contract requires both keys. No image is the rendered truth, and the
-    // opacity of an absent image is neutral, so the house value fills it.
-    return {
-      ...defaults,
-      pageBackgroundImage: "",
-      pageBackgroundImageOpacity: houseTheme.pageBackgroundImageOpacity,
-    };
-  }
-  return { ...mergePartials(defaults, houseTheme), pageBackgroundImage: "" };
+/** The complete theme a consumer layers a stored theme onto: Espalier's scheme defaults, with no page background. */
+export function effectiveThemeBase(scheme) {
+  return {
+    ...SCHEME_DEFAULTS[scheme],
+    pageBackgroundImage: "",
+    pageBackgroundImageOpacity: NO_IMAGE_BACKGROUND_OPACITY[scheme],
+  };
 }
 
-export function projectPulledTheme(stored, scheme, { managedExternally = false } = {}) {
+export function projectPulledTheme(stored, scheme) {
   const source = isPlainObject(stored) ? stored : {};
-  const base = effectiveThemeBase(scheme, { managedExternally });
+  const base = effectiveThemeBase(scheme);
   const { semanticMappings: _baseMappings, ...layerable } = base;
   // The marker is set on the base so mergePartials treats every stored
   // mapping as authored; the pin filter below then decides which survive.
@@ -102,7 +80,6 @@ export function projectPulledTheme(stored, scheme, { managedExternally = false }
     { ...merged, semanticMappings: pins, explicitMappingTokens: Object.keys(pins) },
     source,
     scheme,
-    managedExternally,
     authored,
   );
 
@@ -111,12 +88,8 @@ export function projectPulledTheme(stored, scheme, { managedExternally = false }
 }
 
 /** What a consumer renders for a stored theme: the partial it layers, resolved over Espalier's defaults. */
-function renderedTheme(stored, scheme, managedExternally) {
-  const { defaults, house } = SCHEME_DEFAULTS[scheme];
-  const layered = managedExternally
-    ? layerThemes(encodeTheme(stored))
-    : layerThemes(house(""), encodeTheme({ pageBackgroundImage: "" }), encodeTheme(stored));
-  return mergeTheme(defaults, parseTheme(layered) ?? {});
+function renderedTheme(stored, scheme) {
+  return mergeTheme(SCHEME_DEFAULTS[scheme], parseTheme(layerThemes(encodeTheme(stored))) ?? {});
 }
 
 function canonicalJson(value) {
@@ -137,11 +110,11 @@ function canonicalJson(value) {
  * out of the projection and keep recompiling. Every other difference between
  * the projection and the stored theme's rendering is written back.
  */
-function reconcileWithRendering(projected, stored, scheme, managedExternally, authored) {
-  const { defaults } = SCHEME_DEFAULTS[scheme];
+function reconcileWithRendering(projected, stored, scheme, authored) {
+  const defaults = SCHEME_DEFAULTS[scheme];
   let rendered;
   try {
-    rendered = renderedTheme(stored, scheme, managedExternally);
+    rendered = renderedTheme(stored, scheme);
   } catch {
     // An invalid stored theme cannot be rendered for comparison; validation
     // reports it, and the layered projection is the best available document.

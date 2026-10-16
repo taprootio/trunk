@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import corpus from "./fixtures/site-check-corpus.json" with { type: "json" };
-import { checkRedirectSource, extractPageLinks, missingPageLinkFindings, normalizedPathSet } from "../src/site-checks.js";
+import { pageStructureFindings } from "../src/page-structure-checks.js";
+import {
+  checkRedirectSource,
+  extractPageLinks,
+  missingPageLinkFindings,
+  normalizedPathSet,
+  unknownFormKeyFindings,
+} from "../src/site-checks.js";
 import {
   describeSiteFinding,
   evaluateOfflineSiteChecks,
@@ -35,6 +42,48 @@ for (const testCase of corpus.pageLinks) {
   });
 }
 
+for (const testCase of corpus.formKeys) {
+  test(`form keys: ${testCase.name}`, () => {
+    const findings = unknownFormKeyFindings(testCase.placed, new Set(testCase.known));
+    assert.deepEqual(findings.map((finding) => finding.subject), testCase.expected);
+    assert.ok(findings.every((finding) => finding.ruleId === "form.key_unknown" && finding.severity === "error"));
+  });
+}
+
+for (const testCase of corpus.pageStructure) {
+  test(`page structure: ${testCase.name}`, () => {
+    const findings = pageStructureFindings(testCase.input);
+    assert.deepEqual(
+      findings.map(({ ruleId, subject, detail }) => ({ ruleId, subject, detail })),
+      testCase.expected,
+    );
+    assert.ok(findings.every((finding) => finding.severity === "warning"));
+  });
+}
+
+test("a free-form-only rule is never raised for a page that is not free-form", () => {
+  const freeFormOnly = new Set(rules.rules.filter((rule) => rule.appliesTo?.includes("free_form")).map((rule) => rule.id));
+  for (const testCase of corpus.pageStructure) {
+    const findings = pageStructureFindings({ ...testCase.input, freeForm: false });
+    for (const finding of findings) assert.ok(!freeFormOnly.has(finding.ruleId), `${testCase.name}: ${finding.ruleId}`);
+  }
+});
+
+test("every document rule is raised by some corpus case, and each case's rules are catalogued", () => {
+  const documentRules = rules.rules.filter((rule) => rule.scope === "document").map((rule) => rule.id);
+  const raised = new Set(corpus.pageStructure.flatMap((testCase) => testCase.expected.map((finding) => finding.ruleId)));
+  assert.deepEqual([...raised].sort(), [...documentRules].sort());
+});
+
+test("a rule filter limits which rules are raised", () => {
+  const testCase = corpus.pageStructure.find((candidate) => candidate.expected.length > 1);
+  const only = new Set([testCase.expected[0].ruleId]);
+  assert.deepEqual(
+    pageStructureFindings(testCase.input, only).map((finding) => finding.ruleId),
+    [testCase.expected[0].ruleId],
+  );
+});
+
 test("every catalogued rule has this surface's own words, and an unknown rule never shows only its id", () => {
   for (const rule of rules.rules) {
     const sentence = describeSiteFinding({ ruleId: rule.id, subject: "/x", detail: "Name" });
@@ -50,9 +99,32 @@ test("validate offers the catalogue's offline rules, and names the rest as check
     SITE_CHECK_RULES.filter((rule) => rule.runsAt.includes("validate")).map((rule) => rule.id),
   );
   assert.deepEqual(
-    [...siteChecks.ranOffline, ...siteChecks.checkedBySite, ...siteChecks.checkedAtDeploy].sort(),
+    [
+      ...siteChecks.ranOffline,
+      ...siteChecks.checkedBySite,
+      ...siteChecks.checkedAtDeploy,
+      ...siteChecks.checkedInEditor,
+    ].sort(),
     SITE_CHECK_RULES.map((rule) => rule.id).sort(),
   );
+});
+
+test("the bounded findings keep the link warnings when a frequent rule fires on every page", () => {
+  const planned = Array.from({ length: 400 }, (_, index) => ({
+    file: `pages/p${index}.md`,
+    pagePath: `p${index}`,
+    title: "Page",
+    description: "",
+    document: index === 399
+      ? { type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "T" }] }, { type: "paragraph", content: [{ type: "text", text: "see", marks: [{ type: "link", attrs: { href: "/gone" } }] }] }] }
+      : { type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "T" }] }] },
+  }));
+  const lines = [];
+  const { findings } = evaluateOfflineSiteChecks({ planned, pagePaths: [], onProgress: (line) => lines.push(line) });
+  assert.equal(findings.total, 401);
+  assert.equal(findings.truncated, true);
+  assert.equal(findings.items[0].rule, "link.page_missing");
+  assert.match(lines[0], /pages\/p399\.md links to \/gone/u);
 });
 
 test("a truncated page manifest skips the link check rather than calling a link broken", () => {

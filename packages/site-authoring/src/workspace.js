@@ -1088,6 +1088,11 @@ export async function deleteWorkspaceFile(workspaceDir, relativePath) {
   return true;
 }
 
+/** Whether the workspace has this directory (a link or a file in its place is refused, as everywhere). */
+export async function workspaceDirectoryExists(workspaceDir, relativePath) {
+  return await requireRealDirectoryChain(workspaceDir, relativePath, { includeLeaf: true });
+}
+
 /**
  * Collects the workspace files a push verb should consider, in a stable sorted
  * order so two runs of the same workspace produce the same request sequence.

@@ -1,6 +1,18 @@
 {
   "entries": [
     {
+      "version": "0.22.0",
+      "note": "validate warns when a free-form page has no h1 or a banner or hero already claims it, and about alt text, link text, long titles and missing descriptions.",
+      "behavior": [
+        "validate reports page-structure warnings in findings, never refusing: seo.h1_missing for a free-form page with no # heading, banner title or hero title; seo.h1_demoted when a # heading publishes as an h2 because the banner's overlay text, a hero title or an earlier # heading is already the h1 (detail names which); seo.h1_multiple for a hero title after the h1; seo.heading_renumbered and seo.heading_before_title for headings published at another level; a11y.image_alt_missing; a11y.link_text_empty. Any page gets seo.title_long and seo.description_missing.",
+        "validate's siteChecks gains checkedInEditor, the rules only the page editor evaluates (a cover, a description field, or a description's length, which descriptionWarnings reports here).",
+        "The API refuses a page save that newly places a form that does not exist or is archived, and a first form block on a Profile or Docs site, with a validation error on Forms; status lists form.not_supported_on_site_type among the site findings. preview-page now renders the form a page places, from its current version.",
+        "validate refuses a component:form formKey that none of the workspace's forms/<key>.json files has (pages.form_unknown, rule form.key_unknown), naming the file it expected; a workspace with no forms/ directory is not checked. pages push and plan say whether the missing key's file is in the workspace.",
+        "pull writes a stored light or dark theme as the generator renders it: as stored over Espalier's defaults alone. It no longer layers the Taproot house theme under a theme the CLI does not manage, so a sparse theme from such a site pulls with Espalier's values for the keys it never set, so the pulled theme matches what the published site renders."
+      ],
+      "help": []
+    },
+    {
       "version": "0.21.0",
       "note": "Review URLs stay out of deploy output unless you ask; deploy --staging waits until staging serves the new release; validate reports site checks; help corrections for free-form h1, legal pages, settings and logos; this changelog.",
       "behavior": [

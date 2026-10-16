@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  buildTaprootDarkTheme,
   buildTaprootLightTheme,
   DEFAULT_DARK_THEME,
   DEFAULT_LIGHT_THEME,
@@ -26,17 +25,28 @@ function canonical(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
 }
 
-/** What the generator and BFF render for a Taproot-managed stored theme. */
-function renderedTaprootManaged(stored) {
-  return mergeTheme(
-    DEFAULT_LIGHT_THEME,
-    parseTheme(layerThemes(buildTaprootLightTheme(""), encodeTheme({ pageBackgroundImage: "" }), encodeTheme(stored))),
-  );
+/** What every consumer renders for a stored theme: as stored, over Espalier's defaults alone (TR00879). */
+function rendered(stored, scheme) {
+  const defaults = scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  return mergeTheme(defaults, parseTheme(layerThemes(encodeTheme(stored))));
 }
 
 function withoutMarker(theme) {
   const { explicitMappingTokens: _marker, ...rest } = theme;
   return rest;
+}
+
+/**
+ * A theme as rendered, comparable with its projection. The stored contract requires both page background
+ * keys, so the projection adds "no image" to a theme that never set one; rendering needs neither.
+ */
+function comparable(theme, stored) {
+  const { pageBackgroundImage, pageBackgroundImageOpacity, ...rest } = withoutMarker(theme);
+  return canonical({
+    ...rest,
+    ...(stored?.pageBackgroundImage === undefined ? {} : { pageBackgroundImage }),
+    ...(stored?.pageBackgroundImageOpacity === undefined ? {} : { pageBackgroundImageOpacity }),
+  });
 }
 
 /** A pre-menu-font stored theme: the SHY Wellness shape from the handoff. */
@@ -49,18 +59,30 @@ function legacyStoredTheme() {
   return stored;
 }
 
-test("the effective base is complete for both schemes and both provenance modes", () => {
+test("the effective base is complete for both schemes and is Espalier's defaults, never the Taproot house theme", () => {
   for (const scheme of ["light", "dark"]) {
-    for (const managedExternally of [false, true]) {
-      const base = effectiveThemeBase(scheme, { managedExternally });
-      assert.deepEqual(missingThemeFields(base, scheme), []);
-      assert.equal(base.pageBackgroundImage, "");
-    }
+    const base = effectiveThemeBase(scheme);
+    assert.deepEqual(missingThemeFields(base, scheme), []);
+    assert.equal(base.pageBackgroundImage, "");
   }
-  // Taproot's house look layers only onto a theme Taproot still manages.
+  // No consumer layers Taproot's house look under a stored theme any more (TR00879).
   const house = parseTheme(buildTaprootLightTheme(""));
-  assert.equal(effectiveThemeBase("light").seedColor, house.seedColor);
-  assert.equal(effectiveThemeBase("light", { managedExternally: true }).seedColor, DEFAULT_LIGHT_THEME.seedColor);
+  assert.notEqual(house.seedColor, DEFAULT_LIGHT_THEME.seedColor);
+  assert.equal(effectiveThemeBase("light").seedColor, DEFAULT_LIGHT_THEME.seedColor);
+});
+
+test("a sparse stored theme projects to what the generator renders for it, with none of the house look", () => {
+  const house = parseTheme(buildTaprootLightTheme(""));
+  const stored = { seedColor: "#123456" };
+  const projected = projectPulledTheme(stored, "light");
+
+  assert.equal(projected.seedColor, "#123456");
+  assert.equal(projected.fontBody, DEFAULT_LIGHT_THEME.fontBody);
+  assert.notEqual(projected.fontBody, house.fontBody);
+  assert.deepEqual(
+    comparable(mergeTheme(DEFAULT_LIGHT_THEME, projected), stored),
+    comparable(rendered(stored, "light"), stored),
+  );
 });
 
 test("a legacy stored theme gains the missing per-scheme fonts from the authoritative defaults and validates", () => {
@@ -95,7 +117,7 @@ test("only the mappings the marker claims survive projection, and rendering is u
   assert.equal(before.link.source, "anchor:teal");
   assert.equal(before.actionBackground.source, "anchor:teal");
 
-  const projected = projectPulledTheme(stored, "light", { managedExternally: true });
+  const projected = projectPulledTheme(stored, "light");
   // Projection keeps the claimed pin and nothing else. The twenty-one cached
   // defaults and the hand-added mapping the marker never claimed are both
   // dropped — writing either back would pin a role-derived token and make the
@@ -120,12 +142,11 @@ test("a round trip of a theme without roles renders identically and projection i
   const projected = projectPulledTheme(stored, "light");
   assert.deepEqual(
     canonical(withoutMarker(mergeTheme(DEFAULT_LIGHT_THEME, projected))),
-    canonical(withoutMarker(renderedTaprootManaged(stored))),
+    canonical(withoutMarker(rendered(stored, "light"))),
   );
-  // What push stores is what the next pull projects: a managed-externally
-  // read of the pushed theme reproduces it exactly.
+  // What push stores is what the next pull projects: a read of the pushed theme reproduces it exactly.
   assert.deepEqual(
-    canonical(projectPulledTheme(projected, "light", { managedExternally: true })),
+    canonical(projectPulledTheme(projected, "light")),
     canonical(projected),
   );
 });
@@ -199,22 +220,12 @@ test("a projection that still lacks required fields refuses with the paths and n
   requireProjectedThemeComplete(projectPulledTheme(legacyStoredTheme(), "light"), "light");
 });
 
-/** What every consumer renders for a Taproot-managed or externally managed stored theme. */
-function rendered(stored, scheme, managedExternally) {
-  const defaults = scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
-  const house = scheme === "light" ? buildTaprootLightTheme : buildTaprootDarkTheme;
-  const layered = managedExternally
-    ? layerThemes(encodeTheme(stored))
-    : layerThemes(house(""), encodeTheme({ pageBackgroundImage: "" }), encodeTheme(stored));
-  return mergeTheme(defaults, parseTheme(layered));
-}
-
 test("projection renders exactly what the stored theme rendered: inherited type-role chroma and text companions, both schemes", () => {
   for (const scheme of ["light", "dark"]) {
     const defaults = scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
     const cases = [
       // A sparse legacy theme whose chroma.text override flows into the type-role bands it did not set.
-      { name: "chroma.text inheritance", stored: { seedColor: "#123456", chroma: { text: { min: 0.01, max: 0.02 } } }, managed: false },
+      { name: "chroma.text inheritance", stored: { seedColor: "#123456", chroma: { text: { min: 0.01, max: 0.02 } } } },
       // The seeded complete shape with a customized text mapping: the cached
       // type-role mappings were holding those tokens at their defaults.
       {
@@ -223,24 +234,19 @@ test("projection renders exactly what the stored theme rendered: inherited type-
           ...structuredClone(DEFAULT_SITE_THEME[scheme].theme),
           semanticMappings: { ...DEFAULT_SITE_THEME[scheme].theme.semanticMappings, text: { source: "complementary", lightness: "ink" } },
         },
-        managed: false,
       },
-      { name: "customized text mapping, externally managed", stored: {
-          ...structuredClone(DEFAULT_SITE_THEME[scheme].theme),
-          semanticMappings: { ...DEFAULT_SITE_THEME[scheme].theme.semanticMappings, text: { source: "complementary", lightness: "ink" } },
-        }, managed: true },
     ];
-    for (const { name, stored, managed } of cases) {
-      const projected = projectPulledTheme(stored, scheme, { managedExternally: managed });
+    for (const { name, stored } of cases) {
+      const projected = projectPulledTheme(stored, scheme);
       assert.deepEqual(missingThemeFields(projected, scheme), [], `${scheme} ${name}`);
       assert.deepEqual(
-        canonical(withoutMarker(mergeTheme(defaults, projected))),
-        canonical(withoutMarker(rendered(stored, scheme, managed))),
+        comparable(mergeTheme(defaults, projected), stored),
+        comparable(rendered(stored, scheme), stored),
         `${scheme} ${name}`,
       );
       // And the document push stores re-projects to itself.
       assert.deepEqual(
-        canonical(projectPulledTheme(projected, scheme, { managedExternally: true })),
+        canonical(projectPulledTheme(projected, scheme)),
         canonical(projected),
         `${scheme} ${name} idempotence`,
       );

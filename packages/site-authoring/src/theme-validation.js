@@ -300,7 +300,8 @@ function refuseAgentStylesheets(theme, scheme) {
   }
 }
 
-const SCHEME_DEFAULTS = Object.freeze({ light: DEFAULT_LIGHT_THEME, dark: DEFAULT_DARK_THEME });
+/** Espalier's complete default theme for each scheme: the base every stored theme is rendered over. */
+export const SCHEME_DEFAULTS = Object.freeze({ light: DEFAULT_LIGHT_THEME, dark: DEFAULT_DARK_THEME });
 
 function sameMapping(left, right) {
   return isPlainObject(left) && isPlainObject(right)

@@ -1,6 +1,10 @@
 import { sharedThemeContextNames } from "./content/free-form-sections.js";
 import { readAppearanceWorkspaceContext, FOOTER_SETTINGS_FILE } from "./footer-workspace.js";
+import { placedFormKeys } from "./form-references.js";
+import { FORMS_DIRECTORY } from "./forms-contract.js";
 import { readWorkspaceForms } from "./forms-workspace.js";
+import { describeSiteFinding } from "./site-check-findings.js";
+import { unknownFormKeyFindings } from "./site-checks.js";
 import { CHECK_AREA, collectProblems, problemsOf } from "./problems.js";
 import { normalizeRedirectPath, REDIRECTS_FILE_NAME, validateRedirectsDocument } from "./redirects-contract.js";
 import { SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES } from "./settings-catalog.js";
@@ -16,6 +20,7 @@ import {
   readWorkspaceJson,
   walkWorkspaceFiles,
   WORKSPACE_LIMITS,
+  workspaceDirectoryExists,
   workspaceFileExists,
 } from "./workspace.js";
 import { SiteAuthoringError } from "./errors.js";
@@ -135,7 +140,27 @@ export async function checkWorkspace({
     onProgress(`Validated ${forms.length} form file${forms.length === 1 ? "" : "s"} against the shared field schema.`);
   }
 
-  return { problems, settingsOnly, presentation, footer, navigation, pages, redirects, forms };
+  // A page places a form by key, and the workspace's form files are what a key can name (TR01081). Only
+  // when the workspace carries a forms/ directory: one for a site whose forms were created elsewhere still
+  // pushes. A directory with no files left in it counts, since that is what deleting the last form leaves.
+  const formKeysChecked = forms !== undefined && await workspaceDirectoryExists(workspaceDir, FORMS_DIRECTORY);
+  if (pages !== undefined && formKeysChecked) {
+    const known = new Set(forms.map((form) => form.key));
+    for (const page of pages.planned) {
+      for (const finding of unknownFormKeyFindings(placedFormKeys(page.document), known)) {
+        problems.push(...problemsOf(
+          new SiteAuthoringError(
+            "pages.form_unknown",
+            `'${page.file}' ${describeSiteFinding(finding)}.`,
+            { field: page.file, rule: finding.ruleId },
+          ),
+          { area: CHECK_AREA.pages, file: page.file },
+        ));
+      }
+    }
+  }
+
+  return { problems, settingsOnly, presentation, footer, navigation, pages, redirects, forms, formKeysChecked };
 }
 
 /**

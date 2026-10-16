@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -848,6 +848,40 @@ test("validate accepts a video component whose video the fixture declares ready"
   assert.equal(result.exitCode, 0, result.stderr);
   assert.equal(result.requests, 0);
   assert.equal(JSON.parse(result.stdout).fixture.videoIds, 1);
+});
+
+test("validate refuses a form key the fixture's form files do not have, and accepts one they do (TR01081)", async (context) => {
+  const form = {
+    key: "contact",
+    name: "Contact",
+    sink: "none",
+    retention_days: 365,
+    definition: { fields: [{ id: "email", type: "email", label: "Email", required: true }] },
+  };
+  for (const [label, key, expectedExit] of [["typo", "contakt", 1], ["bound", "contact", 0]]) {
+    const { fixture } = await copiedFixture(context, `form-key-${label}`);
+    await mkdir(path.join(fixture, "forms"));
+    await writeFile(path.join(fixture, "forms/contact.json"), `${JSON.stringify(form, null, 2)}\n`);
+    const manifestPath = path.join(fixture, "manifest.fixture.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.forms = { items: { contact: { id: "00000000-0000-4000-8000-000000000c01", version: 1 } } };
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const visit = path.join(fixture, "pages/visit.md");
+    await writeFile(
+      visit,
+      `${await readFile(visit, "utf8")}\n\`\`\`component:form\n${JSON.stringify({ formKey: key })}\n\`\`\`\n`,
+    );
+
+    const result = await runValidation(fixture);
+
+    assert.equal(result.exitCode, expectedExit, result.stderr);
+    if (expectedExit === 1) {
+      const { error } = JSON.parse(result.stdout);
+      assert.equal(error.code, "pages.form_unknown");
+      assert.equal(error.rule, "form.key_unknown");
+      assert.equal(error.field, "pages/visit.md");
+    }
+  }
 });
 
 test("validate counts no videos for a fixture that declares none", async (context) => {

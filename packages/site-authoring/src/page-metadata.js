@@ -1,4 +1,5 @@
 import { SiteAuthoringError } from "./errors.js";
+import { DESCRIPTION_WARN_LENGTH } from "./page-structure-checks.js";
 import { boundedByBytes } from "./session.js";
 import { displayPagePath } from "./workspace.js";
 
@@ -7,7 +8,7 @@ import { displayPagePath } from "./workspace.js";
  * 160 characters search engines cut it off, so it is warned about; past 1000 it
  * is refused, here and by the API (TR01194).
  */
-export const DESCRIPTION_WARN_LENGTH = 160;
+export { DESCRIPTION_WARN_LENGTH };
 export const DESCRIPTION_MAXIMUM_LENGTH = 1000;
 export const PAGE_DESCRIPTION_LONG = "pages.description_long";
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "about": "The catalogue of site checks (TR01085). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body, 'site' rules read the site's own records. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline), deploy, health. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
-  "runPoints": ["save", "validate", "deploy", "health"],
+  "about": "The catalogue of site checks (TR01085, TR00947). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body plus cheap site lookups, 'site' rules read the site's own records, 'document' rules read only one document and its metadata, so the editor and the CLI evaluate them from shared/page-structure-checks.ts and the server does not. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline), deploy, health, edit (the editor, over the open document in the browser). appliesTo, when present, limits a rule to those page types. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
+  "runPoints": ["save", "validate", "deploy", "health", "edit"],
   "rules": [
     { "id": "link.page_missing", "severity": "warning", "scope": "page", "runsAt": ["save", "validate", "health"], "subject": "page_path", "detail": "none" },
     { "id": "image.missing", "severity": "warning", "scope": "page", "runsAt": ["save", "health"], "subject": "image_id", "detail": "none" },
@@ -9,14 +9,27 @@
     { "id": "form.unreadable", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_reference_text", "detail": "none" },
     { "id": "form.missing", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_id", "detail": "none" },
     { "id": "form.archived", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_id", "detail": "form_name" },
+    { "id": "form.not_supported_on_site_type", "severity": "error", "scope": "page", "runsAt": ["save", "health"], "subject": "none", "detail": "none" },
     { "id": "form.after_submit_page_unpublished", "severity": "error", "scope": "site", "runsAt": ["deploy"], "subject": "page_path", "detail": "form_name" },
     { "id": "form.after_submit_page_not_allowed", "severity": "error", "scope": "site", "runsAt": ["deploy"], "subject": "page_path", "detail": "form_name" },
+    { "id": "form.key_unknown", "severity": "error", "scope": "site", "runsAt": ["validate"], "subject": "form_key", "detail": "none" },
     { "id": "redirect.source_invalid", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "none" },
     { "id": "redirect.source_index_html", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_integration_data", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_share_link", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_runtime_mirror", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_generated_file", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
-    { "id": "redirect.source_not_storable", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" }
+    { "id": "redirect.source_not_storable", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
+    { "id": "seo.h1_missing", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "none", "detail": "none" },
+    { "id": "seo.h1_demoted", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "h1_claimant" },
+    { "id": "seo.h1_multiple", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "h1_claimant" },
+    { "id": "seo.heading_renumbered", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "authored_and_published_level" },
+    { "id": "seo.heading_before_title", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "published_level" },
+    { "id": "a11y.image_alt_missing", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "image_id", "detail": "none" },
+    { "id": "a11y.link_text_empty", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "link_target", "detail": "none" },
+    { "id": "seo.title_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.description_missing", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit"], "subject": "none", "detail": "none" },
+    { "id": "seo.description_long", "severity": "warning", "scope": "document", "runsAt": ["edit"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.social_image_fallback", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["edit"], "subject": "none", "detail": "social_image_source" }
   ]
 }

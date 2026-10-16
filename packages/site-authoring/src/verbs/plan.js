@@ -27,6 +27,7 @@ import { sharedThemeContextNames } from "../content/free-form-sections.js";
 import { SiteAuthoringError } from "../errors.js";
 import { computeFooterContentHash, computeFooterDraftHash, stableJson } from "../footer-draft-hash.js";
 import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
+import { workspaceFormKeys } from "../forms-workspace.js";
 import { CHECK_AREA, collectProblems, problemsError, problemsOf, problemsWithinBudget, withinByteBudget } from "../problems.js";
 import { openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
 import { IMAGE_IDENTIFIER, usedImageIds } from "../typed-pages.js";
@@ -284,7 +285,7 @@ async function preflight(session, invocation) {
     });
     problems.push(...pages.problems);
     problems.push(...await placedVideoProblems(client, siteId, pages.planned));
-    problems.push(...(await placedFormProblems(client, siteId, pages.planned)).problems);
+    problems.push(...(await placedFormProblems(client, siteId, pages.planned, () => workspaceFormKeys(workspaceDir))).problems);
     const sending = pages.planned.filter((page) => !page.unchanged);
 
     // An image a page names must be one the site holds; an image this plan

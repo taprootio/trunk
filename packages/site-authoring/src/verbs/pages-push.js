@@ -22,6 +22,7 @@ import {
 import { VERB_PAGES_PUSH } from "../constants.js";
 import { autolinkWarnings } from "../content/link-warnings.js";
 import { placedFormKeys, readFormIndex, withFormIds } from "../form-references.js";
+import { workspaceFormKeys } from "../forms-workspace.js";
 import { ApiError } from "../transport.js";
 import { waitForProcessing } from "./media-upload.js";
 import { SiteAuthoringError } from "../errors.js";
@@ -883,9 +884,11 @@ export async function placedVideoProblems(client, siteId, planned) {
  * The pages that place a form the site does not have, or has archived, and the
  * site's forms by key for the wire (TR01216). A page is stored with the form's id,
  * so a key that names no active form cannot be sent at all. Pages that will not be
- * sent are not asked about, and a push that places no form reads nothing.
+ * sent are not asked about, and a push that places no form reads nothing. `readLocalFormKeys`, when given,
+ * reads the workspace's own form files (TR01081), only once a key turns out to be one the site lacks, so the
+ * refusal can say whether the key's file is there to push.
  */
-export async function placedFormProblems(client, siteId, planned) {
+export async function placedFormProblems(client, siteId, planned, readLocalFormKeys) {
   const placements = new Map();
   for (const page of planned) {
     if (page.unchanged) continue;
@@ -897,8 +900,14 @@ export async function placedFormProblems(client, siteId, planned) {
 
   const index = await readFormIndex(client, siteId);
   const problems = [];
+  let localFormKeys;
+  let localRead = false;
   for (const [key, file] of placements) {
     if (index.idByKey.has(key)) continue;
+    if (!localRead && !index.archivedKeys.has(key) && readLocalFormKeys !== undefined) {
+      localFormKeys = await readLocalFormKeys();
+      localRead = true;
+    }
     problems.push(...problemsOf(
       index.archivedKeys.has(key)
         ? documentError(
@@ -909,8 +918,11 @@ export async function placedFormProblems(client, siteId, planned) {
         )
         : documentError(
           "pages.form_unknown",
-          `'${file}' places the form '${key}', which this site does not have. Run 'taproot-site forms push' to create `
-            + "it, or fix the key.",
+          localFormKeys?.has(key) === false
+            ? `'${file}' places the form '${key}', which this site does not have, and the workspace has no forms/${key}.json. `
+              + "Add the form file and run 'taproot-site forms push', or fix the key."
+            : `'${file}' places the form '${key}', which this site does not have. Run 'taproot-site forms push' to create `
+              + "it, or fix the key.",
           file,
         ),
       { area: CHECK_AREA.pages, file },
@@ -1607,7 +1619,7 @@ export async function pagesPush(invocation) {
     // publishing would then refuse.
     plan.problems.push(...await placedVideoProblems(client, siteId, planned));
     // Likewise a form: pages store its id, which only the site's own forms can supply.
-    const placedForms = await placedFormProblems(client, siteId, planned);
+    const placedForms = await placedFormProblems(client, siteId, planned, () => workspaceFormKeys(config.workspaceDir));
     plan.problems.push(...placedForms.problems);
 
     // Under apply, the workspace read ledger has already held every source and

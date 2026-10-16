@@ -150,8 +150,17 @@ autolinking), and `pages push` reports the same for the pages it sends.
 `validate` also runs the site checks that need nothing but the workspace, from
 the same rule catalogue the editor and the site-health page read. `findings`
 lists each one as a rule id (`link.page_missing`, a link to a page the workspace
-does not have), a severity, the file, and the value found; a warning never
-refuses. `siteChecks.checkedBySite` names the rules that need the site's own
+does not have), a severity, the file, and the value found (and a `detail` for
+some); a warning never refuses. For a free-form page the rules also read its headings,
+images and links the way the publisher does: `seo.h1_missing` when no `#` heading,
+banner title or hero title is the page's `<h1>`; `seo.h1_demoted` when a `#` heading
+publishes as an `<h2>` because the banner's overlay text, a hero title or an earlier
+`#` heading already is the `<h1>` (`detail` says which); `seo.h1_multiple` for a hero
+title after the `<h1>`; `seo.heading_renumbered` and `seo.heading_before_title` for
+headings published at another level; and `a11y.image_alt_missing` and
+`a11y.link_text_empty`. Any page gets `seo.title_long` and `seo.description_missing`.
+`siteChecks.checkedInEditor` names the rules only the page editor evaluates (a cover, a description field, or a
+description's length, which `descriptionWarnings` reports here). `siteChecks.checkedBySite` names the rules that need the site's own
 records, such as placed images and forms: `status` reports those under
 `siteHealth`; `siteChecks.checkedAtDeploy` names the ones only a deploy applies. A redirect source the site would refuse also names its rule in
 `error.problems[].rule`.
@@ -718,7 +727,11 @@ on the site, sends the form's id, and refuses a key the site does not have
 (`pages.form_unknown`) or has archived (`pages.form_archived`) before it writes
 anything; `plan` reports the same. `pages pull` writes the key back. An id the
 site no longer has stays an id in the pulled file, and a push of it is refused
-until you choose a form. Form names are now unique on a site, ignoring case.
+until you choose a form. Form names are now unique on a site, ignoring case. `validate`
+checks the same keys offline against the workspace's own form files: when the
+workspace has a `forms/` directory, a `formKey` no `forms/<key>.json` in it names is refused
+(`pages.form_unknown`, rule `form.key_unknown`) naming the file it expected. A workspace
+with no `forms/` directory is not checked, because its forms may live only on the site.
 The deploy that introduces this rewrites the stored page bodies, which changes the
 body revision of every page that places a form, so the first `pages pull` after it
 can report `pages.pull_conflict` for such a Markdown page even though its content

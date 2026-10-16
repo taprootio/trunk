@@ -200,12 +200,11 @@ export function projectSettingsGroup(group, response) {
     if (field.wireType === "theme") {
       // A stored theme is what was written, possibly before a required key
       // existed; the workspace gets the complete theme consumers actually
-      // render, resolved the way they resolve it (TR00775). The read-only
-      // provenance flag says whether Taproot's house look still layers under it.
+      // render, resolved the way they resolve it (TR00775): as stored, over
+      // Espalier's defaults alone (TR01060).
       projected[field.name] = projectPulledTheme(
         projected[field.name],
         field.name === "lightTheme" ? "light" : "dark",
-        { managedExternally: source[`${field.name}ManagedExternally`] === true },
       );
     }
   }

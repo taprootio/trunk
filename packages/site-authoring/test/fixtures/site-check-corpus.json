@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "Cases both the C# evaluator (Taproot.Domain/SiteChecks) and the TypeScript evaluator (shared/site-checks.ts) must pass. 'links' pin the internal link extractor, 'redirectSources' pin source normalization and the redirect source rules, 'pageLinks' pin the link.page_missing findings for one page.",
+  "about": "Cases the evaluators must pass: 'links', 'redirectSources' and 'pageLinks' are run by both the C# evaluator (Taproot.Domain/SiteChecks) and the TypeScript evaluator (shared/site-checks.ts); 'pageStructure' and 'formKeys' have no C# counterpart and are run by the TypeScript side only. 'links' pin the internal link extractor, 'redirectSources' pin source normalization and the redirect source rules, 'pageLinks' pin the link.page_missing findings for one page. 'pageStructure' pin the page-structure findings (TR00947) the editor and the CLI evaluate from shared/page-structure-checks.ts; a case with 'rendered' is also rendered by the generator, which must publish the headings (and a banner title) the case lists. 'formKeys' pin the form.key_unknown findings (TR01081) the CLI raises against a workspace's form files.",
   "links": [
     {
       "name": "html anchors and an entity-encoded componentData are read",
@@ -659,6 +659,1603 @@
       },
       "sitePagePaths": [
         "α"
+      ],
+      "expected": []
+    }
+  ],
+  "pageStructure": [
+    {
+      "name": "a title heading with ordered subheadings has nothing to report",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Welcome"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hello"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 2
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Intro"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "headings": [
+          [
+            "Welcome",
+            1
+          ],
+          [
+            "Intro",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a page with content and no h1 is missing its title",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hello"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 2
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "About"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "About",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a page with nothing on it has no title yet and no warning",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "headings": []
+      }
+    },
+    {
+      "name": "an empty level 1 heading claims the title but leaves the page without a usable h1",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              }
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hello"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Later"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_missing",
+          "subject": "",
+          "detail": ""
+        },
+        {
+          "ruleId": "seo.h1_demoted",
+          "subject": "Later",
+          "detail": "heading"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "",
+            1
+          ],
+          [
+            "Later",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a second level 1 heading is demoted under the first",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "First"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hello"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Second"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_demoted",
+          "subject": "Second",
+          "detail": "heading"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "First",
+            1
+          ],
+          [
+            "Second",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a heading that skips a level is renumbered",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Deep"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.heading_renumbered",
+          "subject": "Deep",
+          "detail": "3>2"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "Title",
+            1
+          ],
+          [
+            "Deep",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a heading before the h1 keeps its level and is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 2
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Intro"
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.heading_before_title",
+          "subject": "Intro",
+          "detail": "2"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "Intro",
+            2
+          ],
+          [
+            "Title",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a banner with overlay text claims the h1 and demotes the author's level 1 heading",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"overlayText\":\"Hello\",\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "My page"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_demoted",
+          "subject": "My page",
+          "detail": "banner"
+        }
+      ],
+      "rendered": {
+        "bannerTitle": true,
+        "headings": [
+          [
+            "My page",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a banner without overlay text leaves the title to the author's heading",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "My page"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "My page",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a banner after the page's first content is not its title",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hi"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"overlayText\":\"Hello\",\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "My page"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "My page",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a banner with overlay text and no image claims nothing",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"overlayText\":\"Hello\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "My page"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "My page",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a hero title claims the h1 and demotes the author's level 1 heading",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "hero-section",
+                "componentData": "{\"title\":\"Big idea\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "My page"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_demoted",
+          "subject": "My page",
+          "detail": "hero"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "My page",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a hero title after the h1 is a second h1",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "hero-section",
+                "componentData": "{\"title\":\"Big idea\"}"
+              }
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.h1_multiple",
+          "subject": "Big idea",
+          "detail": "heading"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "Title",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "headings inside a section are read in document order",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "section",
+              "content": [
+                {
+                  "type": "heading",
+                  "attrs": {
+                    "level": 1
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "In a band"
+                    }
+                  ]
+                },
+                {
+                  "type": "heading",
+                  "attrs": {
+                    "level": 3
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Deep"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.heading_renumbered",
+          "subject": "Deep",
+          "detail": "3>2"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "In a band",
+            1
+          ],
+          [
+            "Deep",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a CTA heading fixes level 2, so a level 4 heading after it publishes as level 3",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "cta",
+                "componentData": "{\"heading\":\"Join us\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 4
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Fine print"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.heading_renumbered",
+          "subject": "Fine print",
+          "detail": "4>3"
+        }
+      ],
+      "rendered": {
+        "headings": [
+          [
+            "Title",
+            1
+          ],
+          [
+            "Fine print",
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a heading inside a list closes the open title before an overlay banner",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "bulletList",
+              "content": [
+                {
+                  "type": "listItem",
+                  "content": [
+                    {
+                      "type": "heading",
+                      "attrs": {
+                        "level": 2
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "In a list"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"overlayText\":\"Hello\",\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "seo.heading_before_title",
+          "subject": "In a list",
+          "detail": "2"
+        }
+      ],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "In a list",
+            2
+          ],
+          [
+            "Title",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a fact list before an overlay banner closes the open title",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "inlineFacts",
+              "attrs": {
+                "items": [
+                  {
+                    "value": "5 minutes"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"overlayText\":\"Hello\",\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "Title",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an adopted fragment before an overlay banner closes the open title (findings only)",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "integrationFragment",
+              "attrs": {
+                "html": "<p>Owned</p>",
+                "imageIds": []
+              }
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"},\"overlayText\":\"Hello\",\"altText\":\"A view\"}"
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "an adopted fragment that carries an h1 leaves the page with one (findings only)",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "integrationFragment",
+              "attrs": {
+                "html": "<h1>Owned</h1>",
+                "imageIds": []
+              }
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Hello"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "component data that is not a JSON string is an empty component",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": {
+                  "image": {
+                    "imageId": "img-1",
+                    "src": "https://cdn.example.com/banner-thumb.webp",
+                    "urls": [
+                      {
+                        "minWidth": 1280,
+                        "url": "https://cdn.example.com/banner-1280.webp"
+                      }
+                    ],
+                    "width": 1920,
+                    "height": 600,
+                    "alt": "Banner image"
+                  },
+                  "overlayText": "Hello"
+                }
+              }
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [],
+      "rendered": {
+        "bannerTitle": false,
+        "headings": [
+          [
+            "Title",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an image without alt text is called out, one with alt text is not",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "taprootImage",
+              "attrs": {
+                "imageId": "11111111-1111-4111-8111-111111111111",
+                "alt": ""
+              }
+            },
+            {
+              "type": "taprootImage",
+              "attrs": {
+                "imageId": "11111111-1111-4111-8111-111111111111",
+                "alt": "A heron"
+              }
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "a11y.image_alt_missing",
+          "subject": "11111111-1111-4111-8111-111111111111",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "a hero picture or a call to action picture without alt text is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "hero-section",
+                "componentData": "{\"media\":{\"imageId\":\"img-2\",\"src\":\"https://cdn.example.com/hero.webp\"}}"
+              }
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "cta",
+                "componentData": "{\"heading\":\"Join\",\"mediaImage\":{\"imageId\":\"img-4\",\"src\":\"https://cdn.example.com/cta.webp\",\"alt\":\"\"}}"
+              }
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "cta",
+                "componentData": "{\"heading\":\"Again\",\"mediaImage\":{\"imageId\":\"img-5\",\"src\":\"https://cdn.example.com/cta2.webp\",\"alt\":\"Described\"}}"
+              }
+            }
+          ]
+        },
+        "hasCover": true
+      },
+      "expected": [
+        {
+          "ruleId": "a11y.image_alt_missing",
+          "subject": "",
+          "detail": ""
+        },
+        {
+          "ruleId": "a11y.image_alt_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "a banner image without alt text is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "image-banner",
+                "componentData": "{\"image\":{\"imageId\":\"img-1\",\"src\":\"https://cdn.example.com/banner-thumb.webp\",\"urls\":[{\"minWidth\":1280,\"url\":\"https://cdn.example.com/banner-1280.webp\"}],\"width\":1920,\"height\":600,\"alt\":\"Banner image\"}}"
+              }
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "a11y.image_alt_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "a link with no text is called out, a link split by formatting is not",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "See "
+                },
+                {
+                  "type": "text",
+                  "text": "   ",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "/blank"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Read",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "/more"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "text": " ",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "/more"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "text": "more",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "/more"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": [
+        {
+          "ruleId": "a11y.link_text_empty",
+          "subject": "/blank",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "a title longer than search results show is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_long",
+          "subject": "",
+          "detail": "61"
+        }
+      ]
+    },
+    {
+      "name": "a title at the limit is not",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expected": []
+    },
+    {
+      "name": "an empty description is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "description": "  "
+      },
+      "expected": [
+        {
+          "ruleId": "seo.description_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "a description longer than search results show is called out",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.description_long",
+          "subject": "",
+          "detail": "161"
+        }
+      ]
+    },
+    {
+      "name": "a description the surface cannot read is not judged",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "no cover falls back to the first image",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "taprootImage",
+              "attrs": {
+                "imageId": "11111111-1111-4111-8111-111111111111",
+                "alt": "A heron"
+              }
+            }
+          ]
+        },
+        "hasCover": false
+      },
+      "expected": [
+        {
+          "ruleId": "seo.social_image_fallback",
+          "subject": "",
+          "detail": "first_image"
+        }
+      ]
+    },
+    {
+      "name": "a hero picture or a section's photo background counts as an image for the link preview",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            },
+            {
+              "type": "componentBlock",
+              "attrs": {
+                "componentType": "hero-section",
+                "componentData": "{\"media\":{\"imageId\":\"img-2\",\"src\":\"https://cdn.example.com/hero.webp\",\"alt\":\"Hero\"}}"
+              }
+            },
+            {
+              "type": "section",
+              "attrs": {
+                "background": {
+                  "image": {
+                    "imageId": "img-3",
+                    "src": "https://cdn.example.com/band.webp"
+                  }
+                }
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Hi"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "hasCover": false
+      },
+      "expected": [
+        {
+          "ruleId": "seo.social_image_fallback",
+          "subject": "",
+          "detail": "first_image"
+        }
+      ]
+    },
+    {
+      "name": "no cover and no image leaves link previews without a picture",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "hasCover": false
+      },
+      "expected": [
+        {
+          "ruleId": "seo.social_image_fallback",
+          "subject": "",
+          "detail": "none"
+        }
+      ]
+    },
+    {
+      "name": "a selected cover is fine",
+      "input": {
+        "freeForm": true,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 1
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Title"
+                }
+              ]
+            }
+          ]
+        },
+        "hasCover": true
+      },
+      "expected": []
+    },
+    {
+      "name": "a page that is not free-form is judged by its metadata only",
+      "input": {
+        "freeForm": false,
+        "body": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 2
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Skips"
+                }
+              ]
+            }
+          ]
+        },
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "description": ""
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_long",
+          "subject": "",
+          "detail": "61"
+        },
+        {
+          "ruleId": "seo.description_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    }
+  ],
+  "formKeys": [
+    {
+      "name": "a key the workspace has is fine",
+      "placed": [
+        "contact"
+      ],
+      "known": [
+        "contact",
+        "newsletter"
+      ],
+      "expected": []
+    },
+    {
+      "name": "a key no form file has is called out once, however often it is placed",
+      "placed": [
+        "typo",
+        "contact",
+        "typo"
+      ],
+      "known": [
+        "contact"
+      ],
+      "expected": [
+        "typo"
+      ]
+    },
+    {
+      "name": "two unknown keys are listed in the order they were placed",
+      "placed": [
+        "b-form",
+        "a-form"
+      ],
+      "known": [
+        "contact"
+      ],
+      "expected": [
+        "b-form",
+        "a-form"
+      ]
+    },
+    {
+      "name": "no placed keys, nothing to report",
+      "placed": [],
+      "known": [
+        "contact"
       ],
       "expected": []
     }
