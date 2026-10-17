@@ -647,7 +647,7 @@ function capabilityDenied(permission, granted, required) {
  * so the pipeline resolves the promoted staging deployment's *stored* candidate
  * and re-authorizes it: each selected settings group's own permission, and
  * `site.theme.manage` when the stored manifest carries navigation
- * (`DeploySitePipelineHandler.AuthorizeProductionSelectionForKeyAsync`). All
+ * (`DeploySitePipelineHandler.AuthorizeSelectionForKeyAsync`). All
  * four candidate-selectable settings groups name `site.theme.manage` as well,
  * so the settings and navigation halves collapse to that one permission; the
  * stored candidate's pages then add `site.pages.publish_any`, one decision per

@@ -1,6 +1,16 @@
 {
   "entries": [
     {
+      "version": "0.22.3",
+      "note": "The forms reference now says site moderators can read form submissions.",
+      "behavior": [
+        "The forms help names who holds the submissions permissions: site.forms.submissions.read belongs to a site's owners, admins and moderators, and site.forms.submissions.manage to its owners and admins. No command or refusal changed."
+      ],
+      "help": [
+        "forms"
+      ]
+    },
+    {
       "version": "0.22.2",
       "note": "Free-form sections pad evenly with the page padding wherever they render, including preview-page; Espalier 6.5.0 lets the page preview take the width a capped main column leaves it.",
       "behavior": [

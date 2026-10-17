@@ -88,7 +88,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 38;
+export const REFERENCE_VERSION = 39;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -869,9 +869,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "turns the id back into the key. Then deploy: the release freezes the form it was built with.",
       "The delegation.content capability carries site.forms.manage, which every forms verb needs: it covers "
       + "definitions, settings and status. Visitors' submissions are in no capability: reading them "
-      + "(site.forms.submissions.read) and finding, marking or deleting them (site.forms.submissions.manage) belong "
-      + "to the site's owners and admins on the site's Forms page, never to a key. A refusal names the missing "
-      + "permission.",
+      + "(site.forms.submissions.read) belongs to the site's owners, admins and moderators, and finding, marking or "
+      + "deleting them (site.forms.submissions.manage) to its owners and admins, on the site's Forms page, never to "
+      + "a key. A refusal names the missing permission.",
     ]),
     example: Object.freeze({
       key: "contact",
