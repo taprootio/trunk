@@ -1,6 +1,23 @@
 {
   "entries": [
     {
+      "version": "0.22.2",
+      "note": "Free-form sections pad evenly with the page padding wherever they render, including preview-page; Espalier 6.5.0 lets the page preview take the width a capped main column leaves it.",
+      "behavior": [
+        "The renderer writes a standard free-form section's padding on the section (--esp-size-padding on every side, in place of Espalier's side padding of --esp-size-medium and larger top and bottom), so preview-page and the editor's live preview show the same padding the published page does. A section with no theme context also shows the page background through it, as the published page does. Sections with contentPadding none are unchanged. Republish to apply it to a published page.",
+        "Espalier 6.5.0 changes the editor page layout only. The default site theme is rebuilt against it and its content is unchanged except for the recorded Espalier version, so pulled and validated themes behave as before."
+      ],
+      "help": []
+    },
+    {
+      "version": "0.22.1",
+      "note": "Espalier 6.4.0: dialogs can be bounded by inset properties; the default site theme output is unchanged.",
+      "behavior": [
+        "Espalier 6.4.0 adds four inset properties on dialogs and lets a full-screen box follow them. The default site theme is rebuilt against it and its content is unchanged except for the recorded Espalier version, so pulled and validated themes behave as before."
+      ],
+      "help": []
+    },
+    {
       "version": "0.22.0",
       "note": "validate warns when a free-form page has no h1 or a banner or hero already claims it, and about alt text, link text, long titles and missing descriptions.",
       "behavior": [

@@ -759,7 +759,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 6\.3\.0 complete site-theme contract/u,
+      match: /^Espalier 6\.5\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {

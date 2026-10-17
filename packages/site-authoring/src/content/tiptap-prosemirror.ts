@@ -745,7 +745,17 @@ function renderSection(
       "--esp-section-padding-inline: 0",
       "--esp-section-padding-block: 0",
     );
+  } else {
+    // Espalier pads a section's sides with `--esp-size-medium` and its top and bottom with the larger
+    // `--esp-size-section`. A free-form section pads evenly all round with the page padding, and says so
+    // here, in the one place that renders it, so the published page, the editor's live preview and the
+    // CLI all get the same padding (TR01258: the page shell used to add it, and the preview has no shell).
+    sectionStyleParts.push(
+      "--esp-section-padding-inline: var(--esp-size-padding)",
+      "--esp-section-padding-block: var(--esp-size-padding)",
+    );
   }
+
   // Espalier paints the decoration plane only on a section carrying the
   // `decoration` attribute, so the hooks and the attribute travel together.
   const decorationStyle = kind === "explicit" ? normalizedSectionDecorationStyle(attrs.decoration) : undefined;
@@ -758,6 +768,10 @@ function renderSection(
     sectionStyleParts.push(
       `--esp-section-background: color-mix(in oklab, var(--esp-color-background) ${background.scrimOpacityPercent}%, transparent)`,
     );
+  } else if (!context) {
+    // A section with no theme context lets the page background show through; Espalier would paint the
+    // plain page colour over a page background image. (A photo background's scrim above replaces it.)
+    sectionStyleParts.push("--esp-section-background: transparent");
   }
   const sectionStyle = sectionStyleParts.length > 0 ? sectionStyleParts.join("; ") : undefined;
   const content = renderElement(
