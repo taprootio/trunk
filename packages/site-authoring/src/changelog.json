@@ -1,6 +1,16 @@
 {
   "entries": [
     {
+      "version": "0.22.4",
+      "note": "The publishing preferences gain analyticsConsentPrompt, the switch that asks readers before the visit cookie is set.",
+      "behavior": [
+        "A pulled settings snapshot now carries analyticsConsentPrompt (default false) in the publishing preferences, and a push can set it. It is staged like the rest of the group and applies after a deployment. With it on, published pages show a small prompt and the 30-minute visit cookie is set only after a reader accepts."
+      ],
+      "help": [
+        "settings"
+      ]
+    },
+    {
       "version": "0.22.3",
       "note": "The forms reference now says site moderators can read form submissions.",
       "behavior": [

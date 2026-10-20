@@ -127,6 +127,9 @@ export const SETTINGS_GROUPS = Object.freeze([
       // zero and the default agree and a snapshot of an untouched site reads
       // the same as the site behaves.
       { name: "hideLightboxComments", wireType: "boolean" },
+      // Asks readers before the visit cookie is set (TR01263). Off is what an omitted value means, so a snapshot of
+      // an untouched site reads the same as the site behaves.
+      { name: "analyticsConsentPrompt", wireType: "boolean" },
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
       { name: "tiptapImageMaxImagesPerRow", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },

@@ -263,6 +263,15 @@ const PREFERENCES_ENTRIES = {
     "The image lightbox.",
     false,
   ),
+  analyticsConsentPrompt: entry(
+    `${FEATURES} > Ask readers before counting visits`,
+    "Whether published pages ask readers to accept one short-lived cookie before Taproot counts their visits. Off, "
+      + "the cookie is set without asking; on, readers who decline or ignore the prompt are counted by the estimate "
+      + "only.",
+    "Every page of a published Standard site, as a small prompt at the bottom of the screen. A change applies after "
+      + "a deployment.",
+    false,
+  ),
   tiptapImageMaxHeightVh: entry(
     `${FEATURES} > Image height`,
     "The tallest an image in a page body may be, as a percent of the screen height (45, 60, 75 or 90).",

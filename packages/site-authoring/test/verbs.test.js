@@ -1323,6 +1323,7 @@ test("the settings catalog materializes only real enum members", async (site) =>
       showFollowButton: false,
       albumSeamless: false,
       hideLightboxComments: false,
+      analyticsConsentPrompt: false,
       tiptapImageMaxHeightVh: 0,
       tiptapImageBorderWidth: 0,
       albumBorderWidth: 0,
