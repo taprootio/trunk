@@ -1,3 +1,4 @@
+import { HEX_DIGEST } from "./constants.js";
 import { isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import { appearanceImageIds } from "./appearance-contract.js";
 import { footerImageIds } from "./footer-contract.js";
@@ -6,7 +7,7 @@ import { computeFooterContentHash, computeFooterDraftHash, stableJson } from "./
 import { readManifest, readMediaManifest, writeManifest } from "./workspace.js";
 
 export const FOOTER_SETTINGS_FILE = "settings/site-publishing-preferences.json";
-const SHA256 = /^[0-9a-f]{64}$/u;
+const SHA256 = HEX_DIGEST;
 
 function invalid(message, field) {
   throw new SiteAuthoringError("footer.pull_required", message, { field });

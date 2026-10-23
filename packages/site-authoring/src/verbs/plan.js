@@ -7,9 +7,9 @@ import {
   getNavigation,
   IMAGE_PROCESSING_STATE_COMPLETE,
   listSiteImages,
+  isGonePage,
   listSitePages,
   listVideos,
-  PAGE_STATUS_DELETED,
   withRefusalGuidance,
 } from "../api.js";
 import {
@@ -35,6 +35,7 @@ import { checkWorkspace } from "../workspace-check.js";
 import { enforceWorkspaceReads, ledgerDigest, recordWorkspaceReads } from "../workspace-ledger.js";
 import {
   PAGE_SOURCE_EXTENSIONS,
+  NAVIGATION_FILE_NAME,
   PAGES_DIRECTORY,
   readManifest,
   readMediaManifest,
@@ -42,6 +43,7 @@ import {
 } from "../workspace.js";
 import { footerPush } from "./footer-push.js";
 import { mediaUpload, pendingMediaFiles } from "./media-upload.js";
+import { navigationMovedRefusal, requireNavigationBaseline } from "../navigation-workspace.js";
 import { navPush, validateNavigationWorkspaceDocument } from "./nav-push.js";
 import {
   liveAuthorsRefresher,
@@ -194,7 +196,7 @@ async function preflight(session, invocation) {
         { field: "pages" },
       );
     }
-    const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
+    const live = livePages.filter((summary) => !isGonePage(summary));
     const liveResourceIds = new Set(live.map((summary) => summary.resourceId).filter(Boolean));
 
     // The shared checks for the presentation, footer, and navigation; pages
@@ -357,8 +359,10 @@ async function preflight(session, invocation) {
     onProgress("Reading the site's navigation.");
     let liveNavigation;
     let navigationChanged = false;
+    let settlesLostPush = false;
     if (offline.navigation !== undefined) {
-      liveNavigation = await getNavigation(client, siteId);
+      const live = await getNavigation(client, siteId);
+      liveNavigation = live.navItems;
       let liveItems;
       try {
         liveItems = validateNavigationWorkspaceDocument({ siteId, navItems: liveNavigation }, siteId).navItems;
@@ -368,6 +372,24 @@ async function preflight(session, invocation) {
         liveItems = liveNavigation;
       }
       navigationChanged = stableJson(liveItems) !== stableJson(offline.navigation.navItems);
+      // A tree equal to the file under a baseline the site has moved past is a push whose answer was lost after
+      // it committed. The step runs so nav push settles the workspace, as theme push replays a lost save.
+      if (!navigationChanged) {
+        try {
+          settlesLostPush = requireNavigationBaseline(manifest) !== live.revision;
+        } catch (error) {
+          if (!(error instanceof SiteAuthoringError)) throw error;
+        }
+      }
+      // Only a navigation step that would run can be refused, as for the theme.
+      if (navigationChanged) {
+        try {
+          if (requireNavigationBaseline(manifest) !== live.revision) throw navigationMovedRefusal();
+        } catch (error) {
+          if (!(error instanceof SiteAuthoringError)) throw error;
+          problems.push(...problemsOf(error, { area: CHECK_AREA.navigation, file: NAVIGATION_FILE_NAME }));
+        }
+      }
     }
 
     const pagesItems = reportedWithin(pages.planned.map(plannedPageItem), PAGE_ITEMS_BYTES);
@@ -395,7 +417,10 @@ async function preflight(session, invocation) {
           ...(theme.replaying ? { replaysLostSave: true } : {}),
         }),
       }),
-      step(PLAN_STEP.navigation, stepStatus(problems, PLAN_STEP.navigation, navigationChanged)),
+      step(PLAN_STEP.navigation, stepStatus(problems, PLAN_STEP.navigation, navigationChanged || settlesLostPush), {
+        // The site already holds the file's tree, so the step only settles the workspace's recorded revision.
+        ...(settlesLostPush && !navigationChanged ? { settlesLostPush: true } : {}),
+      }),
     ];
     const planHash = `sha256:${createHash("sha256").update(stableJson({
       version: 1,
@@ -412,7 +437,8 @@ async function preflight(session, invocation) {
       problems,
       pendingMedia,
       planHash,
-      // The live state each step must still find, where the server has no fence.
+      // The live state each step must still find: page revisions and the navigation tree, which the steps check
+      // themselves (the theme and footer saves are fenced by the server, and the navigation save is as well).
       plannedPages: new Map(sending.map((page) => [page.file, stableJson([page.pageId ?? "", page.revision ?? "", page.action])])),
       plannedLiveNavigation: stableJson(liveNavigation ?? null),
     };

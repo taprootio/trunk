@@ -1,6 +1,27 @@
 {
   "entries": [
     {
+      "version": "0.23.0",
+      "note": "theme resolve prints the colors Espalier compiles from the theme, per scheme and context, with their contrast ratios, offline; the help and the staging review result say how long a review lasts and what ends it; pages delete with a dry run; nav push fenced by a navigation revision.",
+      "behavior": [
+        "New verb: taproot-site theme resolve [--scheme light|dark] [--context <name>] [--site] [--json]. It reads the pulled settings/taproot-styles.json with no credential and no network (--site reads the site's stored theme instead and needs a sign-in), compiles it through Espalier's own pipeline, and prints for the root page and every context in each scheme every semantic color as oklch and hex, whether it is compiled from the roles or pinned (origin compiled, pinned or inherited_pin), and the WCAG contrast of every ink-on-surface pair Espalier defines beside the APCA Lc and its target.",
+        "A pair under WCAG AA (4.5:1 text, 3:1 large text and UI) is listed in flags with the stable code theme.contrast_text_below_aa and the theme field to edit; flags never refuse, so the exit code is 0. An invalid or incomplete theme is refused with the code theme push and validate use (theme.settings_missing lists every absent path). Without --json the output is a table; with it, the stable result (schemes[].surfaces[].tokens and pairs, contrast, flags). A result too large for the output bound names what it left out in omittedSurfaces (items, count, truncated); --scheme and --context fetch it.",
+        "The help reference version is 41.",
+        "staging review, deploy and the delivery, preview, redirects and walkthrough help now state that a review handoff works once and expires after two minutes, that opening it starts a five-minute review session that never renews, that the staging site then redirects to the Taproot sign-in (a reviewer without a Taproot account that can preview the site needs a fresh link), and that minting another handoff with the same key (staging review, deploy --staging, redirects check, delivery check --staging) ends the earlier link and any session opened from it. The same text is in stagingPreview.review for staging review and for deploy --staging --handoff on a managed Docs site. No command or refusal changed.",
+        "Correction to 0.22.4: analyticsConsentPrompt is read-only in the CLI. A pull records it in the publishing preferences, but no push verb writes it (theme push writes only the appearance scalars, both themes and the footer colours); switch it on or off in the app under Settings, then deploy. help settings has said so since 0.22.4.",
+        "pages delete <path> [--dry-run] deletes one tracked page and removes its source and manifest entry, so a test page no longer needs the app. It runs the same revision fence as pages push first (pages.push_conflict, nothing deleted), refuses a page navigation, the footer or a form's after-submit page still uses (pages.delete_referenced, naming each use), reports redirects that land on the page in redirectsToPage, and stages the removal of a page the live site serves (effect removalStaged): the page stays live until a deployment promotes the removal, so deploy --staging then deploy finish the job, and pull, push, plan and approve treat it as deleted. The home page, 404, generated, legal and integration-managed pages are refused. A page the site already deleted or staged for removal is only cleaned from the workspace (effect alreadyDeleted or alreadyRemovalStaged).",
+        "pull records the navigation revision beside the tree (navigation.revision in the manifest and in pull's result), and nav push presents it. A tree edited in the app since the pull is refused with nav.concurrent_modification and nothing is written; keep a copy of nav.json, run pull, re-apply the edits and push again. A manifest with no navigation revision (a workspace pulled by an earlier release) is refused with nav.pull_required: run pull once. A successful push records the revision it saved, so the next push is fenced against it, and a push whose answer was lost after it committed is settled by running it again (navigation.alreadyApplied, nothing sent). The result no longer carries lastWriteWins; navigation.revision is the saved revision."
+      ],
+      "help": [
+        "theme",
+        "walkthrough",
+        "delivery",
+        "preview",
+        "redirects",
+        "nav"
+      ]
+    },
+    {
       "version": "0.22.4",
       "note": "The publishing preferences gain analyticsConsentPrompt, the switch that asks readers before the visit cookie is set.",
       "behavior": [

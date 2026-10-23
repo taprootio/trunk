@@ -16,10 +16,17 @@ import {
 } from "../contact-url.js";
 import { SiteAuthoringError } from "../errors.js";
 import { stableJson } from "../footer-draft-hash.js";
+import {
+  advanceNavigationManifest,
+  navigationMovedRefusal,
+  requireNavigationBaseline,
+} from "../navigation-workspace.js";
 import { planStale } from "../problems.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
+import { ApiError } from "../transport.js";
 import {
   NAVIGATION_FILE_NAME,
+  readManifest,
   readWorkspaceJson,
   workspaceFileExists,
   WORKSPACE_LIMITS,
@@ -29,14 +36,14 @@ import {
 /**
  * `nav push` — replace the whole navigation tree.
  *
- * `SaveSiteNavigation` is a whole-tree PUT with no concurrency token, so it is
- * last-write-wins against a browser session editing the same tree. Two things
- * follow, and the body does both:
+ * `SaveSiteNavigation` is a whole-tree PUT fenced by a revision (TR01231): the
+ * pull records the revision the tree was read at, and the save presents it. A
+ * tree edited in the app since is refused with `nav.concurrent_modification`
+ * and nothing is written. Two more things follow, and the body does both:
  *
- * 1. The tree is re-read immediately before the write, so the window in which
- *    someone else's edit can be lost is as small as the contract allows, and
- *    what the replace is about to remove is *named* rather than discovered
- *    afterwards.
+ * 1. The tree is re-read immediately before the write, so a moved tree is
+ *    refused before anything is sent, and what the replace is about to remove
+ *    is *named* rather than discovered afterwards.
  * 2. Local validation is exhaustive and refuses by item path. The server stores
  *    what it is given; a `PAGE` item carrying `pageId` instead of `resourceId`,
  *    or a fourth level of nesting, is accepted and then renders wrong. And the
@@ -178,9 +185,10 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
   return {
     id: item.id,
     kind: item.kind,
-    title: item.title,
+    // Trimmed as the site stores them, so a padded value still equals the stored tree when a lost push is settled.
+    title: item.title.trim(),
     resourceId: item.kind === NAV_ITEM_KIND_PAGE ? item.resourceId : "",
-    externalUrl: item.kind === NAV_ITEM_KIND_EXTERNAL_URL ? item.externalUrl : "",
+    externalUrl: item.kind === NAV_ITEM_KIND_EXTERNAL_URL ? item.externalUrl.trim() : "",
     children: validated,
   };
 }
@@ -271,7 +279,7 @@ async function requireLivePageTargets(client, siteId, pageReferences, onProgress
 /** The complete local validation phase shared by live push and offline fixtures. */
 export function validateNavigationWorkspaceDocument(parsed, siteId, knownPages) {
   // The pulled shape, and only the pulled shape. A bare array carries no site,
-  // and this verb replaces a whole navigation tree in one unversioned write.
+  // and this verb replaces a whole navigation tree in one write, fenced by the pulled revision.
   if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
     throw new SiteAuthoringError(
       "nav.file_invalid",
@@ -328,22 +336,31 @@ export async function navPush(invocation) {
   const validated = validateNavigationWorkspaceDocument(parsed, siteId);
   const { navItems, pageReferences } = validated;
   onProgress(`Validated ${validated.items} navigation items to depth ${NAVIGATION_MAXIMUM_DEPTH}.`);
+  // The manifest's baseline, never a value from the file: nav.json is hand-edited, and its revision would be a
+  // claim rather than a record of a read. Refused before any request when the workspace has none.
+  const expectedRevision = requireNavigationBaseline(await readManifest(config.workspaceDir, siteId));
 
   return await withRefusalGuidance(onProgress, "navigation push", async () => {
     await requireLivePageTargets(client, siteId, pageReferences, onProgress);
 
-    // Re-read immediately before the replace. There is no concurrency token to
-    // check, so this is the narrowest window the contract permits — and the
-    // only way to say what the replace removes. It happens *after* the target
-    // check so the window between reading the tree and replacing it stays as
-    // small as the contract allows.
+    // Re-read immediately before the replace: a tree that moved since the pull is refused here, before anything
+    // is sent, and it is the only way to say what the replace removes. It happens *after* the target check so
+    // the window between reading the tree and replacing it stays as small as possible; the site's own fence
+    // closes what is left.
     onProgress("Re-reading the live navigation tree immediately before replacing it.");
-    const liveItems = await getNavigation(client, siteId);
+    const live = await getNavigation(client, siteId);
+    const liveItems = live.navItems;
     // Under apply, the tree replaced must be the one its plan read: a change
     // made since was never reviewed, and this write would erase it.
     if (invocation.plannedLiveNavigation !== undefined && stableJson(liveItems) !== invocation.plannedLiveNavigation) {
       throw planStale("The site's navigation", NAVIGATION_FILE_NAME);
     }
+    // A moved tree that already equals the file is a push whose answer was lost after it committed (the
+    // transport never replays a write): the retry settles the workspace rather than refusing a tree that is
+    // exactly what the file says.
+    const alreadyApplied = live.revision !== expectedRevision
+      && stableJson(projectNavigationForWorkspace(liveItems)) === stableJson(projectNavigationForWorkspace(navItems));
+    if (live.revision !== expectedRevision && !alreadyApplied) throw navigationMovedRefusal();
     const liveIds = collectIds(liveItems);
     const pushedIds = collectIds(navItems);
     const removed = [...liveIds].filter((id) => !pushedIds.has(id)).sort();
@@ -356,11 +373,25 @@ export async function navPush(invocation) {
       );
     }
 
-    const saved = await saveNavigation(client, siteId, navItems);
-    onProgress(`Replaced the navigation tree with ${validated.items} items.`);
+    let saved;
+    if (alreadyApplied) {
+      onProgress("The site already holds this navigation tree (an earlier push whose answer was lost); nothing is sent.");
+      saved = { navItems: liveItems, revision: live.revision };
+    } else {
+      try {
+        saved = await saveNavigation(client, siteId, navItems, expectedRevision);
+      } catch (error) {
+        // The tree moved between the read above and this write.
+        if (error instanceof ApiError && error.hasField("ExpectedRevision")) throw navigationMovedRefusal();
+        throw error;
+      }
+      onProgress(`Replaced the navigation tree with ${validated.items} items.`);
+    }
     try {
       // The file now holds what the site stored, in the form pull writes, so the next pull is byte-identical.
-      const stored = saved.length > 0 || navItems.length === 0 ? saved : navItems;
+      // Always the answer's tree, even an empty one: the recorded revision describes that response, and another
+      // editor may have changed the tree between this save and the site's read of it.
+      const stored = saved.navItems;
       // siteId and navItems first, in pull's order; any other key the author kept follows.
       const { siteId: _siteId, navItems: _navItems, ...extras } = parsed;
       await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, {
@@ -368,6 +399,9 @@ export async function navPush(invocation) {
         navItems: projectNavigationForWorkspace(stored),
         ...extras,
       });
+      // After the document, as redirects push orders them: if this write fails, the old baseline refuses the
+      // next push rather than letting it overwrite the tree just saved.
+      await advanceNavigationManifest(config.workspaceDir, siteId, { navItems: stored, revision: saved.revision });
     } catch (error) {
       // The site already holds the new tree; only the local file is stale, so say the tree was replaced.
       if (error instanceof SiteAuthoringError) throw error.withCompletedWrites(["navigationTree"]);
@@ -381,14 +415,13 @@ export async function navPush(invocation) {
         file: NAVIGATION_FILE_NAME,
         items: validated.items,
         rootItems: navItems.length,
-        savedRootItems: saved.length,
+        savedRootItems: saved.navItems.length,
         added: addedReport.items,
         removed: removedReport.items,
         ...(addedReport.truncated || removedReport.truncated ? { diffTruncated: true } : {}),
+        revision: saved.revision,
+        ...(alreadyApplied ? { alreadyApplied: true } : {}),
       },
-      // Said plainly, because it is the risk this verb carries: there is no
-      // concurrency token on the navigation contract.
-      lastWriteWins: true,
     });
   });
 }

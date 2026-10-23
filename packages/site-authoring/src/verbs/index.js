@@ -15,6 +15,7 @@ import {
   VERB_LOGOUT,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
+  VERB_PAGES_DELETE,
   VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
   VERB_PLACES_CATEGORY_CLEAR,
@@ -33,6 +34,7 @@ import {
   VERB_STAGING_REVIEW,
   VERB_STATUS,
   VERB_THEME_PUSH,
+  VERB_THEME_RESOLVE,
   VERB_USE,
   VERB_VALIDATE,
   VERB_WHOAMI,
@@ -51,6 +53,7 @@ import { login } from "./login.js";
 import { logout } from "./logout.js";
 import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
+import { pagesDelete } from "./pages-delete.js";
 import { pagesMetaSet } from "./pages-meta-set.js";
 import { pagesPush } from "./pages-push.js";
 import { placesCategoryClear, placesCategoryList, placesCategorySet, placesSearch, placesSelect } from "./places.js";
@@ -65,6 +68,7 @@ import { sites } from "./sites.js";
 import { stagingReview } from "./staging-review.js";
 import { status } from "./status.js";
 import { themePush } from "./theme-push.js";
+import { themeResolve } from "./theme-resolve.js";
 import { use } from "./use.js";
 import { validateFixture } from "./validate.js";
 import { whoami } from "./whoami.js";
@@ -116,6 +120,7 @@ import { whoami } from "./whoami.js";
  *   pagePaths,     // approve: narrow to these page paths; with none, every
  *                  //   draft the workspace manifest tracks is staged
  *   authorHandle,  // authors add: the handle of the site author to create
+ *   deletePagePath, // pages delete: the one tracked page to delete
  *   pageId,        // preview page: the one persisted draft UUID to render
  *   previewIds,    // preview revoke: [page UUID, snapshot UUID]
  * }
@@ -149,6 +154,7 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_PULL]: pull,
   [VERB_PAGES_PUSH]: pagesPush,
   [VERB_PAGES_META_SET]: pagesMetaSet,
+  [VERB_PAGES_DELETE]: pagesDelete,
   [VERB_AUTHORS_LIST]: authorsList,
   [VERB_AUTHORS_ADD]: authorsAdd,
   [VERB_NAV_PUSH]: navPush,
@@ -163,6 +169,7 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_REDIRECTS_PULL]: redirectsPull,
   [VERB_REDIRECTS_PUSH]: redirectsPush,
   [VERB_THEME_PUSH]: themePush,
+  [VERB_THEME_RESOLVE]: themeResolve,
   [VERB_FOOTER_PUSH]: footerPush,
   [VERB_FORMS_PULL]: formsPull,
   [VERB_FORMS_PUSH]: formsPush,

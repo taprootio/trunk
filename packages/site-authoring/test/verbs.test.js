@@ -2,7 +2,7 @@ import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -15,7 +15,7 @@ import {
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
 import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } from "../src/cli.js";
-import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS } from "../src/constants.js";
+import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
 import { applyFooterColors } from "../src/appearance-contract.js";
@@ -60,6 +60,7 @@ const HOME_PAGE_ID = "11111111-1111-4111-8111-111111111111";
 const ABOUT_PAGE_ID = "22222222-2222-4222-8222-222222222222";
 const STORY_PAGE_ID = "33333333-3333-4333-8333-333333333333";
 const NEW_PAGE_ID = "44444444-4444-4444-8444-444444444444";
+const LEGAL_PAGE_ID = "55555555-5555-4555-8555-555555555555";
 const PUBLISHING_PAGE_ID = "99999999-9999-4999-8999-999999999999";
 const NOT_FOUND_PAGE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const IMAGE_ID = "55555555-5555-4555-8555-555555555555";
@@ -350,7 +351,14 @@ function api(routes) {
         assert.equal(target.searchParams.get(name), expected, `${method} ${target.pathname} query ${name}`);
       }
       const value = typeof route.reply === "function" ? await route.reply(call, calls) : route.reply;
-      return value instanceof Response ? value : jsonResponse(value);
+      if (value instanceof Response) return value;
+      // The site states the revision of every navigation tree it answers with.
+      const isNavigation = NAVIGATION.test(target.pathname) && (method === "GET" || method === "PUT");
+      return jsonResponse(
+        isNavigation && value !== null && typeof value === "object" && value.revision === undefined
+          ? { ...value, revision: NAVIGATION_REVISION }
+          : value,
+      );
     }
     throw new Error(`unrouted ${method} ${target.pathname}`);
   };
@@ -475,6 +483,8 @@ const AUTHORS = /\/authors$/u;
 // characters because that is what the CLI accepts as a revision; its value
 // carries no meaning beyond being stable across a test's read and its push.
 const REDIRECT_REVISION = "a".repeat(64);
+// What a navigation answer reports unless a test says otherwise (TR01231); the manifest fixture records the same one.
+const NAVIGATION_REVISION = "e".repeat(64);
 const NEXT_REDIRECT_REVISION = "b".repeat(64);
 
 function emptyRedirectMap() {
@@ -541,6 +551,7 @@ const EXCHANGED_KEY = "tr_live_exchanged_site_credential_never_logged";
 const PERMISSION_CAPABILITIES = Object.freeze({
   "site.pages.create": [CAPABILITY_CONTENT],
   "site.pages.edit_any": [CAPABILITY_CONTENT],
+  "site.pages.delete_any": [CAPABILITY_CONTENT],
   "site.pages.publish_any": [CAPABILITY_CONTENT],
   "site.theme.manage": [CAPABILITY_DESIGN],
   "site.media.manage": [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
@@ -563,6 +574,7 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "POST", pattern: PAGES_COLLECTION, permission: "site.pages.create" },
   { method: "GET", pattern: PAGE_BY_ID, permission: "site.pages.edit_any" },
   { method: "PATCH", pattern: PAGE_BY_ID, permission: "site.pages.edit_any" },
+  { method: "DELETE", pattern: PAGE_BY_ID, permission: "site.pages.delete_any" },
   { method: "GET", pattern: NAVIGATION, permission: "site.theme.manage" },
   { method: "PUT", pattern: NAVIGATION, permission: "site.theme.manage" },
   // A redirect is a content path, so both halves of the map resolve the
@@ -728,7 +740,7 @@ function manifestFixture(pages, extra = {}) {
     manifestVersion: 7,
     siteId: SITE_ID,
     pulledAt: "2026-08-20T00:00:00.000Z",
-    navigation: { file: "nav.json", items: 1 },
+    navigation: { file: "nav.json", items: 1, revision: NAVIGATION_REVISION },
     settings: [{ settingsType: "SETTING_TYPE_SITE_HEADER", file: "settings/site-header.json" }],
     settingsSkipped: [],
     footer: footerManifestEntry(projectFooterSettingsForWorkspace({})),
@@ -2807,6 +2819,8 @@ function trackedRoutes(state, { reportsRevision = true } = {}) {
           pageId: ABOUT_PAGE_ID,
           bodyRevision: reportedRevision(),
           authorRef: state.authorRef,
+          // A test that needs the page in another state (a draft, ever published) says so here.
+          ...state.summary,
           // A page that credits someone shows their name, which an empty
           // authorRef alone cannot say.
           ...(state.authorRef || state.authorDisplayName
@@ -4249,6 +4263,419 @@ test("pages push refuses a page the site changed since this workspace last recon
   // Fails closed: nothing was sent, so the site still holds its own edit.
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
   assert.equal(state.body.content[0].content[0].text, "edited on the site");
+});
+
+// ---------------------------------------------------------------------------
+// TR01226 — pages delete
+// ---------------------------------------------------------------------------
+
+const DRAFT_ABOUT = Object.freeze({ status: "PAGE_STATUS_DRAFT", hasDraft: true });
+
+/** A pulled workspace whose one page is a never-published draft the site can delete. */
+async function pulledDraftAbout(
+  site,
+  { summary = DRAFT_ABOUT, extraRoutes = [], files = {}, afterPull = {}, deleteReply = { status: "PAGE_STATUS_DELETED" } } = {},
+) {
+  const workspace = await fixture(site, files);
+  const state = { body: paragraphDocument(BODY_MARKER), summary };
+  const deleted = [];
+  const wire = api([
+    ...extraRoutes,
+    {
+      method: "DELETE",
+      pattern: PAGE_BY_ID,
+      reply: (call) => {
+        deleted.push(call.pathname);
+        return pageSummary({ pageId: ABOUT_PAGE_ID, ...deleteReply });
+      },
+    },
+    ...trackedRoutes(state),
+  ]);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  // Pull writes the footer settings, so a test that edits them does so after it.
+  for (const [file, contents] of Object.entries(afterPull)) {
+    await writeWorkspaceFile(workspace.workspaceDir, file, Buffer.from(`${JSON.stringify(contents)}\n`));
+  }
+  return { workspace, state, wire, deleted };
+}
+
+const deleteAbout = (workspace, wire, extra = {}) =>
+  VERB_HANDLERS["pages delete"](invoke(workspace, wire, { verb: "pages delete", deletePagePath: "about", ...extra }).invocation);
+
+test("pages delete removes a never-published page and its workspace source (TR01226)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+
+  const result = await deleteAbout(workspace, wire);
+
+  assert.deepEqual(deleted, [`/api/v1/pages/${ABOUT_PAGE_ID}`]);
+  assert.equal(result.deleted, true);
+  assert.equal(result.effect, "removed");
+  assert.deepEqual(result.page, {
+    path: "about",
+    file: "pages/about.pm.json",
+    pageId: ABOUT_PAGE_ID,
+    title: "About us",
+  });
+  assert.equal(result.nextStep, "deploy --staging");
+  // Gone from the workspace, so neither the next push nor the next pull brings it back.
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages.some((entry) => entry.pageId === ABOUT_PAGE_ID), false);
+});
+
+test("pages delete --dry-run reports the effect and sends and changes nothing (TR01226)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site);
+  const before = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+
+  const result = await deleteAbout(workspace, wire, { dryRun: true });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.effect, "removed");
+  assert.equal(result.deleted, undefined);
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+  assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), before);
+});
+
+test("pages delete refuses a page the site changed since this workspace reconciled with it (TR01226)", async (site) => {
+  const { workspace, state, wire, deleted } = await pulledDraftAbout(site);
+  const reconciled = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].baseline.revision;
+  // Somebody edited the page in the app after the pull.
+  state.body = paragraphDocument("edited on the site");
+
+  for (const dryRun of [true, false]) {
+    const failure = await deleteAbout(workspace, wire, { dryRun }).then(() => undefined, (error) => error);
+    assert.equal(failure?.code, "pages.push_conflict");
+    assert.deepEqual(failure.alternatives, [reconciled, siteRevision(state)]);
+    assert.match(failure.message, /No page was deleted/u);
+  }
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+});
+
+test("pages delete honours the revision a refused pull showed, like a push does (TR01226)", async (site) => {
+  const { workspace, state, wire, deleted } = await pulledDraftAbout(site);
+  state.body = paragraphDocument("edited on the site");
+  await writeWorkspaceFile(
+    workspace.workspaceDir,
+    `.taproot-site-state/pages/${ABOUT_PAGE_ID}.revision.json`,
+    Buffer.from(JSON.stringify({ pageId: ABOUT_PAGE_ID, revision: siteRevision(state) })),
+  );
+
+  const result = await deleteAbout(workspace, wire);
+
+  assert.equal(result.deleted, true);
+  assert.equal(deleted.length, 1);
+  assert.equal(await workspaceHas(workspace, `.taproot-site-state/pages/${ABOUT_PAGE_ID}.revision.json`), false);
+});
+
+test("pages delete refuses a link where a workspace file should be before sending anything (TR01226)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site);
+  const baseline = workspacePath(workspace, `.taproot-site-state/pages/${ABOUT_PAGE_ID}.pm.json`);
+  await mkdir(path.dirname(baseline), { recursive: true });
+  await symlink(workspacePath(workspace, "pages/about.pm.json"), baseline);
+
+  for (const dryRun of [true, false]) {
+    const failure = await deleteAbout(workspace, wire, { dryRun }).then(() => undefined, (error) => error);
+    assert.match(failure?.code ?? "", /^workspace\./u);
+    assert.deepEqual(deleted, []);
+  }
+});
+
+test("pages delete stages the removal of a page the live site serves and cleans the workspace (TR01278)", async (site) => {
+  for (const summary of [
+    { status: "PAGE_STATUS_PUBLISHED" },
+    // A published page being edited reports a draft status; its first publication still shows.
+    { ...DRAFT_ABOUT, datePublished: "2026-10-01T00:00:00Z" },
+  ]) {
+    const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+      summary,
+      deleteReply: { status: "PAGE_STATUS_PUBLISHED", removalStaged: true },
+    });
+
+    const result = await deleteAbout(workspace, wire);
+
+    assert.deepEqual(deleted, [`/api/v1/pages/${ABOUT_PAGE_ID}`]);
+    assert.equal(result.effect, "removalStaged");
+    assert.equal(result.removalStaged, true);
+    assert.equal(result.deleted, false);
+    assert.equal(result.nextStep, "deploy --staging");
+    // The page is still live, but this workspace no longer tracks it, so neither a push nor a pull brings it back.
+    assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+  }
+});
+
+test("pages delete --dry-run says a live page would only be staged for removal (TR01278)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, { summary: { status: "PAGE_STATUS_PUBLISHED" } });
+
+  const result = await deleteAbout(workspace, wire, { dryRun: true });
+
+  assert.equal(result.effect, "removalStaged");
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+});
+
+test("pages delete only cleans the workspace for a page already staged for removal (TR01278)", async (site) => {
+  const { workspace, state, wire, deleted } = await pulledDraftAbout(site, { summary: { status: "PAGE_STATUS_PUBLISHED" } });
+  state.summary = { status: "PAGE_STATUS_PUBLISHED", removalStaged: true };
+
+  const result = await deleteAbout(workspace, wire);
+
+  assert.equal(result.effect, "alreadyRemovalStaged");
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+});
+
+test("pull does not bring back a page staged for removal (TR01278)", async (site) => {
+  const workspace = await fixture(site, {});
+  const state = { body: paragraphDocument(BODY_MARKER), summary: { status: "PAGE_STATUS_PUBLISHED", removalStaged: true } };
+
+  await pull(invoke(workspace, api(trackedRoutes(state)), { verb: "pull" }).invocation);
+
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages.some((entry) => entry.pageId === ABOUT_PAGE_ID), false);
+});
+
+test("pages delete refuses a page navigation, the footer or a form still uses, naming each use (TR01226)", async (site) => {
+  const resourceId = resourceIdFor(ABOUT_PAGE_ID);
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+    extraRoutes: [{
+      method: "GET",
+      pattern: NAVIGATION,
+      reply: {
+        navItems: [{
+          id: navId(1),
+          kind: "NAV_ITEM_KIND_GROUP_HEADER",
+          title: "Company",
+          children: [{ id: navId(2), kind: "NAV_ITEM_KIND_PAGE", title: "About", resourceId }],
+        }],
+      },
+    }],
+    files: { "forms/contact.json": { definition: { after_submit: { show: "page", page_path: "/about" } } } },
+    afterPull: {
+      "settings/site-publishing-preferences.json": { footer: { links: [{ id: "f1", label: "About us", pageResourceId: resourceId }] } },
+    },
+  });
+
+  const failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+
+  assert.equal(failure?.code, "pages.delete_referenced");
+  assert.deepEqual(failure.alternatives, [
+    "navItems[0].children[0] (About)",
+    "footer: About us",
+    "forms/contact.json",
+  ]);
+  assert.deepEqual(deleted, []);
+});
+
+test("pages delete reports redirects that land on the page without stopping (TR01226)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+    extraRoutes: [{
+      method: "GET",
+      pattern: REDIRECT_MAP,
+      reply: {
+        siteId: SITE_ID,
+        revision: REDIRECT_REVISION,
+        entries: [{ path: "/company", kind: "SITE_REDIRECT_KIND_REDIRECT", target: "/about", status: 301 }],
+      },
+    }],
+  });
+
+  const result = await deleteAbout(workspace, wire);
+
+  assert.deepEqual(result.redirectsToPage, ["/company"]);
+  assert.equal(result.redirectsToPageCount, 1);
+  assert.equal(deleted.length, 1);
+});
+
+test("pages delete only cleans the workspace for a page the site already deleted (TR01226)", async (site) => {
+  const { workspace, state, wire, deleted } = await pulledDraftAbout(site);
+  state.summary = { status: "PAGE_STATUS_DELETED" };
+
+  const result = await deleteAbout(workspace, wire);
+
+  assert.equal(result.effect, "alreadyDeleted");
+  assert.equal(result.deleted, false);
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+});
+
+test("pages delete finds a form that names the page by resource id, and does not crash on one without a path (TR01226)", async (site) => {
+  const resourceId = resourceIdFor(ABOUT_PAGE_ID);
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+    files: {
+      "forms/contact.json": { definition: { after_submit: { show: "page", page_resource_id: resourceId } } },
+      "forms/other.json": { definition: { after_submit: { show: "message", message: "Thanks" } } },
+    },
+  });
+
+  const failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+
+  assert.equal(failure?.code, "pages.delete_referenced");
+  assert.deepEqual(failure.alternatives, ["forms/contact.json"]);
+  assert.deepEqual(deleted, []);
+});
+
+test("pages delete fails closed when a file that could name the page cannot be read (TR01226)", async (site) => {
+  const resourceId = resourceIdFor(ABOUT_PAGE_ID);
+  // A valid form that targets the page beside a file the forms folder will not accept.
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+    files: {
+      "forms/contact.json": { definition: { after_submit: { show: "page", page_resource_id: resourceId } } },
+      "forms/contact backup.json": {},
+    },
+  });
+
+  const failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+  assert.equal(failure?.code, "pages.delete_references_unreadable");
+  assert.deepEqual(deleted, []);
+
+  // The same for a form file that is not JSON.
+  await rm(workspacePath(workspace, "forms/contact backup.json"));
+  await writeWorkspaceFile(workspace.workspaceDir, "forms/broken.json", Buffer.from("not json"));
+  const broken = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+  assert.equal(broken?.code, "pages.delete_references_unreadable");
+  assert.deepEqual(deleted, []);
+});
+
+test("pages delete refuses a hand-edited manifest entry before any request (TR01226)", async (site) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(site);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  const attempt = async (edit) => {
+    const edited = structuredClone(manifest);
+    edit(edited.pages[0]);
+    await writeWorkspaceFile(workspace.workspaceDir, ".taproot-site-manifest.json", Buffer.from(JSON.stringify(edited)));
+    return (await deleteAbout(workspace, wire).then(() => undefined, (error) => error))?.code;
+  };
+
+  assert.equal(await attempt((entry) => delete entry.pageId), "pages.delete_manifest_invalid");
+  assert.equal(await attempt((entry) => (entry.file = "nav.json")), "pages.delete_manifest_invalid");
+  assert.deepEqual(deleted, []);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+});
+
+test("pages delete refuses the 404 page and a listing too large to search (TR01226)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([
+      trackedAboutEntry(),
+      trackedAboutEntry({ pageId: HOME_PAGE_ID, resourceId: resourceIdFor(HOME_PAGE_ID), path: "404", file: "pages/404.md" }),
+    ]),
+  });
+  const wire = api([{
+    method: "GET",
+    pattern: PAGES_LIST,
+    // Never ends, and never lists the page: the CLI cannot tell it is gone.
+    reply: { pages: [pageSummary({ pageId: NEW_PAGE_ID, path: "other" })], nextPageToken: "more" },
+  }]);
+  const attempt = async (deletePagePath) =>
+    (await VERB_HANDLERS["pages delete"](invoke(workspace, wire, { verb: "pages delete", deletePagePath }).invocation)
+      .then(() => undefined, (error) => error))?.code;
+
+  assert.equal(await attempt("404"), "pages.delete_system");
+  assert.equal(await attempt("about"), "pages.delete_list_incomplete");
+  assert.equal(wire.matching("DELETE", PAGE_BY_ID).length, 0);
+});
+
+test("pages delete names an unknown outcome, and the retry finishes the cleanup (TR01226)", async (site) => {
+  const { workspace, state, wire } = await pulledDraftAbout(site, {
+    extraRoutes: [{ method: "DELETE", pattern: PAGE_BY_ID, reply: () => jsonResponse({ code: 13, message: "boom" }, 500) }],
+  });
+
+  const failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+
+  assert.deepEqual(failure?.completedWrites, ["page about: unknown"]);
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
+  // The delete had in fact committed, so the retry meets the page gone and only cleans up.
+  state.summary = { status: "PAGE_STATUS_DELETED" };
+  const retry = await deleteAbout(workspace, wire);
+  assert.equal(retry.effect, "alreadyDeleted");
+  assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
+});
+
+test("pages delete --dry-run names no effect for a page that may be a restored draft (TR01278)", async (site) => {
+  // A published page being edited and a restored draft that is not live look the same from the listing.
+  const { workspace, wire, deleted } = await pulledDraftAbout(site, {
+    summary: { ...DRAFT_ABOUT, datePublished: "2026-10-01T00:00:00Z" },
+  });
+
+  const result = await deleteAbout(workspace, wire, { dryRun: true });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.effect, undefined);
+  assert.deepEqual(deleted, []);
+});
+
+test("pages delete names an unreadable answer as an unknown outcome (TR01278)", async (site) => {
+  const { workspace, wire } = await pulledDraftAbout(site, { deleteReply: { pageId: "" } });
+
+  const failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+
+  assert.equal(failure?.code, "api.page_contract");
+  assert.deepEqual(failure?.completedWrites, ["page about: unknown"]);
+});
+
+test("pages delete says the page was deleted when the workspace cleanup fails (TR01226)", async (t) => {
+  const { workspace, wire, deleted } = await pulledDraftAbout(t);
+  const pagesDirectory = workspacePath(workspace, "pages");
+  await chmod(pagesDirectory, 0o555);
+  let failure;
+  try {
+    failure = await deleteAbout(workspace, wire).then(() => undefined, (error) => error);
+  } finally {
+    await chmod(pagesDirectory, 0o755);
+  }
+
+  assert.equal(deleted.length, 1);
+  assert.deepEqual(failure?.completedWrites, ["page about: deleted"]);
+});
+
+test("pages delete refuses what the CLI does not delete, before any request (TR01226)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([
+      trackedAboutEntry(),
+      trackedAboutEntry({ pageId: HOME_PAGE_ID, resourceId: resourceIdFor(HOME_PAGE_ID), path: "", file: "pages/index.md" }),
+      trackedAboutEntry({
+        pageId: NEW_PAGE_ID,
+        resourceId: resourceIdFor(NEW_PAGE_ID),
+        path: "tags/news",
+        templateType: "TEMPLATE_TYPE_GENERATED",
+        file: "pages/tags-news.pm.json",
+        sourceFormat: "prosemirror",
+      }),
+      trackedAboutEntry({
+        pageId: LEGAL_PAGE_ID,
+        resourceId: resourceIdFor(LEGAL_PAGE_ID),
+        path: "terms",
+        templateType: "TEMPLATE_TYPE_LEGAL",
+        file: undefined,
+      }),
+    ]),
+  });
+  const wire = api([]);
+  const attempt = async (deletePagePath) =>
+    (await VERB_HANDLERS["pages delete"](invoke(workspace, wire, { verb: "pages delete", deletePagePath }).invocation)
+      .then(() => undefined, (error) => error))?.code;
+
+  assert.equal(await attempt("missing"), "pages.delete_page_unknown");
+  assert.equal(await attempt("/"), "pages.delete_system");
+  assert.equal(await attempt("tags/news"), "pages.delete_generated");
+  assert.equal(await attempt("terms"), "pages.delete_not_authorable");
+  assert.equal(wire.calls.length, 0);
+});
+
+test("pages delete takes exactly one page path (TR01226)", async () => {
+  for (const arguments_ of [["pages", "delete"], ["pages", "delete", "a", "b"]]) {
+    const stderr = [];
+    const code = await runCli({
+      arguments_,
+      stdout: { write: () => true },
+      stderr: { write: (chunk) => stderr.push(chunk) && true },
+    });
+    assert.equal(code, 2);
+    assert.match(stderr.join(""), /pages\.delete_path_invalid/u);
+  }
 });
 
 /**
@@ -7317,7 +7744,7 @@ const NAV_PAGES_ROUTE = {
 };
 
 test("nav push re-reads the live tree immediately before replacing it whole", async (site) => {
-  const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: NAV_TREE } });
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: NAV_TREE } });
   const wire = api([
     NAV_PAGES_ROUTE,
     {
@@ -7340,10 +7767,8 @@ test("nav push re-reads the live tree immediately before replacing it whole", as
   const { invocation, progress } = invoke(workspace, wire, { verb: "nav push" });
   const result = await navPush(invocation);
 
-  // The navigation read is the last thing before the write: there is no
-  // concurrency token, so this is the whole of the CLI's defence against a
-  // concurrent editor. The page list is read first, so it cannot widen that
-  // window.
+  // The navigation read is the last thing before the write, so a tree that moved is refused before anything
+  // is sent. The page list is read first, so it cannot widen that window.
   assert.deepEqual(
     wire.calls.map((call) => `${call.method} ${call.pathname.split("/").pop()}`),
     [`GET ${SITE_ID}`, "GET navigation", "PUT navigation"],
@@ -7363,8 +7788,172 @@ test("nav push re-reads the live tree immediately before replacing it whole", as
   assert.equal(result.navigation.items, 3);
   assert.deepEqual(result.navigation.removed, [NAV_BROWSER_ONLY]);
   assert.deepEqual(result.navigation.added, [NAV_PAGE_CHILD, NAV_LINK_CHILD].sort());
-  assert.equal(result.lastWriteWins, true);
+  // The write carries the revision the pull recorded, and the result no longer calls itself last-write-wins.
+  assert.equal(saved.body.expectedRevision, NAVIGATION_REVISION);
+  assert.equal(result.lastWriteWins, undefined);
+  assert.equal(result.navigation.revision, NAVIGATION_REVISION);
   assert.ok(progress.some((line) => line.includes("removes 1 navigation item")));
+});
+
+const NAVIGATION_REVISION_AFTER_SAVE = "f".repeat(64);
+
+test("nav push refuses a tree that changed on the site since the pull, before sending anything (TR01231)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [], revision: NAVIGATION_REVISION_AFTER_SAVE } },
+    { method: "PUT", pattern: NAVIGATION, reply: (call) => ({ navItems: call.body.navItems }) },
+  ]);
+
+  const failure = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(failure?.code, "nav.concurrent_modification");
+  assert.equal(failure.field, "revision");
+  assert.match(failure.message, /nothing was written/u);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+});
+
+test("nav push maps the site's own revision refusal to the same conflict (TR01231)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  // The tree moved between the CLI's read and its write, which only the site can see.
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "PUT", pattern: NAVIGATION, reply: () => jsonResponse(violation("ExpectedRevision"), 400) },
+  ]);
+
+  const failure = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(failure?.code, "nav.concurrent_modification");
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 1);
+});
+
+test("nav push settles a push whose answer was lost after it committed, instead of refusing the retry (TR01231)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  let live = { navItems: [], revision: NAVIGATION_REVISION };
+  let lostAnswers = 1;
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: () => live },
+    {
+      method: "PUT",
+      pattern: NAVIGATION,
+      reply: (call) => {
+        // The site commits, and the answer never reaches the CLI.
+        live = { navItems: call.body.navItems, revision: NAVIGATION_REVISION_AFTER_SAVE };
+        if (lostAnswers-- > 0) throw new TypeError("fetch failed");
+        return live;
+      },
+    },
+  ]);
+
+  const first = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation).then(() => undefined, (error) => error);
+  assert.equal(first?.code, "transport.mutation_ambiguous");
+
+  const retry = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+
+  assert.equal(retry.navigation.alreadyApplied, true);
+  assert.deepEqual(retry.navigation.added, []);
+  assert.deepEqual(retry.navigation.removed, []);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 1);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.navigation.revision, NAVIGATION_REVISION_AFTER_SAVE);
+});
+
+test("nav push records the tree the site answered with, even when another editor emptied it meanwhile (TR01231)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    // Saved, then cleared in the app before the site read it back for the answer.
+    { method: "PUT", pattern: NAVIGATION, reply: { navItems: [], revision: NAVIGATION_REVISION_AFTER_SAVE } },
+  ]);
+
+  await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+
+  // The file and the recorded revision describe the same tree, so the next push cannot restore the items.
+  assert.deepEqual((await readWorkspaceJson(workspace, "nav.json")).navItems, []);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.navigation.revision, NAVIGATION_REVISION_AFTER_SAVE);
+  assert.equal(manifest.navigation.items, 0);
+});
+
+test("nav push advances the recorded revision, so the next push is fenced against what it saved (TR01231)", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  let revision = NAVIGATION_REVISION;
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: () => ({ navItems: [], revision }) },
+    {
+      method: "PUT",
+      pattern: NAVIGATION,
+      reply: (call) => {
+        revision = NAVIGATION_REVISION_AFTER_SAVE;
+        return { navItems: call.body.navItems, revision };
+      },
+    },
+  ]);
+
+  await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.navigation.revision, NAVIGATION_REVISION_AFTER_SAVE);
+
+  // Pushing again presents the revision the first push saved, not the pulled one.
+  await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+  assert.equal(wire.matching("PUT", NAVIGATION)[1].body.expectedRevision, NAVIGATION_REVISION_AFTER_SAVE);
+});
+
+test("nav push refuses toward pull when the manifest records no navigation revision (TR01231)", async (site) => {
+  const manifest = manifestFixture([]);
+  manifest.navigation = { file: "nav.json", items: 1 };
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifest,
+    "nav.json": { siteId: SITE_ID, navItems: NAV_TREE },
+  });
+  const wire = api([]);
+
+  const failure = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation).then(
+    () => undefined,
+    (error) => error,
+  );
+
+  assert.equal(failure?.code, "nav.pull_required");
+  assert.equal(wire.calls.length, 0);
+});
+
+test("pull records the navigation revision beside the tree (TR01231)", async (site) => {
+  const workspace = await fixture(site, {});
+  const wire = api([
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [], revision: NAVIGATION_REVISION_AFTER_SAVE } },
+    ...trackedRoutes({ body: paragraphDocument(BODY_MARKER) }).filter((route) => route.pattern !== NAVIGATION),
+  ]);
+
+  const result = await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.deepEqual(manifest.navigation, { file: "nav.json", items: 0, revision: NAVIGATION_REVISION_AFTER_SAVE });
+  assert.equal(result.navigation.revision, NAVIGATION_REVISION_AFTER_SAVE);
 });
 
 /** The tree as the API's JSON transcoding prints it: every proto3 default is present. */
@@ -7444,7 +8033,7 @@ test("navigation round-trips byte-identically through pull, nav push and pull (T
 
 test("nav push keeps the file's other top-level keys, and reports a failed local rewrite after the tree was replaced (TR01232)", async (site) => {
   const items = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Press", externalUrl: "https://example.com/press" }];
-  const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, note: "kept", navItems: items } });
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, note: "kept", navItems: items } });
   let replaced = false;
   const wire = api([
     { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
@@ -7479,6 +8068,7 @@ test("nav push carries a contact target to the wire exactly as authored", async 
   // the workspace file and the wire may re-encode it.
   const dialable = "tel:+1 (555) 555-0123";
   const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
     "nav.json": {
       siteId: SITE_ID,
       navItems: [
@@ -7647,7 +8237,7 @@ test("nav push refuses a malformed tree locally and names the item", async (test
   ];
   for (const scenario of cases) {
     await testContext.test(scenario.name, async (site) => {
-      const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: scenario.navItems } });
+      const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: scenario.navItems } });
       const wire = api([]);
       const { invocation } = invoke(workspace, wire, { verb: "nav push" });
       await assert.rejects(
@@ -7675,7 +8265,7 @@ test("nav push refuses a PAGE target that points at nothing, by item path", asyn
   // back from the server as a bare "ResourceId" — no index, nothing to locate
   // across a tree that may hold a thousand items.
   await testContext.test("a dangling resource id is named by path", async (site) => {
-    const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: treeTargeting(navId(9)) } });
+    const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: treeTargeting(navId(9)) } });
     const wire = api([NAV_PAGES_ROUTE]);
     const { invocation } = invoke(workspace, wire, { verb: "nav push" });
     await assert.rejects(
@@ -7692,7 +8282,7 @@ test("nav push refuses a PAGE target that points at nothing, by item path", asyn
   // reaching for the wrong one is the mistake to expect — and it is a valid
   // UUID, so only a liveness check can tell them apart.
   await testContext.test("a pageId used as a resource id says which field is wrong", async (site) => {
-    const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: treeTargeting(HOME_PAGE_ID) } });
+    const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: treeTargeting(HOME_PAGE_ID) } });
     const wire = api([NAV_PAGES_ROUTE]);
     const { invocation } = invoke(workspace, wire, { verb: "nav push" });
     await assert.rejects(
@@ -7707,6 +8297,7 @@ test("nav push refuses a PAGE target that points at nothing, by item path", asyn
 
   await testContext.test("a tree whose targets all exist still pushes", async (site) => {
     const workspace = await fixture(site, {
+      ".taproot-site-manifest.json": manifestFixture([]),
       "nav.json": { siteId: SITE_ID, navItems: treeTargeting(resourceIdFor(STORY_PAGE_ID)) },
     });
     const wire = api([
@@ -7724,7 +8315,7 @@ test("nav push refuses a PAGE target that points at nothing, by item path", asyn
   // all: an incomplete set would reject valid trees, and a false refusal here
   // is worse than the server's vague one.
   await testContext.test("an unenumerable page list skips the check rather than refusing", async (site) => {
-    const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: treeTargeting(navId(9)) } });
+    const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: treeTargeting(navId(9)) } });
     const wire = api([
       { method: "GET", pattern: PAGES_LIST, reply: { pages: [pageSummary()], nextPageToken: "more" } },
       { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
@@ -12083,7 +12674,7 @@ test("a workspace refuses to serve a site it was not pulled from", async (testCo
 });
 
 test("nav push requires the navigation file it pulled, bound to this site", async (testContext) => {
-  // `nav push` replaces a whole tree in one unversioned write, so a stale
+  // `nav push` replaces a whole tree in one write fenced by the pulled revision, so a stale
   // `nav.json` is not a partial mistake — it is another site's entire
   // navigation landing on this one.
   const cases = [
@@ -12105,7 +12696,7 @@ test("nav push requires the navigation file it pulled, bound to this site", asyn
   ];
   for (const scenario of cases) {
     await testContext.test(scenario.name, async (site) => {
-      const workspace = await fixture(site, { "nav.json": scenario.contents });
+      const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": scenario.contents });
       const wire = api([]);
       const { invocation } = invoke(workspace, wire, { verb: "nav push" });
       await assert.rejects(navPush(invocation), (error) => error?.code === scenario.code);
@@ -12115,7 +12706,7 @@ test("nav push requires the navigation file it pulled, bound to this site", asyn
   }
 
   await testContext.test("the pulled wrapper for this site pushes", async (site) => {
-    const workspace = await fixture(site, { "nav.json": { siteId: SITE_ID, navItems: NAV_TREE } });
+    const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: NAV_TREE } });
     const wire = api([
       NAV_PAGES_ROUTE,
       { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
@@ -12622,6 +13213,7 @@ test("the verb table declares every capability the verb's own routes need", asyn
   // fail, or a set could quietly go stale again.
   await testContext.test("narrowing a declared set by one capability is refused on the wire", async (site) => {
     const workspace = await fixture(site, {
+      ".taproot-site-manifest.json": manifestFixture([]),
       "nav.json": {
         siteId: SITE_ID,
         navItems: [{
@@ -13505,6 +14097,7 @@ test("staging review mints a fresh handoff on the presentation surface and repor
   assert.equal(result.verb, "staging review");
   assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
   assert.match(result.stagingPreview.review, /light and dark/u);
+  assert.ok(result.stagingPreview.review.includes(STAGING_REVIEW_SESSION_NOTE));
   assert.ok(!progress.some((line) => line.includes(HANDOFF_TOKEN)));
   assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
 });
@@ -13706,6 +14299,7 @@ test("deploy --staging on a managed Docs site stages settings and skips the stag
   assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
   assert.equal(result.stagingPreview.handoffExpiresAt, HANDOFF_EXPIRES_AT);
   assert.match(result.stagingPreview.review, /light and dark/u);
+  assert.ok(result.stagingPreview.review.includes(STAGING_REVIEW_SESSION_NOTE));
   assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
   assert.ok(wire.calls.findIndex((call) => STAGING_MINT.test(call.pathname)) > wire.calls.findIndex((call) => DEPLOY.test(call.pathname)));
   assert.equal(wire.matching("GET", STAGING_PREVIEW_ROOT).length, 0);
@@ -14489,6 +15083,91 @@ test("plan marks the step a problem blocks, and apply refuses that plan without 
   assert.equal(applied.exitCode, 1);
   assert.equal(applied.result.error.code, "nav.resource_unknown");
   assert.deepEqual(writes(wire), []);
+});
+
+test("plan blocks the navigation step when the tree moved on the site since the pull (TR01231)", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+  }));
+  const wire = api([
+    // Someone edited navigation in the app after the pull.
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [], revision: "d".repeat(64) } },
+    ...siteRoutes(),
+  ]);
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+
+  assert.equal(planned.result.ready, false);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "nav push").status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => problem.code), ["nav.concurrent_modification"]);
+  assert.deepEqual(writes(wire), []);
+});
+
+test("plan blocks the navigation step toward pull when the manifest records no navigation revision (TR01231)", async (site) => {
+  const files = wholeWorkspace({
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
+  });
+  const manifest = structuredClone(files[".taproot-site-manifest.json"]);
+  manifest.navigation = { file: "nav.json", items: 1 };
+  const workspace = await fixture(site, { ...files, ".taproot-site-manifest.json": manifest });
+  const wire = api(siteRoutes());
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+
+  assert.equal(planned.result.steps.find((entry) => entry.step === "nav push").status, "blocked");
+  assert.deepEqual(planned.result.problems.map((problem) => problem.code), ["nav.pull_required"]);
+});
+
+test("plan runs nav push to settle a push whose answer was lost, and apply advances the baseline (TR01231)", async (site) => {
+  const navItems = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }];
+  const workspace = await fixture(site, wholeWorkspace({ navItems }));
+  // The site already holds the file's tree, under a revision the manifest never recorded.
+  const wire = api([
+    { method: "GET", pattern: NAVIGATION, reply: { navItems, revision: "d".repeat(64) } },
+    ...siteRoutes(),
+  ]);
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "nav push").status, "ready");
+  assert.deepEqual(planned.result.problems, []);
+
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 0, applied.stderr);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.navigation.revision, "d".repeat(64));
+});
+
+test("plan leaves an unchanged navigation tree alone when the manifest records no revision (TR01231)", async (site) => {
+  const navItems = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }];
+  const files = wholeWorkspace({ navItems });
+  const manifest = structuredClone(files[".taproot-site-manifest.json"]);
+  manifest.navigation = { file: "nav.json", items: 1 };
+  const workspace = await fixture(site, { ...files, ".taproot-site-manifest.json": manifest });
+  const wire = api([{ method: "GET", pattern: NAVIGATION, reply: { navItems } }, ...siteRoutes()]);
+
+  const planned = await cliRun(workspace, ["plan"], wire);
+
+  assert.deepEqual(planned.result.problems.filter((problem) => problem.area === "navigation"), []);
+  assert.equal(planned.result.steps.find((entry) => entry.step === "nav push").status, "nothing to do");
+});
+
+test("nav push settles a lost push even when the file pads a title the site stores trimmed (TR01231)", async (site) => {
+  const padded = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: " Blog ", externalUrl: " https://example.com/blog " }];
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([]),
+    "nav.json": { siteId: SITE_ID, navItems: padded },
+  });
+  const stored = [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }];
+  const wire = api([
+    NAV_PAGES_ROUTE,
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: stored, revision: NAVIGATION_REVISION_AFTER_SAVE } },
+  ]);
+
+  const result = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+
+  assert.equal(result.navigation.alreadyApplied, true);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
 });
 
 test("apply refuses a plan the workspace has moved past", async (site) => {

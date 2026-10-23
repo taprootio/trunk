@@ -342,6 +342,11 @@ each step names the reference it relies on.
    `lightLogoId`, `darkLogoId` and `brand.faviconId` from the returned ids. There
    is no recolor, crop or SVG upload command.
 5. **Validate, preview, then push.** `validate` checks the whole workspace offline;
+   `theme resolve` prints, also offline, the colors Espalier compiles from the
+   theme for each scheme and context with the contrast of every ink-on-surface
+   pair and a flag for each one under WCAG AA (add `--json` for the stable
+   result, `--scheme` and `--context` to narrow it, `--site` for the site's
+   stored theme);
    `theme push --dry-run` reads the site and lists the JSON paths at which
    each settings file differs from it, and whether the baseline `pull`
    recorded is still current; `theme push` saves both themes, the appearance
@@ -358,7 +363,9 @@ each step names the reference it relies on.
 6. **Review on staging in both schemes.** `staging review` (or
    `deploy --staging --handoff`) returns a single-use handoff in
    `stagingPreview.url`, on a managed Docs site too; open it once and use the
-   site's theme toggle. On a Standard site `deploy --staging` first waits until
+   site's theme toggle; the review session lasts five minutes (see
+   [How long a staging review lasts](#staging-verification-and-deployment-evidence)).
+   On a Standard site `deploy --staging` first waits until
    staging serves the new release (see `stagingServed`). No page draft is
    needed; `preview page` renders one draft and is a different tool.
 7. **Promote only after review.** `deploy --production`.
@@ -512,6 +519,26 @@ closed with `pages.push_conflict` when a page's stored-state revision has
 moved since this workspace last reconciled with it, naming both revisions;
 `pull` first, or push after a refused pull has shown you the site's version.
 
+`pages delete <page-path> [--dry-run]` deletes one tracked page and removes its
+source file and manifest entry, so the next
+`pull` or whole-workspace push does not bring it back. It runs the same
+revision fence as `pages push` first (`pages.push_conflict`, nothing deleted),
+and refuses a page that navigation, the footer or a form's after-submit page
+still uses (`pages.delete_referenced`, naming each use): remove those first,
+then delete. A redirect that lands on the page is listed in `redirectsToPage`
+and does not stop the delete; links from other pages are checked afterwards by
+`validate` (`link.page_missing`). A page the live site serves is not taken off
+it by the delete: the site stages the removal (`effect: removalStaged`) and the
+page stays live until a deployment promotes it, so run `deploy --staging`,
+review the staging site, then `deploy`. A page never published is removed
+outright. The home page, 404, generated, legal and integration-managed pages
+are refused. `--dry-run` runs every check and sends nothing. A page the site
+already deleted or staged for removal (an interrupted run) is only cleaned from
+the workspace and reports `effect: alreadyDeleted` or `alreadyRemovalStaged`.
+`effect` is the answer: `deleted` is true only when the page is gone from the site
+now, so a staged removal reports `deleted: false` and `removalStaged: true`. A
+staged removal can be undone only in the app, with Keep page on the Pages list.
+
 `places search <name and city>` asks Google Places for the place a review
 names and reports predictions with a session token; `places select
 <googlePlaceId> <sessionToken>` records the match as a Taproot place and
@@ -524,7 +551,9 @@ they reference and the images the settings name, the footer and the pages it
 links, the theme, navigation — and orders what is left
 to send: media upload, pages push, footer push (theme push refuses unsaved
 footer content), theme push, nav push, each marked ready, blocked, or nothing
-to do. It writes nothing and reports a `planHash`. `apply --plan <planHash>`
+to do. Navigation is also checked against the revision `pull` recorded: a tree that moved is a blocked
+step (`nav.concurrent_modification`), and an unchanged tree under a stale revision is listed ready with
+`settlesLostPush` so `apply` settles a push whose answer was lost. It writes nothing and reports a `planHash`. `apply --plan <planHash>`
 plans again, refuses with `apply.plan_stale` if the workspace or the site
 moved, and otherwise runs the steps through the ordinary push verbs. While
 they run, a workspace file read differently from the plan (or not read by it)
@@ -550,7 +579,10 @@ component (`help component video`), and
 `pages push` refuses a page that places a video the site does not have. `nav.json` and the footer
 document leave defaults out (no empty `externalUrl` or `children` on a navigation item, no `bold: false`
 on a footer text run); `pull`, `nav push` and `footer push` all write that form and accept either, so a
-pull after a push shows only changes you made. `nav push`, `theme push`, and `footer push` replace the whole
+pull after a push shows only changes you made. `nav push` is fenced by the navigation revision `pull` recorded
+(`navigation.revision` in the manifest): a tree edited in the app since is refused with `nav.concurrent_modification`
+and nothing is written, and a manifest without a revision is refused with `nav.pull_required`; keep a copy of
+`nav.json`, run `pull`, re-apply the edits and push again. `nav push`, `theme push`, and `footer push` replace the whole
 navigation tree, the complete light/dark theme pair with its appearance
 settings, and the closed footer document. `pull` writes each scheme's
 complete effective theme — the stored theme resolved over the same defaults
@@ -873,8 +905,25 @@ minted **after** checks; without it the check still authenticates with its own
 handoff and reports none. Opening it consumes it and establishes a five-minute staging cookie.
 Minting again replaces the same authority's previous handoff and cookie. Current
 site, host and credential permission are rechecked; key revocation stops access.
+
 Treat the URL as secret: it is returned only in final JSON, omitted from progress
 and `GITHUB_OUTPUT`. The same Actions exclusion applies to `preview page` URLs.
+
+**How long a staging review lasts.** The handoff works once and expires two
+minutes after it is minted. Opening it starts a five-minute review session in
+that browser, and the session never renews. When it ends, the staging site
+redirects to the Taproot sign-in. A reviewer whose Taproot account can preview
+the site signs in and is sent straight back to the page with a fresh session; a
+reviewer without one needs a fresh link from `taproot-site staging review`,
+because a link minted with a key has no Taproot session behind it. Minting another handoff with the same
+key for the same site, which `staging review`, `deploy --staging` (on a Standard
+site, or with `--handoff`), `redirects check` and `delivery check --staging` do,
+ends the earlier link and any session opened from it. That browser then shows "Staging preview
+unavailable" rather than the sign-in redirect, so mint the link last, just
+before the reviewer opens it. The staging site does not show a separate "link expired"
+page for a missing cookie: the staging host cannot tell an expired link from a first visit, or see
+whether the visitor is signed in to Taproot, and the sign-in redirect is what
+renews a signed-in owner's review.
 
 Deployment results carry `phaseTimings`. New deployments retain up to 32 durable
 server-observed phase transitions, including repeated phases on retry. Durations

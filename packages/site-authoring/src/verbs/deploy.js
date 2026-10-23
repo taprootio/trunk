@@ -28,6 +28,7 @@ import { HANDOFF_NOT_REQUESTED_PROGRESS, handoffNotRequested, inspectStagingPrev
 import { confirmStagingServed, readStagingReleaseBefore, unverifiedStagingServed } from "../staging-served.js";
 import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
+import { STAGING_REVIEW_GUIDANCE } from "./staging-review.js";
 
 /**
  * When a redirect goes live (TR00702, TR00968, TR01236).
@@ -168,9 +169,6 @@ function reportReadiness(readiness) {
   };
 }
 
-const PRESENTATION_REVIEW_GUIDANCE = "Open the URL once in a browser, then switch the site's theme toggle between "
-  + "light and dark to review both schemes; no page draft is needed to preview a presentation change.";
-
 /**
  * Why a managed Docs staging handoff could not be minted, as a stable reason
  * the caller can act on. The recovery never points at production or at a host
@@ -217,8 +215,8 @@ function presentationHandoffUnavailable(error) {
 async function mintPresentationStagingHandoff(client, siteId, onProgress, now, returnPath) {
   try {
     const handoff = await mintStagingPreviewHandoff(client, siteId, { now, returnPath });
-    onProgress(`Staging review handoff minted for ${handoff.stagingUrl}. ${PRESENTATION_REVIEW_GUIDANCE}`);
-    return { ...handoff, review: PRESENTATION_REVIEW_GUIDANCE };
+    onProgress(`Staging review handoff minted for ${handoff.stagingUrl}. ${STAGING_REVIEW_GUIDANCE}`);
+    return { ...handoff, review: STAGING_REVIEW_GUIDANCE };
   } catch (error) {
     if (error instanceof SiteAuthoringError && !(error instanceof ApiError)) throw error;
     const unavailable = presentationHandoffUnavailable(error);

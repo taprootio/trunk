@@ -1,9 +1,10 @@
 import { mintStagingPreviewHandoff, withRefusalGuidance } from "../api.js";
-import { VERB_STAGING_REVIEW } from "../constants.js";
+import { STAGING_REVIEW_SESSION_NOTE, VERB_STAGING_REVIEW } from "../constants.js";
 import { openSession, successResult } from "../session.js";
 
 export const STAGING_REVIEW_GUIDANCE = "Open the URL once in a browser, then switch the site's theme toggle between "
-  + "light and dark to review both schemes; no page draft is needed to review a presentation change.";
+  + "light and dark to review both schemes; no page draft is needed to review a presentation change. "
+  + STAGING_REVIEW_SESSION_NOTE;
 
 /**
  * `staging review` — mint a fresh single-use review handoff for the site's

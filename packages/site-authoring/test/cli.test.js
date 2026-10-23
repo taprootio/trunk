@@ -1,4 +1,4 @@
-import { CLI_VERSION, LIMITS } from "../src/constants.js";
+import { CLI_VERSION, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../src/constants.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -892,7 +892,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 40,
+          referenceVersion: 41,
           topic: scenario.topic,
         },
       );
@@ -1317,4 +1317,19 @@ test("off a terminal, a wait writes plain lines to stderr and no control charact
   });
 
   assert.equal(stderrWrites.join(""), "Waiting for the deployment (DEPLOYMENT_STATUS_GENERATING).\n");
+});
+
+test("every verb and topic that hands out a staging review says how long it lasts (TR01237)", async () => {
+  const helpText = async (arguments_) => {
+    const stdout = sink();
+    assert.equal(await runCli({ arguments_, stdout, stderr: sink() }), 0);
+    return stdout.read().replace(/\s+/gu, " ");
+  };
+  for (const arguments_ of [["staging", "review", "--help"], ["deploy", "--help"]]) {
+    assert.ok((await helpText(arguments_)).includes(STAGING_REVIEW_SESSION_NOTE), arguments_.join(" "));
+  }
+  for (const topic of ["preview", "redirects", "delivery", "walkthrough"]) {
+    const text = await helpText(["help", topic]);
+    assert.ok(text.includes(STAGING_REVIEW_SESSION_NOTE) || text.includes("help preview"), topic);
+  }
 });

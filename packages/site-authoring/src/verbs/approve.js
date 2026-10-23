@@ -1,7 +1,7 @@
 import {
+  isGonePage,
   listSitePages,
   PAGE_STATUS_APPROVED,
-  PAGE_STATUS_DELETED,
   publishDrafts,
   withRefusalGuidance,
 } from "../api.js";
@@ -81,7 +81,7 @@ export async function approve(invocation) {
     }
     const pathOf = (summary) => normalizePagePath(summary.path) ?? summary.path;
     const candidates = pages.filter((summary) =>
-      summary.status !== PAGE_STATUS_DELETED
+      !isGonePage(summary)
       && summary.hasDraft
       && manifestByPageId.has(summary.pageId)
       && (requestedPaths === undefined || requestedPaths.has(pathOf(summary))));
@@ -94,7 +94,7 @@ export async function approve(invocation) {
       const matched = new Set(candidates.map(pathOf));
       const unknown = [];
       for (const requested of [...requestedPaths].filter((value) => !matched.has(value)).sort()) {
-        const summary = pages.find((page) => page.status !== PAGE_STATUS_DELETED && pathOf(page) === requested);
+        const summary = pages.find((page) => !isGonePage(page) && pathOf(page) === requested);
         if (summary === undefined || !manifestByPageId.has(summary.pageId)) {
           unknown.push(displayPagePath(requested));
           continue;

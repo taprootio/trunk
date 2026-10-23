@@ -1640,7 +1640,7 @@ test("the offline verbs refuse once a newer release has been recorded", async (t
   const site = await fixture(testContext);
   await seedRecordingLatest(site, "9.9.9");
 
-  for (const arguments_ of [["help"], ["whoami"], ["validate", path.join(site.project, "fixture")]]) {
+  for (const arguments_ of [["help"], ["whoami"], ["validate", path.join(site.project, "fixture")], ["theme", "resolve"]]) {
     await testContext.test(arguments_[0], async () => {
       const { exitCode, result, stderr } = await runOffline(site, arguments_);
 

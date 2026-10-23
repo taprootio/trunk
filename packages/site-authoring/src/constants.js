@@ -84,6 +84,7 @@ export const VERB_LOGIN = "login";
 export const VERB_LOGOUT = "logout";
 export const VERB_PAGES_PUSH = "pages push";
 export const VERB_PAGES_META_SET = "pages meta set";
+export const VERB_PAGES_DELETE = "pages delete";
 export const VERB_AUTHORS_LIST = "authors list";
 export const VERB_AUTHORS_ADD = "authors add";
 export const VERB_NAV_PUSH = "nav push";
@@ -94,6 +95,7 @@ export const VERB_FORMS_PULL = "forms pull";
 export const VERB_FORMS_PUSH = "forms push";
 export const VERB_FORMS_VALIDATE = "forms validate";
 export const VERB_THEME_PUSH = "theme push";
+export const VERB_THEME_RESOLVE = "theme resolve";
 export const VERB_FOOTER_PUSH = "footer push";
 export const VERB_MEDIA_UPLOAD = "media upload";
 export const VERB_APPROVE = "approve";
@@ -112,6 +114,19 @@ export const VERB_CHANGELOG = "changelog";
 export function changelogCommandSince(version) {
   return `${CLI_BINARY_NAME} ${VERB_CHANGELOG} --since ${version}`;
 }
+
+/**
+ * How long a staging review lasts and what ends it (TR01237). The numbers come from the API's
+ * StagingPreviewProtocol (handoff 2 minutes, session 5 minutes, no renewal); every help topic, verb note and
+ * result that tells a reader about them repeats this one text.
+ */
+export const STAGING_REVIEW_SESSION_NOTE = "A review handoff works once and expires two minutes after it is minted. "
+  + "Opening it starts a five-minute review session in that browser, and the session never renews: afterwards the "
+  + "staging site redirects to the Taproot sign-in, so a reviewer without a Taproot account that can preview the "
+  + "site needs a fresh link. Minting another handoff with the same key for the same site (staging review, "
+  + "deploy --staging on a Standard site or with --handoff, redirects check or delivery check --staging) ends the earlier link and any session opened "
+  + "from it, and that browser then shows 'Staging preview unavailable'; mint the link last, just before the "
+  + "reviewer opens it.";
 export const VERB_PLAN = "plan";
 export const VERB_APPLY = "apply";
 export const VERB_PLACES_SEARCH = "places search";
@@ -119,6 +134,8 @@ export const VERB_PLACES_SELECT = "places select";
 export const VERB_PLACES_CATEGORY_SET = "places category set";
 export const VERB_PLACES_CATEGORY_CLEAR = "places category clear";
 export const VERB_PLACES_CATEGORY_LIST = "places category list";
+/** A bare 64-character lowercase hex digest: the shape of every revision and draft hash the site reports. */
+export const HEX_DIGEST = /^[0-9a-f]{64}$/u;
 /** The identity `plan` reports and `apply --plan` requires. */
 export const PLAN_HASH = /^sha256:[0-9a-f]{64}$/u;
 export const VERB_ENV = "env";

@@ -1,3 +1,4 @@
+import { HEX_DIGEST } from "./constants.js";
 import { SiteAuthoringError } from "./errors.js";
 import { RUNTIME_MIRROR_PATH_REASON } from "./reserved-paths.js";
 import {
@@ -77,7 +78,7 @@ export const REDIRECT_LIMITS = Object.freeze({
 // hide the mistake.
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/u;
 const ENTRY_KEYS = new Set(["path", "kind", "target", "status", "origin"]);
-const SHA256 = /^[0-9a-f]{64}$/u;
+const SHA256 = HEX_DIGEST;
 
 
 /** Whether the value is a redirect-map revision as the server mints one. */

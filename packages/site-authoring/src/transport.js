@@ -39,8 +39,8 @@ const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 // authoring mutations carry an idempotency key — TR00602 defined none — so a
 // replayed POST duplicates a page, a replayed PATCH re-applies an update over an edit
 // that landed in between, a replayed DELETE removes a resource the first
-// attempt already removed, and a replayed navigation PUT re-asserts a tree
-// after someone else changed it. An ambiguous mutation is reported as
+// attempt already removed, and a replayed navigation PUT, fenced by the revision it
+// presented, reports a false conflict once the first attempt has committed. An ambiguous mutation is reported as
 // ambiguous, never guessed at. The one PUT that *is* replayed is the
 // presigned whole-object upload in `upload()`, which writes immutable bytes
 // to one key and is therefore genuinely idempotent. Two POSTs have their own

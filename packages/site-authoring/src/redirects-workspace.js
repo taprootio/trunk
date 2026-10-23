@@ -5,8 +5,8 @@ import { readManifest, writeManifest } from "./workspace.js";
 /**
  * The redirect map's workspace baseline (TR00702).
  *
- * `nav.json` needs no baseline because navigation is last-write-wins; the
- * redirect map cannot be, because it holds entries nobody typed. Every page and
+ * Navigation records a revision the same way (`navigation-workspace.js`). The
+ * redirect map in particular cannot be last-write-wins, because it holds entries nobody typed. Every page and
  * tag rename records one, so a whole-map push built on a stale read would
  * delete the entry that keeps the renamed page's old URL alive. The manifest
  * therefore records the revision the map was read at, exactly as it records the

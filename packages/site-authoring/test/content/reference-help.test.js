@@ -41,6 +41,8 @@ import {
   shippedFixtureDirectory,
 } from "../../src/fixture-contract.js";
 import { SETTINGS_GROUPS } from "../../src/settings-catalog.js";
+import { STAGING_REVIEW_SESSION_NOTE } from "../../src/constants.js";
+import { getSettingsReference } from "../../src/setting-reference.js";
 import { getTypedPageReference, LEGAL_PLATFORM_LINK_GUIDANCE } from "../../src/typed-page-reference.js";
 import { MANIFEST_VERSION } from "../../src/workspace.js";
 import { FREE_FORM_SECTION_REGISTRY } from "../../src/content/free-form-sections.js";
@@ -56,7 +58,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 40);
+  assert.equal(REFERENCE_VERSION, 41);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -822,4 +824,14 @@ test("the Taproot link guidance is one text shared by the legal and free-form to
   assert.deepEqual(validateDocument(doc).errors, []);
   const link = doc.content[0].content.find((node) => node.marks?.some((mark) => mark.type === "link"));
   assert.equal(link.marks.find((mark) => mark.type === "link").attrs.href, "https://www.taproot.io");
+});
+
+test("the preview topic tells a reader how long a staging review lasts, from the one shared text (TR01237)", () => {
+  const details = getWorkflowReference("preview").details;
+  assert.ok(details.some((line) => line.includes(STAGING_REVIEW_SESSION_NOTE)));
+});
+
+test("help settings lists analyticsConsentPrompt as read-only, because no push verb writes it", () => {
+  const field = getSettingsReference().groups.flatMap((group) => group.fields).find((entry) => entry.path === "settings.analyticsConsentPrompt");
+  assert.match(field.write, /^read-only/u);
 });

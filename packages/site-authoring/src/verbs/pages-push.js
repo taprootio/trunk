@@ -1,10 +1,10 @@
 import {
   createPage,
   importVideoEmbedPoster,
+  isGonePage,
   listSitePages,
   listVideos,
   IMAGE_PROCESSING_STATE_COMPLETE,
-  PAGE_STATUS_DELETED,
   listSiteAuthors,
   posterFromImage,
   translateAuthorRefusal,
@@ -146,7 +146,7 @@ const OUTCOME_UNKNOWN_CODES = new Set([
   "api.page_contract",
 ]);
 
-function outcomeUnknown(error) {
+export function outcomeUnknown(error) {
   // A cancelled retry of a write, and a server error on a write the transport
   // does not replay, leave the same question open.
   return OUTCOME_UNKNOWN_CODES.has(error.code) || error.ambiguousMutation === true || error.httpStatus >= 500;
@@ -613,7 +613,7 @@ export async function readWorkspacePageSource({ workspaceDir, file, manifestEntr
  * Both leave this exactly where TR00622 left it, which is where the caller
  * already is.
  */
-function requireReconciledRevision({ file, pagePath, target, entry, observedRevision }) {
+export function requireReconciledRevision({ file, pagePath, target, entry, observedRevision, deleting = false }) {
   // What the operator was shown by a refused pull outranks what the manifest
   // last reconciled with. Without that, this guard would also refuse the pull
   // conflict's own documented recovery, and the only way out of a conflict
@@ -622,12 +622,16 @@ function requireReconciledRevision({ file, pagePath, target, entry, observedRevi
   const live = target.bodyRevision;
   if (recorded === undefined || live === undefined || recorded === live) return;
   const selector = pagePath || "/";
+  // `pages delete` shares the fence (TR01226): the same code, with the way out that fits a delete.
+  const outcome = deleting
+    ? `No page was deleted. Run 'taproot-site pull' to see what differs and to adopt the site's version, then `
+      + "decide again."
+    : `No page was pushed. Run 'taproot-site pull' to see what differs and to adopt the site's version, or delete `
+      + `'${file}' and pull again to take the site's document as this page's source.`;
   throw new SiteAuthoringError(
     "pages.push_conflict",
     `Page '${selector}' changed on the site since this workspace last reconciled with it: it now reports revision `
-      + `${live}, and '${file}' was written against ${recorded}. No page was pushed. Run `
-      + `'taproot-site pull' to see what differs and to adopt the site's version, or delete '${file}' and pull `
-      + "again to take the site's document as this page's source.",
+      + `${live}, and '${file}' was written against ${recorded}. ${outcome}`,
     { field: file, alternatives: [recorded, live] },
   );
 }
@@ -1110,7 +1114,7 @@ export async function planPages({
   if (problems.length > 0) {
     return { targeted, sources: [], selected: [], planned: [], unresolved: [], staleGenerated, problems };
   }
-  const live = livePages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
+  const live = livePages.filter((summary) => !isGonePage(summary));
   const liveById = new Map(live.map((summary) => [summary.pageId, summary]));
   const liveByPath = new Map(live.map((summary) => [normalizePagePath(summary.path) ?? summary.path, summary]));
   const manifestByFile = new Map(

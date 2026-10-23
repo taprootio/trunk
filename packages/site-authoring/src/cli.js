@@ -15,6 +15,7 @@ import {
   PLAN_HASH,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
   RESULT_SCHEMA_VERSION,
+  STAGING_REVIEW_SESSION_NOTE,
   SURFACE_DOCS_PRESENTATION,
   SURFACE_STANDARD,
   VERB_APPLY,
@@ -35,6 +36,7 @@ import {
   VERB_LOGOUT,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
+  VERB_PAGES_DELETE,
   VERB_PAGES_META_SET,
   VERB_PAGES_PUSH,
   VERB_PLACES_CATEGORY_CLEAR,
@@ -52,6 +54,7 @@ import {
   VERB_SITES,
   VERB_STATUS,
   VERB_THEME_PUSH,
+  VERB_THEME_RESOLVE,
   VERB_USE,
   VERB_VALIDATE,
   VERB_WHOAMI,
@@ -85,6 +88,8 @@ import {
 } from "./reference-help.js";
 import { FONT_CATEGORIES, getFontCatalogReference } from "./font-catalog.js";
 import { assertCliCurrent } from "./session.js";
+import { formatThemeResolve } from "./theme-resolve.js";
+import { MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS } from "./theme-validation.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
 
 /**
@@ -97,7 +102,13 @@ import { VERB_HANDLERS } from "./verbs/index.js";
  * are outdated. `--help` and `--version` are outside it for the same reason:
  * they are how someone finds out what they have.
  */
-const VERSION_GATED_OFFLINE_VERBS = Object.freeze([VERB_HELP, VERB_VALIDATE, VERB_FORMS_VALIDATE, VERB_WHOAMI]);
+const VERSION_GATED_OFFLINE_VERBS = Object.freeze([
+  VERB_HELP,
+  VERB_VALIDATE,
+  VERB_FORMS_VALIDATE,
+  VERB_THEME_RESOLVE,
+  VERB_WHOAMI,
+]);
 
 // One entry per verb, in help order. `tokens` is the exact leading positional
 // sequence; matching prefers the longest sequence, so a two-token family can
@@ -297,6 +308,32 @@ const VERBS = Object.freeze([
       + "1000 is refused. Nothing is sent: run 'pages push', then 'approve'.",
   },
   {
+    name: VERB_PAGES_DELETE,
+    surface: SURFACE_STANDARD,
+    // Deleting is Content; the navigation read that checks for a dangling item is Design.
+    capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
+    tokens: ["pages", "delete"],
+    dryRun: true,
+    positionals: "deletePagePath",
+    summary: "Delete one page (a live page is staged for removal until you deploy), and remove its source from the workspace.",
+    note: "Names one page this workspace tracks by its path and deletes it from the site, "
+      + "then removes its source file and manifest entry so the next pull or push does not bring it back. "
+      + "A draft or staged page that was never published is removed outright and its path is free again. A page "
+      + "the live site serves is not taken off it by the delete: the site stages the removal (effect "
+      + "removalStaged) and the page stays live until a deployment promotes it, so run 'deploy --staging', "
+      + "review the staging site, then 'deploy'. A deployment is also how a staging candidate that held a page "
+      + "is refreshed. A staged removal can be undone only in the app, with Keep page on the Pages list. The same fence as 'pages push' runs first: a page changed on "
+      + "the site since this workspace last reconciled with it is refused with pages.push_conflict and nothing is "
+      + "deleted; run 'pull' and decide again. A page that navigation, the footer or a form's after-submit page "
+      + "still uses is refused with pages.delete_referenced, naming each use; remove those first. A redirect that "
+      + "lands on the path is reported in redirectsToPage and does not stop the delete. Links from other pages "
+      + "are not checked here: run 'validate' afterwards (link.page_missing). The home page, 404, generated pages, "
+      + "legal documents and integration-managed pages are refused. --dry-run runs every check and reports what "
+      + "would be deleted, or staged for removal, without sending anything. A page the site has already deleted "
+      + "or staged for removal (an interrupted run) is only cleaned from the workspace and reports effect "
+      + "alreadyDeleted or alreadyRemovalStaged.",
+  },
+  {
     name: VERB_AUTHORS_LIST,
     surface: SURFACE_STANDARD,
     // Naming an author is part of writing a page, and the site gates both the
@@ -430,7 +467,7 @@ const VERBS = Object.freeze([
     summary: "Check the whole workspace against the live site and order what is left to send. Writes nothing.",
     note: "Runs every check the pushes run — each page against the site's pages, revisions, videos and forms; media that "
       + "pages reference and media upload has not sent; the theme, appearance and footer colors against the site's "
-      + "presentation revision; the footer against its draft; navigation against the live page list — and lists "
+      + "presentation revision; the footer against its draft; navigation against the live page list and the revision pull recorded (an unchanged tree under a stale revision is listed ready with settlesLostPush, so apply settles a push whose answer was lost) — and lists "
       + "every problem with its area, file, code and field. It then orders the steps that remain: media upload, "
       + "pages push, footer push (theme push refuses unsaved footer content), theme push, nav push, each marked "
       + "ready, blocked, or nothing to do with the reason for its place. The result's planHash covers what each "
@@ -463,6 +500,13 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
     tokens: ["nav", "push"],
     summary: "Replace the whole navigation tree from the local workspace.",
+    note: "Fenced by the navigation revision that 'pull' recorded in the manifest: a tree edited in the app since is "
+      + "refused with nav.concurrent_modification and nothing is written; keep a copy of nav.json, run 'pull', "
+      + "re-apply the edits and push again. A manifest with no navigation revision is refused with nav.pull_required. "
+      + "The result's navigation.revision is the revision this push saved, and nav.json and the manifest are updated "
+      + "to match, so the next push is fenced against it. A push whose answer was lost after it committed is settled by running it again: the site already holds the file's tree, so nothing is sent and the result says navigation.alreadyApplied. A page deleted in the app also drops its navigation items "
+      + "and so moves the revision: pull before the next push. Every PAGE target is checked against the site's page "
+      + "list, and the items the replace removes are named in navigation.removed.",
   },
   {
     name: VERB_REDIRECTS_CHECK,
@@ -475,7 +519,8 @@ const VERBS = Object.freeze([
       + "following redirects. A redirect is live only with the release that carries it, so this reads the staged release. "
       + "The check authenticates with its own handoff and never reports it. The result carries no review URL unless "
       + "you pass --handoff, which adds a fresh single-use one in stagingPreview.url (keep it private); "
-      + "'staging review' mints one at any time.",
+      + "'staging review' mints one at any time. Every run mints its own handoff, which ends an earlier review "
+      + "link minted with the same key (see 'help preview').",
   },
   {
     name: VERB_REDIRECTS_PULL,
@@ -567,6 +612,34 @@ const VERBS = Object.freeze([
       + "status-color warnings name the nearest passing value the CLI found and checked.",
   },
   {
+    name: VERB_THEME_RESOLVE,
+    surface: SURFACE_DOCS_PRESENTATION,
+    // Only --site reads the site, and that is the one read of the presentation theme push also makes.
+    capabilities: [CAPABILITY_DESIGN],
+    tokens: ["theme", "resolve"],
+    json: true,
+    resolveOptions: true,
+    summary: "Print the colors Espalier compiles from the theme, per scheme and context, with their contrast ratios.",
+    note: "Reads the pulled workspace's settings/taproot-styles.json offline (run pull first; no credential, no network) "
+      + "and compiles it through Espalier's own pipeline, the one theme push lints and the published page renders "
+      + "through, so a value here cannot differ from the render. For the root page and every declared context in "
+      + "each scheme it lists every semantic color token as oklch and hex (hex is the sRGB the engine gamut-maps the "
+      + "color to), whether it is compiled from the roles or pinned in semanticMappings (origin compiled, pinned, "
+      + "or inherited_pin for a root pin a context carries), and the ramp stop or anchor it came from. It also "
+      + "measures every ink-on-surface pairing Espalier defines (text on background, links, headings, the action "
+      + "label, and so on): the WCAG ratio against the AA minimum (4.5:1 for text, 3:1 for large text and UI) and "
+      + "the APCA Lc against Espalier's target. A pair under AA is listed in flags with the stable code "
+      + "theme.contrast_text_below_aa and the field to edit (for example "
+      + "darkTheme.contexts.inverted); flags never refuse, so the exit code stays 0. An invalid or incomplete theme "
+      + "is refused with the code theme push and validate use, the first fault in error.code and error.field. Without --json the output "
+      + "is a readable table; --json writes the stable result (schemes[].surfaces[].tokens and pairs, contrast, flags). "
+      + "--scheme and --context narrow the output only; the whole pair is always validated. A result too large for "
+      + "the output bound names the surfaces it left out in omittedSurfaces (items, count, truncated). --site reads the site's stored theme "
+      + "instead of the workspace (the effective theme pull would write), which compares a workspace edit with what is "
+      + "live: run it with and without --site. A pair under AA is a finding to read, not a failure: a brand color "
+      + "may be a deliberate choice. See 'taproot-site help theme'.",
+  },
+  {
     name: VERB_FOOTER_PUSH,
     surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_DESIGN],
@@ -634,7 +707,8 @@ const VERBS = Object.freeze([
       + `serving the previous release for up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes, so a Standard site's `
       + "deploy --staging waits until staging serves the new release and reports stagingServed: state served, "
       + "propagating (still the previous release at the bound) or unverified (the change cannot be attributed to this deployment, or the last read did not name the previous release), "
-      + "with the time to wait or the seconds waited.",
+      + "with the time to wait or the seconds waited. "
+      + STAGING_REVIEW_SESSION_NOTE,
   },
   {
     name: VERB_PREVIEW_PAGE,
@@ -695,11 +769,11 @@ const VERBS = Object.freeze([
     tokens: ["staging", "review"],
     summary: "Mint a fresh single-use review handoff for the site's staging host.",
     reviewPath: true,
-    note: "The handoff URL is reported only in the final JSON as stagingPreview.url, is single-use, and expires two "
-      + "minutes after it is minted; keep it private. --path <page> opens the review on that page instead of the "
+    note: "The handoff URL is reported only in the final JSON as stagingPreview.url; keep it private. --path <page> opens the review on that page instead of the "
       + "home page: a page path as 'pull' records it ('about', '/posts/one'), optionally with a query. Open it once, then use the site's theme toggle to review both "
       + "schemes. deploy --staging and redirects check report no review URL unless you pass --handoff, so this is "
-      + "the usual way to get one, on a managed Docs site too.",
+      + "the usual way to get one, on a managed Docs site too. "
+      + STAGING_REVIEW_SESSION_NOTE,
   },
   {
     name: VERB_STATUS,
@@ -845,6 +919,8 @@ function verbHelp(verb) {
     ? " <place-id> <category>"
     : verb.positionals === "placeId"
     ? " <place-id>"
+    : verb.positionals === "deletePagePath"
+    ? " <page-path>"
     : verb.positionals === "metaPagePath"
     ? " <page-path> [--title <text>] [--description <text>] [--author <handle-or-email>]"
     : verb.positionals === "authorHandle"
@@ -883,8 +959,14 @@ function verbHelp(verb) {
     ? `\n  --name <text>        The name readers see on the byline (required).
   --email <address>    A private address, kept to link the person to an account later (optional).`
     : "";
-  const jsonOption = verb.json
+  const jsonOption = verb.json && !verb.resolveOptions
     ? "\n  --json           Emit the stable JSON contract (operational output is always JSON)."
+    : "";
+  const resolveOptions = verb.resolveOptions
+    ? `\n  --scheme <light|dark>  Describe one scheme (default: both).
+  --context <name>       Describe one declared context only, not the root page.
+  --site                 Read the site's theme instead of the workspace's; needs a sign-in.
+  --json                 Write the stable JSON result instead of the table.`
     : "";
   const dryRunOption = verb.dryRun
     ? "\n  --dry-run        Read the site and report what a push would change, without writing."
@@ -914,7 +996,11 @@ function verbHelp(verb) {
     ? " It refuses only when a previous sign-in exchange recorded a newer published release than this CLI, because "
       + "Taproot accepts only the latest; with nothing recorded it runs."
     : "";
-  const boundary = verb.name === VERB_VALIDATE
+  const boundary = verb.name === VERB_THEME_RESOLVE
+    ? "By default this verb reads the pulled workspace and uses no credential, makes no network request, and writes "
+      + `nothing to the workspace or the site (GITHUB_OUTPUT, when set, receives the JSON result). With --site it reads the site's presentation with the site-scoped credential from ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} `
+      + `or the sign-in '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores.${upgradeGate}`
+    : verb.name === VERB_VALIDATE
     ? "Validation uses no credential, network or write; it reads the configuration only to find the workspace when "
       + "no directory is given. With --init it reads the pulled workspace or selected configuration and writes a new "
       + `fixture directory, still without credentials or network.${upgradeGate}`
@@ -964,7 +1050,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${dryRunOption}${planOption}${nameOption}${note}
+${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${resolveOptions}${dryRunOption}${planOption}${nameOption}${note}
 `;
 }
 
@@ -1254,6 +1340,32 @@ function parseNameOption(arguments_, index) {
   return candidate;
 }
 
+const THEME_RESOLVE_SCHEMES = Object.freeze(["light", "dark"]);
+
+function parseThemeScheme(arguments_, index) {
+  const candidate = arguments_[index + 1];
+  if (!THEME_RESOLVE_SCHEMES.includes(candidate)) {
+    throw usageError("theme.scheme_invalid", "--scheme requires 'light' or 'dark'.", { field: "scheme" });
+  }
+  return candidate;
+}
+
+function parseThemeContext(arguments_, index) {
+  const candidate = arguments_[index + 1];
+  if (
+    typeof candidate !== "string"
+    || candidate.length === 0
+    || [...candidate].length > MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS
+    || hasAsciiControl(candidate)
+    || candidate.startsWith("--")
+  ) {
+    throw usageError("theme.context_invalid", "--context requires the name of one declared context.", {
+      field: "context",
+    });
+  }
+  return candidate;
+}
+
 function parseArguments(arguments_) {
   if (!Array.isArray(arguments_) || arguments_.some((argument) => typeof argument !== "string")) {
     throw usageError("cli.usage", "The command line must be a list of strings.");
@@ -1314,6 +1426,9 @@ function parseArguments(arguments_) {
   let since;
   let dryRun = false;
   let json = false;
+  let themeScheme;
+  let themeContext;
+  let fromSite = false;
   let keyName;
   let planHash;
   let metaTitle;
@@ -1421,6 +1536,23 @@ function parseArguments(arguments_) {
     if (verb.json && argument === "--json") {
       if (json) throw usageError("cli.duplicate_option", "--json may be supplied only once.");
       json = true;
+      continue;
+    }
+    if (verb.resolveOptions && argument === "--scheme") {
+      if (themeScheme !== undefined) throw usageError("cli.duplicate_option", "--scheme may be supplied only once.");
+      themeScheme = parseThemeScheme(rest, index);
+      index += 1;
+      continue;
+    }
+    if (verb.resolveOptions && argument === "--context") {
+      if (themeContext !== undefined) throw usageError("cli.duplicate_option", "--context may be supplied only once.");
+      themeContext = parseThemeContext(rest, index);
+      index += 1;
+      continue;
+    }
+    if (verb.resolveOptions && argument === "--site") {
+      if (fromSite) throw usageError("cli.duplicate_option", "--site may be supplied only once.");
+      fromSite = true;
       continue;
     }
     if (verb.planHash && argument === "--plan") {
@@ -1554,6 +1686,11 @@ function parseArguments(arguments_) {
       { field: "environmentSelector" },
     );
   }
+  if (verb.positionals === "deletePagePath" && positionals.length !== 1) {
+    throw usageError("pages.delete_path_invalid", "pages delete names exactly one page path.", {
+      field: "pagePath",
+    });
+  }
   if (verb.positionals === "metaPagePath" && positionals.length !== 1) {
     throw usageError("pages.meta_path_invalid", "pages meta set names exactly one page path ('/' for the homepage).", {
       field: "pagePath",
@@ -1624,7 +1761,11 @@ function parseArguments(arguments_) {
     ...(browser === undefined ? {} : { browser }),
     init,
     dryRun,
+    json,
     keyName,
+    ...(themeScheme === undefined ? {} : { themeScheme }),
+    ...(themeContext === undefined ? {} : { themeContext }),
+    ...(fromSite ? { fromSite } : {}),
     ...(planHash === undefined ? {} : { planHash }),
     ...(metaTitle === undefined ? {} : { metaTitle }),
     ...(metaDescription === undefined ? {} : { metaDescription }),
@@ -1636,7 +1777,7 @@ function parseArguments(arguments_) {
         key: verb.positionals,
         values: positionals,
         scalar: verb.positionals === "pageSelector" || verb.positionals === "fixturePath" || verb.positionals === "metaPagePath"
-          || verb.positionals === "siteSelector" || verb.positionals === "environmentSelector"
+          || verb.positionals === "deletePagePath" || verb.positionals === "siteSelector" || verb.positionals === "environmentSelector"
           || verb.positionals === "authorHandle",
       }
       : undefined,
@@ -1718,6 +1859,9 @@ export async function runCli({
       quiet: parsed.quiet,
       dryRun: parsed.dryRun,
       keyName: parsed.keyName,
+      ...(parsed.themeScheme === undefined ? {} : { themeScheme: parsed.themeScheme }),
+      ...(parsed.themeContext === undefined ? {} : { themeContext: parsed.themeContext }),
+      ...(parsed.fromSite === undefined ? {} : { fromSite: parsed.fromSite }),
       ...(parsed.planHash === undefined ? {} : { planHash: parsed.planHash }),
       // Only when given, like the other optional fields, so each verb keeps its default (TR00925).
       ...(parsed.deliveryUrl === undefined ? {} : { deliveryUrl: parsed.deliveryUrl }),
@@ -1756,7 +1900,8 @@ export async function runCli({
     if (!isValidationInvocation && environment.GITHUB_OUTPUT) {
       await writeGithubActionsOutput(environment.GITHUB_OUTPUT, result);
     }
-    stdout.write(`${json}\n`);
+    // The table is this verb's default view; --json asks for the contract. A failure is always the JSON result.
+    stdout.write(parsed.verb === VERB_THEME_RESOLVE && !parsed.json ? formatThemeResolve(result) : `${json}\n`);
     return 0;
   } catch (unknownError) {
     progress?.stop();

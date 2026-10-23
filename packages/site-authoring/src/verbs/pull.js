@@ -5,8 +5,8 @@ import {
   getSitePresentation,
   getSiteRedirectMap,
   listSiteAuthors,
+  isGonePage,
   listSitePages,
-  PAGE_STATUS_DELETED,
   PAGE_STATUS_DRAFT,
   PAGE_STATUS_UNKNOWN,
   withRefusalGuidance,
@@ -22,6 +22,7 @@ import { sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
 import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../footer-workspace.js";
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
 import { projectRedirectMapForWorkspace, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
+import { navigationManifestEntry } from "../navigation-workspace.js";
 import { redirectsManifestEntry } from "../redirects-workspace.js";
 import { projectNavigationForWorkspace } from "./nav-push.js";
 import { boundedList, openSession, successResult } from "../session.js";
@@ -678,7 +679,7 @@ export async function pull(invocation) {
       onProgress("Listing the site's pages.");
       ({ pages, truncated } = await listSitePages(client, siteId, { onProgress }));
     }
-    const live = pages.filter((summary) => summary.status !== PAGE_STATUS_DELETED);
+    const live = pages.filter((summary) => !isGonePage(summary));
     const authorable = live.filter((summary) => isAuthorableTemplateType(summary.templateType));
     // Generated-page sources recorded apart as retired. One whose page the site
     // lists again (a bounded listing left it out last time) takes its file back
@@ -1312,9 +1313,11 @@ export async function pull(invocation) {
     }
 
     let navItems;
+    let navigation;
     if (!presentationOnly) {
       onProgress("Reading the navigation tree.");
-      navItems = await getNavigation(client, siteId);
+      navigation = await getNavigation(client, siteId);
+      navItems = navigation.navItems;
       await writeWorkspaceJson(config.workspaceDir, NAVIGATION_FILE_NAME, {
         siteId,
         navItems: projectNavigationForWorkspace(navItems),
@@ -1356,7 +1359,7 @@ export async function pull(invocation) {
       // not a partial pull.
       ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
       pagesTruncated: truncated,
-      ...(navItems === undefined ? {} : { navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length } }),
+      ...(navigation === undefined ? {} : { navigation: navigationManifestEntry(navigation) }),
       ...(redirectMap === undefined ? {} : { redirects: redirectsManifestEntry(redirectMap) }),
       settings: pulledSettings,
       settingsSkipped: skippedSettings,
@@ -1409,7 +1412,7 @@ export async function pull(invocation) {
         items: reported.items,
         ...(reported.truncated ? { itemsTruncated: true } : {}),
       },
-      ...(navItems === undefined ? {} : { navigation: { file: NAVIGATION_FILE_NAME, items: navItems.length } }),
+      ...(navigation === undefined ? {} : { navigation: navigationManifestEntry(navigation) }),
       // Absent, not zeroed, when the site served no map: an agent reading
       // `entries: 0` would take the site for one with no redirects.
       ...(redirectMap === undefined ? {} : {

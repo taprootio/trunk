@@ -10,6 +10,7 @@ import {
   EXTERNAL_WRITES_SETTING_KEY,
   EXTERNAL_WRITES_SETTING_LOCATION,
   GRPC_NOT_FOUND,
+  HEX_DIGEST,
   HTTP_NOT_FOUND,
   LIMITS,
   REFUSAL_CAPABILITY_MISSING,
@@ -509,6 +510,11 @@ export async function withRefusalGuidance(onProgress, action, work) {
   }
 }
 
+/** A page the author no longer has: deleted, or deleted and waiting for a deployment to take it off the live site. */
+export function isGonePage(summary) {
+  return summary.status === PAGE_STATUS_DELETED || summary.removalStaged === true;
+}
+
 export function normalizePageSummary(value) {
   const summary = requireObject(value, "api.page_contract", "page summary");
   return {
@@ -521,7 +527,11 @@ export function normalizePageSummary(value) {
     templateType: typeof summary.templateType === "string" ? summary.templateType : "TEMPLATE_TYPE_UNKNOWN",
     status: enumValue(summary.status, PAGE_STATUSES, PAGE_STATUS_UNKNOWN, "api.page_status", "page status"),
     hasDraft: summary.hasDraft === true,
+    // The first publication, which outlives the status: a published page being edited reports a draft status.
+    datePublished: typeof summary.datePublished === "string" ? summary.datePublished : "",
     isGenerated: summary.isGenerated === true,
+    // A published page whose deletion waits for a deployment: it is still live, and the author has deleted it.
+    removalStaged: summary.removalStaged === true,
     // Absent against a Taproot that predates the revision contract, and absent
     // on the listings that never resolve stored body state. Both mean the same
     // thing to a caller — "this read cannot say what version you are looking
@@ -577,6 +587,15 @@ export async function getPage(client, pageId, status) {
 
 export async function createPage(client, body) {
   return normalizePageSummary(await client.request("v1/pages", { method: "POST", body }));
+}
+
+/**
+ * Deletes one page. A page the live site does not serve is removed at once (a path it published stays reserved);
+ * one it serves is staged for removal and stays live until a deployment takes it off (TR01278). The answer says
+ * which: `removalStaged`.
+ */
+export async function deletePage(client, pageId) {
+  return normalizePageSummary(await client.request(`v1/pages/${encodeURIComponent(pageId)}`, { method: "DELETE" }));
 }
 
 export async function updatePage(client, pageId, body) {
@@ -664,21 +683,29 @@ export async function publishDrafts(client, pageIds) {
  */
 export async function getNavigation(client, siteId) {
   const search = query([["environment", SITE_ENVIRONMENT_DRAFT]]);
-  const response = requireObject(
-    await client.request(sitePath(siteId, `navigation${search}`)),
-    "api.navigation_contract",
-    "site navigation",
-  );
-  return Array.isArray(response.navItems) ? response.navItems : [];
+  return requireNavigation(await client.request(sitePath(siteId, `navigation${search}`)));
 }
 
-export async function saveNavigation(client, siteId, navItems) {
-  const response = requireObject(
-    await client.request(sitePath(siteId, "navigation"), { method: "PUT", body: { siteId, navItems } }),
-    "api.navigation_contract",
-    "site navigation",
+/**
+ * Replaces the draft tree. `expectedRevision` is the revision the tree was read
+ * at; the site refuses the write rather than erasing an item added since.
+ */
+export async function saveNavigation(client, siteId, navItems, expectedRevision) {
+  return requireNavigation(
+    await client.request(sitePath(siteId, "navigation"), {
+      method: "PUT",
+      body: { siteId, navItems, expectedRevision },
+    }),
   );
-  return Array.isArray(response.navItems) ? response.navItems : [];
+}
+
+/** A navigation answer: the tree and the revision a later save must present. */
+function requireNavigation(value) {
+  const response = requireObject(value, "api.navigation_contract", "site navigation");
+  return {
+    navItems: Array.isArray(response.navItems) ? response.navItems : [],
+    revision: typeof response.revision === "string" ? response.revision : "",
+  };
 }
 
 /**
@@ -815,7 +842,7 @@ export async function saveSiteFooterSettings(client, siteId, footerSettings, exp
  * is a containment check on a server string that reaches the manifest, not a
  * claim about how the value is computed.
  */
-export const PRESENTATION_REVISION = /^[0-9a-f]{64}$/u;
+export const PRESENTATION_REVISION = HEX_DIGEST;
 
 /**
  * Reads the site's draft presentation — the four theme-gated settings groups

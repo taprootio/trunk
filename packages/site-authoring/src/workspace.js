@@ -1068,9 +1068,9 @@ export async function writeWorkspaceJson(workspaceDir, relativePath, value) {
  * Removes one internal workspace file, refusing a link anywhere on the way to
  * it exactly as a read would. Returns whether anything was there.
  *
- * Only internal state is ever removed this way. Authored sources are the
- * author's, and a verb that deleted one would be doing the thing this package
- * exists to prevent.
+ * Internal state is removed this way as a matter of course. An authored source
+ * is the author's, so the one caller that removes it, `pages delete`, does so
+ * only for the page the author just asked to delete.
  */
 export async function deleteWorkspaceFile(workspaceDir, relativePath) {
   if (!await regularFileExists(workspaceDir, relativePath)) return false;

@@ -62,7 +62,7 @@ function fail(code, message, field) {
   throw new SiteAuthoringError(code, message, { field });
 }
 
-async function readSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId = siteId) {
+export async function readSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId = siteId) {
   const file = `${SETTINGS_DIRECTORY}/${SETTINGS_FILES[settingsType]}`;
   if (!await workspaceFileExists(workspaceDir, file)) {
     fail("theme.settings_missing", `Workspace file '${file}' is missing. Run 'taproot-site pull' first.`, file);
@@ -81,6 +81,34 @@ async function readSettingsDocument(workspaceDir, siteId, settingsType, expected
     );
   }
   return document.settings;
+}
+
+/** The theme paths the styles document lacks, both schemes, in the order theme push reports them. */
+export function missingThemeSettings(style) {
+  const missing = [];
+  for (const scheme of ["light", "dark"]) {
+    const name = `${scheme}Theme`;
+    if (!Object.hasOwn(style, name)) missing.push(name);
+    else missing.push(...missingThemeFields(style[name], scheme));
+  }
+  return missing;
+}
+
+/** The one refusal for absent required settings keys, listing every path; `resolve` shares it with push and validate. */
+export function requireNoMissingSettings(missing) {
+  if (missing.length === 0) return;
+  throw new SiteAuthoringError(
+    "theme.settings_missing",
+    "Required settings keys are absent from this workspace. Restore them locally, or run 'taproot-site pull' if the workspace is stale; a fresh pull that still omits them means the server projection is incomplete for the listed paths.",
+    {
+      field: missing[0],
+      details: missing.map((field) => ({
+        code: "theme.setting_missing",
+        field,
+        message: MISSING_SETTING_MESSAGE,
+      })),
+    },
+  );
 }
 
 /** The complete local validation phase shared by live push and offline fixtures. */
@@ -119,12 +147,7 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
   // Preflight the complete required-key inventory before any value validator
   // can stop at a malformed value in an earlier group. Optional footer color
   // leaves retain their existing empty-color fallback.
-  const missing = [];
-  for (const scheme of ["light", "dark"]) {
-    const name = `${scheme}Theme`;
-    if (!Object.hasOwn(style, name)) missing.push(name);
-    else missing.push(...missingThemeFields(style[name], scheme));
-  }
+  const missing = missingThemeSettings(style);
   for (const definition of APPEARANCE_SCALAR_FIELDS) {
     if (!Object.hasOwn(documents[definition.settingsType], definition.name)) {
       missing.push(definition.path);
@@ -137,20 +160,7 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
       if (!Object.hasOwn(publishing.footerSettings, scheme)) missing.push(`footerSettings.${scheme}`);
     }
   }
-  if (missing.length > 0) {
-    throw new SiteAuthoringError(
-      "theme.settings_missing",
-      "Required settings keys are absent from this workspace. Restore them locally, or run 'taproot-site pull' if the workspace is stale; a fresh pull that still omits them means the server projection is incomplete for the listed paths.",
-      {
-        field: missing[0],
-        details: missing.map((field) => ({
-          code: "theme.setting_missing",
-          field,
-          message: MISSING_SETTING_MESSAGE,
-        })),
-      },
-    );
-  }
+  requireNoMissingSettings(missing);
   const themes = await validateAndLintThemePair(style.lightTheme, style.darkTheme);
   const scalarOperations = buildAppearanceScalarOperations(
     documents,

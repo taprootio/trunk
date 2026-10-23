@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { CLI_BINARY_NAME, LIMITS } from "./constants.js";
+import { CLI_BINARY_NAME, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "./constants.js";
 import {
   canonicalizeComponentData,
   COMPONENT_TYPES,
@@ -88,7 +88,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 40;
+export const REFERENCE_VERSION = 41;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -578,7 +578,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "runtime the page's bootstrap declares are fetched (an authored reference to any other host is content, "
       + "not delivery), local-only references (localhost, *.test, *.local) are reported rather than fetched, a "
       + "redirect Location that could reflect a credential is withheld, bodies are read up to a fixed bound, "
-      + "member-only content is not exercised, and nothing is purged, republished or rolled back.",
+      + "member-only content is not exercised, and nothing is purged, republished or rolled back. A staging check "
+      + "mints its own handoff, which ends an earlier review link minted with the same key (see 'help preview').",
       "Verdicts: delivered (no findings), degraded (every route served and the runtime is compatible, "
       + "but an asset, link or browser load did not match), failed (a route or the runtime did not deliver).",
     ]),
@@ -614,6 +615,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "the variants yourself with any image tool (a transparent logo at the highest resolution you have, a square favicon); there is no "
       + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
       + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header.",
+      `See the compiled colors: ${CLI_BINARY_NAME} theme resolve prints, offline, every semantic color Espalier compiles `
+      + "from the pair for each scheme and context, whether each is compiled from the roles or pinned, and the contrast "
+      + "of every ink-on-surface pair, with a flag for each one under WCAG AA. Run it after each theme edit, in both "
+      + "schemes, instead of discovering the result on staging; add --json to branch on it.",
       `Validate offline: ${CLI_BINARY_NAME} validate checks the whole workspace at once — the complete pair, the `
       + "appearance files, the footer, every page, navigation and redirects — against the contracts the site enforces, "
       + "lists every problem in error.problems, and warns when a semanticMappings pin repeats the default on a token "
@@ -635,7 +640,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "a single-use handoff in stagingPreview.url (on a managed Docs site too). Open it once, then use the site's "
       + "theme toggle to check both schemes: text, headings, links and hover, actions and focus, the header logos, the "
       + "favicon. When a requested handoff could not be minted, stagingPreview.reason says why and staging review mints "
-      + "another (add --path <page> to open it on the page under review). A page draft is "
+      + "another (add --path <page> to open it on the page under review). The review session lasts five minutes: "
+      + "see 'help preview' for what ends it. A page draft is "
       + "not needed to review a presentation change; preview page renders one persisted draft and is a different tool.",
       `Promote only after review: ${CLI_BINARY_NAME} deploy --production promotes the completed staging deployment. `
       + "Never use production to discover what staging should have shown.",
@@ -656,13 +662,18 @@ const WORKFLOW_REFERENCES = Object.freeze({
   }),
   nav: Object.freeze({
     title: "Navigation workspace contract",
-    summary: "nav push replaces the complete tree in nav.json; item IDs are author-minted canonical lowercase UUIDs.",
+    summary: "nav push replaces the complete tree in nav.json, fenced by the revision pull recorded; item IDs are author-minted canonical lowercase UUIDs.",
     usage: `${CLI_BINARY_NAME} nav push`,
     details: Object.freeze([
       "nav.json is { siteId, navItems }, not a bare array. Defaults are left out: an item has no resourceId or "
       + "externalUrl unless its kind uses one, and no children when it has none. pull and nav push both write that "
       + "form (nav push rewrites the file after it saves), and either form is accepted on the way in, so a pull after "
       + "a push shows no change you did not make.",
+      "nav push is fenced by the navigation revision that pull recorded in the manifest (navigation.revision), as "
+      + "theme push, footer push and redirects push are fenced by theirs. A tree edited in the app since is refused "
+      + "with nav.concurrent_modification and nothing is written: keep a copy of nav.json, run pull, re-apply the "
+      + "edits, and push again. A manifest with no navigation revision is refused with nav.pull_required; run pull. "
+      + "A successful push records the revision it saved, so the next push is fenced against that state.",
       "kind is NAV_ITEM_KIND_PAGE, NAV_ITEM_KIND_EXTERNAL_URL, or NAV_ITEM_KIND_GROUP_HEADER.",
       "PAGE uses resourceId from .taproot-site-manifest.json, never pageId or path.",
       "EXTERNAL_URL uses externalUrl; GROUP_HEADER has no target; every kind may carry children.",
@@ -704,7 +715,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "two-minute handoff, minted after checks. It is emitted only in final JSON, excluded from progress and "
       + "GITHUB_OUTPUT; keep it private. Without it, stagingPreview.reason is staging.handoff_not_requested and "
       + "'staging review' mints one. The staging cookie lasts five minutes and remains subject to current "
-      + "site/host/credential permission.",
+      + "site/host/credential permission. Each run mints its own handoff, which ends an earlier review link "
+      + "minted with the same key (see 'help preview').",
       `${REDIRECTS_FILE_NAME} is { siteId, revision, entries }, not a bare array. 'redirects pull' writes it and `
       + "records the revision in .taproot-site-manifest.json; 'pull' writes it too.",
       "An entry is { path, kind, target, status }. kind is 'redirect' (the default) or 'gone'; a gone entry "
@@ -934,6 +946,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "staging review for one, or pass --handoff to get a fresh single-use handoff in stagingPreview.url, minted "
       + "after the headless redirect checks. staging review --path <page> (and --review-path <page> beside --handoff) "
       + "opens the review on that page instead of the home page. Handoffs never go to GITHUB_OUTPUT.",
+      `Review session: ${STAGING_REVIEW_SESSION_NOTE} Once the session has ended, run staging review again for a `
+      + "fresh link, or stay signed in to the Taproot app in a browser whose account can preview the site, to review longer.",
       "On a managed Docs site deploy --staging stages settings only: run staging review (or deploy --staging "
       + "--handoff) and open the URL once, then use the site's theme toggle to review both schemes; no page draft is "
       + "needed to preview a presentation change. When a requested handoff can't be minted the result carries "
