@@ -1,6 +1,14 @@
 {
   "entries": [
     {
+      "version": "0.23.1",
+      "note": "Image uploads support Taproot’s single-use upload gateway and send an operation key with each upload request.",
+      "behavior": [
+        "media upload sends an operation key when requesting an image upload. It accepts a single-use gateway capability only for the configured Taproot API origin and image-upload path, and never automatically retries that capability after a transport failure or retryable response. Direct signed object-store uploads retain their existing retry behavior."
+      ],
+      "help": []
+    },
+    {
       "version": "0.23.0",
       "note": "theme resolve prints the colors Espalier compiles from the theme, per scheme and context, with their contrast ratios, offline; the help and the staging review result say how long a review lasts and what ends it; pages delete with a dry run; nav push fenced by a navigation revision.",
       "behavior": [

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 
 import {
@@ -624,6 +625,7 @@ export async function mediaUpload(invocation) {
           contentType,
           fileSize: bytes.byteLength,
           contentHash: hash,
+          operationKey: randomUUID(),
           width,
           height,
           ownershipScope: IMAGE_OWNERSHIP_SCOPE_SITE,

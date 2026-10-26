@@ -51,6 +51,10 @@ const IDEMPOTENT_METHODS = new Set(["GET"]);
 
 /** An exchanged credential is renewed once it is this close to expiring. */
 const CREDENTIAL_RENEWAL_MARGIN_MILLISECONDS = 5 * 60_000;
+const GATEWAY_UPLOAD_ATTEMPTS = 4;
+const GATEWAY_CAPACITY_WINDOW_MILLISECONDS = 15_000;
+const UPLOAD_CAPACITY_HEADER = "x-taproot-upload-admission";
+const UPLOAD_CAPACITY_REFUSAL = "capacity-before-claim";
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_RESPONSE_ERRORS = new Set([
@@ -965,15 +969,16 @@ export class SiteApiClient {
   }
 
   /**
-   * Performs one presigned whole-object PUT. The signed headers are echoed
+   * Performs a whole-object PUT. Signed S3 headers are echoed
    * exactly as the server returned them and are never recomputed: the values
    * are covered by the SigV4 signature, so a "helpfully" regenerated
    * Content-Type or an added header turns into an opaque S3 403. The bearer is
    * never forwarded — the signature is the authorization, and sending the
    * site key to an object store would leak it outside the reviewed origin.
    *
-   * The PUT of an immutable object is idempotent, so this is the one mutation
-   * shape that may be replayed.
+   * S3 create-only uploads retain their existing retry contract. A gateway
+   * capability is consumed once before the body is read. Only an explicit
+   * capacity refusal before that claim permits a bounded retry.
    */
   async upload({ url: uploadUrl, requiredHeaders } = {}, bodyBytes) {
     // A video original is streamed from disk: `{ byteLength, stream, timeoutMilliseconds }`,
@@ -1040,7 +1045,8 @@ export class SiteApiClient {
       names.add(normalizedName);
       headers.set(name, value);
     }
-    if (!headers.has("content-type") || !headers.has("content-length")) {
+    const gateway = headers.has("x-taproot-upload-capability");
+    if (!headers.has("content-type") || (!gateway && !headers.has("content-length"))) {
       throw new SiteAuthoringError(
         "upload.headers_invalid",
         "The signed upload capability is missing required content headers.",
@@ -1049,31 +1055,48 @@ export class SiteApiClient {
     // The declared length is bound into the signature, so a body of any other
     // size cannot succeed. Failing here names the real problem instead of
     // surfacing an S3 signature error.
-    if (headers.get("content-length") !== String(bodyBytes.byteLength)) {
+    if (gateway && (
+      url.origin !== this.apiOrigin
+      || !url.pathname.startsWith(this.apiPathPrefix)
+      || !/^\/api\/v1\/images\/uploads\/[0-9a-f-]{36}\/content$/u.test(url.pathname)
+      || url.search !== ""
+    )) {
+      throw new SiteAuthoringError("upload.contract_invalid", "Taproot returned an invalid gateway URL.");
+    }
+    if (!gateway && headers.get("content-length") !== String(bodyBytes.byteLength)) {
       throw new SiteAuthoringError(
         "upload.content_length_invalid",
         "The signed upload content length does not match the bytes being uploaded.",
       );
     }
 
-    for (let attempt = 0; attempt < LIMITS.uploadAttempts; attempt += 1) {
+    const maximumAttempts = gateway ? GATEWAY_UPLOAD_ATTEMPTS : LIMITS.uploadAttempts;
+    const startedAt = this.now();
+    const uploadDeadline = startedAt + ((streamed ? bodyBytes.timeoutMilliseconds : undefined) ?? LIMITS.uploadMilliseconds);
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+      if (this.signal?.aborted) throw cancelledError(false);
+      const remaining = uploadDeadline - this.now();
+      if (gateway && remaining <= 0) {
+        throw new SiteAuthoringError("upload.capacity_exhausted", "The image upload exhausted its attempt window.");
+      }
       let response;
+      const attemptSignal = operationSignal(
+        this.signal,
+        gateway ? remaining : (streamed ? bodyBytes.timeoutMilliseconds : undefined) ?? LIMITS.uploadMilliseconds,
+        this.timeoutSignal,
+      );
       try {
-        response = await this.fetch(url, {
+        response = await awaitWithSignal(this.fetch(url, {
           method: "PUT",
           redirect: "error",
-          signal: operationSignal(
-            this.signal,
-            (streamed ? bodyBytes.timeoutMilliseconds : undefined) ?? LIMITS.uploadMilliseconds,
-            this.timeoutSignal,
-          ),
+          signal: attemptSignal,
           headers,
           ...(streamed
             ? { body: Readable.toWeb(bodyBytes.stream()), duplex: "half" }
             : { body: bodyBytes }),
-        });
+        }), attemptSignal);
       } catch {
-        if (attempt + 1 < LIMITS.uploadAttempts && !this.signal?.aborted) {
+        if (!gateway && attempt + 1 < maximumAttempts && !this.signal?.aborted) {
           await this.sleep(delayForAttempt(attempt), this.signal);
           continue;
         }
@@ -1082,14 +1105,29 @@ export class SiteApiClient {
           "The whole-object upload ended without an authoritative response.",
         );
       }
-      await cancelBody(response);
+      await cancelBody(response, attemptSignal);
       if (response.status >= 200 && response.status < 300 && !response.redirected) return;
-      if (RETRYABLE_STATUS.has(response.status) && attempt + 1 < LIMITS.uploadAttempts) {
+      const capacityRefused = gateway && !response.redirected && response.status === HTTP_TOO_MANY_REQUESTS
+        && response.headers.get(UPLOAD_CAPACITY_HEADER) === UPLOAD_CAPACITY_REFUSAL;
+      const retryAfter = response.headers.get("retry-after") ?? "";
+      if (capacityRefused && /^[1-5]$/u.test(retryAfter) && attempt + 1 < maximumAttempts) {
+        const delay = Number(retryAfter) * 1000;
+        const capacityRemaining = Math.min(uploadDeadline, startedAt + GATEWAY_CAPACITY_WINDOW_MILLISECONDS) - this.now();
+        if (delay < capacityRemaining) {
+          // TR01295: the server guarantees that this rejected PUT did not
+          // claim the capability. Network failures and 5xx never retry it.
+          await awaitWithSignal(this.sleep(delay, this.signal), operationSignal(
+            this.signal, capacityRemaining, this.timeoutSignal,
+          ));
+          if (this.now() - startedAt < GATEWAY_CAPACITY_WINDOW_MILLISECONDS) continue;
+        }
+      }
+      if (!gateway && RETRYABLE_STATUS.has(response.status) && attempt + 1 < maximumAttempts) {
         await this.sleep(delayForAttempt(attempt), this.signal);
         continue;
       }
       throw new SiteAuthoringError(
-        RETRYABLE_STATUS.has(response.status) ? "upload.ambiguous" : "upload.rejected",
+        RETRYABLE_STATUS.has(response.status) && !capacityRefused ? "upload.ambiguous" : "upload.rejected",
         `The whole-object upload was rejected with HTTP ${response.status}.`,
         { status: `http:${response.status}` },
       );

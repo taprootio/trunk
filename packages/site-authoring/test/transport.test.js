@@ -1258,6 +1258,111 @@ test("replays a presigned PUT and reports a rejection that is not ambiguous", as
   });
 });
 
+test("a one-use image gateway capability is same-origin and never retries uncertain writes", async () => {
+  const bytes = Buffer.from("image-bytes");
+  const capability = {
+    url: "https://app.taproot.test/api/v1/images/uploads/11111111-1111-1111-1111-111111111111/content",
+    requiredHeaders: {
+      "Content-Type": "image/jpeg",
+      "X-Taproot-Upload-Capability": "a".repeat(64),
+    },
+  };
+  let calls = 0;
+  const client = makeClient(async (_url, init) => {
+    calls += 1;
+    assert.equal(init.headers.get("authorization"), null);
+    assert.equal(init.headers.get("x-taproot-upload-capability"), "a".repeat(64));
+    return new Response(null, { status: 503 });
+  });
+  await assert.rejects(client.upload(capability, bytes),
+    (error) => error?.code === "upload.ambiguous");
+  assert.equal(calls, 1);
+
+  await assert.rejects(client.upload({
+    ...capability,
+    url: "https://objects.example/api/v1/images/uploads/11111111-1111-1111-1111-111111111111/content",
+  }, bytes), (error) => error?.code === "upload.contract_invalid");
+  assert.equal(calls, 1);
+});
+
+test("gateway capacity retries require the authoritative preclaim marker and stay finite", async (context) => {
+  const bytes = Buffer.from("image-bytes");
+  const capability = {
+    url: "https://app.taproot.test/api/v1/images/uploads/11111111-1111-1111-1111-111111111111/content",
+    requiredHeaders: { "Content-Type": "image/jpeg", "X-Taproot-Upload-Capability": "a".repeat(64) },
+  };
+  const refusalHeaders = { "x-taproot-upload-admission": "capacity-before-claim", "retry-after": "1" };
+
+  await context.test("retries a rejected preclaim PUT with the same bytes and capability", async () => {
+    let calls = 0;
+    let elapsed = 0;
+    const client = makeClient(async (_url, init) => {
+      calls += 1;
+      assert.equal(init.body, bytes);
+      assert.equal(init.headers.get("x-taproot-upload-capability"), "a".repeat(64));
+      return calls === 1 ? new Response(null, { status: 429, headers: refusalHeaders }) : new Response(null);
+    }, { now: () => elapsed, sleep: async (delay) => { elapsed += delay; } });
+    await client.upload(capability, bytes);
+    assert.equal(calls, 2);
+    assert.equal(elapsed, 1000);
+  });
+
+  for (const [name, status, headers] of [
+    ["unmarked 429", 429, {}],
+    ["5xx with marker", 503, refusalHeaders],
+    ["unbounded retry-after", 429, { ...refusalHeaders, "retry-after": "60" }],
+  ]) {
+    await context.test(name, async () => {
+      let calls = 0;
+      const client = makeClient(async () => {
+        calls += 1;
+        return new Response(null, { status, headers });
+      });
+      await assert.rejects(client.upload(capability, bytes));
+      assert.equal(calls, 1);
+    });
+  }
+
+  await context.test("never retries a network failure", async () => {
+    let calls = 0;
+    const client = makeClient(async () => { calls += 1; throw new Error("lost response"); });
+    await assert.rejects(client.upload(capability, bytes), (error) => error.code === "upload.ambiguous");
+    assert.equal(calls, 1);
+  });
+
+  await context.test("stops after four refusals", async () => {
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      return new Response(null, { status: 429, headers: refusalHeaders });
+    });
+    await assert.rejects(client.upload(capability, bytes), (error) => error.code === "upload.rejected");
+    assert.equal(calls, 4);
+  });
+
+  await context.test("cancels during the rejected-operation wait without another PUT", async () => {
+    let calls = 0;
+    const cancellation = new AbortController();
+    const client = makeClient(async () => {
+      calls += 1;
+      return new Response(null, { status: 429, headers: refusalHeaders });
+    }, { signal: cancellation.signal, sleep: async () => { cancellation.abort(); } });
+    await assert.rejects(client.upload(capability, bytes));
+    assert.equal(calls, 1);
+  });
+
+  await context.test("elapsed time stops recovery before the attempt cap", async () => {
+    let calls = 0;
+    let elapsed = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      return new Response(null, { status: 429, headers: refusalHeaders });
+    }, { now: () => elapsed, sleep: async () => { elapsed = 15_000; } });
+    await assert.rejects(client.upload(capability, bytes), (error) => error.code === "upload.rejected");
+    assert.equal(calls, 1);
+  });
+});
+
 test("retains violation descriptions with the same bounds the fields get", async (testContext) => {
   const build = (field, description) => new ApiError(400, {
     code: 3,
