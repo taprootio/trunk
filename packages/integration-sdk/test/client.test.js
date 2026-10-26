@@ -31,6 +31,29 @@ test("publisher-only claim refuses to substitute installation authority", async 
   await assert.rejects(() => client.claimInstallation({ installationId: "10000000-0000-4000-8000-000000000001", claimCode: "claim" }), { code: "missing_publisher_credential" });
 });
 
+test("integration media request keeps the caller's upload identity across retries", async () => {
+  const bodies = [];
+  const client = new TaprootIntegrationClient({
+    baseUrl: "https://app.example/api",
+    installationCredential: "installation-secret",
+    fetch: async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ uploadId: "20000000-0000-4000-8000-000000000001",
+        presignedUrl: "https://app.example/api/v1/images/uploads/20000000-0000-4000-8000-000000000001/content",
+        requiredHeaders: {} }), { status: 200 });
+    },
+  });
+  const request = { installationId: "10000000-0000-4000-8000-000000000001",
+    fileName: "image.jpg", contentType: "image/jpeg", fileSize: 1024,
+    contentHash: "a".repeat(64), width: 100, height: 100,
+    operationKey: "same-logical-upload" };
+  await client.requestMediaUpload(request);
+  await client.requestMediaUpload(request);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].operationKey, request.operationKey);
+  assert.deepEqual(bodies[0], bodies[1]);
+});
+
 test("a successful claim with an unreadable secret response is never safe to replay", async () => {
   const installationId = "10000000-0000-4000-8000-000000000001";
   const oversized = new TaprootIntegrationClient({

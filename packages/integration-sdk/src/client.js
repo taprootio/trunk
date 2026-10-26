@@ -334,10 +334,11 @@ export class TaprootIntegrationClient {
       body: withIdempotency({ installationId: id, syncId, key: nonEmptyString(key, "invalid_content_key") }, idempotencyKey), retry: true });
   }
 
-  requestMediaUpload({ installationId, fileName, contentType, fileSize, contentHash, width, height }) {
+  requestMediaUpload({ installationId, fileName, contentType, fileSize, contentHash, width, height, operationKey = createIdempotencyKey() }) {
     const id = nonEmptyString(installationId, "invalid_installation_id");
+    const key = nonEmptyString(operationKey, "invalid_operation_key");
     return this.#request({ path: operationPath("requestMediaUpload", { installationId: id }), credential: "installation",
-      body: { installationId: id, fileName: nonEmptyString(fileName, "invalid_file_name"), contentType: nonEmptyString(contentType, "invalid_content_type"), fileSize, contentHash: nonEmptyString(contentHash, "invalid_content_hash"), width, height } });
+      body: { installationId: id, fileName: nonEmptyString(fileName, "invalid_file_name"), contentType: nonEmptyString(contentType, "invalid_content_type"), fileSize, contentHash: nonEmptyString(contentHash, "invalid_content_hash"), width, height, operationKey: key } });
   }
 
   confirmMediaUpload({ installationId, uploadId }) {
@@ -345,8 +346,8 @@ export class TaprootIntegrationClient {
     return this.#request({ path: operationPath("confirmMediaUpload", { installationId: id }), credential: "installation", body: { installationId: id, uploadId: nonEmptyString(uploadId, "invalid_upload_id") } });
   }
 
-  async putMedia({ installationId, fileName, contentType, fileSize, contentHash, width, height, body }) {
-    const requested = await this.requestMediaUpload({ installationId, fileName, contentType, fileSize, contentHash, width, height });
+  async putMedia({ installationId, fileName, contentType, fileSize, contentHash, width, height, body, operationKey = createIdempotencyKey() }) {
+    const requested = await this.requestMediaUpload({ installationId, fileName, contentType, fileSize, contentHash, width, height, operationKey });
     if (requested.isDuplicate) return requested.image;
     await this.uploadPresigned({ url: requested.presignedUrl, requiredHeaders: requested.requiredHeaders, body });
     return (await this.confirmMediaUpload({ installationId, uploadId: requested.uploadId })).image;

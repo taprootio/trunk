@@ -6,7 +6,7 @@ export { INTEGRATION_OPENAPI_OPERATIONS, INTEGRATION_OPENAPI_SCHEMAS, INTEGRATIO
 type OperationRequest<Name extends keyof IntegrationOpenApiOperationMap> = IntegrationOpenApiOperationMap[Name]["request"];
 type OperationResponse<Name extends keyof IntegrationOpenApiOperationMap> = IntegrationOpenApiOperationMap[Name]["response"];
 
-export const INTEGRATION_SDK_VERSION: "0.1.2";
+export const INTEGRATION_SDK_VERSION: "0.1.3";
 export const WEBHOOK_VERSION: "1";
 export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[];
 export const INTEGRATION_CAPABILITIES: readonly IntegrationCapability[];
@@ -209,9 +209,9 @@ export class TaprootIntegrationClient {
   deleteManagedPage(input: { installationId: string; syncId?: string; externalId: string; idempotencyKey: string }): Promise<IntegrationSyncResult>;
   putDataDocument(input: { installationId: string; syncId?: string; key: string; json: string; idempotencyKey: string }): Promise<IntegrationSyncResult>;
   deleteDataDocument(input: { installationId: string; syncId?: string; key: string; idempotencyKey: string }): Promise<IntegrationSyncResult>;
-  requestMediaUpload(input: { installationId: string; fileName: string; contentType: string; fileSize: number; contentHash: string; width: number; height: number }): Promise<RequestMediaUploadResponse>;
+  requestMediaUpload(input: { installationId: string; fileName: string; contentType: string; fileSize: number; contentHash: string; width: number; height: number; operationKey?: string }): Promise<RequestMediaUploadResponse>;
   confirmMediaUpload(input: { installationId: string; uploadId: string }): Promise<OperationResponse<"confirmMediaUpload">>;
-  putMedia(input: { installationId: string; fileName: string; contentType: string; fileSize: number; contentHash: string; width: number; height: number; body: Uint8Array | ArrayBuffer | string }): Promise<TaprootImage>;
+  putMedia(input: { installationId: string; fileName: string; contentType: string; fileSize: number; contentHash: string; width: number; height: number; body: Uint8Array | ArrayBuffer | string; operationKey?: string }): Promise<TaprootImage>;
   uploadPresigned(input: { url: string; requiredHeaders?: Record<string, string>; body: Uint8Array | ArrayBuffer | string }): Promise<void>;
   listPlacements(input: { installationId: string }): Promise<{ placements: IntegrationPlacement[] }>;
   putFragment(input: { installationId: string; placementId: string; configurationRevision: number; expectedFragmentRevision?: number; html: string; structuredData?: string[]; syncId?: string; idempotencyKey: string }): Promise<IntegrationPlacementFragmentResult>;

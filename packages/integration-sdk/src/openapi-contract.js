@@ -844,6 +844,9 @@ export const INTEGRATION_OPENAPI_SCHEMAS = Object.freeze({
       "height": {
         "type": "integer",
         "format": "int32"
+      },
+      "operationKey": {
+        "type": "string"
       }
     },
     "additionalProperties": false

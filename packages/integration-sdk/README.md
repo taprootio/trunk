@@ -7,7 +7,7 @@ Taproot publishes accepted, immutable content; it does not call an integration d
 ## Install
 
 ```sh
-npm install @taprootio/integration-sdk@0.1.2
+npm install @taprootio/integration-sdk@0.1.3
 ```
 
 The public manifest schema is exported at `@taprootio/integration-sdk/schema`. The fixtures under `@taprootio/integration-sdk/fixtures/...` are contract examples, not a local fixture host or a production deployment recipe.
