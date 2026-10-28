@@ -11,6 +11,7 @@ import {
   ROLLOUT_REFUSAL_FIELD,
   VERB_LOGIN,
   VERB_USE,
+  SURFACE_STANDARD,
 } from "./constants.js";
 import { loadSiteConfig } from "./config.js";
 import { cliOutdatedError, compareCliVersions, isBehindLatest } from "./cli-release.js";
@@ -219,6 +220,7 @@ export async function resolveApiBaseUrl(environment) {
 }
 
 export async function openSession(invocation = {}) {
+  if (invocation.resolvedSession !== undefined) return invocation.resolvedSession;
   const environment = invocation.environment ?? process.env;
   const onProgress = progressSink(invocation);
   const now = invocation.now ?? Date.now;
@@ -231,6 +233,9 @@ export async function openSession(invocation = {}) {
   // at all.
   const environmentToken = environment?.[PUBLISH_KEY_ENVIRONMENT_VARIABLE];
   if (environmentToken !== undefined) {
+    if (invocation.legalDrafts) {
+      throw new SiteAuthoringError("auth.legal_environment_override", `Unset ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} and run '${CLI_BINARY_NAME} ${VERB_LOGIN} --legal-drafts' to use the selected site's legal draft grant.`);
+    }
     const apiBaseUrl = await resolveApiBaseUrl(environment);
     const config = await loadConfig(invocation);
     if (!config.siteId) throw siteMissingError();
@@ -244,12 +249,39 @@ export async function openSession(invocation = {}) {
     return {
       config,
       client,
+      legalDrafts: false,
       siteId: config.siteId,
       surface: config.authoringSurface,
       platform: UNKNOWN_PLATFORM,
       release: UNKNOWN_CLI_RELEASE,
       now,
       onProgress,
+    };
+  }
+
+  if (invocation.legalDrafts) {
+    const apiBaseUrl = await resolveApiBaseUrl(environment);
+    const config = await loadConfig(invocation);
+    if (!config.siteId) throw siteMissingError();
+    if (config.authoringSurface !== undefined && config.authoringSurface !== SURFACE_STANDARD) {
+      throw new SiteAuthoringError("auth.legal_site_required", "Legal draft access requires a standard site.");
+    }
+    requireRecordedSurface(invocation, config);
+    const store = await readCredentialStore(environment);
+    const credential = selectCredential(store.credentials, credentialApiOrigin(apiBaseUrl), { siteId: config.siteId });
+    if (credential === undefined) {
+      throw new SiteAuthoringError("auth.legal_grant_missing", `Legal draft access is missing. Run '${CLI_BINARY_NAME} ${VERB_LOGIN} --legal-drafts' again.`);
+    }
+    if (Date.parse(credential.keyExpiresAt) <= now()) {
+      onProgress(
+        `The stored legal draft grant expired at ${credential.keyExpiresAt}. `
+          + `If Taproot refuses it, run '${CLI_BINARY_NAME} ${VERB_LOGIN} --legal-drafts' again.`,
+      );
+    }
+    return {
+      config, client: invocation.client ?? new SiteApiClient(buildClientOptions(invocation, apiBaseUrl, credential.key)),
+      legalDrafts: true, siteId: config.siteId, surface: config.authoringSurface,
+      platform: UNKNOWN_PLATFORM, release: UNKNOWN_CLI_RELEASE, now, onProgress,
     };
   }
 
@@ -280,6 +312,7 @@ export async function openSession(invocation = {}) {
     return {
       config,
       client: invocation.client,
+      legalDrafts: false,
       siteId: config.siteId,
       surface: config.authoringSurface,
       platform: UNKNOWN_PLATFORM,
@@ -403,6 +436,7 @@ export async function openSession(invocation = {}) {
     config,
     client,
     siteId: config.siteId,
+    legalDrafts: false,
     surface: exchanged.authoringSurface,
     exchanged: {
       keyId: exchanged.keyId,

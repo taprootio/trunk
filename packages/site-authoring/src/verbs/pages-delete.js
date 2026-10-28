@@ -14,7 +14,7 @@ import { FOOTER_SETTINGS_FILE } from "../footer-workspace.js";
 import { afterSubmitPage, FORM_FILE_EXTENSION, FORMS_DIRECTORY, normalizePagePath as normalizeFormPagePath } from "../forms-contract.js";
 import { normalizeRedirectPath } from "../site-checks.js";
 import { boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
-import { isAuthorableTemplateType, isGeneratedTemplateType } from "../typed-pages.js";
+import { isAuthorableTemplateType, isGeneratedTemplateType, isLegalTemplateType } from "../typed-pages.js";
 import {
   deleteWorkspaceFile,
   displayPagePath,
@@ -194,10 +194,10 @@ function requireDeletable(manifest, entry, pagePath) {
       shown,
     );
   }
-  if (!isAuthorableTemplateType(entry.templateType)) {
+  if (isLegalTemplateType(entry.templateType) || !isAuthorableTemplateType(entry.templateType)) {
     throw refusal(
       "pages.delete_not_authorable",
-      `'${shown}' is a ${entry.templateType ?? "system-managed"} page, which this CLI does not author; delete it in the app.`,
+      `'${shown}' is a ${entry.templateType ?? "system-managed"} page, which this CLI cannot delete; delete it in the app.`,
       shown,
     );
   }
@@ -240,6 +240,9 @@ export async function pagesDelete(invocation) {
           + "Nothing was deleted.",
         shown,
       );
+    }
+    if (live !== undefined && isLegalTemplateType(live.templateType)) {
+      throw refusal("pages.delete_not_authorable", `'${shown}' is a legal page; delete it in the app.`, shown);
     }
     const alreadyGone = live === undefined || isGonePage(live);
     if (!alreadyGone) {

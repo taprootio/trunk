@@ -25,6 +25,7 @@ import {
 // must equal acceptance on save — a prefix admitted here but refused there
 // would turn a successful mint into an orphaned key.
 import { KEY_PREFIX } from "./credentials.js";
+import { CAPABILITY_LEGAL_DRAFTS, SITE_AUTHORING_CAPABILITIES } from "./capabilities.js";
 import { isCanonicalUuid, normalizePreviewDiagnostic, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 import { normalizeAuthorListing, parseAuthorReference } from "./authors-contract.js";
 import { docsPublicationModeFromWire, siteKindFromWire, surfaceFromWire } from "./surface.js";
@@ -2238,7 +2239,7 @@ function requireBoundedSeconds(value, minimum, maximum, field) {
  * caller from the already-allowlisted API origin, so a compromised or
  * misconfigured server cannot steer the owner somewhere else to approve.
  */
-export async function startCliAuthorization(client, { keyName }, requestOptions = {}) {
+export async function startCliAuthorization(client, { keyName, legalDraftSiteId }, requestOptions = {}) {
   const response = requireObject(
     // No site: TR00645 made the account-level sign-in the front door, so the
     // CLI no longer has to know a site id before it can authorize at all.
@@ -2248,7 +2249,7 @@ export async function startCliAuthorization(client, { keyName }, requestOptions 
     await client.request(CLI_AUTHORIZATION_PATH, {
       ...requestOptions,
       method: "POST",
-      body: { keyName, cliVersion: CLI_VERSION },
+      body: { keyName, cliVersion: CLI_VERSION, ...(legalDraftSiteId === undefined ? {} : { legalDraftSiteId }) },
     }),
     "login.start_contract",
     "CLI authorization",
@@ -2263,9 +2264,13 @@ export async function startCliAuthorization(client, { keyName }, requestOptions 
       field: "userCode",
     });
   }
+  if (legalDraftSiteId !== undefined && response.legalDraftSiteId !== legalDraftSiteId) {
+    throw new SiteAuthoringError("login.start_contract", "Taproot did not confirm the selected legal draft site. Update the server and try again.", { field: "legalDraftSiteId" });
+  }
   return {
     deviceCode: response.deviceCode,
     userCode: response.userCode,
+    ...(legalDraftSiteId === undefined ? {} : { legalDraftSiteId }),
     expiresInSeconds: requireBoundedSeconds(
       response.expiresInSeconds,
       1,
@@ -2387,7 +2392,7 @@ export async function exchangeSiteAuthoringToken(client, { siteId, capabilities 
   };
 }
 
-function normalizeIssuedCredential(response) {
+function normalizeIssuedCredential(response, legalDraftSiteId) {
   if (!isWellFormedCredential(response.rawKey)) {
     // The value is never quoted, here or anywhere: it is the secret.
     throw new SiteAuthoringError("login.claim_unusable", "Taproot returned an invalid issued key.", {
@@ -2411,7 +2416,24 @@ function normalizeIssuedCredential(response) {
       || response.keyExpiresAt === ""
     ? undefined
     : requireCanonicalTimestamp(response.keyExpiresAt, "login.claim_unusable", "keyExpiresAt").value;
+  if (legalDraftSiteId !== undefined) {
+    const capabilities = response.capabilities;
+    if (response.legalDraftSiteId !== legalDraftSiteId || !Array.isArray(capabilities)
+      || capabilities.length !== SITE_AUTHORING_CAPABILITIES.length + 1
+      || new Set(capabilities).size !== capabilities.length
+      || ![...SITE_AUTHORING_CAPABILITIES, CAPABILITY_LEGAL_DRAFTS].every((value) => capabilities.includes(value))
+      || (response.legalDraftPlatformSite !== undefined && typeof response.legalDraftPlatformSite !== "boolean")
+      || keyExpiresAt === undefined) {
+      throw new SiteAuthoringError("login.claim_unusable", "Taproot returned an invalid legal draft grant.");
+    }
+  } else if (response.legalDraftSiteId || (Array.isArray(response.capabilities) && response.capabilities.length > 0)) {
+    throw new SiteAuthoringError("login.claim_unusable", "Taproot returned an unexpected site grant.");
+  }
   return {
+    ...(legalDraftSiteId === undefined ? {} : {
+      purpose: "legal-drafts", siteId: legalDraftSiteId, capabilities: [...response.capabilities],
+      legalDraftPlatformSite: response.legalDraftPlatformSite ?? false,
+    }),
     key: response.rawKey,
     keyId,
     keyPrefix: response.keyPrefix,
@@ -2427,7 +2449,7 @@ function normalizeIssuedCredential(response) {
  * `..._CONSUMED`, and the caller reports the orphaned credential honestly
  * rather than hiding it behind a network error.
  */
-export async function claimCliAuthorization(client, deviceCode, requestOptions = {}) {
+export async function claimCliAuthorization(client, deviceCode, requestOptions = {}, { legalDraftSiteId } = {}) {
   // Every `login.claim_contract` raised here — a non-object envelope, an
   // absent status, a status string this vocabulary does not know — is an
   // answer this client could not read, not proof the claim was refused. A
@@ -2451,7 +2473,7 @@ export async function claimCliAuthorization(client, deviceCode, requestOptions =
     );
   }
   if (status === CLI_AUTHORIZATION_CLAIM_STATUS_ISSUED) {
-    return { status, credential: normalizeIssuedCredential(response) };
+    return { status, credential: normalizeIssuedCredential(response, legalDraftSiteId) };
   }
   if (status === CLI_AUTHORIZATION_CLAIM_STATUS_CONSUMED) {
     // A consumed answer names the credential an earlier claim minted, so the

@@ -288,7 +288,7 @@ test("login stores an approved credential and never emits the secret or the devi
 
   // The stored record carries the key; every emitted surface does not.
   const stored = await storeContents(site);
-  assert.equal(stored.schemaVersion, 2);
+  assert.equal(stored.schemaVersion, 3);
   assert.deepEqual(stored.credentials, [{
     apiOrigin: API_ORIGIN,
     accountId: ACCOUNT_ID,

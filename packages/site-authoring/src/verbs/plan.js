@@ -5,6 +5,8 @@ import { footerImageIds } from "../footer-contract.js";
 import { SETTINGS_TYPE_BRAND, SETTINGS_TYPE_SITE_HEADER, SETTINGS_TYPE_TAPROOT_STYLES } from "../settings-catalog.js";
 import {
   getNavigation,
+  getPage,
+  PAGE_STATUS_DRAFT,
   IMAGE_PROCESSING_STATE_COMPLETE,
   listSiteImages,
   isGonePage,
@@ -276,6 +278,8 @@ async function preflight(session, invocation) {
       files: await walkWorkspaceFiles(workspaceDir, PAGES_DIRECTORY, PAGE_SOURCE_EXTENSIONS),
       livePages,
       online: true,
+      legalDrafts: session.legalDrafts === true,
+      readLegalPage: (target) => getPage(client, target.pageId, target.hasDraft ? PAGE_STATUS_DRAFT : target.status),
       // Asked of the site but never written down: `plan` leaves the workspace as it found it.
       refreshAuthors: liveAuthorsRefresher({ client, workspaceDir, siteId, write: false, onProgress }),
       // From the theme validated above, so a broken styles file is one problem, not one per page.
@@ -550,7 +554,8 @@ export async function apply(invocation) {
 
   const ready = planned.steps.filter((entry) => entry.status === READY);
   const completed = [];
-  const stepInvocation = { ...invocation, client: session.client, resolvedConfig: session.config };
+  const stepInvocation = { ...invocation, client: session.client, resolvedConfig: session.config,
+    ...(session.legalDrafts ? { resolvedSession: session } : {}) };
   await enforceWorkspaceReads(planned.ledger, () => runSteps(ready, completed, stepInvocation, planned, onProgress));
   onProgress(
     completed.length === 0

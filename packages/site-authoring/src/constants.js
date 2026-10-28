@@ -49,7 +49,7 @@ export const CREDENTIAL_FILE_NAME = "credentials.json";
 // store is refused with a message naming `login` rather than migrated —
 // the CLI is unpublished, so the only v1 stores are in this repository, and
 // a migration path would be code that exists for nobody.
-export const CREDENTIAL_STORE_VERSION = 2;
+export const CREDENTIAL_STORE_VERSION = 3;
 export const CREDENTIAL_DIRECTORY_MODE = 0o700;
 export const CREDENTIAL_FILE_MODE = 0o600;
 

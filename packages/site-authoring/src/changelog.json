@@ -1,6 +1,20 @@
 {
   "entries": [
     {
+      "version": "0.24.0",
+      "note": "Site-specific consent enables legal draft authoring through JSON; legal approval and publication remain in the app.",
+      "behavior": [
+        "Select a standard site, then run login --legal-drafts and approve the pinned site grant in the app. It lasts at most 24 hours and is separate from ordinary account login. Use the global --legal-drafts option before pull, pages push, plan or apply to select that grant.",
+        "Pull includes legal bodies as .pm.json with ordinary Content read access. Legal create and update accept JSON only; document key, role and path are immutable, and version, effective date and superseded version are assigned by publication. A changed or new legal draft needs the explicit grant before writes begin.",
+        "TAPROOT_SITE_KEY takes precedence; legal writes with an unclassified environment key are refused. Legal approval, deletion and deployment remain app-only. Saving a draft does not approve it.",
+        "The help reference version is 42."
+      ],
+      "help": [
+        "page",
+        "pages"
+      ]
+    },
+    {
       "version": "0.23.1",
       "note": "Image uploads support Taproot’s single-use upload gateway and send an operation key with each upload request.",
       "behavior": [

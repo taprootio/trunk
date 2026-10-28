@@ -16,6 +16,7 @@ import { SITE_AUTHORING_CAPABILITIES } from "../capabilities.js";
 import { openAnonymousSession, successResult } from "../session.js";
 import { environmentNameFor } from "../settings.js";
 import { describeSurface } from "../surface.js";
+import { SiteAuthoringError } from "../errors.js";
 
 /**
  * What the last exchange recorded about the platform authoring switch, dated
@@ -81,7 +82,10 @@ export async function whoami(invocation) {
   const environment = invocation.environment ?? process.env;
   const { config, apiBaseUrl, onProgress } = await openAnonymousSession({ ...invocation, client: null });
   const apiOrigin = credentialApiOrigin(apiBaseUrl);
-  const { path: credentialPath, credential } = await findCredential(environment, apiOrigin);
+  if (invocation.legalDrafts && !config?.siteId) {
+    throw new SiteAuthoringError("config.site_missing", "Select a site before inspecting its legal draft grant.");
+  }
+  const { path: credentialPath, credential } = await findCredential(environment, apiOrigin, { siteId: invocation.legalDrafts ? config.siteId : undefined });
 
   // Reported, not resolved. An operator debugging a permission surprise needs
   // to know the environment override is in play; printing its value would put
@@ -92,6 +96,11 @@ export async function whoami(invocation) {
   const expired = credential?.keyExpiresAt !== undefined && Date.parse(credential.keyExpiresAt) <= now;
 
   onProgress(`Taproot: ${apiOrigin} (${environmentNameFor(apiBaseUrl)})`);
+  if (invocation.legalDrafts) {
+    onProgress(`Legal draft grant for site ${config.siteId}: ${credential ? `${credential.keyPrefix} (id ${credential.keyId}), ${expired ? "expired" : "expires"} ${credential.keyExpiresAt}` : `not found; run '${CLI_BINARY_NAME} ${VERB_LOGIN} --legal-drafts'.`}`);
+    if (environmentOverride) onProgress(`Unset ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} to use this legal draft grant.`);
+    return successResult(VERB_WHOAMI, config.siteId, { apiOrigin, legalDrafts: true, signedIn: credential !== undefined, environmentOverride, ...(credential === undefined ? {} : { accountId: credential.accountId, keyId: credential.keyId, keyPrefix: credential.keyPrefix, keyExpiresAt: credential.keyExpiresAt, expired, credentialPath }) });
+  }
   if (environmentOverride) {
     onProgress(
       `${PUBLISH_KEY_ENVIRONMENT_VARIABLE} is set, so commands use that site credential and skip the sign-in.`,

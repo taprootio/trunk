@@ -323,12 +323,6 @@ const TYPE_DETAILS = Object.freeze({
   },
 });
 
-/**
- * The legal page type (TR01221). It is described here and nowhere else in the
- * CLI: it has no template name in `typed-pages.js` because a site-authoring
- * key cannot author it, so `pull` records it as a metadata-only page and
- * `pages push` never sees a source for it.
- */
 export const LEGAL_PAGE_TYPE = "legal";
 
 export const TYPED_PAGE_TYPES = Object.freeze([...Object.keys(TYPE_DETAILS), LEGAL_PAGE_TYPE]);
@@ -355,15 +349,14 @@ function legalReference() {
     displayName: "Legal page",
     summary:
       "A versioned legal document such as a privacy policy or terms: an automatic h1, a version and effective date, and "
-      + "permanent links to each version. The CLI sees it as metadata only; it is created and published in the app.",
-    readOnly: true,
+      + "permanent links to each version. The CLI can edit drafts with an explicit site grant; approval and publication happen in the app.",
+    readOnly: false,
     workspace: Object.freeze({
       directory: `${PAGES_DIRECTORY}/`,
       templateType: "TEMPLATE_TYPE_LEGAL",
       sourceRule:
-        "A legal page has no source file. 'pull' lists it in .taproot-site-manifest.json with templateType "
-        + "TEMPLATE_TYPE_LEGAL and workspaceMode \"metadata-only\" and writes nothing under pages/ for it, so 'pages push' has "
-        + "nothing to send.",
+        "Pull writes a .pm.json source containing template legal and data with documentKey, documentRole, summaryOfChanges, material and body. "
+        + "Edit that source to change the draft; Markdown is not supported. To create one, add a .pm.json source and a manifest pages entry with file, title and path, without a pageId. Version, effectiveDate and supersedesVersion are assigned by Taproot and must not be authored.",
     }),
     fields: Object.freeze([
       Object.freeze({ name: "title", description: "The page title. It prints as the page's h1, so the body should not open with its own title." }),
@@ -374,13 +367,13 @@ function legalReference() {
       Object.freeze({
         name: "documentKey",
         description:
-          "The document's stable identity, set in the app. The permanent version address exists only once the page has "
+          "The document's stable identity, fixed after creation. The permanent version address exists only once the page has "
           + "a document key and a version.",
       }),
       Object.freeze({
         name: "documentRole",
         description:
-          "The typed purpose of the document, such as membership_terms or privacy_notice. Selected in the app; fixed for membership terms.",
+          "The typed purpose of the document, such as membership_terms or privacy_notice. Fixed after creation.",
       }),
       Object.freeze({ name: "summaryOfChanges", description: "A short note on what this version changed, written by the owner." }),
       Object.freeze({
@@ -402,14 +395,11 @@ function legalReference() {
     ]),
     authoring: Object.freeze({
       cli:
-        "Read-only. 'pull' records the page's identity, path, title and status. No verb creates, edits, converts, "
-        + "approves or publishes one. A bare 'approve' stages every tracked page with a draft, a pending legal draft "
-        + "included, and the request holding it is refused (up to 100 pages go in one request): name the pages ('approve <path>').",
+        "Pull reads legal pages with ordinary Content access. Run 'taproot-site login --legal-drafts', then "
+        + "'taproot-site --legal-drafts pages push' to create or edit legal drafts. Approval and deletion are refused by the CLI; use the app. A bare 'approve' skips legal drafts; naming a legal page refuses the whole selection.",
       key:
-        "A site-authoring key cannot create or publish a legal page, and a production deploy whose selected pages include "
-        + "one is refused for a key, because the permission that governs legal documents (site.legal_documents.manage) is "
-        + "outside the key's delegation.content, delegation.design and delegation.deployments capabilities. Until a "
-        + "person promotes an app-approved legal page, every production promotion of a release staged after that approval is refused. This is how keys work today; whether a key should ever author a legal page is an open owner decision.",
+        "Only an explicit site-specific legal-drafts grant can save legal drafts. It does not grant site.legal_documents.manage, "
+        + "and cannot approve, delete or deploy legal documents.",
       app:
         "A signed-in person who may manage the site's legal documents creates the page, writes its body, and publishes it "
         + "with a production deployment in the app. Taproot assigns the version and effective date at that point.",
@@ -421,18 +411,21 @@ function legalReference() {
       freeForm:
         "A free-form page is an ordinary page. It has no version history, no effective date, no permanent version "
         + "addresses and no automatic heading: open its Markdown with a '# ' line holding the title (see "
-        + `'${CLI_BINARY_NAME} help page free-form'). The CLI cannot author a legal page, so a policy written here is an ordinary `
-        + "page, free-form unless another template fits: put the date it was last updated in its text, and tell the owner it is not versioned.",
+        + `'${CLI_BINARY_NAME} help page free-form'). A policy written as free-form is an ordinary page; put its last-updated date in its text and tell the owner it is not versioned.`,
     }),
     platformLink: LEGAL_PLATFORM_LINK_GUIDANCE,
     workflow: Object.freeze([
       Object.freeze({
         command: `${CLI_BINARY_NAME} pull`,
-        result: "Records the page as metadata-only in the manifest; nothing to edit.",
+        result: "Writes the legal draft as a .pm.json source and records its identity in the manifest.",
       }),
       Object.freeze({
-        command: "the app",
-        result: "A person with the legal permission edits the draft and promotes it with a production deployment.",
+        command: `${CLI_BINARY_NAME} login --legal-drafts`,
+        result: "Request a site-specific grant; a person approves it in the app.",
+      }),
+      Object.freeze({
+        command: `${CLI_BINARY_NAME} --legal-drafts pages push`,
+        result: "Saves changed legal drafts. A person approves and publishes them in the app.",
       }),
     ]),
   });
@@ -516,7 +509,7 @@ function formatField(field) {
 }
 
 function formatLegalReference(page) {
-  return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace (${page.workspace.directory}):\n  source rule           ${page.workspace.sourceRule}\n\nFields (set in the app):\n${
+  return `${page.displayName} (${page.type})\n${page.summary}\n\nWorkspace (${page.workspace.directory}):\n  source rule           ${page.workspace.sourceRule}\n\nFields:\n${
     page.fields.map((field) => `  ${field.name}: ${field.description}`).join("\n")
   }\n\nHow it renders:\n${page.rendering.map((line) => `  - ${line}`).join("\n")}\n\nWho can author it:\n  CLI                   ${page.authoring.cli}\n  site-authoring key    ${page.authoring.key}\n  app                   ${page.authoring.app}\n\nLegal page or free-form page:\n  legal                 ${page.choosing.legal}\n  free-form             ${page.choosing.freeForm}\n\nLinking Taproot: ${page.platformLink.rule}\n  example               ${page.platformLink.example}\n\nWorkflow:\n${
     page.workflow.map((step) => `  ${step.command}: ${step.result}`).join("\n")

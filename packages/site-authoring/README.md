@@ -246,7 +246,9 @@ answers Not found like any site the account can no longer author, and the
 CLI adds a hint to run `use` again because the recording says the site was
 authorable before.
 
-`logout` discards the stored sign-in locally and revokes nothing; the
+`logout` discards only the stored account sign-in locally. Separately stored
+site legal draft grants remain; select each site and use
+`taproot-site --legal-drafts logout` to discard its grant. Logout revokes nothing; the
 credential stays valid until an owner revokes it under Account → Settings →
 API keys. The secret itself is never displayed, logged, or placed in any
 result: credentials are named by id and display prefix only.
@@ -396,6 +398,12 @@ the site's own document is kept as internal state under
 `.taproot-site-state/`, which is never a page source and never pushed. A page
 edited on the site since the last pull is a `pages.pull_conflict` refusal
 before anything under `pages/` changes, with both recovery paths named.
+Pull before creating a new JSON source. Once a new page is declared with a
+file, title or path but has no server page ID, save it with `pages push` before
+pulling again, or back up both the source and its manifest entry and move them
+out of the workspace. Pull refuses these pending entries rather than dropping
+their metadata. It also refuses an untracked legal or unreadable JSON source
+that would be replaced by a new remote page.
 
 Pages are not only free-form. A source chooses its template with `template:` in
 its front matter — `article`, `recipe`, `album` or `place-review`; free-form is
@@ -406,10 +414,25 @@ its original publication date) and `coverImage`, which the site requires to be a
 image the page itself uses (place it in the body too; `pages.cover_image_unused`). A page's template is fixed when
 it is created: a source for another template is refused with
 `pages.template_immutable`. `taproot-site help page <type>` gives each
-template's fields and one worked example. The structured legal page (a versioned
-privacy policy or terms with an effective date) is created and published in the
-app; the CLI records it as a metadata-only page, and `taproot-site help page
-legal` says what a site-authoring key can and cannot do with one.
+template's fields and one worked example. Pull includes structured legal pages and their
+bodies as `.pm.json` with the usual Content read permission. Create and update
+legal drafts in JSON only; Markdown conversion is not supported. The document
+key, role and path are immutable, and publication assigns the version, effective
+date and superseded version. See `taproot-site help page legal` for the fields.
+
+Select a standard site and run `taproot-site login --legal-drafts`; the owner
+reviews and approves a site-specific grant in the app, valid for at most 24
+hours. Ordinary account login stays separate. Use the global option before the
+verb, for example `taproot-site --legal-drafts pages push`,
+`taproot-site --legal-drafts plan`, or `taproot-site --legal-drafts apply`.
+It also selects the grant for `pull`, although ordinary Content access can read
+legal pages. Changed or new legal drafts require this grant before writes begin;
+unchanged legal pages do not block ordinary work. `TAPROOT_SITE_KEY` still takes
+precedence, and legal writes with an unclassified environment override are
+refused: unset it and use the explicit site login. Saving a draft does not
+approve it. Legal approval, deletion and deployment remain in the app. A bare
+`taproot-site approve` skips legal drafts and stages other tracked drafts; explicitly
+naming a legal page refuses the whole selection.
 A privacy policy or other legal page that names Taproot should link the first
 mention to <https://www.taproot.io>; `help page free-form` and `help page legal`
 give a sample sentence.

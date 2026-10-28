@@ -14,6 +14,7 @@
 export const CAPABILITY_CONTENT = "delegation.content";
 export const CAPABILITY_DESIGN = "delegation.design";
 export const CAPABILITY_DEPLOYMENTS = "delegation.deployments";
+export const CAPABILITY_LEGAL_DRAFTS = "delegation.legal-drafts";
 
 export const SITE_AUTHORING_CAPABILITIES = Object.freeze([
   CAPABILITY_CONTENT,

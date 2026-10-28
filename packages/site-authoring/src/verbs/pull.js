@@ -18,7 +18,7 @@ import {
   VERB_PULL,
 } from "../constants.js";
 import { AUTHORS_FILE_NAME, parseAuthorReference, projectAuthorsForWorkspace } from "../authors-contract.js";
-import { sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
+import { isCanonicalUuid, sanitizeDiagnostic, SiteAuthoringError } from "../errors.js";
 import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../footer-workspace.js";
 import { describeJsonDifferences, reportableDifferencePaths } from "../json-path-diff.js";
 import { projectRedirectMapForWorkspace, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
@@ -38,9 +38,12 @@ import { ApiError } from "../transport.js";
 import { placesFormIds, readFormIndex, withFormKeys } from "../form-references.js";
 import {
   generatedIdentity,
+  legalIdentity,
+  isLegalTemplateType,
   isAuthorableTemplateType,
   isGeneratedTemplateType,
   sentDisplayDate,
+  TEMPLATE_LEGAL,
   workspaceDocumentFromPage,
 } from "../typed-pages.js";
 import {
@@ -450,11 +453,11 @@ async function resolveTrackedSources(workspaceDir, pages, registry, onProgress) 
 }
 
 /**
- * Reads the previous manifest's source registry, tolerating everything a
- * strict read would refuse.
+ * Reads the previous manifest's source registry, tolerating damaged tracked
+ * entries but protecting unsaved drafts whose metadata has no server identity.
  *
- * `pull` is the verb that repairs a workspace, so refusing here would strand
- * one. It is also the only verb that reads a manifest it is about to replace:
+ * `pull` repairs damaged tracked entries instead of stranding the workspace.
+ * It is also the only verb that reads a manifest it is about to replace:
  * a version-4 manifest still records the `pageId → file` mapping this needs,
  * and honoring it is what repairs an existing workspace in one pull instead of
  * by hand. Every other verb keeps refusing an old manifest outright — the site
@@ -474,7 +477,22 @@ async function readSourceRegistry(workspaceDir, siteId) {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || parsed.siteId !== siteId) {
     return new Map();
   }
-  const registry = pageSourceRegistry(withoutRetiredReadOnlyProjections(parsed));
+  const manifest = withoutRetiredReadOnlyProjections(parsed);
+  for (const entry of Array.isArray(manifest.pages) ? manifest.pages : []) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || isCanonicalUuid(entry.pageId)) continue;
+    if (!["file", "title", "path"].some((field) => Object.hasOwn(entry, field))) continue;
+    const field = sanitizeDiagnostic(entry.file, MANIFEST_FILE_NAME);
+    const label = sanitizeDiagnostic(entry.path, field);
+    // A new source's metadata lives only here until its first save.
+    throw new SiteAuthoringError(
+      "pages.source_conflict",
+      `The pending page entry '${label}' has no server page id. Pull would discard its saved metadata. `
+        + "Save the draft with 'taproot-site pages push' first, or back up and move its source file and manifest "
+        + "entry before running 'taproot-site pull' again. Nothing was changed.",
+      { field },
+    );
+  }
+  const registry = pageSourceRegistry(manifest);
   return parsed.manifestVersion === MANIFEST_VERSION ? registry : withoutSupersededRemoteHashes(registry);
 }
 
@@ -750,6 +768,33 @@ export async function pull(invocation) {
       new Set(retiredGeneratedSources.map((source) => source.file)),
     );
 
+    // A fresh destination has no ownership baseline. Protect legal drafts even
+    // when the remote page has another template, and refuse unreadable sources.
+    for (const summary of authorable) {
+      if (tracked.has(summary.pageId)) continue;
+      const file = pageFiles.get(summary.pageId);
+      let protectedSource;
+      try {
+        if (!await workspaceFileExists(config.workspaceDir, file)) continue;
+        protectedSource = isLegalTemplateType(summary.templateType);
+        if (!protectedSource) {
+          const document = await readWorkspaceJson(config.workspaceDir, file, WORKSPACE_LIMITS.documentBytes);
+          protectedSource = document?.template === TEMPLATE_LEGAL;
+        }
+      } catch {
+        protectedSource = true;
+      }
+      if (protectedSource) {
+        throw new SiteAuthoringError(
+          "pages.source_conflict",
+          `Page ${summary.pageId} would use '${file}', but this workspace does not track that file as its source. `
+            + "The file was kept. Back up and move its source file and any manifest entry, or reconcile it before "
+            + "running 'taproot-site pull' again.",
+          { field: file },
+        );
+      }
+    }
+
     // The redirect map, with the revision a later push is fenced by (TR00702).
     // Read here, before the first workspace write, for the same reason the
     // settings groups below are: a failure must strand nothing. A Taproot that
@@ -920,6 +965,7 @@ export async function pull(invocation) {
           // The page is still the generated page it was; losing the record would
           // let the next push take an edit to its identity for the owner's.
           ...(source.generated === undefined ? {} : { generated: source.generated }),
+          ...(source.legal === undefined ? {} : { legal: source.legal }),
           description: metadataKept ? source.metadata.description : description,
           title: metadataKept ? source.metadata.title : titleFromRead(page, summary),
           path: metadataKept ? source.metadata.path : pathFromRead(page, summary),
@@ -1036,6 +1082,7 @@ export async function pull(invocation) {
       if (metadataEdited) reportPendingAuthorDisagreement(source, summary, onProgress);
       trackedPlans.set(summary.pageId, {
         ...(generatedPage ? { generated: generatedIdentity(body.data) } : {}),
+        ...(isLegalTemplateType(summary.templateType) ? { legal: legalIdentity(body.data) } : {}),
         description: metadataEdited ? source.metadata.description : description,
         title: metadataEdited ? source.metadata.title : titleFromRead(page, summary),
         path: metadataEdited ? source.metadata.path : pathFromRead(page, summary),
@@ -1252,6 +1299,7 @@ export async function pull(invocation) {
           if (plan.path !== undefined) entry.path = plan.path;
           // What a generated page is, so a push can refuse a source that changed it.
           if (plan.generated !== undefined) entry.generated = plan.generated;
+          if (plan.legal !== undefined) entry.legal = plan.legal;
           if (plan.file !== undefined) {
             entry.file = plan.file;
             entry.sourceFormat = plan.sourceFormat;
@@ -1285,6 +1333,7 @@ export async function pull(invocation) {
         } else {
           entry.file = pageFiles.get(summary.pageId);
           if (isGeneratedTemplateType(summary.templateType)) entry.generated = generatedIdentity(body.data);
+          if (isLegalTemplateType(summary.templateType)) entry.legal = legalIdentity(body.data);
           const source = Buffer.from(`${JSON.stringify(body, undefined, 2)}\n`, "utf8");
           entry.workspaceMode = PAGE_WORKSPACE_MODE_EDITABLE;
           entry.sourceFormat = pageSourceFormat(entry.file);

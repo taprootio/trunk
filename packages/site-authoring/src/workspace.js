@@ -484,6 +484,9 @@ export function pageSourceRegistry(manifest) {
       ...(entry.generated !== null && typeof entry.generated === "object" && !Array.isArray(entry.generated)
         ? { generated: entry.generated }
         : {}),
+      ...(entry.legal !== null && typeof entry.legal === "object" && !Array.isArray(entry.legal)
+        ? { legal: entry.legal }
+        : {}),
       // What this workspace says the page's metadata is; a .pm.json page's only
       // record of it (TR01194).
       metadata: {

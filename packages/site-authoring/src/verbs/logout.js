@@ -1,6 +1,7 @@
 import { CLI_BINARY_NAME, VERB_LOGOUT } from "../constants.js";
 import { credentialApiOrigin, removeCredential } from "../credentials.js";
 import { openAnonymousSession, successResult } from "../session.js";
+import { SiteAuthoringError } from "../errors.js";
 
 /**
  * `taproot-site logout` — local discard, and nothing more.
@@ -19,11 +20,20 @@ import { openAnonymousSession, successResult } from "../session.js";
  * discards is addressed by API origin.
  */
 export async function logout(invocation) {
-  const { apiBaseUrl, onProgress } = await openAnonymousSession(invocation);
+  const { config, apiBaseUrl, onProgress } = await openAnonymousSession(invocation);
+  if (invocation.legalDrafts && !config?.siteId) {
+    throw new SiteAuthoringError("config.site_missing", "Select a site before discarding its legal draft grant.");
+  }
   const { path: credentialPath, removed } = await removeCredential(
     invocation.environment ?? process.env,
     credentialApiOrigin(apiBaseUrl),
+    { siteId: invocation.legalDrafts ? config.siteId : undefined },
   );
+  if (invocation.legalDrafts) {
+    onProgress(removed ? `Discarded the legal draft grant for site ${config.siteId} from ${credentialPath}.` : `No legal draft grant for site ${config.siteId} was found in ${credentialPath}.`);
+    if (removed) onProgress("This is a local discard; revoke the credential in Account -> Settings -> API keys.");
+    return successResult(VERB_LOGOUT, config.siteId, { removed, credentialPath, legalDrafts: true });
+  }
   onProgress(
     removed
       ? `Discarded the stored Taproot sign-in from ${credentialPath}.`
@@ -35,5 +45,9 @@ export async function logout(invocation) {
         + `Account -> Settings -> API keys; '${CLI_BINARY_NAME} ${VERB_LOGOUT}' cannot revoke it.`,
     );
   }
+  onProgress(
+    "Separate site legal draft grants, if any, remain stored. Select each site and run "
+      + `'${CLI_BINARY_NAME} --legal-drafts ${VERB_LOGOUT}' to discard its grant, or revoke the keys in Account -> Settings -> API keys.`,
+  );
   return successResult(VERB_LOGOUT, undefined, { removed, credentialPath });
 }

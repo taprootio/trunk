@@ -88,7 +88,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 41;
+export const REFERENCE_VERSION = 42;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -389,7 +389,7 @@ export function getDesignBlueprint(type) {
   return DESIGN_BLUEPRINTS.find((blueprint) => blueprint.type === type);
 }
 export const REFERENCE_TOPICS = Object.freeze([
-  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List page types: free-form, article, recipe, album, place-review, generated, and the read-only legal page." }),
+  Object.freeze({ name: "pages", usage: `${CLI_BINARY_NAME} help pages`, summary: "List page types: free-form, article, recipe, album, place-review, generated, and legal draft pages." }),
   Object.freeze({
     name: "page",
     usage: `${CLI_BINARY_NAME} help page <page-type>`,
@@ -1728,7 +1728,7 @@ const FREE_FORM_REFERENCE = Object.freeze({
     legalAndPrivacyPages: Object.freeze({
       ...LEGAL_PLATFORM_LINK_GUIDANCE,
       choosing:
-        `A policy that needs a version and an effective date is a legal page, which the CLI cannot author: see '${CLI_BINARY_NAME} help page legal'.`,
+        `A policy that needs a version and an effective date is a legal page; see '${CLI_BINARY_NAME} help page legal' for draft editing and app approval.`,
     }),
     componentNode: Object.freeze({
       type: "componentBlock",

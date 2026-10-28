@@ -645,20 +645,20 @@ test("serves page and component reference help without configuration, credential
       ],
     },
     {
-      // A site-authoring key cannot author a legal page, so the topic states what the CLI does see (TR01221).
+      // Legal drafts require a separate site grant; publication remains in the app.
       arguments_: ["help", "page", "legal"],
       match: /^Legal page \(legal\)/u,
       contains: [
-        "TEMPLATE_TYPE_LEGAL",
-        "metadata-only",
+        "template legal",
+        ".pm.json source",
         "automatic <h1>",
         "/<path>/<version>",
         "Assigned by Taproot when the document is promoted to production",
         "site.legal_documents.manage",
-        "open owner decision",
+        "login --legal-drafts",
+        "--legal-drafts pages push",
         "Linking Taproot: Where a privacy policy or other legal page names Taproot",
-        "'approve' stages every tracked page with a draft",
-        "every production promotion of a release staged after that approval is refused",
+        "Approval and deletion are refused by the CLI",
         "no automatic heading",
       ],
     },
@@ -892,7 +892,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 41,
+          referenceVersion: 42,
           topic: scenario.topic,
         },
       );

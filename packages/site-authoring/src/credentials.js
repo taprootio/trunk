@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { atomicWriteFile } from "./atomic-file.js";
 import { readBoundedFile } from "./bounded-file.js";
-import { SITE_AUTHORING_CAPABILITIES } from "./capabilities.js";
+import { CAPABILITY_LEGAL_DRAFTS, SITE_AUTHORING_CAPABILITIES } from "./capabilities.js";
 import { parseCliVersion } from "./cli-release.js";
 
 import {
@@ -172,8 +172,30 @@ function normalizeEntry(entry) {
           || parseCliVersion(entry.lastExchange.latestCliVersion) !== undefined)),
     "A stored credential record has an invalid lastExchange.",
   );
+  const legal = entry.purpose === "legal-drafts";
+  const legalExpiry = legal && typeof entry.keyExpiresAt === "string" ? Date.parse(entry.keyExpiresAt) : Number.NaN;
+  requireStoreShape(entry.purpose === undefined || legal, "A stored credential record has an invalid purpose.");
+  requireStoreShape(legal
+    ? isCanonicalUuid(entry.siteId)
+      && typeof entry.legalDraftPlatformSite === "boolean"
+      && entry.keyExpiresAt !== undefined
+      && Number.isFinite(legalExpiry)
+      && new Date(legalExpiry).toISOString().slice(0, 19) === entry.keyExpiresAt.slice(0, 19)
+      && Array.isArray(entry.capabilities)
+      && entry.capabilities.length === SITE_AUTHORING_CAPABILITIES.length + 1
+      && new Set(entry.capabilities).size === entry.capabilities.length
+      && [...SITE_AUTHORING_CAPABILITIES, CAPABILITY_LEGAL_DRAFTS].every((value) => entry.capabilities.includes(value))
+      && entry.lastExchange === undefined
+    : entry.siteId === undefined && entry.capabilities === undefined && entry.legalDraftPlatformSite === undefined,
+  "A stored credential record has invalid scope.");
   return Object.freeze({
     apiOrigin: entry.apiOrigin,
+    ...(legal ? {
+      purpose: entry.purpose,
+      siteId: entry.siteId,
+      capabilities: Object.freeze([...entry.capabilities]),
+      legalDraftPlatformSite: entry.legalDraftPlatformSite,
+    } : {}),
     accountId: entry.accountId,
     key: entry.key,
     keyId: entry.keyId,
@@ -262,14 +284,22 @@ export async function readCredentialStore(environment = {}) {
       parsed !== null && typeof parsed === "object" && !Array.isArray(parsed),
       "The stored credential file is not a JSON object.",
     );
-    if (parsed.schemaVersion !== CREDENTIAL_STORE_VERSION) {
+    if (parsed.schemaVersion !== CREDENTIAL_STORE_VERSION && parsed.schemaVersion !== 2) {
       throw new SiteAuthoringError(
         "credentials.unsupported_version",
         `The stored credential file must declare schemaVersion ${CREDENTIAL_STORE_VERSION}.`,
       );
     }
     requireStoreShape(Array.isArray(parsed.credentials), "The stored credential file has no credentials array.");
-    return { path: filePath, credentials: parsed.credentials.map(normalizeEntry) };
+    if (parsed.schemaVersion === 2) {
+      requireStoreShape(parsed.credentials.every((entry) => entry && entry.purpose === undefined
+        && entry.siteId === undefined && entry.capabilities === undefined && entry.legalDraftPlatformSite === undefined),
+      "An older credential store has an invalid scope.");
+    }
+    const credentials = parsed.credentials.map(normalizeEntry);
+    const identities = credentials.map((entry) => JSON.stringify([entry.apiOrigin, entry.purpose ?? "account", entry.siteId ?? ""]));
+    requireStoreShape(new Set(identities).size === identities.length, "The stored credential file has duplicate records.");
+    return { path: filePath, credentials };
   } catch (error) {
     throw namedStoreFailure(error, filePath);
   }
@@ -283,13 +313,18 @@ export async function readCredentialStore(environment = {}) {
  * site; the sign-in credential authorizes an account, and an operator has one
  * of those per Taproot they use.
  */
-export function selectCredential(credentials, apiOrigin) {
-  return credentials.find((entry) => entry.apiOrigin === apiOrigin);
+export function selectCredential(credentials, apiOrigin, { siteId } = {}) {
+  return credentials.find((entry) => entry.apiOrigin === apiOrigin
+    && (siteId === undefined ? entry.purpose === undefined : entry.purpose === "legal-drafts" && entry.siteId === siteId));
 }
 
-export async function findCredential(environment, apiOrigin) {
+function sameCredentialScope(left, right) {
+  return left.apiOrigin === right.apiOrigin && left.purpose === right.purpose && left.siteId === right.siteId;
+}
+
+export async function findCredential(environment, apiOrigin, scope = {}) {
   const store = await readCredentialStore(environment);
-  return { path: store.path, credential: selectCredential(store.credentials, apiOrigin) };
+  return { path: store.path, credential: selectCredential(store.credentials, apiOrigin, scope) };
 }
 
 /**
@@ -486,7 +521,7 @@ async function withStoreLock(filePath, action, { sleep = defaultLockSleep } = {}
  * someone with a nearly full store to log out of a Taproot they no longer use;
  * under-refusing means orphaning a credential. The asymmetry picks the side.
  */
-export async function assertCredentialCapacity(environment, apiOrigin) {
+export async function assertCredentialCapacity(environment, apiOrigin, { siteId } = {}) {
   const store = await readCredentialStore(environment);
   const projected = normalizeEntry({
     apiOrigin,
@@ -494,7 +529,7 @@ export async function assertCredentialCapacity(environment, apiOrigin) {
     key: "k".repeat(MAXIMUM_TOKEN_LENGTH),
     keyId: PROJECTION_UUID,
     keyPrefix: "p".repeat(PROJECTION_KEY_PREFIX_LENGTH),
-    keyExpiresAt: PROJECTION_TIMESTAMP,
+    keyExpiresAt: siteId === undefined ? PROJECTION_TIMESTAMP : "2000-01-02T00:00:00.000Z",
     lastExchange: {
       siteId: PROJECTION_UUID,
       capabilities: [...SITE_AUTHORING_CAPABILITIES],
@@ -505,9 +540,14 @@ export async function assertCredentialCapacity(environment, apiOrigin) {
       externalWritesEnabled: false,
       latestCliVersion: PROJECTION_LATEST_CLI_VERSION,
     },
+    ...(siteId === undefined ? {} : {
+      purpose: "legal-drafts", siteId, legalDraftPlatformSite: false,
+      capabilities: [...SITE_AUTHORING_CAPABILITIES, CAPABILITY_LEGAL_DRAFTS],
+      lastExchange: undefined,
+    }),
     createdAt: PROJECTION_TIMESTAMP,
   });
-  const others = store.credentials.filter((entry) => entry.apiOrigin !== apiOrigin);
+  const others = store.credentials.filter((entry) => !sameCredentialScope(entry, projected));
   requireStoreFits(serializeStore([...others, projected]));
   return store.path;
 }
@@ -525,7 +565,7 @@ export async function saveCredential(environment, credential, { now = Date.now, 
   const filePath = credentialStorePath(environment);
   return withStoreLock(filePath, async () => {
     const store = await readCredentialStore(environment);
-    const others = store.credentials.filter((entry) => entry.apiOrigin !== record.apiOrigin);
+    const others = store.credentials.filter((entry) => !sameCredentialScope(entry, record));
     const ordered = [...others, record].sort((left, right) => left.apiOrigin.localeCompare(right.apiOrigin));
     await writeCredentialStore(store.path, ordered);
     return store.path;
@@ -554,7 +594,7 @@ export async function updateCredentialMetadata(environment, apiOrigin, keyId, me
     if (current === undefined || current.keyId !== keyId) return false;
 
     const updated = normalizeEntry({ ...current, ...metadata });
-    const others = store.credentials.filter((entry) => entry.apiOrigin !== apiOrigin);
+    const others = store.credentials.filter((entry) => !sameCredentialScope(entry, current));
     const ordered = [...others, updated].sort((left, right) => left.apiOrigin.localeCompare(right.apiOrigin));
     await writeCredentialStore(store.path, ordered);
     return true;
@@ -567,11 +607,12 @@ export async function updateCredentialMetadata(environment, apiOrigin, keyId, me
  * asked for is the state they end up in. The read-modify-write runs under the
  * same store lock the save takes.
  */
-export async function removeCredential(environment, apiOrigin, { sleep } = {}) {
+export async function removeCredential(environment, apiOrigin, { sleep, siteId } = {}) {
   const filePath = credentialStorePath(environment);
   return withStoreLock(filePath, async () => {
     const store = await readCredentialStore(environment);
-    const remaining = store.credentials.filter((entry) => entry.apiOrigin !== apiOrigin);
+    const current = selectCredential(store.credentials, apiOrigin, { siteId });
+    const remaining = store.credentials.filter((entry) => current === undefined || !sameCredentialScope(entry, current));
     if (remaining.length === store.credentials.length) return { path: store.path, removed: false };
     await writeCredentialStore(store.path, remaining);
     return { path: store.path, removed: true };

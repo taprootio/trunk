@@ -1,5 +1,7 @@
 import {
   createPage,
+  getPage,
+  PAGE_STATUS_DRAFT,
   importVideoEmbedPoster,
   isGonePage,
   listSitePages,
@@ -38,6 +40,10 @@ import {
   COVER_IMAGE_UNUSED_MESSAGE,
   documentTemplate,
   generatedMarkdownFault,
+  legalMarkdownFault,
+  legalIdentity,
+  workspaceDocumentFromPage,
+  TEMPLATE_LEGAL,
   generatedPageDescription,
   generatedPageTitle,
   placedVideoIds,
@@ -289,6 +295,7 @@ function parseFrontMatter(source, file) {
     try {
       template = requireTemplateName(fields.get("template"), file);
       if (template === TEMPLATE_GENERATED) record(generatedMarkdownFault(file));
+      if (template === TEMPLATE_LEGAL) record(legalMarkdownFault(file));
     } catch (error) {
       record(error);
     }
@@ -1100,6 +1107,8 @@ export async function planPages({
   requestedPaths,
   getSharedThemeContexts,
   refreshAuthors,
+  legalDrafts = false,
+  readLegalPage,
   onProgress = () => {},
 }) {
   const problems = [];
@@ -1282,6 +1291,7 @@ export async function planPages({
       onProgress(`Validating '${file}'.`);
       const manifestEntry = manifestByFile.get(file);
       let observedRecord;
+      let legalRevisionGuard;
       requireCompletePageMetadata(source);
       const document_ = await convertWorkspacePageSource({ source, mediaManifest, content });
 
@@ -1298,6 +1308,9 @@ export async function planPages({
         );
       }
       const generated = documentTemplate(document_) === TEMPLATE_GENERATED;
+      if (documentTemplate(document_) === TEMPLATE_LEGAL && target === undefined && manifestEntry?.pageId !== undefined) {
+        throw documentError("pages.legal_missing", `'${file}' tracks a legal page that the site no longer lists. Pull and reconcile it before creating another page.`, file);
+      }
       if (generated && target === undefined) {
         if (targeted) {
           throw documentError(
@@ -1417,8 +1430,11 @@ export async function planPages({
             entry: manifestByPageId.get(target.pageId),
             observedRevision: observed?.revision,
           };
-          requireReconciledRevision(guard);
-          requireReconciledDisplayDate({ ...guard, document_, observed });
+          if (sourceTemplate === TEMPLATE_LEGAL) legalRevisionGuard = guard;
+          else {
+            requireReconciledRevision(guard);
+            requireReconciledDisplayDate({ ...guard, document_, observed });
+          }
         }
       }
 
@@ -1474,6 +1490,24 @@ export async function planPages({
       // An author the site no longer holds is a change to send, however the
       // source compares with the record.
       const unchanged = isUnchanged(observedRecord) && !(online && target !== undefined && authorship.sendAuthor);
+      if (documentTemplate(document_) === TEMPLATE_LEGAL && !unchanged && online) {
+        if (legalRevisionGuard !== undefined) requireReconciledRevision(legalRevisionGuard);
+        if (!legalDrafts) {
+          throw documentError("pages.legal_grant_required", "Legal draft changes require an explicit site grant. Run 'taproot-site login --legal-drafts', then 'taproot-site --legal-drafts pages push'. If TAPROOT_SITE_KEY is set, unset it first.", file);
+        }
+        if (target !== undefined) {
+          const recorded = targetEntry?.legal;
+          const livePath = normalizePagePath(target.path) ?? target.path;
+          const livePage = await readLegalPage(target);
+          const liveDocument = workspaceDocumentFromPage(livePage, target.templateType);
+          const identity = legalIdentity(document_.data);
+          const same = (other) => other !== undefined && other.documentKey === identity.documentKey && other.documentRole === identity.documentRole;
+          if (targetEntry === undefined || normalizePagePath(targetEntry.path) !== pagePath || livePath !== pagePath
+              || !same(recorded) || documentTemplate(liveDocument) !== TEMPLATE_LEGAL || !same(legalIdentity(liveDocument.data))) {
+            throw documentError("pages.legal_identity", `'${file}' changes or lacks the recorded legal document key, role or path. Pull and reconcile the page before editing.`, file);
+          }
+        }
+      }
       // Only for a page this push sends: a description stored before the limit
       // existed must not block a push that leaves it alone (TR01194). A
       // generated page's derived description is not the owner's to shorten;
@@ -1605,6 +1639,8 @@ export async function pagesPush(invocation) {
       files,
       livePages,
       online: true,
+      legalDrafts: session.legalDrafts === true,
+      readLegalPage: (target) => getPage(client, target.pageId, target.hasDraft ? PAGE_STATUS_DRAFT : target.status),
       requestedPaths,
       refreshAuthors: liveAuthorsRefresher({
         client,
@@ -1735,7 +1771,8 @@ export async function pagesPush(invocation) {
         // and a raw TypeError here would collapse to an opaque `site.failed`
         // *after* pages had already been created — the one place in this verb
         // where a crash costs more than a refusal.
-        const existing = manifest.pages.find((entry) => entry?.pageId === summary.pageId);
+        const existing = manifest.pages.find((entry) => entry?.pageId === summary.pageId)
+          ?? manifest.pages.find((entry) => entry?.pageId === undefined && entry?.file === page.file);
         const record = existing ?? {};
         // The author the site holds now: what it reports, else what was just
         // accepted, else what this workspace already knew it held.
@@ -1785,6 +1822,7 @@ export async function pagesPush(invocation) {
         });
         // What the source names, kept beside the site's own for a .pm.json
         // page, whose manifest entry is the only place it is written down.
+        if (documentTemplate(page.document) === TEMPLATE_LEGAL) record.legal = legalIdentity(page.document.data);
         if (page.author === "") delete record.author;
         else record.author = page.author;
         if (existing === undefined) manifest.pages.push(record);

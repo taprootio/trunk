@@ -8,6 +8,7 @@ import {
 import { VERB_APPROVE } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { boundedByBytes, boundedList, openSession, successResult, warnIfExternalWritesPaused } from "../session.js";
+import { isLegalTemplateType } from "../typed-pages.js";
 import { displayPagePath, normalizePagePath, readManifest, writeManifest } from "../workspace.js";
 
 /**
@@ -45,7 +46,7 @@ export async function approve(invocation) {
 
   // Positional arguments narrow the selection to those page paths; `cli.js`
   // hands them over as `pagePaths`, and a programmatic caller can supply the
-  // same key directly. With none, every draft the manifest tracks is staged.
+  // same key directly. With none, legal drafts are skipped and the other tracked drafts are staged.
   //
   // A path this CLI cannot use is refused by name rather than dropped. Dropping
   // it silently is the worst available outcome: the remaining selection would
@@ -80,16 +81,29 @@ export async function approve(invocation) {
       );
     }
     const pathOf = (summary) => normalizePagePath(summary.path) ?? summary.path;
-    const candidates = pages.filter((summary) =>
-      !isGonePage(summary)
-      && summary.hasDraft
-      && manifestByPageId.has(summary.pageId)
-      && (requestedPaths === undefined || requestedPaths.has(pathOf(summary))));
+    const tracked = pages.filter((summary) => !isGonePage(summary) && manifestByPageId.has(summary.pageId));
+    const isLegal = (page) => isLegalTemplateType(page.templateType)
+      || isLegalTemplateType(manifestByPageId.get(page.pageId)?.templateType);
+    if (requestedPaths !== undefined && tracked.some((page) => requestedPaths.has(pathOf(page)) && isLegal(page))) {
+      throw new SiteAuthoringError("approve.legal_not_allowed", "Legal drafts must be approved in the app. Nothing was approved.", { field: "pages" });
+    }
+    const selected = tracked.filter((summary) =>
+      summary.hasDraft && (requestedPaths === undefined || requestedPaths.has(pathOf(summary))));
+    const legalDrafts = requestedPaths === undefined ? selected.filter(isLegal) : [];
+    const candidates = selected.filter((page) => !isLegal(page));
 
     // A requested page with nothing to approve is reported, not refused, so
     // one already-approved path does not stop the rest of the batch. A path
     // that names no page this workspace tracks is still refused by name.
-    const skipped = [];
+    const skipped = legalDrafts.map((page) => ({
+      pageId: page.pageId,
+      path: displayPagePath(pathOf(page)),
+      status: page.status,
+      reason: "legal_requires_app",
+    }));
+    if (legalDrafts.length > 0) {
+      onProgress(`Skipping ${legalDrafts.length} legal draft${legalDrafts.length === 1 ? "" : "s"}; approve ${legalDrafts.length === 1 ? "it" : "them"} in the app.`);
+    }
     if (requestedPaths !== undefined) {
       const matched = new Set(candidates.map(pathOf));
       const unknown = [];
@@ -137,7 +151,9 @@ export async function approve(invocation) {
 
     if (candidates.length === 0) {
       onProgress(
-        skipped.length > 0
+        legalDrafts.length > 0
+          ? "No ordinary drafts to approve; approve the skipped legal drafts in the app."
+          : skipped.length > 0
           ? "Nothing to approve: the requested page(s) have no pending draft."
           : "No page in this workspace is carrying a draft; there is nothing to approve.",
       );
@@ -145,7 +161,7 @@ export async function approve(invocation) {
         approved: { total: 0, items: [] },
         ...skippedResult,
         stagedNotDeployed: true,
-        nextStep: "deploy --staging",
+        nextStep: legalDrafts.length > 0 ? "approve legal drafts in the app" : "deploy --staging",
       });
     }
 

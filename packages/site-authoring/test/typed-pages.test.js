@@ -15,6 +15,7 @@ import {
   typedDocumentFromJson,
   typedDocumentFromMarkdown,
   unsupportedRestrictedNode,
+  usedImageIds,
   unusedCoverImageId,
   wirePageFields,
   wireTemplate,
@@ -751,4 +752,39 @@ test("help page generated describes an update-only source without a Markdown for
   assert.match(text, /^Generated page \(generated\)/u);
   assert.match(text, /pages\.generated_create/u);
   assert.doesNotMatch(text, /Markdown front matter/u);
+});
+
+
+test("legal drafts project defaults and omit assigned metadata, then round-trip their body", () => {
+  const body = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms" }] }] };
+  const pulled = workspaceDocumentFromPage({
+    displayDate: "2026-01-01", coverImageId: COVER_ID,
+    template: { templateType: "TEMPLATE_TYPE_LEGAL", legalDocumentData: {
+      documentKey: "terms", documentRole: "platform_terms", body,
+      version: "1", effectiveDate: "2026-01-01T00:00:00Z", supersedesVersion: "0",
+    } },
+  });
+  assert.deepEqual(pulled, { template: "legal", data: {
+    documentKey: "terms", documentRole: "platform_terms", summaryOfChanges: "", material: false, body,
+  } });
+  assert.deepEqual(typedDocumentFromJson(pulled, "terms.pm.json"), pulled);
+  assert.deepEqual(wireTemplate(pulled).legalDocumentData, pulled.data);
+  assert.deepEqual(wirePageFields(pulled), {});
+  assert.deepEqual(contentDocuments(pulled), [{ doc: body, path: "data.body" }]);
+  const illustrated = structuredClone(pulled);
+  illustrated.data.body.content.push({ type: "taprootImage", attrs: { imageId: IMAGE_ONE } });
+  assert.deepEqual([...usedImageIds(illustrated)], [IMAGE_ONE]);
+  for (const key of ["version", "effectiveDate", "supersedesVersion"]) {
+    assert.throws(() => typedDocumentFromJson({ ...pulled, data: { ...pulled.data, [key]: "1" } }, "terms.pm.json"),
+      (error) => error.code === "pages.document_shape");
+  }
+  for (const key of ["displayDate", "coverImageId"]) {
+    assert.throws(() => typedDocumentFromJson({ ...pulled, [key]: "" }, "terms.pm.json"),
+      (error) => error.code === "pages.document_shape");
+  }
+});
+
+test("legal Markdown is refused instead of falling through to a recipe", async () => {
+  await assert.rejects(typedDocumentFromMarkdown({ template: "legal", fields: new Map(), markdown: "Terms", file: "terms.md" }),
+    (error) => error.code === "pages.legal_markdown");
 });

@@ -22,6 +22,7 @@ import {
   VERB_LOGIN,
   VERB_LOGOUT,
   VERB_SITES,
+  SURFACE_STANDARD,
 } from "../constants.js";
 import { assertCredentialCapacity, credentialApiOrigin, saveCredential } from "../credentials.js";
 import { asSiteAuthoringError, hasControlCharacter, SiteAuthoringError } from "../errors.js";
@@ -156,7 +157,7 @@ function describeMinutes(milliseconds) {
  * revoked — named by its exact id and display prefix when the server supplied
  * them, and by its display name otherwise.
  */
-function terminalFailure(answer, keyName) {
+function terminalFailure(answer, keyName, loginCommand) {
   const status = answer.status;
   switch (status) {
     case CLI_AUTHORIZATION_CLAIM_STATUS_DENIED:
@@ -168,7 +169,7 @@ function terminalFailure(answer, keyName) {
     case CLI_AUTHORIZATION_CLAIM_STATUS_EXPIRED:
       return new SiteAuthoringError(
         "login.expired",
-        `The authorization expired before it was approved. Run '${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+        `The authorization expired before it was approved. Run '${loginCommand}' again.`,
         { status },
       );
     case CLI_AUTHORIZATION_CLAIM_STATUS_CONSUMED:
@@ -179,7 +180,7 @@ function terminalFailure(answer, keyName) {
             ? `Revoke the credential with id ${answer.keyId}`
             + (answer.keyPrefix === undefined ? "" : ` (display prefix ${answer.keyPrefix})`)
             : `Revoke the credential named '${keyName}'`)
-          + ` under Account -> Settings -> API keys, then run '${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+          + ` under Account -> Settings -> API keys, then run '${loginCommand}' again.`,
         { status },
       );
     default:
@@ -191,11 +192,11 @@ function terminalFailure(answer, keyName) {
   }
 }
 
-function translateClaimApiError(error) {
+function translateClaimApiError(error, loginCommand) {
   if (!(error instanceof ApiError) || error.httpStatus !== 404) return error;
   return new SiteAuthoringError(
     "login.unknown",
-    `Taproot does not recognize this authorization. Run '${CLI_BINARY_NAME} ${VERB_LOGIN}' to start a new one.`,
+    `Taproot does not recognize this authorization. Run '${loginCommand}' to start a new one.`,
     { status: error.status },
   );
 }
@@ -222,13 +223,13 @@ function translateStartApiError(error) {
  * display prefix, never by value — and direct the owner to revoke it, because
  * silence here is a live credential the owner does not know exists.
  */
-function unstoredCredentialFailure(error, claimed) {
+function unstoredCredentialFailure(error, claimed, loginCommand) {
   const cause = asSiteAuthoringError(error);
   return new SiteAuthoringError(
     "login.credential_unstored",
     `A credential WAS issued (id ${claimed.keyId}, display prefix ${claimed.keyPrefix}) but could not `
       + `be stored: ${cause.message} Revoke it under Account -> Settings -> API keys, then run `
-      + `'${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+      + `'${loginCommand}' again.`,
     { ...(cause.status === undefined ? {} : { status: cause.status }) },
   );
 }
@@ -311,7 +312,12 @@ async function handOffToBrowser({ verificationUrl, userCode, onProgress, awaitEn
 
 export async function login(invocation) {
   const keyName = normalizeKeyName(invocation.keyName);
-  const { apiBaseUrl, client, now, onProgress } = await openAnonymousSession(invocation);
+  const { config, apiBaseUrl, client, now, onProgress } = await openAnonymousSession(invocation);
+  const legalDraftSiteId = invocation.legalDrafts ? config?.siteId : undefined;
+  if (invocation.legalDrafts && (!legalDraftSiteId || (config.authoringSurface !== undefined && config.authoringSurface !== SURFACE_STANDARD))) {
+    throw new SiteAuthoringError("auth.legal_site_required", "Select a standard site with taproot-site use before requesting legal draft access.");
+  }
+  const loginCommand = `${CLI_BINARY_NAME} ${VERB_LOGIN}${legalDraftSiteId === undefined ? "" : " --legal-drafts"}`;
   const environment = invocation.environment ?? process.env;
   const apiOrigin = credentialApiOrigin(apiBaseUrl);
 
@@ -323,11 +329,11 @@ export async function login(invocation) {
   // now rather than at the write, which is the same failure arriving after the
   // damage. A residual write failure can still happen (the disk can fill during
   // the poll), which is what `unstoredCredentialFailure` below is for.
-  await assertCredentialCapacity(environment, apiOrigin);
+  await assertCredentialCapacity(environment, apiOrigin, { siteId: legalDraftSiteId });
 
   let authorization;
   try {
-    authorization = await startCliAuthorization(client, { keyName });
+    authorization = await startCliAuthorization(client, { keyName, legalDraftSiteId });
   } catch (error) {
     // Announced only when the refusal survives translation: sign-in is the
     // earlier of the two calls that carry this CLI's version, so it is where
@@ -390,7 +396,7 @@ export async function login(invocation) {
       // total wall time.
       read: async () => {
         try {
-          return await claimCliAuthorization(client, authorization.deviceCode);
+          return await claimCliAuthorization(client, authorization.deviceCode, {}, { legalDraftSiteId, now });
         } catch (error) {
           // A throttle is the endpoint doing its job, not a verdict on this
           // authorization. Back off within the same deadline instead of
@@ -441,7 +447,7 @@ export async function login(invocation) {
             if (error.ambiguousMutation === true) claimResponseLost = true;
             throw error;
           }
-          throw translateClaimApiError(error);
+          throw translateClaimApiError(error, loginCommand);
         }
       },
       evaluate: (value) => {
@@ -464,7 +470,7 @@ export async function login(invocation) {
           // each line pushes the code the operator is still reading off screen.
           return { done: false };
         }
-        throw terminalFailure(value, keyName);
+        throw terminalFailure(value, keyName, loginCommand);
       },
       // A deadline reached after a lost answer cannot honestly say nothing was
       // issued: one of those lost checks may have consumed the approval and
@@ -477,12 +483,12 @@ export async function login(invocation) {
             "The polling deadline passed, and at least one check's answer was lost in transit — a credential "
               + `MAY have been issued without this command receiving it. Nothing was stored locally; check `
               + `Account -> Settings -> API keys for a credential named '${keyName}' and revoke it before running `
-              + `'${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+              + `'${loginCommand}' again.`,
           )
           : new SiteAuthoringError(
             "login.timeout",
             "The approval was not completed before this command's polling deadline. Nothing was stored; "
-              + `run '${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+              + `run '${loginCommand}' again.`,
           ),
     });
   } catch (error) {
@@ -498,8 +504,11 @@ export async function login(invocation) {
         "site.cancelled",
         "The login was cancelled after a claim's answer was lost — a credential MAY have been issued without "
           + `this command receiving it. Check Account -> Settings -> API keys for a credential named '${keyName}' `
-          + `and revoke it before running '${CLI_BINARY_NAME} ${VERB_LOGIN}' again.`,
+          + `and revoke it before running '${loginCommand}' again.`,
       );
+    }
+    if (error instanceof SiteAuthoringError && error.code === "site.cancelled" && legalDraftSiteId !== undefined) {
+      throw new SiteAuthoringError("site.cancelled", `${error.message} Run '${loginCommand}' again.`);
     }
     throw error;
   }
@@ -510,6 +519,7 @@ export async function login(invocation) {
       environment,
       {
         apiOrigin,
+        ...(legalDraftSiteId === undefined ? {} : { purpose: claimed.purpose, siteId: claimed.siteId, capabilities: claimed.capabilities, legalDraftPlatformSite: claimed.legalDraftPlatformSite }),
         accountId: claimed.accountId,
         key: claimed.key,
         keyId: claimed.keyId,
@@ -519,7 +529,13 @@ export async function login(invocation) {
       { now },
     );
   } catch (error) {
-    throw unstoredCredentialFailure(error, claimed);
+    throw unstoredCredentialFailure(error, claimed, loginCommand);
+  }
+  if (legalDraftSiteId !== undefined) {
+    onProgress(`Stored legal draft access for site ${legalDraftSiteId} in ${credentialPath}. The credential itself is never displayed.`);
+    onProgress(`Use '${CLI_BINARY_NAME} --legal-drafts pages push' to save drafts; approve and publish them in Taproot.`);
+    onProgress(`Discard this local grant with '${CLI_BINARY_NAME} --legal-drafts ${VERB_LOGOUT}'; revoke it in Account -> Settings -> API keys.`);
+    return successResult(VERB_LOGIN, legalDraftSiteId, { accountId: claimed.accountId, keyId: claimed.keyId, keyPrefix: claimed.keyPrefix, keyExpiresAt: claimed.keyExpiresAt, userCode: authorization.userCode, verificationUrl, credentialPath, legalDrafts: true });
   }
   onProgress(`Stored the sign-in in ${credentialPath}. The credential itself is never displayed.`);
   onProgress(`Run '${CLI_BINARY_NAME} ${VERB_SITES}' to see the sites you can author.`);

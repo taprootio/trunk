@@ -1,3 +1,4 @@
+import { openSession } from "../src/session.js";
 import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -49,6 +50,7 @@ import {
   pageContentKey,
   readWorkspaceFile,
   workspaceContentHash,
+  WORKSPACE_LIMITS,
   writeWorkspaceFile,
 } from "../src/workspace.js";
 import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
@@ -910,7 +912,11 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
     {
       method: "GET",
       pattern: PAGE_BY_ID,
-      reply: (call) => freeFormPageDetail(call.pathname.split("/").pop(), BODY_MARKER),
+      reply: (call) => call.pathname.endsWith(STORY_PAGE_ID)
+        ? { pageId: STORY_PAGE_ID, title: "Story", template: { templateType: "TEMPLATE_TYPE_LEGAL", legalDocumentData: {
+          documentKey: "story", documentRole: "privacy_notice", body: paragraphDocument(BODY_MARKER),
+        } } }
+        : freeFormPageDetail(call.pathname.split("/").pop(), BODY_MARKER),
     },
     {
       method: "GET",
@@ -947,22 +953,21 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.equal(wire.matching("GET", PRESENTATION).length, 1);
   assert.equal(wire.matching("GET", SETTINGS).length, 0);
   assert.equal(result.pages.total, 3);
-  assert.equal(result.pages.bodies, 2);
+  assert.equal(result.pages.bodies, 3);
   assert.equal(result.navigation.items, 1);
   assert.deepEqual(result.settings.skipped, []);
 
   // The home page reads its draft, because that is the version an author is
   // editing; the published-only page reads its published body.
   const bodyReads = wire.matching("GET", PAGE_BY_ID);
-  assert.equal(bodyReads.length, 2);
+  assert.equal(bodyReads.length, 3);
   assert.equal(bodyReads[0].query.get("status"), "PAGE_STATUS_DRAFT");
   assert.equal(bodyReads[1].query.get("status"), "PAGE_STATUS_PUBLISHED");
 
   assert.equal(await workspaceHas(workspace, "pages/index.pm.json"), true);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), true);
-  // The legal page is snapshotted as metadata only: this CLI authors the five
-  // content templates and does not pretend to round-trip the others.
-  assert.equal(await workspaceHas(workspace, "pages/story.pm.json"), false);
+  assert.equal(await workspaceHas(workspace, "pages/story.pm.json"), true);
+  assert.equal((await readWorkspaceJson(workspace, "pages/story.pm.json")).template, "legal");
   assert.deepEqual(
     (await readWorkspaceJson(workspace, "pages/index.pm.json")).content[0].content[0].text,
     BODY_MARKER,
@@ -984,7 +989,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
     [
       [HOME_PAGE_ID, "", "PAGE_STATUS_APPROVED", "pages/index.pm.json", "editable"],
       [ABOUT_PAGE_ID, "about", "PAGE_STATUS_PUBLISHED", "pages/about.pm.json", "editable"],
-      [STORY_PAGE_ID, "story", "PAGE_STATUS_PUBLISHED", undefined, "metadata-only"],
+      [STORY_PAGE_ID, "story", "PAGE_STATUS_PUBLISHED", "pages/story.pm.json", "editable"],
     ],
   );
   assert.equal(manifest.pages[0].resourceId, resourceIdFor(HOME_PAGE_ID));
@@ -17115,4 +17120,310 @@ test("validate cannot prove an author absent from a stale authors.json, so it wa
   const failed = await cliRun(malformed, ["validate"]);
   assert.equal(failed.exitCode, 1);
   assert.equal(failed.result.error.code, "pages.author_invalid");
+});
+
+
+const LEGAL_SOURCE = "pages/terms.pm.json";
+const legalDocument = (text = "Terms") => ({ template: "legal", data: {
+  documentKey: "terms", documentRole: "platform_terms", summaryOfChanges: "", material: false,
+  body: paragraphDocument(text),
+} });
+
+function legalRoutes(state) {
+  const summary = () => pageSummary({ pageId: LEGAL_PAGE_ID, path: state.path ?? "terms", title: "Terms",
+    templateType: "TEMPLATE_TYPE_LEGAL", hasDraft: true, status: "PAGE_STATUS_DRAFT", bodyRevision: state.revision });
+  return [
+    { method: "GET", pattern: PAGES_LIST, reply: () => ({ pages: state.exists === false ? [] : [summary()], nextPageToken: "" }) },
+    { method: "GET", pattern: PAGE_BY_ID, reply: () => ({ ...summary(), template: {
+      templateType: "TEMPLATE_TYPE_LEGAL", legalDocumentData: { ...state.document.data, version: "1" },
+    } }) },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+    { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => {
+      state.document = { template: "legal", data: call.body.template.legalDocumentData };
+      return summary();
+    } },
+    { method: "POST", pattern: PAGES_COLLECTION, reply: (call) => {
+      state.exists = true; state.document = { template: "legal", data: call.body.template.legalDocumentData };
+      return summary();
+    } },
+  ];
+}
+
+async function legalPush(workspace, wire, grant, extra = {}) {
+  const invocation = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT, ...extra }).invocation;
+  const session = await openSession(invocation);
+  return pagesPush({ ...invocation, resolvedSession: { ...session, legalDrafts: grant } });
+}
+
+function failureCodes(error) {
+  return [error?.code, ...(error?.problems ?? []).map((problem) => problem.code)];
+}
+
+test("legal pull, edit and push preserves identity and the revision baseline", async (site) => {
+  const workspace = await fixture(site);
+  const state = { document: legalDocument(), revision: "v1:1111111111111111" };
+  const wire = api(legalRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const pulled = await readWorkspaceJson(workspace, LEGAL_SOURCE);
+  assert.deepEqual(pulled, legalDocument());
+  assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages[0].legal,
+    { documentKey: "terms", documentRole: "platform_terms" });
+  assert.equal((await legalPush(workspace, wire, false)).pages.unchanged, 1);
+  state.revision = "v1:2222222222222222";
+  assert.equal((await legalPush(workspace, wire, false)).pages.unchanged, 1);
+  state.revision = "v1:1111111111111111";
+  await writeFile(workspacePath(workspace, LEGAL_SOURCE), `${JSON.stringify(legalDocument("Edited"), undefined, 2)}\n`);
+  await assert.rejects(legalPush(workspace, wire, false), (error) => failureCodes(error).includes("pages.legal_grant_required"));
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+  assert.equal((await legalPush(workspace, wire, true)).pages.updated, 1);
+  assert.deepEqual(wire.matching("PATCH", PAGE_BY_ID)[0].body.template.legalDocumentData, legalDocument("Edited").data);
+  assert.equal("displayDate" in wire.matching("PATCH", PAGE_BY_ID)[0].body, false);
+});
+
+test("pull preserves pending page metadata before consulting any remote listing", async (t) => {
+  const sources = [
+    ["legal", `${JSON.stringify(legalDocument("Local draft"), undefined, 2)}\n`],
+    ["malformed", '{ "template": "legal", unfinished'],
+    ["missing", undefined],
+  ];
+  for (const remote of ["legal", "ordinary", "absent"]) {
+    for (const [source, local] of sources) {
+      await t.test(`${source} source with ${remote} remote`, async (site) => {
+        const workspace = await fixture(site, {
+          ".taproot-site-manifest.json": manifestFixture([{ file: LEGAL_SOURCE, path: "terms", title: "Local terms" }]),
+          ...(local === undefined ? {} : { [LEGAL_SOURCE]: local }),
+          "nav.json": "local navigation sentinel\n",
+        });
+        const manifestBefore = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+        const wire = api(remote === "ordinary" ? [{ method: "GET", pattern: PAGES_LIST,
+          reply: { pages: [pageSummary({ path: "terms" })], nextPageToken: "" } }]
+          : legalRoutes({ exists: remote !== "absent", document: legalDocument("Remote draft"), revision: "v1:1111111111111111" }));
+        await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation),
+          (error) => error.code === "pages.source_conflict" && error.field === LEGAL_SOURCE);
+        assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), manifestBefore);
+        assert.equal(await readWorkspaceText(workspace, "nav.json"), "local navigation sentinel\n");
+        if (local === undefined) assert.equal(await workspaceHas(workspace, LEGAL_SOURCE), false);
+        else assert.equal(await readWorkspaceText(workspace, LEGAL_SOURCE), local);
+        assert.equal(wire.calls.length, 0);
+      });
+    }
+  }
+  for (const pageId of [undefined, "not-a-canonical-page-id"]) {
+    await t.test(`ordinary pending draft with pageId ${pageId}`, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture([{ pageId, file: "pages/new.pm.json", path: "new", title: "New page" }]),
+        "pages/new.pm.json": paragraphDocument("An ordinary pending draft"),
+      });
+      const manifestBefore = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+      const sourceBefore = await readWorkspaceText(workspace, "pages/new.pm.json");
+      await assert.rejects(pull(invoke(workspace, api([]), { verb: "pull" }).invocation),
+        (error) => error.code === "pages.source_conflict" && error.field === "pages/new.pm.json");
+      assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), manifestBefore);
+      assert.equal(await readWorkspaceText(workspace, "pages/new.pm.json"), sourceBefore);
+    });
+  }
+});
+
+test("pull preserves incomplete pending page entries and unreadable source metadata", async (t) => {
+  for (const scenario of [
+    { name: "file and title without path", entry: { file: LEGAL_SOURCE, title: "Unfinished terms" }, local: '{ "template": "legal", unfinished' },
+    { name: "file and path without title", entry: { file: LEGAL_SOURCE, path: "terms" } },
+    { name: "file alone", entry: { file: LEGAL_SOURCE }, local: `${JSON.stringify(legalDocument("Local draft"))}\n` },
+    { name: "title alone", entry: { title: "Unfinished terms" } },
+    { name: "path alone", entry: { path: "terms" } },
+    { name: "malformed declared metadata", entry: { file: null, title: null, path: [] } },
+  ]) {
+    await t.test(scenario.name, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture([scenario.entry]),
+        ...(scenario.local === undefined ? {} : { [LEGAL_SOURCE]: scenario.local }),
+        "nav.json": "local navigation sentinel\n",
+      });
+      const manifestBefore = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+      const wire = api([]);
+      await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation),
+        (error) => error.code === "pages.source_conflict"
+          && error.field === (scenario.entry.file ?? ".taproot-site-manifest.json")
+          && !error.message.includes("undefined"));
+      assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), manifestBefore);
+      assert.equal(await readWorkspaceText(workspace, "nav.json"), "local navigation sentinel\n");
+      if (scenario.local === undefined) assert.equal(await workspaceHas(workspace, LEGAL_SOURCE), false);
+      else assert.equal(await readWorkspaceText(workspace, LEGAL_SOURCE), scenario.local);
+      assert.equal(wire.calls.length, 0);
+    });
+  }
+});
+
+test("pull protects unowned legal and unreadable sources from any fresh remote destination", async (t) => {
+  for (const scenario of [
+    { name: "legal metadata-only upgrade", legalRemote: true, metadataOnly: true, local: legalDocument("Local draft") },
+    { name: "ordinary remote over loose legal source", local: legalDocument("Local draft") },
+    { name: "ordinary remote over malformed JSON", local: '{ "template": "legal", unfinished' },
+    { name: "ordinary remote over JSON beyond the read bound", local: `"${"x".repeat(WORKSPACE_LIMITS.documentBytes)}"` },
+    { name: "legal remote over ordinary source", legalRemote: true, local: paragraphDocument("Local ordinary draft") },
+  ]) {
+    await t.test(scenario.name, async (site) => {
+      const local = typeof scenario.local === "string" ? scenario.local : `${JSON.stringify(scenario.local, undefined, 2)}\n`;
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture(scenario.metadataOnly ? [{
+          pageId: LEGAL_PAGE_ID, path: "terms", title: "Terms", templateType: "TEMPLATE_TYPE_LEGAL", workspaceMode: "metadata-only",
+        }] : []),
+        [LEGAL_SOURCE]: local,
+        "nav.json": "local navigation sentinel\n",
+      });
+      const manifestBefore = await readWorkspaceText(workspace, ".taproot-site-manifest.json");
+      const wire = api(scenario.legalRemote
+        ? legalRoutes({ document: legalDocument("Remote draft"), revision: "v1:1111111111111111" })
+        : [{ method: "GET", pattern: PAGES_LIST, reply: { pages: [pageSummary({ path: "terms" })], nextPageToken: "" } }]);
+      await assert.rejects(pull(invoke(workspace, wire, { verb: "pull" }).invocation),
+        (error) => error.code === "pages.source_conflict" && error.field === LEGAL_SOURCE);
+      assert.equal(await readWorkspaceText(workspace, LEGAL_SOURCE), local);
+      assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), manifestBefore);
+      assert.equal(await readWorkspaceText(workspace, "nav.json"), "local navigation sentinel\n");
+      assert.equal(wire.matching("GET", PAGE_BY_ID).length, 0);
+    });
+  }
+});
+
+test("pull upgrades a legal metadata-only entry when its new source does not exist", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{
+      pageId: LEGAL_PAGE_ID, path: "terms", title: "Terms", templateType: "TEMPLATE_TYPE_LEGAL", workspaceMode: "metadata-only",
+    }]),
+  });
+  const wire = api(legalRoutes({ document: legalDocument("Remote draft"), revision: "v1:1111111111111111" }));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages[0].pageId, LEGAL_PAGE_ID);
+  assert.equal(manifest.pages[0].workspaceMode, "editable");
+  assert.equal(manifest.pages[0].file, LEGAL_SOURCE);
+  assert.deepEqual(await readWorkspaceJson(workspace, LEGAL_SOURCE), legalDocument("Remote draft"));
+});
+
+test("pull keeps local edits to a tracked legal source when the remote page is unchanged", async (site) => {
+  const workspace = await fixture(site);
+  const state = { document: legalDocument(), revision: "v1:1111111111111111" };
+  const wire = api(legalRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const local = `${JSON.stringify(legalDocument("Local draft"), undefined, 2)}\n`;
+  await writeFile(workspacePath(workspace, LEGAL_SOURCE), local);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.equal(await readWorkspaceText(workspace, LEGAL_SOURCE), local);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages[0].pageId, LEGAL_PAGE_ID);
+  assert.equal(manifest.pages[0].file, LEGAL_SOURCE);
+});
+
+test("legal create requires a grant before any ordinary page is written", async (site) => {
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([{ file: LEGAL_SOURCE, path: "terms", title: "Terms" }]),
+    [LEGAL_SOURCE]: legalDocument(),
+    "pages/a.md": "---\ntitle: A\npath: a\n---\n\nA page.\n",
+  });
+  const state = { exists: false, document: legalDocument() };
+  const wire = api(legalRoutes(state));
+  await assert.rejects(legalPush(workspace, wire, false), (error) => failureCodes(error).includes("pages.legal_grant_required"));
+  assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
+  const created = await legalPush(workspace, wire, true, { pagePaths: ["terms"] });
+  assert.equal(created.pages.created, 1);
+  assert.deepEqual(wire.matching("POST", PAGES_COLLECTION)[0].body.template.legalDocumentData, legalDocument().data);
+});
+
+test("legal edits refuse changed identity or revision before a write", async (site) => {
+  const workspace = await fixture(site);
+  const state = { document: legalDocument(), revision: "v1:1111111111111111" };
+  const wire = api(legalRoutes(state));
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  for (const field of ["documentKey", "documentRole"]) {
+    const edited = legalDocument("Edited"); edited.data[field] = "different";
+    await writeFile(workspacePath(workspace, LEGAL_SOURCE), `${JSON.stringify(edited)}\n`);
+    await assert.rejects(legalPush(workspace, wire, true), (error) => failureCodes(error).includes("pages.legal_identity"));
+  }
+  await writeFile(workspacePath(workspace, LEGAL_SOURCE), `${JSON.stringify(legalDocument("Edited"))}\n`);
+  state.document.data.documentRole = "privacy_notice";
+  await assert.rejects(legalPush(workspace, wire, true), (error) => failureCodes(error).includes("pages.legal_identity"));
+  state.document.data.documentRole = "platform_terms";
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  manifest.pages[0].path = "renamed-terms";
+  await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest)}\n`);
+  await assert.rejects(legalPush(workspace, wire, true), (error) => failureCodes(error).includes("pages.legal_identity"));
+  manifest.pages[0].path = "terms";
+  await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest)}\n`);
+  state.revision = "v1:2222222222222222";
+  await assert.rejects(legalPush(workspace, wire, true), (error) => failureCodes(error).includes("pages.push_conflict"));
+  assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+});
+
+async function legalApprovalFixture(site, { ordinary = true, legalHasDraft = true } = {}) {
+  const entries = [
+    ...(ordinary ? [{ pageId: ABOUT_PAGE_ID, path: "about", title: "About", file: "pages/about.md" }] : []),
+    { pageId: LEGAL_PAGE_ID, path: "terms", title: "Terms", file: LEGAL_SOURCE, templateType: "TEMPLATE_TYPE_LEGAL", hasDraft: legalHasDraft },
+  ];
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture(entries) });
+  const pages = [
+    ...(ordinary ? [pageSummary({ pageId: ABOUT_PAGE_ID, hasDraft: true })] : []),
+    pageSummary({ pageId: LEGAL_PAGE_ID, path: "terms", hasDraft: legalHasDraft, templateType: "TEMPLATE_TYPE_LEGAL" }),
+  ];
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages, nextPageToken: "" } },
+    { method: "POST", pattern: PUBLISH_DRAFTS, reply: (call) => ({ pages: call.body.pageIds.map((pageId) =>
+      pageSummary({ pageId, status: "PAGE_STATUS_APPROVED", hasDraft: false })) }) },
+  ]);
+  return { workspace, wire };
+}
+
+test("bare approve stages ordinary drafts and reports skipped legal drafts", async (site) => {
+  const { workspace, wire } = await legalApprovalFixture(site);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "approve" });
+  const result = await approve(invocation);
+  assert.deepEqual(wire.matching("POST", PUBLISH_DRAFTS).map((call) => call.body.pageIds), [[ABOUT_PAGE_ID]]);
+  assert.equal(result.approved.total, 1);
+  assert.deepEqual(result.approved.items.map((item) => item.pageId), [ABOUT_PAGE_ID]);
+  assert.deepEqual(result.skipped, { total: 1, items: [{
+    pageId: LEGAL_PAGE_ID, path: "terms", status: "PAGE_STATUS_PUBLISHED", reason: "legal_requires_app",
+  }] });
+  assert.ok(progress.includes("Skipping 1 legal draft; approve it in the app."));
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.equal(manifest.pages.find((entry) => entry.pageId === ABOUT_PAGE_ID).pendingApproval, false);
+  assert.equal(manifest.pages.find((entry) => entry.pageId === LEGAL_PAGE_ID).hasDraft, true);
+});
+
+test("explicitly naming a legal page refuses the whole approval selection", async (site) => {
+  for (const legalHasDraft of [true, false]) {
+    const { workspace, wire } = await legalApprovalFixture(site, { legalHasDraft });
+    await assert.rejects(approve(invoke(workspace, wire, { verb: "approve", pagePaths: ["about", "terms"] }).invocation),
+      (error) => error.code === "approve.legal_not_allowed");
+    assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 0);
+  }
+});
+
+test("bare approve reports an all-legal selection without publishing", async (site) => {
+  const { workspace, wire } = await legalApprovalFixture(site, { ordinary: false });
+  const { invocation, progress } = invoke(workspace, wire, { verb: "approve" });
+  const result = await approve(invocation);
+  assert.deepEqual(result.approved, { total: 0, items: [] });
+  assert.equal(result.skipped.total, 1);
+  assert.equal(result.skipped.items[0].reason, "legal_requires_app");
+  assert.equal(result.nextStep, "approve legal drafts in the app");
+  assert.ok(progress.includes("Skipping 1 legal draft; approve it in the app."));
+  assert.ok(progress.some((line) => line.includes("approve the skipped legal drafts in the app")));
+  assert.equal(wire.matching("POST", PUBLISH_DRAFTS).length, 0);
+});
+
+
+test("plan and apply block a legal draft without a grant before any step writes", async (site) => {
+  const files = wholeWorkspace({ files: { [LEGAL_SOURCE]: legalDocument() } });
+  files[".taproot-site-manifest.json"].pages.push({ file: LEGAL_SOURCE, path: "terms", title: "Terms" });
+  const workspace = await fixture(site, files);
+  const wire = api(siteRoutes());
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.exitCode, 0, planned.stderr);
+  assert.equal(planned.result.ready, false);
+  assert.ok(planned.result.problems.some((problem) => problem.code === "pages.legal_grant_required"));
+  const applied = await cliRun(workspace, ["apply", "--plan", planned.result.planHash], wire);
+  assert.equal(applied.exitCode, 1);
+  assert.ok([applied.result.error.code, ...(applied.result.error.problems ?? []).map((problem) => problem.code)]
+    .includes("pages.legal_grant_required"));
+  assert.deepEqual(writes(wire), []);
 });

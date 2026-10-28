@@ -14,6 +14,7 @@ import {
   LOGIN_KEY_NAME_MAXIMUM,
   PLAN_HASH,
   PUBLISH_KEY_ENVIRONMENT_VARIABLE,
+  REFUSAL_CREDENTIAL_REJECTED,
   RESULT_SCHEMA_VERSION,
   STAGING_REVIEW_SESSION_NOTE,
   SURFACE_DOCS_PRESENTATION,
@@ -88,6 +89,7 @@ import {
 } from "./reference-help.js";
 import { FONT_CATEGORIES, getFontCatalogReference } from "./font-catalog.js";
 import { assertCliCurrent } from "./session.js";
+import { ApiError } from "./transport.js";
 import { formatThemeResolve } from "./theme-resolve.js";
 import { MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS } from "./theme-validation.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
@@ -161,8 +163,9 @@ const VERBS = Object.freeze([
     note: "Starts a device-authorization exchange, prints the approval URL and an eight-character code, and waits for "
       + "an owner to enter that code and approve in a browser they are already signed in to. Typing the code — rather "
       + "than following a prefilled link — is what proves the approver can see this terminal. "
-      + "It needs no site and no taproot-site.json: what it authorizes is the account, so it works in any directory "
+      + "Ordinary login needs no site and no taproot-site.json: what it authorizes is the account, so it works in any directory "
       + "immediately after install. Choose a site afterwards with 'sites' and 'use'. "
+      + "With --legal-drafts it requests a separate 24-hour grant for the selected standard site; use the global --legal-drafts option before site commands to select that grant. "
       + "The approval URL is composed from the reviewed API origin and is never taken from a response. "
       + "The issued sign-in is written to credentials.json under $XDG_CONFIG_HOME/taproot-site/ (falling back to "
       + "~/.config/taproot-site/), directory 0700 and file 0600, one per API origin, replacing any sign-in already "
@@ -847,7 +850,11 @@ The site credential is taken from ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} when it is
 set; otherwise it is minted for each run by exchanging the account sign-in that
 login stores outside the repository. There is no flag for either. The sign-in
 authorizes nothing on any site: it lists sites and buys short-lived site
-credentials, and it expires 24 hours after it is issued.
+credentials, and it expires 24 hours after it is issued. To edit legal drafts,
+run 'login --legal-drafts' for the selected standard site, then put
+'--legal-drafts' before pull, pages push, plan, or apply. This selects a
+separate site grant that expires within 24 hours. Legal approval and publishing
+remain in the app.
 
 Verbs write one JSON result to stdout and human progress to stderr. validate,
 help, whoami, and env are offline and read-only. login, logout, sites, use,
@@ -1038,8 +1045,11 @@ function verbHelp(verb) {
     // contradicts the note two paragraphs below it is worse than either alone.
     ? `Options:
   --config <path>  Place before the verb; bypass parent discovery.
+  --legal-drafts   Authorize a separate, short-lived grant for the selected standard site.
   --help           Show this help.
   --version        Show the package version.`
+    : ["logout", "whoami", "pull", "pages push", "plan", "apply"].includes(verb.name)
+    ? COMMON_OPTIONS.replace("  --quiet", "  --legal-drafts   Use the selected site's legal draft grant (before the verb).\n  --quiet")
     : COMMON_OPTIONS;
   const deliveryTargetOption = verb.deliveryOptions
     ? `\n  --staging        Check the staging target.
@@ -1374,11 +1384,20 @@ function parseArguments(arguments_) {
   if (arguments_.length === 1 && arguments_[0] === "--version") return { mode: "version" };
 
   let configPath;
-  let commandArguments = arguments_;
-  if (arguments_[0] === "--config") {
-    configPath = parseConfigOption(arguments_, 0);
-    commandArguments = arguments_.slice(2);
+  let legalDrafts = false;
+  let globalIndex = 0;
+  while (arguments_[globalIndex] === "--config" || arguments_[globalIndex] === "--legal-drafts") {
+    if (arguments_[globalIndex] === "--config") {
+      if (configPath !== undefined) throw usageError("cli.duplicate_option", "--config may be supplied only once.");
+      configPath = parseConfigOption(arguments_, globalIndex);
+      globalIndex += 2;
+    } else {
+      if (legalDrafts) throw usageError("cli.duplicate_option", "--legal-drafts may be supplied only once.");
+      legalDrafts = true;
+      globalIndex += 1;
+    }
   }
+  const commandArguments = arguments_.slice(globalIndex);
 
   const verb = matchVerb(commandArguments);
   if (!verb) {
@@ -1389,6 +1408,7 @@ function parseArguments(arguments_) {
   }
   const rest = commandArguments.slice(verb.tokens.length);
   if (verb.name === VERB_HELP) {
+    if (legalDrafts) throw usageError("cli.legal_option", "--legal-drafts applies only to site authoring commands.");
     if (configPath !== undefined) {
       throw usageError("cli.config_option", "--config applies only to operational verbs.", {
         field: "configPath",
@@ -1439,6 +1459,11 @@ function parseArguments(arguments_) {
   const positionals = [];
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
+    if (verb.name === VERB_LOGIN && argument === "--legal-drafts") {
+      if (legalDrafts) throw usageError("cli.duplicate_option", "--legal-drafts may be supplied only once.");
+      legalDrafts = true;
+      continue;
+    }
     if (verb.name === VERB_VALIDATE && argument === "--init") {
       if (init) throw usageError("cli.duplicate_option", "--init may be supplied only once.");
       init = true;
@@ -1718,6 +1743,9 @@ function parseArguments(arguments_) {
       field: "planHash",
     });
   }
+  if (legalDrafts && !["login", "logout", "whoami", "pull", "pages push", "plan", "apply"].includes(verb.name)) {
+    throw usageError("cli.legal_option", "--legal-drafts applies to login, logout, whoami, pull, pages push, plan, or apply.");
+  }
   if (quiet && verb.name === VERB_LOGIN) {
     // The approval URL and user code reach the operator only as progress
     // lines, and the JSON result is serialized only after polling ends — so a
@@ -1750,6 +1778,7 @@ function parseArguments(arguments_) {
     surface: verb.surface,
     surfaceCapabilities: verb.surfaceCapabilities,
     configPath,
+    legalDrafts,
     quiet,
     deployTarget,
     allowFailedPreview,
@@ -1850,6 +1879,7 @@ export async function runCli({
       cwd,
       environment,
       configPath: parsed.configPath,
+      legalDrafts: parsed.legalDrafts,
       deployTarget: parsed.deployTarget,
       allowFailedPreview: parsed.allowFailedPreview,
       ...(parsed.handoff === undefined ? {} : { handoff: parsed.handoff }),
@@ -1905,6 +1935,10 @@ export async function runCli({
     return 0;
   } catch (unknownError) {
     progress?.stop();
+    if (parsed?.legalDrafts && unknownError instanceof ApiError
+      && unknownError.refusalKind() === REFUSAL_CREDENTIAL_REJECTED) {
+      stderr.write(`The legal draft grant was rejected. Run '${CLI_BINARY_NAME} ${VERB_LOGIN} --legal-drafts' again.\n`);
+    }
     const error = asSiteAuthoringError(unknownError);
     if (completedPreviewRecovery) error.withPreviewRecovery(completedPreviewRecovery);
     const result = failureResult(error);
