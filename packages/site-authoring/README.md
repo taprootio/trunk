@@ -235,8 +235,8 @@ Which verbs apply depends on the site:
   `pull` snapshots its four settings documents, `theme push`, `footer push`,
   and `media upload` author them, and `deploy` stages and promotes them.
   Its pages, navigation, and redirects come from the Docs artifact, so
-  `pages push`, `nav push`, the `redirects` and `forms` verbs, `approve`, and the
-  `preview` verbs refuse with `surface.presentation_only` before any request.
+  `pages push`, `nav push`, the `redirects`, `forms` and `marketing` verbs, `link build`,
+  `approve`, and the `preview` verbs refuse with `surface.presentation_only` before any request.
 - A **prebuilt Docs** site (`none`) serves its artifact unchanged and takes no
   verb; each refuses with `surface.none`.
 
@@ -640,6 +640,54 @@ existing form preserves the site's preference. It is independent of the sink
 and takes effect without publishing or a new form version. Delivery requires
 Taproot's rollout and email provider readiness; opt-in does not enable either
 or backfill earlier submissions. The CLI never pulls visitor answers.
+
+### Campaigns, placements and tracked links
+
+A campaign groups the links of one push, and a placement names the spot a
+link appears, such as a newsletter footer. Both are bounded sets of public
+keys the site's release admits, so a page view that carries a matching
+`utm_campaign` or `utm_content` is counted under it. Each is one JSON file:
+`marketing/campaigns.json` is `{ campaigns: [{ key, name, note?, starts_on?,
+ends_on? }] }` and `marketing/placements.json` is `{ placements: [{ key, name
+}] }`.
+
+```bash
+taproot-site marketing pull          # write both files, with a baseline
+# edit marketing/campaigns.json and marketing/placements.json
+taproot-site marketing push          # create, update and restore
+taproot-site marketing push --archive  # also archive what the files leave out
+taproot-site link build --path /recipes/spring-salad --source newsletter \
+  --campaign spring-launch --placement nl-footer
+```
+
+`marketing pull` replaces both files with the site's live records, each with
+the read-only `state` (live, publishing, goes_live_with_first_publish,
+not_in_current_release) and `counted_from`, the day its key first went live.
+Archived records are listed and not written. `marketing push` validates both
+files, compares every record with the site, and then creates a key the site
+lacks, updates the labels of an existing key, and restores an archived key a
+file names. A key is public URL text and never changes or returns to use, so a
+changed key is a new record; the old one is archived only when you pass
+`--archive`, and only if this workspace pulled it. A record that changed on the
+site since the pull is refused (`marketing.concurrent_modification`), as is a
+key the site has that this workspace never pulled (`marketing.pull_required`).
+Quota and key refusals are shown as Taproot words them. Like `forms push`, it
+has no plan step: it reads the site, refuses a stale baseline, and writes.
+Creating or restoring a key queues the silent release that starts counting it;
+nothing is deployed or waited for.
+
+`link build` prints one address and saves nothing. It uses the Marketing link
+builder's own rules, compiled from the app: the source decides the medium
+(`reader` is not offered), a `utm_source`, `utm_medium`, `utm_campaign` or `utm_content` already on the path is replaced (other `utm_` pairs are kept), and a
+campaign or placement is checked against `marketing/*.json` when the workspace
+has them, and otherwise against the live site. A key that is not live yet is
+allowed, with a note that page views count under the source only until it is
+(a note read from a file is as of the last `marketing pull` or push).
+The host is the signed-in site's public address; pass `--domain <host>` when
+only a site credential is available. The `delegation.content` capability
+carries what these verbs need (`site.analytics.view`, plus the publish
+permission to change anything); `whoami` reports whether the last exchange
+held it. `help marketing` and `help link` state the contracts.
 
 `preview page <page-path-or-id>` renders one persisted draft behind the
 staging gate and mints a browser handoff URL, reported only in the final JSON

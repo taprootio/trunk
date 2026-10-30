@@ -36,6 +36,7 @@ import {
 } from "../settings-catalog.js";
 import { ApiError } from "../transport.js";
 import { placesFormIds, readFormIndex, withFormKeys } from "../form-references.js";
+import { MARKETING_MANIFEST_KEY } from "../marketing-workspace.js";
 import {
   generatedIdentity,
   legalIdentity,
@@ -1395,10 +1396,13 @@ export async function pull(invocation) {
 
     // `forms pull` owns the forms baseline, and a plain pull does not read forms.
     // Carrying it forward keeps the next `forms push` fenced instead of refusing
-    // it as never pulled. An unreadable old manifest has nothing to carry.
-    const formsBaseline = (await readManifest(config.workspaceDir, siteId, { required: false }).catch(() =>
+    // it as never pulled. The marketing baseline is carried for the same reason
+    // (TR01301). An unreadable old manifest has nothing to carry.
+    const previousManifest = await readManifest(config.workspaceDir, siteId, { required: false }).catch(() =>
       undefined
-    ))?.forms;
+    );
+    const formsBaseline = previousManifest?.forms;
+    const marketingBaseline = previousManifest?.[MARKETING_MANIFEST_KEY];
     const manifest = {
       manifestVersion: MANIFEST_VERSION,
       siteId,
@@ -1420,6 +1424,7 @@ export async function pull(invocation) {
       ),
       ...(presentationRevision === undefined ? {} : { presentation: presentationManifestEntry(presentationRevision) }),
       ...(formsBaseline === undefined ? {} : { forms: formsBaseline }),
+      ...(marketingBaseline === undefined ? {} : { [MARKETING_MANIFEST_KEY]: marketingBaseline }),
       pages: manifestPages,
       ...(retiredGeneratedSources.length === 0 ? {} : { retiredGeneratedSources }),
     };

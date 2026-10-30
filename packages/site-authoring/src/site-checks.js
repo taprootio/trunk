@@ -19,7 +19,6 @@ export const RULE_FORM_KEY_UNKNOWN = "form.key_unknown";
 export const RULE_REDIRECT_SOURCE_INVALID = "redirect.source_invalid";
 export const RULE_REDIRECT_SOURCE_INDEX_HTML = "redirect.source_index_html";
 export const RULE_REDIRECT_SOURCE_INTEGRATION_DATA = "redirect.source_integration_data";
-export const RULE_REDIRECT_SOURCE_SHARE_LINK = "redirect.source_share_link";
 export const RULE_REDIRECT_SOURCE_RUNTIME_MIRROR = "redirect.source_runtime_mirror";
 export const RULE_REDIRECT_SOURCE_GENERATED_FILE = "redirect.source_generated_file";
 export const RULE_REDIRECT_SOURCE_NOT_STORABLE = "redirect.source_not_storable";
@@ -282,7 +281,6 @@ export function normalizeRedirectPath(value) {
 }
 const GENERATED_ROOT_FILES = ["404.html", "sitemap.xml", "robots.txt", "favicon.ico"];
 const INTEGRATION_DATA_ROOT = "integrations";
-const SHARE_LINK_ROOT = "s";
 const MAX_MARKER_SEGMENT_BYTES = 200;
 const MAX_OUTPUT_PATH_LENGTH = 1_024;
 const WINDOWS_DEVICE_STEMS = new Set(["con", "prn", "aux", "nul"]);
@@ -317,10 +315,6 @@ export function redirectSourceRule(edgePath) {
     }
     if (first.toLowerCase() === INTEGRATION_DATA_ROOT)
         return refuse(RULE_REDIRECT_SOURCE_INTEGRATION_DATA);
-    const shareSegments = decoded.replace(/^\/+|\/+$/gu, "").split("/");
-    if (shareSegments.length > 1 && shareSegments[1].length > 0 && shareSegments[0].toLowerCase() === SHARE_LINK_ROOT) {
-        return refuse(RULE_REDIRECT_SOURCE_SHARE_LINK);
-    }
     if (isRuntimeMirrorPath(decoded))
         return refuse(RULE_REDIRECT_SOURCE_RUNTIME_MIRROR);
     if (GENERATED_ROOT_FILES.includes(first.toLowerCase()))

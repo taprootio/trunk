@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "keyGrammar": "campaign",
+  "artifactPath": "_taproot/analytics-links.json",
+  "artifactVersion": 1,
+  "collectorMarker": "c2",
+  "maxActivePerSite": 200,
+  "maxTotalPerSite": 2000,
+  "nameMaxLength": 80,
+  "vectors": [
+    {"value": "nl-footer", "valid": true},
+    {"value": "abc", "valid": true},
+    {"value": "ab", "valid": false},
+    {"value": "NL-footer", "valid": false},
+    {"value": "nl_footer", "valid": false},
+    {"value": "nl footer", "valid": false},
+    {"value": "nl|footer", "valid": false},
+    {"value": "a-label-key-that-is-longer-than-32", "valid": false},
+    {"value": "promo-123456789", "valid": false},
+    {"value": "", "valid": false}
+  ]
+}

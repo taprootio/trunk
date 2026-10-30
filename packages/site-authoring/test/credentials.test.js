@@ -19,6 +19,7 @@ import {
 import { readCredentialStore, saveCredential } from "../src/credentials.js";
 import { SiteAuthoringError } from "../src/errors.js";
 import { warnIfExternalWritesPaused } from "../src/session.js";
+import { linkBuild } from "../src/verbs/link-build.js";
 import { login } from "../src/verbs/login.js";
 import { logout } from "../src/verbs/logout.js";
 import { sites } from "../src/verbs/sites.js";
@@ -1427,6 +1428,56 @@ test("the exchange records the platform switch, dated, and whoami reports it off
   // Dated on the human channel too, because an undated flag from an offline
   // command reads as a fact about right now.
   assert.ok(progress.some((line) => line.includes(EXCHANGED_AT) && line.includes(EXTERNAL_WRITES_SETTING_KEY)));
+});
+
+test("whoami says whether the last exchange allows campaigns and placements, offline", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+
+  const before = await whoami(invoke(site, api([]), { verb: "whoami" }).invocation);
+  assert.deepEqual(before.marketing, { capability: "delegation.content", access: "on_exchange" });
+
+  await status(invoke(site, api(statusRoutes()), { verb: "status" }).invocation);
+  const { invocation, progress } = invoke(site, api([]), { verb: "whoami" });
+  const after = await whoami(invocation);
+  assert.equal(after.marketing.access, after.lastExchange.capabilities.includes("delegation.content") ? "granted" : "not_in_last_exchange");
+  assert.ok(progress.some((line) => line.startsWith("Campaigns and placements ('marketing pull', 'marketing push' and 'link build')")));
+});
+
+test("link build takes the site's public host from the signed-in site", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api([authorableSitesRoute()]);
+  const { invocation } = invoke(site, wire, {
+    verb: "link build",
+    linkPath: "https://www.blog.example.test/posts/one?x=1#top",
+    linkSource: "x",
+  });
+
+  const result = await linkBuild(invocation);
+
+  assert.equal(result.link.host, "blog.example.test");
+  assert.equal(result.link.address, "https://blog.example.test/posts/one?x=1&utm_source=x&utm_medium=social#top");
+});
+
+test("link build without a sign-in or a --domain says where the host comes from", async (testContext) => {
+  const site = await fixture(testContext);
+  const { invocation } = invoke(site, api([]), { verb: "link build", linkPath: "/", linkSource: "x" });
+
+  await assert.rejects(linkBuild(invocation), (error) => error.code === "link.domain_unknown" && /--domain/u.test(error.message));
+});
+
+test("link build refuses a site that has no public address yet", async (testContext) => {
+  const site = await fixture(testContext);
+  await seedCredential(site);
+  const wire = api([{
+    method: "GET",
+    pathname: "/api/v1/site-authoring/authorable-sites",
+    reply: { sites: [{ siteId: SITE_ID, name: "Blog", siteType: "SITE_TYPE_STANDARD", authoringSurface: "SITE_AUTHORING_SURFACE_STANDARD" }] },
+  }]);
+  const { invocation } = invoke(site, wire, { verb: "link build", linkPath: "/", linkSource: "x" });
+
+  await assert.rejects(linkBuild(invocation), (error) => error.code === "link.no_public_address");
 });
 
 test("a sign-in stored before the switch existed still loads, and whoami says it was not recorded", async (testContext) => {

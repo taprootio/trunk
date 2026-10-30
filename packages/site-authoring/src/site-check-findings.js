@@ -36,7 +36,6 @@ export const SITE_CHECK_WORDING = Object.freeze({
   "redirect.source_invalid": () => "has a source that is not an absolute site path",
   "redirect.source_index_html": () => "has a source ending in index.html",
   "redirect.source_integration_data": () => "has a source under the integration data root",
-  "redirect.source_share_link": () => "has a source under the share-link root",
   "redirect.source_runtime_mirror": () => "has a source under the published-site runtime",
   "redirect.source_generated_file": () => "has a source naming a file the site generates",
   "redirect.source_not_storable": () => "has a source the publisher cannot store",

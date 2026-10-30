@@ -12,7 +12,7 @@ import {
 } from "../constants.js";
 import { isBehindLatest } from "../cli-release.js";
 import { credentialApiOrigin, findCredential } from "../credentials.js";
-import { SITE_AUTHORING_CAPABILITIES } from "../capabilities.js";
+import { CAPABILITY_CONTENT, SITE_AUTHORING_CAPABILITIES } from "../capabilities.js";
 import { openAnonymousSession, successResult } from "../session.js";
 import { environmentNameFor } from "../settings.js";
 import { describeSurface } from "../surface.js";
@@ -62,6 +62,33 @@ function cliReleaseLine(lastExchange) {
     ? `Latest CLI release ${when}: ${lastExchange.latestCliVersion}. This CLI is ${CLI_VERSION} and is behind it; `
       + `Taproot accepts only the latest. Upgrade with: ${CLI_UPGRADE_COMMAND}`
     : `Latest CLI release ${when}: ${lastExchange.latestCliVersion}. This CLI is ${CLI_VERSION}.`;
+}
+
+/**
+ * Whether the credential can manage the site's campaigns and placements (TR01301), from what is known locally.
+ *
+ * The Content capability carries both permissions those verbs need, so the answer is whether the last exchange
+ * held it. Like the rest of this verb it is a recording: `granted` is "what that exchange held", and `exchange`
+ * says no exchange has happened yet, when the next command that needs it will mint one.
+ */
+function marketingAccess(lastExchange, environmentOverride) {
+  if (environmentOverride) return { capability: CAPABILITY_CONTENT, access: "unknown" };
+  if (lastExchange === undefined) return { capability: CAPABILITY_CONTENT, access: "on_exchange" };
+  return {
+    capability: CAPABILITY_CONTENT,
+    access: lastExchange.capabilities.includes(CAPABILITY_CONTENT) ? "granted" : "not_in_last_exchange",
+  };
+}
+
+function marketingLine({ capability, access }) {
+  const verbs = "'marketing pull', 'marketing push' and 'link build'";
+  return access === "granted"
+    ? `Campaigns and placements (${verbs}): allowed; the last exchange held ${capability}.`
+    : access === "not_in_last_exchange"
+    ? `Campaigns and placements (${verbs}): the last exchange did not hold ${capability}, which the next command that needs it requests; a sign-in's ceiling includes it.`
+    : access === "on_exchange"
+    ? `Campaigns and placements (${verbs}): carried by ${capability}, which the next command that needs it requests.`
+    : `Campaigns and placements (${verbs}): needs ${capability}; ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} supplies the credential, so this command cannot tell.`;
 }
 
 /**
@@ -155,6 +182,9 @@ export async function whoami(invocation) {
     onProgress(cliReleaseLine(lastExchange));
   }
 
+  const marketing = marketingAccess(lastExchange, environmentOverride);
+  onProgress(marketingLine(marketing));
+
   return successResult(VERB_WHOAMI, config?.siteId, {
     apiOrigin,
     // Named as well as spelled out, so "am I on local right now" is answerable
@@ -176,6 +206,7 @@ export async function whoami(invocation) {
     // Named for what each is. `capabilities` alone would conflate the ceiling
     // with the grant, which are different numbers and differently trustworthy.
     capabilityCeiling: SITE_AUTHORING_CAPABILITIES,
+    marketing,
     ...(environmentOverride || lastExchange === undefined ? {} : {
       lastExchange: {
         siteId: lastExchange.siteId,

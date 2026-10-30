@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "keyPattern": "^[a-z0-9-]{3,32}$",
+  "keyMinLength": 3,
+  "keyMaxLength": 32,
+  "maxActivePerSite": 50,
+  "artifactPath": "_taproot/analytics-campaigns.json",
+  "artifactVersion": 1,
+  "collectorMarker": "c1",
+  "maxDigitRun": 8,
+  "maxTotalPerSite": 500,
+  "nameMaxLength": 80,
+  "noteMaxLength": 500,
+  "vectors": [
+    {"value": "spring-26", "valid": true},
+    {"value": "abc", "valid": true},
+    {"value": "ab", "valid": false},
+    {"value": "a-very-long-campaign-key-that-is-over-32", "valid": false},
+    {"value": "Spring-26", "valid": false},
+    {"value": "spring_26", "valid": false},
+    {"value": "spring 26", "valid": false},
+    {"value": "spring|26", "valid": false},
+    {"value": "spring.26", "valid": false},
+    {"value": "", "valid": false},
+    {"value": "-leading", "valid": true},
+    {"value": "x12345678y", "valid": true},
+    {"value": "promo-123456789", "valid": false},
+    {"value": "spring-26\n", "valid": false},
+    {"value": "0123456789", "valid": false}
+  ]
+}

@@ -16,7 +16,6 @@
     { "id": "redirect.source_invalid", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "none" },
     { "id": "redirect.source_index_html", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_integration_data", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
-    { "id": "redirect.source_share_link", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_runtime_mirror", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_generated_file", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },
     { "id": "redirect.source_not_storable", "severity": "error", "scope": "site", "runsAt": ["save", "validate"], "subject": "redirect_source", "detail": "first_segment" },

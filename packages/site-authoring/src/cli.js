@@ -33,8 +33,11 @@ import {
   VERB_FORMS_PUSH,
   VERB_FORMS_VALIDATE,
   VERB_HELP,
+  VERB_LINK_BUILD,
   VERB_LOGIN,
   VERB_LOGOUT,
+  VERB_MARKETING_PULL,
+  VERB_MARKETING_PUSH,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
   VERB_PAGES_DELETE,
@@ -88,11 +91,14 @@ import {
   REFERENCE_VERSION,
 } from "./reference-help.js";
 import { FONT_CATEGORIES, getFontCatalogReference } from "./font-catalog.js";
+import { LINK_SOURCES } from "./marketing-contract.js";
 import { assertCliCurrent } from "./session.js";
 import { ApiError } from "./transport.js";
 import { formatThemeResolve } from "./theme-resolve.js";
 import { MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS } from "./theme-validation.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
+
+const LINK_SOURCE_KEYS = LINK_SOURCES.map((source) => source.key);
 
 /**
  * The verbs the local version gate applies to (TR00703).
@@ -592,6 +598,45 @@ const VERBS = Object.freeze([
       + "See 'taproot-site help forms'.",
   },
   {
+    name: VERB_MARKETING_PULL,
+    surface: SURFACE_STANDARD,
+    // Campaigns and placements ride the content capability, which carries the analytics-view permission that
+    // reads them and the publish permission that changes them (TR01301).
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["marketing", "pull"],
+    summary: "Write the site's live campaigns and placements to marketing/ and record what was read.",
+    note: "Needs a pulled workspace ('pull' first). It replaces marketing/campaigns.json and marketing/placements.json "
+      + "with the site's records, each with its read-only state and the day its key was first counted from, and records "
+      + "a baseline that 'marketing push' fences against. Archived records are listed and not written. "
+      + "See 'taproot-site help marketing'.",
+  },
+  {
+    name: VERB_MARKETING_PUSH,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["marketing", "push"],
+    archiveOption: true,
+    summary: "Create, update and restore the campaigns and placements the marketing files name.",
+    note: "Every file is validated and compared with the site before anything is written. A key is public URL text "
+      + "and never changes, so a new key is a new record; a record the file leaves out is archived only with "
+      + "--archive, and only if this workspace pulled it. A file that names an archived key restores it. Creating or "
+      + "restoring a key queues the silent release that starts counting it; run 'marketing pull' later to see it live. "
+      + "A quota or key refusal is reported as Taproot returns it. See 'taproot-site help marketing'.",
+  },
+  {
+    name: VERB_LINK_BUILD,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
+    tokens: ["link", "build"],
+    linkOptions: true,
+    summary: "Print one tracked address for a page, a source, and an optional campaign and placement.",
+    note: "Saves nothing. The medium is set by the source ('reader' is not offered: a published page's own share "
+      + "action sets it). The host is the signed-in site's public address; pass --domain when only a site credential "
+      + "is available. A campaign or placement is checked against marketing/*.json when the workspace has the file, "
+      + "and otherwise against the live site; one that is not live yet is allowed with a note that page views count "
+      + "under the source only until it is. See 'taproot-site help link'.",
+  },
+  {
     name: VERB_THEME_PUSH,
     surface: SURFACE_DOCS_PRESENTATION,
     capabilities: [CAPABILITY_DESIGN],
@@ -978,6 +1023,17 @@ function verbHelp(verb) {
   const dryRunOption = verb.dryRun
     ? "\n  --dry-run        Read the site and report what a push would change, without writing."
     : "";
+  const archiveOption = verb.archiveOption
+    ? "\n  --archive        Archive a campaign or placement the file leaves out (never done without this)."
+    : "";
+  const linkOptions = verb.linkOptions
+    ? `\n  --path <page>        The page on this site; / or '' for the home page. A query or #fragment you add is kept (required).
+  --source <key>       Where you will post the link: ${LINK_SOURCE_KEYS.join(", ")} (required).
+  --campaign <key>     A campaign key to group links from one push (optional).
+  --placement <key>    A placement key naming the spot the link will appear (optional).
+                       Write --option=<value> for a value that starts with hyphens.
+  --domain <host>      The site's public host; for a site credential with no sign-in to read it from.`
+    : "";
   const planOption = verb.planHash
     ? "\n  --plan <hash>    The planHash 'plan' reported; required."
     : "";
@@ -1060,7 +1116,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${resolveOptions}${dryRunOption}${planOption}${nameOption}${note}
+${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${resolveOptions}${dryRunOption}${archiveOption}${linkOptions}${planOption}${nameOption}${note}
 `;
 }
 
@@ -1075,6 +1131,39 @@ function matchVerb(arguments_) {
     }
   }
   return matched;
+}
+
+/** The `link build` options and the invocation field each fills. */
+const LINK_OPTION_FIELDS = Object.freeze({
+  "--path": "linkPath",
+  "--source": "linkSource",
+  "--campaign": "linkCampaign",
+  "--placement": "linkPlacement",
+  "--domain": "linkDomain",
+});
+
+/**
+ * The value after a `link build` option. An option-like value is refused so a missing value never swallows the
+ * next flag; only --path may be empty, which names the home page.
+ */
+function parseLinkOption(rest, index, argument) {
+  // `--campaign=--launch` is the one way to pass a value that starts with `--`, which a valid key may (a key may
+  // begin with a hyphen); a separated value that looks like an option is refused so a missing value never swallows
+  // the next flag.
+  const [name, inline] = argument.includes("=") ? [argument.slice(0, argument.indexOf("=")), argument.slice(argument.indexOf("=") + 1)] : [argument, undefined];
+  const value = inline ?? rest[index + 1];
+  const field = name.slice(2);
+  if (typeof value !== "string" || (inline === undefined && value.startsWith("--")) || (value === "" && name !== "--path")) {
+    throw usageError("cli.option_value", `${name} requires a value.`, { field });
+  }
+  if (Buffer.byteLength(value, "utf8") > LIMITS.configPathBytes || hasAsciiControl(value)) {
+    throw usageError(
+      "cli.option_value",
+      `${name} must be at most ${LIMITS.configPathBytes} bytes with no control characters.`,
+      { field },
+    );
+  }
+  return { name, value, consumed: inline === undefined ? 1 : 0 };
 }
 
 function usageError(code, message, options = {}) {
@@ -1126,6 +1215,8 @@ function parseReferenceArguments(arguments_) {
       || topic === "fixture"
       || topic === "redirects"
       || topic === "forms"
+      || topic === "marketing"
+      || topic === "link"
       || topic === "walkthrough"
       || topic === "delivery"
       || topic === "import"
@@ -1197,6 +1288,8 @@ function referenceResult(parsed) {
     case "nav":
     case "redirects":
     case "forms":
+    case "marketing":
+    case "link":
     case "media":
     case "preview":
     case "fixture":
@@ -1451,6 +1544,8 @@ function parseArguments(arguments_) {
   let fromSite = false;
   let keyName;
   let planHash;
+  let archive = false;
+  const linkValues = {};
   let metaTitle;
   let metaDescription;
   let metaAuthor;
@@ -1551,6 +1646,21 @@ function parseArguments(arguments_) {
       }
       since = candidate;
       index += 1;
+      continue;
+    }
+    if (verb.archiveOption && argument === "--archive") {
+      if (archive) throw usageError("cli.duplicate_option", "--archive may be supplied only once.");
+      archive = true;
+      continue;
+    }
+    if (verb.linkOptions && Object.hasOwn(LINK_OPTION_FIELDS, argument.split("=")[0])) {
+      const { name, value, consumed } = parseLinkOption(rest, index, argument);
+      const field = LINK_OPTION_FIELDS[name];
+      if (linkValues[field] !== undefined) {
+        throw usageError("cli.duplicate_option", `${name} may be supplied only once.`, { field: name.slice(2) });
+      }
+      linkValues[field] = value;
+      index += consumed;
       continue;
     }
     if (verb.dryRun && argument === "--dry-run") {
@@ -1796,6 +1906,8 @@ function parseArguments(arguments_) {
     ...(themeContext === undefined ? {} : { themeContext }),
     ...(fromSite ? { fromSite } : {}),
     ...(planHash === undefined ? {} : { planHash }),
+    ...(archive ? { archive } : {}),
+    ...linkValues,
     ...(metaTitle === undefined ? {} : { metaTitle }),
     ...(metaDescription === undefined ? {} : { metaDescription }),
     ...(metaAuthor === undefined ? {} : { metaAuthor }),
@@ -1893,6 +2005,8 @@ export async function runCli({
       ...(parsed.themeContext === undefined ? {} : { themeContext: parsed.themeContext }),
       ...(parsed.fromSite === undefined ? {} : { fromSite: parsed.fromSite }),
       ...(parsed.planHash === undefined ? {} : { planHash: parsed.planHash }),
+      ...(parsed.archive ? { archive: true } : {}),
+      ...Object.fromEntries(Object.values(LINK_OPTION_FIELDS).filter((field) => parsed[field] !== undefined).map((field) => [field, parsed[field]])),
       // Only when given, like the other optional fields, so each verb keeps its default (TR00925).
       ...(parsed.deliveryUrl === undefined ? {} : { deliveryUrl: parsed.deliveryUrl }),
       ...(parsed.propagationWaitSeconds === undefined ? {} : { propagationWaitSeconds: parsed.propagationWaitSeconds }),

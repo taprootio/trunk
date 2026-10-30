@@ -86,7 +86,7 @@ function keyMissingError() {
  * The exchange's own answer is checked again afterwards, because the
  * recording can be stale.
  */
-function requireRecordedSurface(invocation, config) {
+export function requireRecordedSurface(invocation, config) {
   if (invocation.surface === undefined || config.authoringSurface === undefined) return;
   if (!surfaceAllows(config.authoringSurface, invocation.surface)) {
     throw surfaceRefusal(invocation.verb ?? "This verb", config.authoringSurface, { source: "config" });

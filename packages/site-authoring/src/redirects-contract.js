@@ -12,7 +12,6 @@ import {
   RULE_REDIRECT_SOURCE_INVALID,
   RULE_REDIRECT_SOURCE_NOT_STORABLE,
   RULE_REDIRECT_SOURCE_RUNTIME_MIRROR,
-  RULE_REDIRECT_SOURCE_SHARE_LINK,
 } from "./site-checks.js";
 
 export { normalizeRedirectPath };
@@ -110,8 +109,6 @@ const SOURCE_RULE_REASONS = Object.freeze({
     + "a redirect source, and the page or home file there is generated.",
   [RULE_REDIRECT_SOURCE_INTEGRATION_DATA]: (first) =>
     `'/${first}' is reserved for integration data, so nothing under it can be a redirect source.`,
-  [RULE_REDIRECT_SOURCE_SHARE_LINK]: () =>
-    "'/s/' is reserved for share links, so nothing under it can be a redirect source.",
   [RULE_REDIRECT_SOURCE_RUNTIME_MIRROR]: () => RUNTIME_MIRROR_PATH_REASON,
   [RULE_REDIRECT_SOURCE_GENERATED_FILE]: (first) =>
     `'/${first}' is a file the site generates, so neither it nor anything under it can be a redirect source.`,

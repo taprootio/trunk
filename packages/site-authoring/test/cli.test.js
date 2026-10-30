@@ -759,7 +759,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 6\.5\.0 complete site-theme contract/u,
+      match: /^Espalier 6\.7\.0 complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -892,7 +892,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 42,
+          referenceVersion: 43,
           topic: scenario.topic,
         },
       );
@@ -968,6 +968,8 @@ test("reference help reports stable usage errors with valid alternatives", async
         "nav",
         "redirects",
         "forms",
+        "marketing",
+        "link",
         "media",
         "preview",
         "delivery",

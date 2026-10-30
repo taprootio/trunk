@@ -255,7 +255,6 @@ test("a target too long to store as metadata is refused offline", () => {
 test("a refused redirect source names the site-check rule that refuses it, and keeps its code", () => {
   for (
     const [path, rule] of [
-      ["/s/abc", "redirect.source_share_link"],
       ["/index.html", "redirect.source_index_html"],
       ["/sitemap.xml", "redirect.source_generated_file"],
       ["/integrations/x", "redirect.source_integration_data"],

@@ -39,6 +39,9 @@ import { previewPage } from "../src/verbs/preview-page.js";
 import { projectPulledTheme } from "../src/theme-projection.js";
 import { missingThemeFields } from "../src/theme-validation.js";
 import { previewRevoke } from "../src/verbs/preview-revoke.js";
+import { linkBuild } from "../src/verbs/link-build.js";
+import { marketingPull } from "../src/verbs/marketing-pull.js";
+import { marketingPush } from "../src/verbs/marketing-push.js";
 import { pull } from "../src/verbs/pull.js";
 import { redirectsPull } from "../src/verbs/redirects-pull.js";
 import { redirectsPush } from "../src/verbs/redirects-push.js";
@@ -520,6 +523,8 @@ const CONFIRM_UPLOAD = /\/images\/confirm-upload$/u;
 const PRESIGNED_PUT = /^\/upload$/u;
 const SITE_VIDEOS = /\/sites\/[^/]+\/videos$/u;
 const SITE_FORMS = /\/sites\/[^/]+\/forms$/u;
+const SITE_CAMPAIGNS = /\/sites\/[^/]+\/campaigns(?:\/[^/]+(?:\/(?:archive|restore))?)?$/u;
+const SITE_PLACEMENTS = /\/sites\/[^/]+\/link-labels(?:\/[^/]+(?:\/(?:archive|restore))?)?$/u;
 const REQUEST_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/request-upload$/u;
 const CONFIRM_VIDEO_UPLOAD = /\/sites\/[^/]+\/videos\/confirm-upload$/u;
 const IMPORT_VIDEO_EMBED_POSTER = /\/sites\/[^/]+\/videos\/import-embed-poster$/u;
@@ -558,6 +563,7 @@ const PERMISSION_CAPABILITIES = Object.freeze({
   "site.theme.manage": [CAPABILITY_DESIGN],
   "site.media.manage": [CAPABILITY_CONTENT, CAPABILITY_DESIGN],
   "site.forms.manage": [CAPABILITY_CONTENT],
+  "site.analytics.view": [CAPABILITY_CONTENT],
   "site.staging.view": [CAPABILITY_CONTENT, CAPABILITY_DESIGN, CAPABILITY_DEPLOYMENTS],
   "site.deploy": [CAPABILITY_DEPLOYMENTS],
   "site.deployments.view_any": [CAPABILITY_DEPLOYMENTS],
@@ -602,6 +608,14 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: SITE_VIDEOS, permission: "site.media.manage" },
   // A page names a form by key here and by id on the site, so a push and a pull read the site's forms (TR01216).
   { method: "GET", pattern: SITE_FORMS, permission: "site.forms.manage" },
+  // Campaigns and placements: reads need the analytics view; a write needs it first and then the publish
+  // permission, because a new key queues a public release (TR01301).
+  { method: "GET", pattern: SITE_CAMPAIGNS, permission: "site.analytics.view" },
+  { method: "GET", pattern: SITE_PLACEMENTS, permission: "site.analytics.view" },
+  { method: "POST", pattern: SITE_CAMPAIGNS, permission: "site.analytics.view", alsoRequires: ["site.pages.publish_any"] },
+  { method: "PUT", pattern: SITE_CAMPAIGNS, permission: "site.analytics.view", alsoRequires: ["site.pages.publish_any"] },
+  { method: "POST", pattern: SITE_PLACEMENTS, permission: "site.analytics.view", alsoRequires: ["site.pages.publish_any"] },
+  { method: "PUT", pattern: SITE_PLACEMENTS, permission: "site.analytics.view", alsoRequires: ["site.pages.publish_any"] },
   { method: "POST", pattern: REQUEST_VIDEO_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: CONFIRM_VIDEO_UPLOAD, permission: "site.media.manage" },
   { method: "POST", pattern: IMPORT_VIDEO_EMBED_POSTER, permission: "site.media.manage" },
@@ -726,7 +740,7 @@ function capabilityGatedFetch(verbName, fetchImpl) {
     // The route's own gate first, then anything the server resolves from state
     // the request only names — in the server's order, so the refusal a narrowed
     // credential meets is the one it would meet in production.
-    for (const permission of [route.permission, ...promotionPermissions(method, target.pathname, init)]) {
+    for (const permission of [route.permission, ...(route.alsoRequires ?? []), ...promotionPermissions(method, target.pathname, init)]) {
       const required = PERMISSION_CAPABILITIES[permission];
       assert.ok(required !== undefined, `PERMISSION_CAPABILITIES is missing '${permission}'`);
       if (!required.some((capability) => granted.includes(capability))) {
@@ -8341,6 +8355,114 @@ test("nav push refuses a workspace with no navigation file", async (site) => {
     navPush(invocation),
     (error) => error?.code === "nav.file_missing" && /pull/u.test(error.message),
   );
+});
+
+// ---------------------------------------------------------------------------
+// marketing pull / marketing push / link build (TR01301)
+// ---------------------------------------------------------------------------
+
+const MARKETING_CAMPAIGN_ID = "bbbb2222-cccc-4222-8222-dddd22222222";
+
+function wireCampaign(overrides = {}) {
+  return {
+    id: MARKETING_CAMPAIGN_ID,
+    key: "spring-26",
+    name: "Spring launch",
+    state: "SITE_CAMPAIGN_STATE_LIVE",
+    createdAt: "2026-02-01T10:00:00Z",
+    ...overrides,
+  };
+}
+
+test("pull keeps the marketing baseline that marketing push is fenced by", async (site) => {
+  const baseline = {
+    campaigns: { items: { "spring-26": { id: MARKETING_CAMPAIGN_ID, archived: false, name: "Spring launch" } } },
+  };
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([], { marketing: baseline }),
+  });
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: SETTINGS, reply: {} },
+  ]);
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+
+  assert.deepEqual((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).marketing, baseline);
+});
+
+test("marketing pull, marketing push and link build stay inside the Content capability", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const records = [wireCampaign()];
+  const wire = api([
+    { method: "GET", pattern: SITE_CAMPAIGNS, reply: () => ({ campaigns: records, canManage: true, maxActive: 50 }) },
+    { method: "GET", pattern: SITE_PLACEMENTS, reply: { linkLabels: [], canManage: true, maxActive: 200 } },
+    {
+      method: "POST",
+      pattern: SITE_CAMPAIGNS,
+      reply: (call) => {
+        const created = wireCampaign({
+          id: call.body.campaignId,
+          key: call.body.key,
+          name: call.body.name,
+          state: "SITE_CAMPAIGN_STATE_PUBLISHING",
+        });
+        records.push(created);
+        return created;
+      },
+    },
+  ]);
+
+  const pulled = await marketingPull(invoke(workspace, wire, { verb: "marketing pull" }).invocation);
+  assert.equal(pulled.marketing.campaigns.total, 1);
+
+  const campaigns = await readWorkspaceJson(workspace, "marketing/campaigns.json");
+  campaigns.campaigns.push({ key: "summer-26", name: "Summer sale" });
+  await writeWorkspaceFile(workspace.workspaceDir, "marketing/campaigns.json", Buffer.from(JSON.stringify(campaigns)));
+  const pushed = await marketingPush(invoke(workspace, wire, { verb: "marketing push" }).invocation);
+  assert.deepEqual(pushed.marketing.campaigns.created, ["summer-26"]);
+
+  // With the file pulled, the link is checked against it and the site is not asked again.
+  wire.calls.length = 0;
+  const built = await linkBuild(invoke(workspace, wire, {
+    verb: "link build",
+    linkPath: "/recipes",
+    linkSource: "newsletter",
+    linkCampaign: "summer-26",
+    linkDomain: "example.com",
+  }).invocation);
+  assert.equal(
+    built.link.address,
+    "https://example.com/recipes?utm_source=newsletter&utm_medium=email&utm_campaign=summer-26",
+  );
+  assert.deepEqual(built.notes, [
+    "Summer sale is publishing. Until it is live, page views count under the source only. "
+      + "(As of the last marketing pull or push; marketing/campaigns.json.)",
+  ]);
+  assert.deepEqual(wire.calls, []);
+});
+
+test("link build asks the live site when the workspace has no marketing file, under the Content capability", async (site) => {
+  const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]) });
+  const wire = api([
+    { method: "GET", pattern: SITE_CAMPAIGNS, reply: { campaigns: [wireCampaign()], canManage: true, maxActive: 50 } },
+  ]);
+
+  const built = await linkBuild(invoke(workspace, wire, {
+    verb: "link build",
+    linkPath: "",
+    linkSource: "linkedin",
+    linkCampaign: "spring-26",
+    linkDomain: "example.com",
+  }).invocation);
+
+  assert.equal(
+    built.link.address,
+    "https://example.com/?utm_source=linkedin&utm_medium=social&utm_campaign=spring-26",
+  );
+  assert.equal(built.notes, undefined);
+  assert.equal(wire.matching("GET", SITE_CAMPAIGNS).length, 1);
 });
 
 // ---------------------------------------------------------------------------

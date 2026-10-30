@@ -51,6 +51,13 @@ import {
   FORMS_DIRECTORY,
 } from "./forms-contract.js";
 import {
+  LINK_SOURCES,
+  MARKETING_KEY_RULE,
+  MARKETING_KINDS,
+  MARKETING_STATES,
+  maximumActive,
+} from "./marketing-contract.js";
+import {
   formatPresentationReference,
   getAppearanceReference,
   getFooterReference,
@@ -88,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 42;
+export const REFERENCE_VERSION = 43;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -421,6 +428,16 @@ export const REFERENCE_TOPICS = Object.freeze([
     name: "forms",
     usage: `${CLI_BINARY_NAME} help forms`,
     summary: "Author a form as forms/<key>.json: file shape, field types, validate, pull, push, and placing it on a page.",
+  }),
+  Object.freeze({
+    name: "marketing",
+    usage: `${CLI_BINARY_NAME} help marketing`,
+    summary: "Keep a site's campaigns and placements as marketing/*.json: file shape, pull, push, archive, and what an agent may do.",
+  }),
+  Object.freeze({
+    name: "link",
+    usage: `${CLI_BINARY_NAME} help link`,
+    summary: "Build a tracked address: path, source, optional campaign and placement; what counts and when it goes live.",
   }),
   Object.freeze({
     name: "media",
@@ -901,6 +918,95 @@ const WORKFLOW_REFERENCES = Object.freeze({
         submit_label: "Send message",
         after_submit: Object.freeze({ show: "page", page_path: "/thanks" }),
       }),
+    }),
+  }),
+  marketing: Object.freeze({
+    title: "Campaigns and placements workspace contract",
+    summary: "A site's campaigns and placements are two JSON files under marketing/. 'marketing pull' reads the site's, "
+      + "'marketing push' creates, updates, restores and (with --archive) archives to match them, and 'link build' prints "
+      + "an address that uses them.",
+    usage: `${CLI_BINARY_NAME} marketing pull | ${CLI_BINARY_NAME} marketing push [--archive]`,
+    details: Object.freeze([
+      "Run 'pull' once first: both verbs need the pulled workspace's manifest, which records what each record looked "
+      + "like when this workspace last read it. The site's licence must include analytics, and the site must be a Standard site.",
+      `A campaign groups links from one push; a placement names the spot a link appears, such as a newsletter footer. `
+      + `Both are public keys the site's release admits, so page views carry them: a campaign as utm_campaign, a placement as `
+      + `utm_content. ${MARKETING_KINDS.campaigns.file} is { campaigns: [ { key, name, note?, starts_on?, ends_on? } ] }; `
+      + `${MARKETING_KINDS.placements.file} is { placements: [ { key, name } ] }. Records are listed by key.`,
+      `A key is ${MARKETING_KEY_RULE}. It is public URL text and never changes or returns to use, even after the record is `
+      + "archived, because page views already counted under it keep the key. A name (at most "
+      + `${MARKETING_KINDS.campaigns.rules.nameMaxLength} characters), a campaign's note (at most ${MARKETING_KINDS.campaigns.rules.noteMaxLength}) `
+      + "and its starts_on and ends_on days (YYYY-MM-DD, labels only) are private and can change.",
+      `A pull also writes two read-only fields: state (${MARKETING_STATES.join(", ")}) and counted_from, the day the key first `
+      + "went live and page views began to count under it. A push ignores both. A record is live once the silent release "
+      + "that carries its key has run; until then page views count under the source only.",
+      "'marketing push' validates both files and compares every record with the site before the first write. "
+      + "A key the file names that the site lacks is created. A record whose labels differ is updated. A key the file "
+      + "names that the site has archived is restored (and updated if its labels differ). Nothing else is touched: a "
+      + "record the file leaves out stays unless you pass --archive, and --archive archives only records this workspace "
+      + "pulled. A changed key is therefore a new record plus, if you want the old one gone, an explicit --archive.",
+      "A record that changed on the site since the last pull is refused as marketing.concurrent_modification, a key "
+      + "the site has that this workspace never pulled as marketing.pull_required; reconcile with 'marketing pull' and "
+      + "retry. Taproot refuses a key outside the grammar, a key already used by an archived record, and a record over "
+      + `the quota (${maximumActive("campaigns")} unarchived campaigns, ${maximumActive("placements")} unarchived placements, and a larger cap on archived ones `
+      + "together); the refusal is shown as Taproot returns it. Archive one to make room, or restore an archived one.",
+      "'marketing pull' reports, per kind, file, total, items ([{ key, state }], at most 200), archived keys (at most 200, "
+      + "with archivedTotal and archivedTruncated), canManage and maxActive. 'marketing push' reports, per kind, the keys it "
+      + "created, updated, restored, archived, left unchanged, left on the site because the file omits them (unlisted) and found "
+      + "on the site but never pulled (unpulled), each list capped at 50 with the true totals in counts and the capped lists "
+      + "named in truncated; written is { items, count } across both kinds.",
+      "Creating or restoring a key queues a silent production release that starts admitting it; no 'deploy' is needed and "
+      + "none is waited for. 'marketing pull' later shows the state. Archiving queues no release: the key stops being admitted from the next one.",
+      "The delegation.content capability carries the permissions this needs: site.analytics.view to read and also "
+      + "site.pages.publish_any to change, because a new key publishes a release. Platform-wide, an administrator can pause external "
+      + "authoring; a push is then refused with the rollout field. A refusal names a missing permission.",
+    ]),
+    example: Object.freeze({
+      campaigns: Object.freeze({
+        campaigns: Object.freeze([
+          Object.freeze({
+            key: "spring-launch",
+            name: "Spring launch",
+            note: "Newsletter and social push",
+            starts_on: "2026-03-01",
+            ends_on: "2026-03-31",
+          }),
+        ]),
+      }),
+      placements: Object.freeze({
+        placements: Object.freeze([Object.freeze({ key: "nl-footer", name: "Newsletter footer" })]),
+      }),
+      commands: Object.freeze([
+        `${CLI_BINARY_NAME} marketing pull`,
+        `${CLI_BINARY_NAME} marketing push`,
+        `${CLI_BINARY_NAME} link build --path /recipes/spring-salad --source newsletter --campaign spring-launch --placement nl-footer`,
+      ]),
+    }),
+  }),
+  link: Object.freeze({
+    title: "Tracked link builder",
+    summary: "'link build' prints one address that counts under a source, and optionally a campaign and a placement. It saves nothing.",
+    usage: `${CLI_BINARY_NAME} link build --path <page> --source <key> [--campaign <key>] [--placement <key>] [--domain <host>]`,
+    details: Object.freeze([
+      "--path is the page on this site, such as /recipes/spring-salad; / or an empty value is the home page. A query or #fragment "
+      + "is kept; a full address is accepted only if it is on this site's own host. --source is where the link will be posted: "
+      + `${LINK_SOURCES.map((source) => source.key).join(", ")}. The medium (social or email) is set by the source and cannot be chosen. 'reader' is not offered: `
+      + "a published page's own share action sets it.",
+      "The address is https://<public host><path>?utm_source=<source>&utm_medium=<medium>[&utm_campaign=<campaign>][&utm_content=<placement>]. "
+      + "A utm_source, utm_medium, utm_campaign or utm_content already on the path is replaced, never duplicated. Page views carry these values into the site's "
+      + "analytics only for campaigns and placements the site admits; anything else is dropped.",
+      "The host is the site's public address, read from the signed-in site; a site credential alone cannot read it, so "
+      + "pass --domain <host> then. A site with no public address yet has nothing to build a link to.",
+      "A campaign or placement is checked first. When the workspace has marketing/campaigns.json or marketing/placements.json "
+      + "(from 'marketing pull'), the file is the record of what exists; otherwise the live site is asked. A key it does not "
+      + "hold, or one the site has archived, is refused, because it would not be counted. A key that exists but is not live yet is "
+      + "allowed, and the result carries a note: 'publishing' while its release runs, 'goes live with your first publish' for a site "
+      + "that has not published, or 'not in the current release' after a rollback. Until it is live, page views count under the source only. A note read from a file says it is as of the last marketing pull or push, so run 'marketing pull' for the current state.",
+      "The result is { link: { address, host, path, source, medium, campaign?, placement? }, notes? }.",
+    ]),
+    example: Object.freeze({
+      command: `${CLI_BINARY_NAME} link build --path /recipes/spring-salad --source newsletter --campaign spring-launch --placement nl-footer`,
+      address: "https://example.com/recipes/spring-salad?utm_source=newsletter&utm_medium=email&utm_campaign=spring-launch&utm_content=nl-footer",
     }),
   }),
   media: Object.freeze({

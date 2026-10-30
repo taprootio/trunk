@@ -337,6 +337,11 @@
       "rule": null
     },
     {
+      "submitted": "/s/abc",
+      "normalized": "/s/abc",
+      "rule": null
+    },
+    {
       "submitted": "/sx/abc",
       "normalized": "/sx/abc",
       "rule": null
@@ -475,26 +480,6 @@
       "submitted": "/%69ntegrations/old",
       "normalized": "/%69ntegrations/old",
       "rule": "redirect.source_integration_data"
-    },
-    {
-      "submitted": "/s/abc",
-      "normalized": "/s/abc",
-      "rule": "redirect.source_share_link"
-    },
-    {
-      "submitted": "/S/abc",
-      "normalized": "/S/abc",
-      "rule": "redirect.source_share_link"
-    },
-    {
-      "submitted": "/s/a/b",
-      "normalized": "/s/a/b",
-      "rule": "redirect.source_share_link"
-    },
-    {
-      "submitted": "/%73/abc",
-      "normalized": "/%73/abc",
-      "rule": "redirect.source_share_link"
     },
     {
       "submitted": "/taproot/5.0.62/manifest.json",

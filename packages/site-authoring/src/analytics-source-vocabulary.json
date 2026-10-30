@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "media": ["social", "email", "share"],
+  "sources": [
+    { "key": "linkedin", "name": "LinkedIn", "medium": "social", "aliases": ["linkedin.com", "lnkd.in", "com.linkedin.android"] },
+    { "key": "x", "name": "X", "medium": "social", "aliases": ["x.com", "twitter.com", "t.co", "com.twitter.android"] },
+    { "key": "facebook", "name": "Facebook", "medium": "social", "aliases": ["facebook.com", "fb.com", "fb.me", "com.facebook.katana", "com.facebook.lite"] },
+    { "key": "instagram", "name": "Instagram", "medium": "social", "aliases": ["instagram.com", "com.instagram.android"] },
+    { "key": "threads", "name": "Threads", "medium": "social", "aliases": ["threads.net", "threads.com", "com.instagram.barcelona"] },
+    { "key": "bluesky", "name": "Bluesky", "medium": "social", "aliases": ["bsky.app", "bsky.social", "xyz.blueskyweb.app"] },
+    { "key": "mastodon", "name": "Mastodon", "medium": "social", "aliases": ["mastodon.social", "mastodon.online", "org.joinmastodon.android"] },
+    { "key": "reddit", "name": "Reddit", "medium": "social", "aliases": ["reddit.com", "redd.it", "com.reddit.frontpage"] },
+    { "key": "youtube", "name": "YouTube", "medium": "social", "aliases": ["youtube.com", "youtu.be", "com.google.android.youtube"] },
+    { "key": "newsletter", "name": "Newsletter", "medium": "email", "aliases": [] },
+    { "key": "reader", "name": "Reader shares", "medium": "share", "aliases": [] }
+  ]
+}

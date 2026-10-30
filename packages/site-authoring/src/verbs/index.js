@@ -11,8 +11,11 @@ import {
   VERB_FORMS_PULL,
   VERB_FORMS_PUSH,
   VERB_FORMS_VALIDATE,
+  VERB_LINK_BUILD,
   VERB_LOGIN,
   VERB_LOGOUT,
+  VERB_MARKETING_PULL,
+  VERB_MARKETING_PUSH,
   VERB_MEDIA_UPLOAD,
   VERB_NAV_PUSH,
   VERB_PAGES_DELETE,
@@ -49,8 +52,11 @@ import { footerPush } from "./footer-push.js";
 import { formsPull } from "./forms-pull.js";
 import { formsPush } from "./forms-push.js";
 import { formsValidate } from "./forms-validate.js";
+import { linkBuild } from "./link-build.js";
 import { login } from "./login.js";
 import { logout } from "./logout.js";
+import { marketingPull } from "./marketing-pull.js";
+import { marketingPush } from "./marketing-push.js";
 import { mediaUpload } from "./media-upload.js";
 import { navPush } from "./nav-push.js";
 import { pagesDelete } from "./pages-delete.js";
@@ -91,6 +97,9 @@ import { whoami } from "./whoami.js";
  *   quiet,         // --quiet; suppresses progress, never the JSON result
  *   keyName,       // --name; `login` only, undefined everywhere else
  *   planHash,      // --plan; `apply` only: the plan it may run
+ *   archive,       // --archive; `marketing push` only: archive a record the file leaves out
+ *   linkPath, linkSource, linkCampaign, linkPlacement, linkDomain,
+ *                  // --path, --source, --campaign, --placement, --domain; `link build` only
  *   onProgress,    // human progress sink (stderr, or a no-op when quiet)
  *   fetch,         // injectable fetch, for tests
  *   signal,        // optional AbortSignal
@@ -174,6 +183,9 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_FORMS_PULL]: formsPull,
   [VERB_FORMS_PUSH]: formsPush,
   [VERB_FORMS_VALIDATE]: formsValidate,
+  [VERB_MARKETING_PULL]: marketingPull,
+  [VERB_MARKETING_PUSH]: marketingPush,
+  [VERB_LINK_BUILD]: linkBuild,
   [VERB_MEDIA_UPLOAD]: mediaUpload,
   [VERB_APPROVE]: approve,
   [VERB_DEPLOY]: deploy,

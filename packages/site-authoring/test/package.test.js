@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.5.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.7.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -91,6 +91,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "examples/riverbend-wellness/settings/site-publishing-preferences.json",
     "examples/riverbend-wellness/settings/taproot-styles.json",
     "package.json",
+    "src/analytics-campaign.json",
+    "src/analytics-link-label.json",
+    "src/analytics-source-vocabulary.json",
     // The verb-support modules TR00604 S2 added alongside the S1 foundation:
     // wire vocabulary, the image header sniffer, session/result shaping, the
     // covered settings catalog, and the workspace and its manifests.
@@ -158,6 +161,9 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/index.js",
     "src/json-guard.js",
     "src/json-path-diff.js",
+    "src/marketing-api.js",
+    "src/marketing-contract.js",
+    "src/marketing-workspace.js",
     "src/navigation-workspace.js",
     "src/output.js",
     "src/page-metadata.js",
@@ -186,6 +192,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/transport.js",
     "src/typed-page-reference.js",
     "src/typed-pages.js",
+    "src/utm-link.js",
     "src/verbs/approve.js",
     "src/verbs/authors.js",
     "src/verbs/changelog.js",
@@ -197,8 +204,11 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/forms-push.js",
     "src/verbs/forms-validate.js",
     "src/verbs/index.js",
+    "src/verbs/link-build.js",
     "src/verbs/login.js",
     "src/verbs/logout.js",
+    "src/verbs/marketing-pull.js",
+    "src/verbs/marketing-push.js",
     "src/verbs/media-upload.js",
     "src/verbs/nav-push.js",
     "src/verbs/pages-delete.js",

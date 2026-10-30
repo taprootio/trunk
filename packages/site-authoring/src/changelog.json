@@ -1,6 +1,30 @@
 {
   "entries": [
     {
+      "version": "0.26.0",
+      "note": "marketing pull and marketing push keep a site's campaigns and placements as files, and link build prints a tracked address, so an agent can run a site's attribution over the CLI.",
+      "behavior": [
+        "New verbs: taproot-site marketing pull, marketing push [--archive] and link build --path <page> --source <key> [--campaign <key>] [--placement <key>] [--domain <host>]. A key now carries the permissions they need: delegation.content includes site.analytics.view, so a credential minted before this release gains read access to the site's campaigns and placements and, with the publish permission it already held, may change them.",
+        "marketing pull writes marketing/campaigns.json and marketing/placements.json (key, name, a campaign's note, starts_on and ends_on, and the read-only state and counted_from) and records a baseline in the pull manifest; a plain pull carries it forward. marketing push validates both files, compares every record with the site, and creates a new key, updates the labels of an existing one, or restores an archived key the file names. A key is public and never changes, so a changed key is a new record; a record the file leaves out is archived only with --archive, and only if the workspace pulled it. A record that changed on the site since the pull is refused (marketing.concurrent_modification, marketing.pull_required). Quota and key refusals are shown as Taproot returns them. There is no plan or apply step, as with forms push.",
+        "link build prints one address and saves nothing, with the Marketing link builder's own rules: the source decides the medium, the reader source is not offered, a utm_source, utm_medium, utm_campaign or utm_content on the path is replaced, and a campaign or placement is checked against marketing/*.json when the workspace has it, otherwise against the site. One that is not live yet is allowed with the builder's note that page views count under the source only until it is. The host is the signed-in site's public address; pass --domain when only a site credential is available.",
+        "whoami reports whether the last exchange allows campaigns and placements (marketing.access).",
+        "The help reference version is 43.",
+        "Built against Espalier 6.7.0. The default site theme is rebuilt against it and its content is unchanged except for the recorded Espalier version, so pulled and validated themes behave as before."
+      ],
+      "help": [
+        "marketing",
+        "link"
+      ]
+    },
+    {
+      "version": "0.25.0",
+      "note": "Redirects from /s/ addresses are ordinary redirects now that tracked share links are retired.",
+      "behavior": [
+        "A redirect whose source is /s/<anything> saves and validates like any other source. The redirect.source_share_link site-check rule is gone, so offline checks and the server no longer refuse it."
+      ],
+      "help": []
+    },
+    {
       "version": "0.24.0",
       "note": "Site-specific consent enables legal draft authoring through JSON; legal approval and publication remain in the app.",
       "behavior": [
