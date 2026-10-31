@@ -22,6 +22,17 @@
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
+    "presentation": {
+      "description": "Sparse embedded-form appearance choices. Omitted properties inherit the site's staged defaults; explicit false disables a choice. Omit the object when all choices inherit.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "background": { "type": "boolean" },
+        "border": { "type": "boolean" },
+        "shadow": { "type": "boolean" }
+      }
+    },
     "submit_label": {
       "description": "The text on the submit button. Omit it for Taproot's default. Must contain more than whitespace; the validator also rejects a blank label, which a schema cannot express.",
       "type": "string",

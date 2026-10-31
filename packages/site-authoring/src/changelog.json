@@ -1,6 +1,20 @@
 {
   "entries": [
     {
+      "version": "0.27.0",
+      "note": "Embedded forms inherit configurable background, border and shadow defaults from the site, with per-form overrides.",
+      "behavior": [
+        "Form definitions accept sparse presentation.background, presentation.border and presentation.shadow boolean overrides. Omitted values inherit the site; explicit false disables the decoration. An empty presentation object is omitted by the form editor.",
+        "Site publishing preferences expose formBoxBackground, formBoxBorder and formBoxShadow. Background and shadow default on; border defaults off. Stage publishing preferences and the form version to apply appearance changes.",
+        "Forms pull and push preserve appearance overrides, including explicit false.",
+        "The help reference version is 44."
+      ],
+      "help": [
+        "forms",
+        "settings"
+      ]
+    },
+    {
       "version": "0.26.0",
       "note": "marketing pull and marketing push keep a site's campaigns and placements as files, and link build prints a tracked address, so an agent can run a site's attribution over the CLI.",
       "behavior": [

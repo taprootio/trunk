@@ -1171,6 +1171,39 @@ test("forms validate accepts the button text and either after_submit choice, and
   }
 });
 
+test("form appearance projects sparse choices in stable order and keeps the supported newsletter audience", () => {
+  const form = withSettings({
+    presentation: { shadow: false, background: false, border: true },
+    newsletter_audience_id: "12345678-1234-1234-1234-123456789abc",
+  });
+  const projected = projectFormForWorkspace(form);
+  assert.deepEqual(Object.keys(projected.definition.presentation), ["background", "border", "shadow"]);
+  assert.deepEqual(projected.definition.presentation, { background: false, border: true, shadow: false });
+  assert.equal(projected.definition.newsletter_audience_id, form.definition.newsletter_audience_id);
+  assert.deepEqual(projectFormForWorkspace(projected), projected);
+  assert.doesNotThrow(() => validateFormDocument(projected, "contact"));
+
+  const future = projectFormForWorkspace(withSettings({ future_setting: true }));
+  assert.equal(future.definition.future_setting, true);
+  assert.throws(() => validateFormDocument(future, "contact"), /future_setting: unknown_property/u);
+});
+
+test("forms pull and push keep sparse false appearance choices without writing a version", async (t) => {
+  const site = await workspace(t, { ".taproot-site-manifest.json": MANIFEST });
+  const stored = withSettings({ presentation: { shadow: false } });
+  const scripted = scriptedSite({ forms: { contact: wireForm(stored, { version: 2 }) } });
+
+  const pulled = await runWithSite(site, scripted, ["forms", "pull"]);
+  assert.equal(pulled.exit, 0, pulled.stderr);
+  const before = await readText(site, "forms/contact.json");
+  assert.deepEqual(JSON.parse(before).definition.presentation, { shadow: false });
+  const pushed = await runWithSite(site, scripted, ["forms", "push"]);
+  assert.equal(pushed.exit, 0, pushed.stderr);
+  assert.deepEqual(pushed.result.forms.items, [{ key: "contact", action: "unchanged", version: 2 }]);
+  assert.equal(await readText(site, "forms/contact.json"), before);
+  assert.deepEqual(writes(scripted), []);
+});
+
 test("the projection writes the settings in one order and spells a known page by its path", () => {
   const pathById = new Map([[THANKS_ID, "/about/thanks"]]);
   const shuffled = {

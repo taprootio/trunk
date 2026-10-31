@@ -106,7 +106,7 @@ export function contactFieldId(definition) {
     const emails = definition.fields.filter((field) => field.type === "email");
     return emails.length === 1 ? emails[0].id : undefined;
 }
-const DEFINITION_KEYS = ["fields", "contact_field", "submit_label", "after_submit", "newsletter_audience_id"];
+const DEFINITION_KEYS = ["fields", "contact_field", "submit_label", "after_submit", "newsletter_audience_id", "presentation"];
 const BASE_FIELD_KEYS = ["id", "type", "label", "hint"];
 const isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const isInteger = (value) => typeof value === "number" && Number.isInteger(value);
@@ -427,6 +427,22 @@ export function validateDefinition(definition) {
 }
 /** The button text and the after-submit choice, which sit beside the fields in a definition. */
 function validateFormSettings(definition, errors) {
+    if ("presentation" in definition) {
+        const presentation = definition.presentation;
+        if (!isPlainObject(presentation) || Object.keys(presentation).length === 0) {
+            errors.push({ path: "presentation", code: "invalid_presentation" });
+        }
+        else {
+            for (const key of sortedKeys(presentation)) {
+                if (key !== "background" && key !== "border" && key !== "shadow") {
+                    errors.push({ path: `presentation.${key}`, code: "unknown_property" });
+                }
+                else if (typeof presentation[key] !== "boolean") {
+                    errors.push({ path: `presentation.${key}`, code: "invalid_presentation_value" });
+                }
+            }
+        }
+    }
     const audience = definition.newsletter_audience_id;
     if (audience !== undefined && (typeof audience !== "string" || !isResourceId(audience))) {
         errors.push({ path: "newsletter_audience_id", code: "invalid_newsletter_audience" });

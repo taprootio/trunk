@@ -130,6 +130,9 @@ export const SETTINGS_GROUPS = Object.freeze([
       // Asks readers before the visit cookie is set (TR01263). Off is what an omitted value means, so a snapshot of
       // an untouched site reads the same as the site behaves.
       { name: "analyticsConsentPrompt", wireType: "boolean" },
+      { name: "formBoxBackground", wireType: "boolean", zero: true },
+      { name: "formBoxBorder", wireType: "boolean" },
+      { name: "formBoxShadow", wireType: "boolean", zero: true },
       { name: "tiptapImageMaxHeightVh", wireType: "int" },
       { name: "tiptapImageMaxImagesPerRow", wireType: "int" },
       { name: "tiptapImageBorderWidth", wireType: "int" },
@@ -146,7 +149,7 @@ export const CANDIDATE_SELECTABLE_SETTINGS_TYPES = Object.freeze(
 );
 
 function zeroValue(field) {
-  if (field.wireType === "boolean") return false;
+  if (field.wireType === "boolean") return field.zero ?? false;
   if (field.wireType === "int" || field.wireType === "double") return 0;
   if (field.wireType === "theme" || field.wireType === "document") return field.zero ?? {};
   return field.zero ?? "";

@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 43;
+export const REFERENCE_VERSION = 44;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -883,6 +883,11 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "the visitor saw it, so a response shows what each box agreed to.",
       "Editing a definition appends a version on the site; versions are never changed. A page keeps the form "
       + "version it was published with until the next deploy, and a rollback restores the form it shipped with.",
+      "definition.presentation optionally overrides the site's form appearance: background, border and shadow are "
+      + "optional booleans. Omit a property to inherit the corresponding site preference (formBoxBackground, "
+      + "formBoxBorder, formBoxShadow); false turns that choice off. Omit presentation when all three inherit: an empty "
+      + "object is refused. Site defaults are background on, border off and shadow on. Background can be off while border "
+      + "and shadow remain on. The release freezes both the form choices and the site defaults.",
       "Both verbs write the file in one canonical key order, so a pulled file pushed back unchanged reports "
       + "'unchanged' and leaves the bytes as they were. Write your own files in that order and a push rewrites "
       + "nothing you did not change.",

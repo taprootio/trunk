@@ -6,7 +6,7 @@ import { contactFieldId, validateDefinition } from "./field-validation.js";
  *
  * A form is one JSON file, `forms/<key>.json`, holding what an author decides:
  * its key, name, sink, retention, owner-notification preference and definition. The definition holds the fields
- * and the form's own settings (`contact_field`, `submit_label`, `after_submit`),
+ * and the form's own settings (`contact_field`, `submit_label`, `after_submit`, `presentation`),
  * exactly as the site stores it, so one validator reads one shape. The
  * definition's own rules belong to `shared/field-validation.ts` and are run
  * here through the generated copy, so this file never restates them. The one
@@ -288,6 +288,20 @@ export function projectFormForWorkspace(form, pathById) {
   if (form.definition.submit_label !== undefined) definition.submit_label = form.definition.submit_label;
   if (form.definition.after_submit !== undefined) {
     definition.after_submit = canonicalAfterSubmit(form.definition.after_submit, pathById);
+  }
+  if (form.definition.newsletter_audience_id !== undefined) {
+    definition.newsletter_audience_id = form.definition.newsletter_audience_id;
+  }
+  if (form.definition.presentation !== undefined) {
+    const presentation = {};
+    for (const name of ["background", "border", "shadow", ...Object.keys(form.definition.presentation).sort()]) {
+      if (form.definition.presentation[name] !== undefined) presentation[name] = form.definition.presentation[name];
+    }
+    definition.presentation = presentation;
+  }
+  // Preserve future properties on pull so an older workspace cannot silently erase them.
+  for (const name of Object.keys(form.definition).sort()) {
+    if (name !== "contact_field" && definition[name] === undefined) definition[name] = form.definition[name];
   }
   return {
     key: form.key,

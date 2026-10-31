@@ -272,6 +272,24 @@ const PREFERENCES_ENTRIES = {
       + "a deployment.",
     false,
   ),
+  formBoxBackground: entry(
+    `${FEATURES} > Form appearance > Background`,
+    "Whether embedded forms have a box background by default. A form's presentation.background overrides this choice.",
+    "Embedded forms, including validation and confirmation. A change applies after deployment.",
+    true,
+  ),
+  formBoxBorder: entry(
+    `${FEATURES} > Form appearance > Border`,
+    "Whether embedded forms have a border by default. A form's presentation.border overrides this choice.",
+    "Embedded forms. Independent of background and shadow; applies after deployment.",
+    false,
+  ),
+  formBoxShadow: entry(
+    `${FEATURES} > Form appearance > Shadow`,
+    "Whether embedded forms have a shadow by default. A form's presentation.shadow overrides this choice.",
+    "Embedded forms. Independent of background and border; applies after deployment.",
+    true,
+  ),
   tiptapImageMaxHeightVh: entry(
     `${FEATURES} > Image height`,
     "The tallest an image in a page body may be, as a percent of the screen height (45, 60, 75 or 90).",
