@@ -552,6 +552,41 @@
       "rule": "redirect.source_generated_file"
     },
     {
+      "submitted": "/0123456789abcdef0123456789abcdef.txt",
+      "normalized": "/0123456789abcdef0123456789abcdef.txt",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/0123456789abcdef0123456789abcdef.txt/old",
+      "normalized": "/0123456789abcdef0123456789abcdef.txt/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/0123456789ABCDEF0123456789abcdef.TXT/old",
+      "normalized": "/0123456789ABCDEF0123456789abcdef.TXT/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/%30123456789abcdef0123456789abcdef.txt",
+      "normalized": "/%30123456789abcdef0123456789abcdef.txt",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/blog/0123456789abcdef0123456789abcdef.txt",
+      "normalized": "/blog/0123456789abcdef0123456789abcdef.txt",
+      "rule": null
+    },
+    {
+      "submitted": "/0123456789abcdef0123456789abcdef.txt.bak",
+      "normalized": "/0123456789abcdef0123456789abcdef.txt.bak",
+      "rule": null
+    },
+    {
+      "submitted": "/0123456789abcdef0123456789abcde.txt",
+      "normalized": "/0123456789abcdef0123456789abcde.txt",
+      "rule": null
+    },
+    {
       "submitted": "/.well-known/old",
       "normalized": "/.well-known/old",
       "rule": "redirect.source_not_storable"

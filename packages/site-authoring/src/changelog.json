@@ -1,6 +1,17 @@
 {
   "entries": [
     {
+      "version": "0.27.1",
+      "note": "The site checks refuse a page or redirect source named like a search-engine key file, which the platform now publishes at the site root.",
+      "behavior": [
+        "A redirect source whose first segment is 32 lowercase hexadecimal characters followed by .txt (any capitals, with or without a path beneath it) is refused with redirect.source_generated_file, like sitemap.xml and robots.txt. Taproot writes a file with that name at the root of a site that tells search engines about its releases, so nothing else can sit there. No command changed.",
+        "The help reference version is 45."
+      ],
+      "help": [
+        "redirects"
+      ]
+    },
+    {
       "version": "0.27.0",
       "note": "Embedded forms inherit configurable background, border and shadow defaults from the site, with per-form overrides.",
       "behavior": [

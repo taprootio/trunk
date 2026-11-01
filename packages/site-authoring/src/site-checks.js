@@ -280,6 +280,8 @@ export function normalizeRedirectPath(value) {
     return trimmed === "" ? "/" : trimmed;
 }
 const GENERATED_ROOT_FILES = ["404.html", "sitemap.xml", "robots.txt", "favicon.ico"];
+// The IndexNow key file (TR01304) is named by a pattern, so it cannot join the list above.
+const INDEX_NOW_KEY_FILE = /^[a-f0-9]{32}\.txt$/u;
 const INTEGRATION_DATA_ROOT = "integrations";
 const MAX_MARKER_SEGMENT_BYTES = 200;
 const MAX_OUTPUT_PATH_LENGTH = 1_024;
@@ -317,8 +319,9 @@ export function redirectSourceRule(edgePath) {
         return refuse(RULE_REDIRECT_SOURCE_INTEGRATION_DATA);
     if (isRuntimeMirrorPath(decoded))
         return refuse(RULE_REDIRECT_SOURCE_RUNTIME_MIRROR);
-    if (GENERATED_ROOT_FILES.includes(first.toLowerCase()))
+    if (GENERATED_ROOT_FILES.includes(first.toLowerCase()) || INDEX_NOW_KEY_FILE.test(first.toLowerCase())) {
         return refuse(RULE_REDIRECT_SOURCE_GENERATED_FILE);
+    }
     if (!isStorable(decoded))
         return refuse(RULE_REDIRECT_SOURCE_NOT_STORABLE);
     return undefined;

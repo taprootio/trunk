@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 44;
+export const REFERENCE_VERSION = 45;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -786,7 +786,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "check does not see may belong to a release the edge has not switched to yet; deploy --staging waits for "
       + "staging to serve the new release and reports stagingServed.",
       "A source cannot name a file the site generates: '/index.html' or any page's own 'index.html', '/404.html', "
-      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', or a path under the sitemap or robots names. Nothing under "
+      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', a path under the sitemap or robots names, or the "
+      + "search-engine key file Taproot publishes when a site tells search engines about its releases (32 "
+      + "lowercase hexadecimal characters followed by '.txt', in any capitals). Nothing under "
       + "'/taproot/<version>/' (for example '/taproot/5.0.62/manifest.json') can be a source either: the platform "
       + "serves the published-site runtime there before any redirect. The platform "
       + "already redirects every '…/index.html' address to its directory, so no entry is needed for one. A source "
