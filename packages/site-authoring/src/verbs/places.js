@@ -83,8 +83,8 @@ export async function placesSelect(invocation) {
  *
  * A place's category is shared by every site, and Google's types do not always
  * give the one an owner wants. The override is the site's alone: its place
- * reviews and `/places/<category>` pages use it from the next deployment, and
- * the platform-wide place is never changed. The server owns the closed list, so
+ * reviews use it from the next deployment, and the platform-wide place is
+ * never changed. The server owns the closed list, so
  * the CLI sends the name as given and lets the server check it.
  */
 export async function placesCategorySet(invocation) {

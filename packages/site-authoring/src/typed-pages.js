@@ -32,7 +32,7 @@ export const TEMPLATE_ALBUM = "album";
 export const TEMPLATE_PLACE_REVIEW = "place-review";
 export const TEMPLATE_LEGAL = "legal";
 /**
- * A page Taproot generates (a tag, a month, a folder). It is update-only: the
+ * A page Taproot generates (the published archive, the map or a folder). It is update-only: the
  * owner's title, breadcrumb, description and introduction are authored, and
  * pages push refuses to create one or to change what it is (TR01195).
  */
@@ -111,9 +111,18 @@ const RECIPE_HEADINGS = Object.freeze(["ingredients", "instructions"]);
 
 /** The generated page kinds the site reports, as the API names them (never the unknown kind). */
 export const GENERATED_PAGE_KINDS = Object.freeze([
+  "GENERATED_PAGE_KIND_PUBLISHED_INDEX",
+  "GENERATED_PAGE_KIND_FOLDER_INDEX",
+  "GENERATED_PAGE_KIND_MAP_INDEX",
+]);
+/**
+ * The kinds Taproot no longer generates (TR01308, TR01309, TR01310), which an older
+ * pull may have written. Named, so a typo or the unknown kind is refused as a bad
+ * document and is never mistaken for a page Taproot retired.
+ */
+export const RETIRED_GENERATED_PAGE_KINDS = Object.freeze([
   "GENERATED_PAGE_KIND_TAG",
   "GENERATED_PAGE_KIND_TAGS_INDEX",
-  "GENERATED_PAGE_KIND_PUBLISHED_INDEX",
   "GENERATED_PAGE_KIND_PUBLISHED_YEAR",
   "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
   "GENERATED_PAGE_KIND_PLACES_INDEX",
@@ -121,18 +130,10 @@ export const GENERATED_PAGE_KINDS = Object.freeze([
   "GENERATED_PAGE_KIND_PLACES_STATE",
   "GENERATED_PAGE_KIND_PLACES_CITY",
   "GENERATED_PAGE_KIND_PLACES_CATEGORY",
-  "GENERATED_PAGE_KIND_FOLDER_INDEX",
 ]);
 /** What a generated page is: system-managed, so a push must send it back unchanged. */
 export const GENERATED_IDENTITY_KEYS = Object.freeze([
   "kind",
-  "tagId",
-  "year",
-  "month",
-  "countryCode",
-  "regionCode",
-  "citySlug",
-  "categorySlug",
 ]);
 const GENERATED_KEYS = [
   ...GENERATED_IDENTITY_KEYS,
@@ -142,17 +143,10 @@ const GENERATED_KEYS = [
   "introductionBody",
 ];
 const GENERATED_TEXT_KEYS = [
-  "tagId",
-  "countryCode",
-  "regionCode",
-  "citySlug",
-  "categorySlug",
   "customTitle",
   "breadcrumbTitle",
   "customDescription",
 ];
-const GENERATED_MAXIMUM_YEAR = 9999;
-const GENERATED_MAXIMUM_MONTH = 12;
 const EMPTY_DOCUMENT = Object.freeze({ type: "doc", content: Object.freeze([]) });
 
 function fail(code, message, field) {
@@ -368,13 +362,6 @@ const DATA_BUILDERS = Object.freeze({
   [TEMPLATE_GENERATED]: (raw) =>
     definedEntries([
       ["kind", raw.kind],
-      ["tagId", raw.tagId ?? ""],
-      ["year", raw.year ?? 0],
-      ["month", raw.month ?? 0],
-      ["countryCode", raw.countryCode ?? ""],
-      ["regionCode", raw.regionCode ?? ""],
-      ["citySlug", raw.citySlug ?? ""],
-      ["categorySlug", raw.categorySlug ?? ""],
       ["customTitle", raw.customTitle ?? ""],
       ["breadcrumbTitle", raw.breadcrumbTitle ?? ""],
       ["customDescription", raw.customDescription ?? ""],
@@ -479,9 +466,6 @@ function canonicalSourceData(template, data, file) {
     for (const key of GENERATED_TEXT_KEYS) {
       if (data[key] !== undefined) requireString(data[key], file, `${path}.${key}`);
     }
-    if (data.tagId !== undefined && data.tagId !== "") requireIdentifier(data.tagId, file, `${path}.tagId`);
-    if (data.year !== undefined) requireCount(data.year, file, `${path}.year`, GENERATED_MAXIMUM_YEAR);
-    if (data.month !== undefined) requireCount(data.month, file, `${path}.month`, GENERATED_MAXIMUM_MONTH);
     // The API trims a description, so the length that counts is the trimmed one.
     const customDescription = data.customDescription?.trim();
     requireDescriptionLength(customDescription, `${file}:${path}.customDescription`);
@@ -658,8 +642,6 @@ const PAGE_PROJECTIONS = Object.freeze({
       ? DATA_BUILDERS[TEMPLATE_GENERATED]({
         kind: raw.kind,
         ...Object.fromEntries(GENERATED_TEXT_KEYS.map((key) => [key, typeof raw[key] === "string" ? raw[key] : ""])),
-        year: Number.isSafeInteger(raw.year) ? raw.year : 0,
-        month: Number.isSafeInteger(raw.month) ? raw.month : 0,
         introductionBody: presentIntroduction(raw.introductionBody),
       })
       : undefined,

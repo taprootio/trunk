@@ -3407,8 +3407,7 @@ test("an over-long description refuses only a page the push sends (TR01194)", as
 // TR01195 — generated pages are update-only sources
 // ---------------------------------------------------------------------------
 
-const TAG_PAGE_ID = "55555555-aaaa-4aaa-8aaa-555555555555";
-const TAG_ID = "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a";
+const FOLDER_PAGE_ID = "55555555-aaaa-4aaa-8aaa-555555555555";
 
 /** The text of a document's first paragraph, the way the site derives a generated page's description from an introduction. */
 function firstParagraphText(document_) {
@@ -3417,7 +3416,7 @@ function firstParagraphText(document_) {
 }
 
 /**
- * One generated tag page whose stored state the test owns, and the PATCH that edits it.
+ * One generated folder index whose stored state the test owns, and the PATCH that edits it.
  *
  * It behaves as the site does: the title and description a read reports are
  * derived (the custom value, else the introduction's first paragraph, else the
@@ -3427,16 +3426,15 @@ function firstParagraphText(document_) {
  */
 function generatedRoutes(state) {
   state.title ??= "Trails";
-  state.description ??= "Pages tagged with Trails.";
+  state.description ??= "Pages in Trails.";
   state.data ??= {
-    kind: "GENERATED_PAGE_KIND_TAG",
-    tagId: TAG_ID,
+    kind: "GENERATED_PAGE_KIND_FOLDER_INDEX",
     customTitle: "",
     breadcrumbTitle: "",
     customDescription: "",
     introductionBody: { type: "doc", content: [] },
     generatedTitle: "Trails",
-    generatedDescription: "Pages tagged with Trails.",
+    generatedDescription: "Pages in Trails.",
   };
   const revision = () => {
     const { generatedTitle: _title, generatedDescription: _description, ...owned } = state.data;
@@ -3451,8 +3449,8 @@ function generatedRoutes(state) {
   };
   const listing = () => ({
     pages: state.retired === true ? [] : [pageSummary({
-      pageId: state.pageId ?? TAG_PAGE_ID,
-      path: "tags/trails",
+      pageId: state.pageId ?? FOLDER_PAGE_ID,
+      path: "trails",
       title: state.title,
       templateType: "TEMPLATE_TYPE_GENERATED",
       isGenerated: true,
@@ -3466,10 +3464,10 @@ function generatedRoutes(state) {
       method: "GET",
       pattern: PAGE_BY_ID,
       reply: () => ({
-        pageId: state.pageId ?? TAG_PAGE_ID,
+        pageId: state.pageId ?? FOLDER_PAGE_ID,
         status: "PAGE_STATUS_PUBLISHED",
         title: state.title,
-        path: "tags/trails",
+        path: "trails",
         shortDescription: state.description,
         bodyRevision: revision(),
         isGenerated: true,
@@ -3503,78 +3501,63 @@ function generatedRoutes(state) {
   ];
 }
 
-const TAG_SOURCE = "pages/tags/trails.pm.json";
+const FOLDER_SOURCE = "pages/trails.pm.json";
 
-async function pullGeneratedTag(site, state = {}) {
+async function pullGeneratedFolder(site, state = {}) {
   const workspace = await fixture(site);
   const wire = api(generatedRoutes(state));
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
   return { workspace, wire, state };
 }
 
-const pushTag = (workspace, wire, extra = {}) =>
+const pushFolder = (workspace, wire, extra = {}) =>
   pagesPush(
-    invoke(workspace, wire, { verb: "pages push", pagePaths: ["tags/trails"], content: contentStub().module, ...extra })
+    invoke(workspace, wire, { verb: "pages push", pagePaths: ["trails"], content: contentStub().module, ...extra })
       .invocation,
   );
 
 test("pull writes a generated page as an editable source with its identity recorded (TR01195)", async (site) => {
-  const { workspace } = await pullGeneratedTag(site);
+  const { workspace } = await pullGeneratedFolder(site);
 
-  assert.deepEqual(await readWorkspaceJson(workspace, TAG_SOURCE), {
+  assert.deepEqual(await readWorkspaceJson(workspace, FOLDER_SOURCE), {
     template: "generated",
     data: {
-      kind: "GENERATED_PAGE_KIND_TAG",
-      tagId: TAG_ID,
-      year: 0,
-      month: 0,
-      countryCode: "",
-      regionCode: "",
-      citySlug: "",
-      categorySlug: "",
+      kind: "GENERATED_PAGE_KIND_FOLDER_INDEX",
       customTitle: "",
       breadcrumbTitle: "",
       customDescription: "",
     },
   });
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  const entry = manifest.pages.find((page) => page.pageId === TAG_PAGE_ID);
+  const entry = manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID);
   assert.equal(entry.workspaceMode, "editable");
-  assert.equal(entry.file, TAG_SOURCE);
+  assert.equal(entry.file, FOLDER_SOURCE);
   assert.equal(entry.templateType, "TEMPLATE_TYPE_GENERATED");
   // What the site reports is recorded for reference; the owner's own values are in the document.
   assert.equal(entry.title, "Trails");
-  assert.equal(entry.description, "Pages tagged with Trails.");
-  assert.equal(entry.generated.kind, "GENERATED_PAGE_KIND_TAG");
-  assert.equal(entry.generated.tagId, TAG_ID);
+  assert.equal(entry.description, "Pages in Trails.");
+  assert.equal(entry.generated.kind, "GENERATED_PAGE_KIND_FOLDER_INDEX");
 });
 
 test("a generated page's description and introduction round-trip through pull, edit and push (TR01195)", async (site) => {
-  const { workspace, wire, state } = await pullGeneratedTag(site);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, wire, state } = await pullGeneratedFolder(site);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.customDescription = "Field notes from the trails I walk most often.";
   document_.data.introductionBody = paragraphDocument("Everything I have written about walking.");
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
 
-  const pushed = await pushTag(workspace, wire);
+  const pushed = await pushFolder(workspace, wire);
 
   assert.equal(pushed.pages.updated, 1);
   const sent = wire.matching("PATCH", PAGE_BY_ID).at(-1).body;
-  assert.equal(sent.pageId, TAG_PAGE_ID);
-  assert.equal(sent.path, "tags/trails");
+  assert.equal(sent.pageId, FOLDER_PAGE_ID);
+  assert.equal(sent.path, "trails");
   // No custom title, so the title the site reported is sent back unchanged.
   assert.equal(sent.title, "Trails");
   assert.equal(sent.shortDescription, "Field notes from the trails I walk most often.");
   assert.equal(sent.template.templateType, "TEMPLATE_TYPE_GENERATED");
   assert.deepEqual(sent.template.generatedPageData, {
-    kind: "GENERATED_PAGE_KIND_TAG",
-    tagId: TAG_ID,
-    year: 0,
-    month: 0,
-    countryCode: "",
-    regionCode: "",
-    citySlug: "",
-    categorySlug: "",
+    kind: "GENERATED_PAGE_KIND_FOLDER_INDEX",
     customTitle: "",
     breadcrumbTitle: "",
     customDescription: "Field notes from the trails I walk most often.",
@@ -3586,26 +3569,26 @@ test("a generated page's description and introduction round-trip through pull, e
 
   // The push recorded what it sent, so the next pull keeps the document and the next push has nothing to send.
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
-  const after = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const after = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   assert.equal(after.data.customDescription, "Field notes from the trails I walk most often.");
   assert.deepEqual(after.data.introductionBody, paragraphDocument("Everything I have written about walking."));
-  const again = await pushTag(workspace, wire);
+  const again = await pushFolder(workspace, wire);
   assert.equal(again.pages.unchanged, 1);
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 1);
 });
 
 test("a custom generated title is sent as the title, and an empty one falls back to the reported title (TR01195)", async (site) => {
-  const { workspace, wire } = await pullGeneratedTag(site);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, wire } = await pullGeneratedFolder(site);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.customTitle = "Trail notes";
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-  await pushTag(workspace, wire);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+  await pushFolder(workspace, wire);
   const sent = wire.matching("PATCH", PAGE_BY_ID).at(-1).body;
   assert.equal(sent.title, "Trail notes");
   assert.equal(sent.template.templateType, "TEMPLATE_TYPE_GENERATED");
   assert.equal(sent.template.generatedPageData.customTitle, "Trail notes");
   // The description is the one the site reported: the owner wrote none.
-  assert.equal(sent.shortDescription, "Pages tagged with Trails.");
+  assert.equal(sent.shortDescription, "Pages in Trails.");
 });
 
 test("a padded custom title the site trimmed leaves an untouched generated page unchanged (TR01195)", async (site) => {
@@ -3613,50 +3596,49 @@ test("a padded custom title the site trimmed leaves an untouched generated page 
   generatedRoutes(state);
   state.data = { ...state.data, customTitle: "  Trail notes  " };
   state.recompute();
-  const { workspace, wire } = await pullGeneratedTag(site, state);
-  const pushed = await pushTag(workspace, wire);
+  const { workspace, wire } = await pullGeneratedFolder(site, state);
+  const pushed = await pushFolder(workspace, wire);
   assert.equal(pushed.pages.unchanged, 1);
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
 });
 
 test("a push refuses to create, move, or re-identify a generated page (TR01195)", async (t) => {
   await t.test("a source whose page the site no longer has is not created", async (site) => {
-    const { workspace } = await pullGeneratedTag(site);
+    const { workspace } = await pullGeneratedFolder(site);
     const wire = api([
       { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
       ...pushRoutes({ live: [] }).slice(1),
     ]);
     await assert.rejects(
-      pushTag(workspace, wire),
-      (error) => error?.code === "pages.generated_create" && error?.field === TAG_SOURCE,
+      pushFolder(workspace, wire),
+      (error) => error?.code === "pages.generated_create" && error?.field === FOLDER_SOURCE,
     );
     assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
   });
   await t.test("a different path is a move", async (site) => {
-    const { workspace, wire } = await pullGeneratedTag(site);
+    const { workspace, wire } = await pullGeneratedFolder(site);
     const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-    manifest.pages.find((page) => page.pageId === TAG_PAGE_ID).path = "tags/hikes";
+    manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID).path = "hikes";
     await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest, undefined, 2)}\n`);
     await assert.rejects(
-      pushTag(workspace, wire, { pagePaths: ["tags/hikes"] }),
+      pushFolder(workspace, wire, { pagePaths: ["hikes"] }),
       (error) => error?.code === "pages.generated_move",
     );
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
   });
   await t.test("changing the kind or an identity field is refused, naming the field", async (site) => {
-    const { workspace, wire } = await pullGeneratedTag(site);
-    const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
-    document_.data.kind = "GENERATED_PAGE_KIND_TAGS_INDEX";
-    document_.data.tagId = "";
-    await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    const { workspace, wire } = await pullGeneratedFolder(site);
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
+    document_.data.kind = "GENERATED_PAGE_KIND_PUBLISHED_INDEX";
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
     await assert.rejects(
-      pushTag(workspace, wire),
-      (error) => error?.code === "pages.generated_identity" && error.message.includes("kind, tagId"),
+      pushFolder(workspace, wire),
+      (error) => error?.code === "pages.generated_identity" && error.message.includes("kind"),
     );
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
   });
   await t.test("a Markdown source cannot declare the generated template", async (site) => {
-    const { workspace, wire } = await pullGeneratedTag(site);
+    const { workspace, wire } = await pullGeneratedFolder(site);
     await writeFile(
       workspacePath(workspace, "pages/hand-made.md"),
       "---\ntitle: Hand made\npath: hand-made\ntemplate: generated\n---\n\nHello.\n",
@@ -3673,65 +3655,65 @@ test("a push refuses to create, move, or re-identify a generated page (TR01195)"
     );
   });
   await t.test("a custom description over 1000 characters is refused, and over 160 is warned about", async (site) => {
-    const { workspace, wire } = await pullGeneratedTag(site);
-    const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+    const { workspace, wire } = await pullGeneratedFolder(site);
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
     document_.data.customDescription = "x".repeat(1001);
-    await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-    await assert.rejects(pushTag(workspace, wire), (error) => error?.code === "pages.description_too_long");
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    await assert.rejects(pushFolder(workspace, wire), (error) => error?.code === "pages.description_too_long");
 
     document_.data.customDescription = "x".repeat(161);
-    await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-    const pushed = await pushTag(workspace, wire);
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    const pushed = await pushFolder(workspace, wire);
     assert.equal(pushed.descriptionWarnings.items[0].length, 161);
   });
   await t.test("a stale reported description is not warned about when the owner wrote none", async (site) => {
-    const { workspace, wire } = await pullGeneratedTag(site, { description: "y".repeat(400) });
-    const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+    const { workspace, wire } = await pullGeneratedFolder(site, { description: "y".repeat(400) });
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
     document_.data.customTitle = "Trail notes";
-    await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-    const pushed = await pushTag(workspace, wire);
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    const pushed = await pushFolder(workspace, wire);
     assert.equal(pushed.pages.updated, 1);
     assert.equal(pushed.descriptionWarnings, undefined);
   });
 });
 
 test("a generated page's server-only title and default description are neither pulled nor sent (TR01195)", async (site) => {
-  const { workspace, wire } = await pullGeneratedTag(site);
-  const pulled = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, wire } = await pullGeneratedFolder(site);
+  const pulled = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   assert.equal("generatedTitle" in pulled.data, false);
   assert.equal("generatedDescription" in pulled.data, false);
 
   pulled.data.customDescription = "Field notes.";
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(pulled, undefined, 2)}\n`);
-  await pushTag(workspace, wire);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(pulled, undefined, 2)}\n`);
+  await pushFolder(workspace, wire);
   const sent = wire.matching("PATCH", PAGE_BY_ID).at(-1).body.template.generatedPageData;
   assert.equal("generatedTitle" in sent, false);
   assert.equal("generatedDescription" in sent, false);
 });
 
 test("an introduction-only edit leaves the next push unrefused once the site recomputes its description (TR01195)", async (site) => {
-  const { workspace, wire, state } = await pullGeneratedTag(site);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, wire, state } = await pullGeneratedFolder(site);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.introductionBody = paragraphDocument("Everything I have written about walking.");
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-  const first = await pushTag(workspace, wire);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+  const first = await pushFolder(workspace, wire);
   assert.equal(first.pages.updated, 1);
   // The site derived the description from the introduction when it saved the draft.
   assert.equal(state.description, "Everything I have written about walking.");
 
   // A deploy's synchronizer recomputes the description; the draft already holds it.
   const revisionBefore = (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages
-    .find((page) => page.pageId === TAG_PAGE_ID).baseline.revision;
+    .find((page) => page.pageId === FOLDER_PAGE_ID).baseline.revision;
   state.recompute();
 
   document_.data.customDescription = "Field notes.";
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
-  const second = await pushTag(workspace, wire);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+  const second = await pushFolder(workspace, wire);
 
   assert.equal(second.pages.updated, 1);
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 2);
   assert.notEqual(
-    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages.find((page) => page.pageId === TAG_PAGE_ID)
+    (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).pages.find((page) => page.pageId === FOLDER_PAGE_ID)
       .baseline.revision,
     revisionBefore,
   );
@@ -3748,7 +3730,7 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
     pagesPush(invoke(workspace, wire, { verb: "pages push", content: contentStub().module }).invocation);
 
   await t.test("its revision moved because the site renamed the tag", async (site) => {
-    const { workspace, state } = await pullGeneratedTag(site);
+    const { workspace, state } = await pullGeneratedFolder(site);
     await writeFile(workspacePath(workspace, "pages/hand-made.md"), handMade);
     state.data = { ...state.data, generatedTitle: "Hikes", generatedDescription: "Pages tagged with Hikes." };
     state.recompute();
@@ -3761,10 +3743,10 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
   });
   await t.test("but one the push sends still refuses a revision that moved", async (site) => {
-    const { workspace, state } = await pullGeneratedTag(site);
-    const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+    const { workspace, state } = await pullGeneratedFolder(site);
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
     document_.data.customDescription = "Mine.";
-    await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
     state.data = { ...state.data, introductionBody: paragraphDocument("Theirs.") };
     state.recompute();
     const wire = api(routes(state));
@@ -3774,7 +3756,7 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
   });
   await t.test("its page is gone: reported, nothing sent, and the other pages still go", async (site) => {
-    const { workspace, state } = await pullGeneratedTag(site);
+    const { workspace, state } = await pullGeneratedFolder(site);
     await writeFile(workspacePath(workspace, "pages/hand-made.md"), handMade);
     state.retired = true;
     const wire = api(routes(state));
@@ -3785,9 +3767,9 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
     assert.equal(pushed.pages.created, 1);
     assert.deepEqual(pushed.pages.staleGeneratedSources, {
       total: 1,
-      items: [{ file: TAG_SOURCE, path: "tags/trails" }],
+      items: [{ file: FOLDER_SOURCE, path: "trails" }],
     });
-    assert.ok(progressWire.progress.some((line) => line.includes(TAG_SOURCE) && line.includes("Delete the file")));
+    assert.ok(progressWire.progress.some((line) => line.includes(FOLDER_SOURCE) && line.includes("Delete the file")));
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
 
     // A dry run reports it too.
@@ -3799,44 +3781,97 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
     // So does a pull, which will not delete the authored file.
     const pulling = invoke(workspace, wire, { verb: "pull" });
     await pull(pulling.invocation);
-    assert.ok(pulling.progress.some((line) => line.includes(TAG_SOURCE) && line.includes("no longer has")));
-    assert.equal(await workspaceHas(workspace, TAG_SOURCE), true);
+    assert.ok(pulling.progress.some((line) => line.includes(FOLDER_SOURCE) && line.includes("no longer has")));
+    assert.equal(await workspaceHas(workspace, FOLDER_SOURCE), true);
 
     // After that pull, and the next, the file is still known: a whole push
     // reports it and sends the rest instead of refusing it as an unknown
     // raw document, and naming its path is still refused.
     await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
     const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-    assert.deepEqual(manifest.retiredGeneratedSources, [{ pageId: TAG_PAGE_ID, file: TAG_SOURCE, path: "tags/trails" }]);
-    assert.equal(manifest.pages.some((page) => page.file === TAG_SOURCE), false);
+    assert.deepEqual(manifest.retiredGeneratedSources, [{ pageId: FOLDER_PAGE_ID, file: FOLDER_SOURCE, path: "trails" }]);
+    assert.equal(manifest.pages.some((page) => page.file === FOLDER_SOURCE), false);
     await writeFile(workspacePath(workspace, "pages/hand-made.md"), handMade.replace("Hello", "Hello again"));
     const afterPull = await pagesPush(
       invoke(workspace, wire, { verb: "pages push", content: contentStub().module }).invocation,
     );
     assert.equal(afterPull.pages.staleGeneratedSources.total, 1);
-    await assert.rejects(pushTag(workspace, wire), (error) => error?.code === "pages.generated_create");
+    await assert.rejects(pushFolder(workspace, wire), (error) => error?.code === "pages.generated_create");
     // validate reads the same record (the mock site's settings fail it for
     // reasons of their own, so only this file's handling is asserted).
     const validated = await cliRun(workspace, ["validate"]);
-    assert.ok(validated.stderr.includes(`'${TAG_SOURCE}' is the source of a generated page the site no longer has`));
+    assert.ok(validated.stderr.includes(`'${FOLDER_SOURCE}' is the source of a generated page the site no longer has`));
     assert.ok(!validated.stderr.includes("pages.metadata_missing"), validated.stderr);
 
     // Deleting the file ends the record.
-    await rm(workspacePath(workspace, TAG_SOURCE));
+    await rm(workspacePath(workspace, FOLDER_SOURCE));
     await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
     assert.equal(
       (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).retiredGeneratedSources,
       undefined,
     );
   });
+  await t.test("its page is of a kind this release retired: reported stale, not refused as unknown", async (site) => {
+    // TR01308: a workspace pulled a /places page before the release that retired the kind.
+    const { workspace, state } = await pullGeneratedFolder(site);
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
+    document_.data = {
+      ...document_.data,
+      kind: "GENERATED_PAGE_KIND_PLACES_CITY",
+      countryCode: "us",
+      regionCode: "wa",
+      citySlug: "seattle",
+      categorySlug: "",
+    };
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    await writeFile(workspacePath(workspace, "pages/hand-made.md"), handMade);
+    state.retired = true;
+    const wire = api(routes(state));
+
+    const pushed = await wholePush(workspace, wire);
+
+    assert.equal(pushed.pages.created, 1);
+    assert.equal(pushed.pages.staleGeneratedSources.total, 1);
+    assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+  });
+  await t.test("an unknown or misspelled kind is a bad document, never mistaken for a retired page", async (site) => {
+    for (const kind of ["GENERATED_PAGE_KIND_UNKNOWN", "GENERATED_PAGE_KIND_FOLDER_INDX"]) {
+      const { workspace, state } = await pullGeneratedFolder(site);
+      const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
+      document_.data = { ...document_.data, kind };
+      await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+      const wire = api(routes(state));
+
+      await assert.rejects(wholePush(workspace, wire), (error) => error?.code === "pages.document_shape", kind);
+      assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0, kind);
+    }
+  });
+  await t.test("its page is of a retired kind the site has not synchronized away yet: still stale, and refused by path", async (site) => {
+    // Until the site's next synchronization the retired page is still listed, so the
+    // target exists; the kind alone decides.
+    const { workspace, state } = await pullGeneratedFolder(site);
+    const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
+    document_.data = { ...document_.data, kind: "GENERATED_PAGE_KIND_PLACES_CATEGORY", categorySlug: "cafe" };
+    await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+    await writeFile(workspacePath(workspace, "pages/hand-made.md"), handMade);
+    const wire = api(routes(state));
+
+    const pushed = await wholePush(workspace, wire);
+
+    assert.equal(pushed.pages.created, 1);
+    assert.deepEqual(pushed.pages.staleGeneratedSources, { total: 1, items: [{ file: FOLDER_SOURCE, path: "trails" }] });
+    assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
+    await assert.rejects(pushFolder(workspace, wire), (error) =>
+      error?.code === "pages.generated_create" && /no longer publishes/u.test(error.message));
+  });
   await t.test("its page is gone and the path was asked for: refused", async (site) => {
-    const { workspace, state } = await pullGeneratedTag(site);
+    const { workspace, state } = await pullGeneratedFolder(site);
     state.retired = true;
     const wire = api(routes(state));
 
     await assert.rejects(
-      pushTag(workspace, wire),
-      (error) => error?.code === "pages.generated_create" && error?.field === TAG_SOURCE,
+      pushFolder(workspace, wire),
+      (error) => error?.code === "pages.generated_create" && error?.field === FOLDER_SOURCE,
     );
     assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
     assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 0);
@@ -3844,11 +3879,11 @@ test("an untouched generated page never blocks a whole-workspace push (TR01195)"
 });
 
 test("a generated page recreated at a retired page's path never writes over its source (TR01195)", async (site) => {
-  const { workspace, state } = await pullGeneratedTag(site);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, state } = await pullGeneratedFolder(site);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.customDescription = "Unpushed words.";
   const edited = `${JSON.stringify(document_, undefined, 2)}\n`;
-  await writeFile(workspacePath(workspace, TAG_SOURCE), edited);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), edited);
 
   // Retired and recreated between two pulls: a new page id at the same path.
   const recreatedId = "6f2d7c1e-3a4b-4c5d-8e9f-0a1b2c3d4e5f";
@@ -3856,23 +3891,23 @@ test("a generated page recreated at a retired page's path never writes over its 
   const wire = api(generatedRoutes(state));
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
 
-  assert.equal(await readFile(workspacePath(workspace, TAG_SOURCE), "utf8"), edited);
+  assert.equal(await readFile(workspacePath(workspace, FOLDER_SOURCE), "utf8"), edited);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.deepEqual(manifest.retiredGeneratedSources, [{ pageId: TAG_PAGE_ID, file: TAG_SOURCE, path: "tags/trails" }]);
+  assert.deepEqual(manifest.retiredGeneratedSources, [{ pageId: FOLDER_PAGE_ID, file: FOLDER_SOURCE, path: "trails" }]);
   const recreated = manifest.pages.find((page) => page.pageId === recreatedId);
   assert.equal(recreated.file, `pages/${recreatedId}.pm.json`);
 
   // A push by that path sends the new page's own source.
-  const pushed = await pushTag(workspace, wire);
+  const pushed = await pushFolder(workspace, wire);
   assert.equal(pushed.pages.unchanged, 1);
 });
 
 test("a bounded listing keeps a generated source it cannot see, and a full one gives it back (TR01195)", async (site) => {
-  const { workspace, state } = await pullGeneratedTag(site);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const { workspace, state } = await pullGeneratedFolder(site);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.customDescription = "Unpushed words.";
   const edited = `${JSON.stringify(document_, undefined, 2)}\n`;
-  await writeFile(workspacePath(workspace, TAG_SOURCE), edited);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), edited);
 
   // A listing the CLI cannot finish: it shows a page created at the tag's
   // path with a new id, and not the tracked one.
@@ -3893,7 +3928,7 @@ test("a bounded listing keeps a generated source it cannot see, and a full one g
         pages: calls === 1
           ? [pageSummary({
             pageId: recreatedId,
-            path: "tags/trails",
+            path: "trails",
             title: "Trails",
             templateType: "TEMPLATE_TYPE_GENERATED",
             isGenerated: true,
@@ -3907,23 +3942,23 @@ test("a bounded listing keeps a generated source it cannot see, and a full one g
   const boundedWire = api([bounded, ...generatedRoutes(boundedState).slice(1)]);
   const boundedPull = invoke(workspace, boundedWire, { verb: "pull" });
   await pull(boundedPull.invocation);
-  assert.equal(await readFile(workspacePath(workspace, TAG_SOURCE), "utf8"), edited);
+  assert.equal(await readFile(workspacePath(workspace, FOLDER_SOURCE), "utf8"), edited);
   assert.ok(boundedPull.progress.some((line) => line.includes("bounded listing did not include")));
   assert.deepEqual(
     (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).retiredGeneratedSources,
-    [{ pageId: TAG_PAGE_ID, file: TAG_SOURCE, path: "tags/trails" }],
+    [{ pageId: FOLDER_PAGE_ID, file: FOLDER_SOURCE, path: "trails" }],
   );
 
   // The full listing has the tracked page after all: it takes its file back,
   // and the unpushed edit is kept rather than replaced by the site's copy.
   const fullWire = api(generatedRoutes(state));
   await pull(invoke(workspace, fullWire, { verb: "pull" }).invocation);
-  assert.equal(await readFile(workspacePath(workspace, TAG_SOURCE), "utf8"), edited);
+  assert.equal(await readFile(workspacePath(workspace, FOLDER_SOURCE), "utf8"), edited);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.pages.find((page) => page.pageId === TAG_PAGE_ID).file, TAG_SOURCE);
+  assert.equal(manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID).file, FOLDER_SOURCE);
   // The page the bounded listing showed is the one this listing lacks now.
   assert.deepEqual(manifest.retiredGeneratedSources, [
-    { pageId: recreatedId, file: `pages/${recreatedId}.pm.json`, path: "tags/trails" },
+    { pageId: recreatedId, file: `pages/${recreatedId}.pm.json`, path: "trails" },
   ]);
 });
 
@@ -3932,7 +3967,7 @@ test("a first pull over a manifest that held generated pages as metadata only wr
   const workspace = await fixture(site);
   const routes = generatedRoutes(state);
   // The workspace tracks an ordinary page whose file was renamed onto the name the generated page would prefer.
-  const trackedFile = TAG_SOURCE;
+  const trackedFile = FOLDER_SOURCE;
   const tracked = { body: paragraphDocument(BODY_MARKER), path: "about" };
   const aboutRoutes = trackedRoutes(tracked);
   const combined = api([
@@ -3958,11 +3993,11 @@ test("a first pull over a manifest that held generated pages as metadata only wr
   // Rewrite what that pull recorded into what an older CLI left: the generated page metadata only, no source.
   const manifestFile = ".taproot-site-manifest.json";
   const manifest = await readWorkspaceJson(workspace, manifestFile);
-  const generatedEntry = manifest.pages.find((page) => page.pageId === TAG_PAGE_ID);
+  const generatedEntry = manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID);
   for (const key of ["file", "sourceFormat", "baseline", "generated"]) delete generatedEntry[key];
   generatedEntry.workspaceMode = "metadata-only";
   await writeFile(workspacePath(workspace, manifestFile), `${JSON.stringify(manifest, undefined, 2)}\n`);
-  await rm(workspacePath(workspace, TAG_SOURCE), { force: true });
+  await rm(workspacePath(workspace, FOLDER_SOURCE), { force: true });
   // And the ordinary page's tracked source now sits where the generated page would go.
   const aboutEntry = manifest.pages.find((page) => page.pageId === ABOUT_PAGE_ID);
   const aboutBytes = await readFile(workspacePath(workspace, aboutEntry.file));
@@ -3977,69 +4012,69 @@ test("a first pull over a manifest that held generated pages as metadata only wr
   assert.equal(result.ok, true);
   const after = await readWorkspaceJson(workspace, manifestFile);
   const aboutAfter = after.pages.find((page) => page.pageId === ABOUT_PAGE_ID);
-  const tagAfter = after.pages.find((page) => page.pageId === TAG_PAGE_ID);
+  const folderAfter = after.pages.find((page) => page.pageId === FOLDER_PAGE_ID);
   assert.equal(aboutAfter.file, trackedFile);
-  assert.equal(tagAfter.workspaceMode, "editable");
-  assert.equal(tagAfter.file, `pages/${TAG_PAGE_ID}.pm.json`);
-  assert.equal(tagAfter.generated.tagId, TAG_ID);
+  assert.equal(folderAfter.workspaceMode, "editable");
+  assert.equal(folderAfter.file, `pages/${FOLDER_PAGE_ID}.pm.json`);
+  assert.equal(folderAfter.generated.kind, "GENERATED_PAGE_KIND_FOLDER_INDEX");
   assert.deepEqual(await readFile(workspacePath(workspace, trackedFile)), aboutBytes);
-  assert.equal((await readWorkspaceJson(workspace, tagAfter.file)).template, "generated");
+  assert.equal((await readWorkspaceJson(workspace, folderAfter.file)).template, "generated");
 });
 
 test("a generated page's identity is carried through a pull that cannot read its body, and a push without it is refused (TR01195)", async (site) => {
-  const { workspace, wire, state } = await pullGeneratedTag(site);
+  const { workspace, wire, state } = await pullGeneratedFolder(site);
   const manifestFile = ".taproot-site-manifest.json";
-  const recorded = (await readWorkspaceJson(workspace, manifestFile)).pages.find((page) => page.pageId === TAG_PAGE_ID)
+  const recorded = (await readWorkspaceJson(workspace, manifestFile)).pages.find((page) => page.pageId === FOLDER_PAGE_ID)
     .generated;
 
   state.unreadable = true;
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
-  const kept = (await readWorkspaceJson(workspace, manifestFile)).pages.find((page) => page.pageId === TAG_PAGE_ID);
+  const kept = (await readWorkspaceJson(workspace, manifestFile)).pages.find((page) => page.pageId === FOLDER_PAGE_ID);
   assert.deepEqual(kept.generated, recorded);
-  assert.equal(kept.file, TAG_SOURCE);
+  assert.equal(kept.file, FOLDER_SOURCE);
 
   // A manifest entry with no record cannot prove what the file is, so an edit to its identity would pass.
   state.unreadable = false;
   const manifest = await readWorkspaceJson(workspace, manifestFile);
-  delete manifest.pages.find((page) => page.pageId === TAG_PAGE_ID).generated;
+  delete manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID).generated;
   await writeFile(workspacePath(workspace, manifestFile), `${JSON.stringify(manifest, undefined, 2)}\n`);
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   document_.data.customDescription = "Mine.";
-  await writeFile(workspacePath(workspace, TAG_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
+  await writeFile(workspacePath(workspace, FOLDER_SOURCE), `${JSON.stringify(document_, undefined, 2)}\n`);
   await assert.rejects(
-    pushTag(workspace, wire),
+    pushFolder(workspace, wire),
     (error) => error?.code === "pages.generated_identity" && error.message.includes("pull"),
   );
   assert.equal(wire.matching("PATCH", PAGE_BY_ID).length, 0);
 });
 
 test("pages meta set edits a generated page's own title and description in its source (TR01195)", async (site) => {
-  const { workspace, wire } = await pullGeneratedTag(site);
+  const { workspace, wire } = await pullGeneratedFolder(site);
 
   const set = await VERB_HANDLERS["pages meta set"](
     invoke(workspace, wire, {
       verb: "pages meta set",
-      metaPagePath: "tags/trails",
+      metaPagePath: "trails",
       metaTitle: "Trail notes",
       metaDescription: "  Field notes.  ",
     }).invocation,
   );
   assert.equal(set.changed, true);
   assert.deepEqual(set.page, {
-    path: "tags/trails",
-    file: TAG_SOURCE,
+    path: "trails",
+    file: FOLDER_SOURCE,
     title: "Trail notes",
     description: "Field notes.",
     generated: true,
   });
-  const document_ = await readWorkspaceJson(workspace, TAG_SOURCE);
+  const document_ = await readWorkspaceJson(workspace, FOLDER_SOURCE);
   assert.equal(document_.data.customTitle, "Trail notes");
   assert.equal(document_.data.customDescription, "Field notes.");
   // The manifest keeps what the site reported.
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.pages.find((page) => page.pageId === TAG_PAGE_ID).title, "Trails");
+  assert.equal(manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID).title, "Trails");
 
-  await pushTag(workspace, wire);
+  await pushFolder(workspace, wire);
   const sent = wire.matching("PATCH", PAGE_BY_ID).at(-1).body;
   assert.equal(sent.title, "Trail notes");
   assert.equal(sent.shortDescription, "Field notes.");
@@ -4048,16 +4083,16 @@ test("pages meta set edits a generated page's own title and description in its s
   const cleared = await VERB_HANDLERS["pages meta set"](
     invoke(workspace, wire, {
       verb: "pages meta set",
-      metaPagePath: "tags/trails",
+      metaPagePath: "trails",
       metaTitle: "",
       metaDescription: "",
     }).invocation,
   );
   assert.equal(cleared.changed, true);
-  assert.equal((await readWorkspaceJson(workspace, TAG_SOURCE)).data.customDescription, "");
-  assert.equal((await readWorkspaceJson(workspace, TAG_SOURCE)).data.customTitle, "");
+  assert.equal((await readWorkspaceJson(workspace, FOLDER_SOURCE)).data.customDescription, "");
+  assert.equal((await readWorkspaceJson(workspace, FOLDER_SOURCE)).data.customTitle, "");
   const unchanged = await VERB_HANDLERS["pages meta set"](
-    invoke(workspace, wire, { verb: "pages meta set", metaPagePath: "tags/trails", metaDescription: "" }).invocation,
+    invoke(workspace, wire, { verb: "pages meta set", metaPagePath: "trails", metaDescription: "" }).invocation,
   );
   assert.equal(unchanged.changed, false);
 
@@ -4066,7 +4101,7 @@ test("pages meta set edits a generated page's own title and description in its s
     VERB_HANDLERS["pages meta set"](
       invoke(workspace, wire, {
         verb: "pages meta set",
-        metaPagePath: "tags/trails",
+        metaPagePath: "trails",
         metaDescription: "x".repeat(1001),
       }).invocation,
     ),
@@ -4075,7 +4110,7 @@ test("pages meta set edits a generated page's own title and description in its s
   const warned = await VERB_HANDLERS["pages meta set"](
     invoke(workspace, wire, {
       verb: "pages meta set",
-      metaPagePath: "tags/trails",
+      metaPagePath: "trails",
       metaDescription: "x".repeat(161),
     }).invocation,
   );
@@ -4095,31 +4130,31 @@ test("pages meta set will not empty an ordinary page's title (TR01195)", async (
 });
 
 test("a local edit to a generated page survives a pull and conflicts with a site change (TR01195)", async (site) => {
-  const { workspace, wire, state } = await pullGeneratedTag(site);
+  const { workspace, wire, state } = await pullGeneratedFolder(site);
   await VERB_HANDLERS["pages meta set"](
-    invoke(workspace, wire, { verb: "pages meta set", metaPagePath: "tags/trails", metaDescription: "Mine." })
+    invoke(workspace, wire, { verb: "pages meta set", metaPagePath: "trails", metaDescription: "Mine." })
       .invocation,
   );
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
-  assert.equal((await readWorkspaceJson(workspace, TAG_SOURCE)).data.customDescription, "Mine.");
+  assert.equal((await readWorkspaceJson(workspace, FOLDER_SOURCE)).data.customDescription, "Mine.");
 
   state.data = { ...state.data, customDescription: "Theirs." };
   await assert.rejects(
     pull(invoke(workspace, wire, { verb: "pull" }).invocation),
-    (error) => error?.code === "pages.pull_conflict" && error?.field === TAG_SOURCE,
+    (error) => error?.code === "pages.pull_conflict" && error?.field === FOLDER_SOURCE,
   );
 });
 
 test("a hand-edited manifest title for a generated page is not local work to keep (TR01195)", async (site) => {
-  const { workspace, wire } = await pullGeneratedTag(site);
+  const { workspace, wire } = await pullGeneratedFolder(site);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  manifest.pages.find((page) => page.pageId === TAG_PAGE_ID).title = "Edited by hand";
+  manifest.pages.find((page) => page.pageId === FOLDER_PAGE_ID).title = "Edited by hand";
   await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest, undefined, 2)}\n`);
 
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
 
   const refreshed = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(refreshed.pages.find((page) => page.pageId === TAG_PAGE_ID).title, "Trails");
+  assert.equal(refreshed.pages.find((page) => page.pageId === FOLDER_PAGE_ID).title, "Trails");
 });
 
 test("an unpushed ProseMirror edit survives every later pull, not just the first", async (site) => {
@@ -4658,9 +4693,9 @@ test("pages delete refuses what the CLI does not delete, before any request (TR0
       trackedAboutEntry({
         pageId: NEW_PAGE_ID,
         resourceId: resourceIdFor(NEW_PAGE_ID),
-        path: "tags/news",
+        path: "news",
         templateType: "TEMPLATE_TYPE_GENERATED",
-        file: "pages/tags-news.pm.json",
+        file: "pages/news.pm.json",
         sourceFormat: "prosemirror",
       }),
       trackedAboutEntry({
@@ -4679,7 +4714,7 @@ test("pages delete refuses what the CLI does not delete, before any request (TR0
 
   assert.equal(await attempt("missing"), "pages.delete_page_unknown");
   assert.equal(await attempt("/"), "pages.delete_system");
-  assert.equal(await attempt("tags/news"), "pages.delete_generated");
+  assert.equal(await attempt("news"), "pages.delete_generated");
   assert.equal(await attempt("terms"), "pages.delete_not_authorable");
   assert.equal(wire.calls.length, 0);
 });
@@ -14844,19 +14879,10 @@ test("validate warns on a description search results will cut off (TR01194)", as
   ]);
 });
 
-/** A pulled workspace that also tracks one generated tag page. */
-function workspaceWithGeneratedTag(data) {
+/** A pulled workspace that also tracks one generated folder index. */
+function workspaceWithGeneratedFolder(data) {
   const base = wholeWorkspace({ uploaded: true });
-  const identity = {
-    kind: "GENERATED_PAGE_KIND_TAG",
-    tagId: TAG_ID,
-    year: 0,
-    month: 0,
-    countryCode: "",
-    regionCode: "",
-    citySlug: "",
-    categorySlug: "",
-  };
+  const identity = { kind: "GENERATED_PAGE_KIND_FOLDER_INDEX" };
   return {
     ...base,
     ".taproot-site-manifest.json": {
@@ -14864,22 +14890,22 @@ function workspaceWithGeneratedTag(data) {
       pages: [
         ...base[".taproot-site-manifest.json"].pages,
         {
-          pageId: TAG_PAGE_ID,
-          resourceId: resourceIdFor(TAG_PAGE_ID),
-          path: "tags/trails",
+          pageId: FOLDER_PAGE_ID,
+          resourceId: resourceIdFor(FOLDER_PAGE_ID),
+          path: "trails",
           title: "Trails",
           description: "y".repeat(400),
           status: "PAGE_STATUS_PUBLISHED",
           templateType: "TEMPLATE_TYPE_GENERATED",
           isGenerated: true,
-          file: TAG_SOURCE,
+          file: FOLDER_SOURCE,
           sourceFormat: "prosemirror",
           workspaceMode: "editable",
           generated: identity,
         },
       ],
     },
-    [TAG_SOURCE]: {
+    [FOLDER_SOURCE]: {
       template: "generated",
       data: { ...identity, customTitle: "", breadcrumbTitle: "", customDescription: "", ...data },
     },
@@ -14887,21 +14913,21 @@ function workspaceWithGeneratedTag(data) {
 }
 
 test("validate accepts a pulled generated page and warns on its custom description only (TR01195)", async (site) => {
-  const plain = await fixture(site, workspaceWithGeneratedTag({}));
+  const plain = await fixture(site, workspaceWithGeneratedFolder({}));
   const accepted = await cliRun(plain, ["validate"]);
   assert.equal(accepted.exitCode, 0, accepted.stderr);
   // The long description the site derived is not the owner's to shorten.
   assert.equal(accepted.result.descriptionWarnings, undefined);
 
-  const long = await fixture(site, workspaceWithGeneratedTag({
+  const long = await fixture(site, workspaceWithGeneratedFolder({
     customDescription: "x".repeat(200),
     introductionBody: paragraphDocument("Intro."),
   }));
   const warned = await cliRun(long, ["validate"]);
   assert.equal(warned.exitCode, 0, warned.stderr);
-  assert.deepEqual(warned.result.descriptionWarnings.items.map((item) => [item.file, item.length]), [[TAG_SOURCE, 200]]);
+  assert.deepEqual(warned.result.descriptionWarnings.items.map((item) => [item.file, item.length]), [[FOLDER_SOURCE, 200]]);
 
-  const refused = await fixture(site, workspaceWithGeneratedTag({ customDescription: "x".repeat(1001) }));
+  const refused = await fixture(site, workspaceWithGeneratedFolder({ customDescription: "x".repeat(1001) }));
   const failed = await cliRun(refused, ["validate"]);
   assert.equal(failed.exitCode, 1);
   const codes = [failed.result.error.code, ...(failed.result.error.problems ?? []).map((problem) => problem.code)];
@@ -14909,13 +14935,13 @@ test("validate accepts a pulled generated page and warns on its custom descripti
 });
 
 test("validate refuses a generated page whose identity was edited, and autolinks in its introduction are warned about (TR01195)", async (site) => {
-  const edited = await fixture(site, workspaceWithGeneratedTag({ kind: "GENERATED_PAGE_KIND_FOLDER_INDEX" }));
+  const edited = await fixture(site, workspaceWithGeneratedFolder({ kind: "GENERATED_PAGE_KIND_PUBLISHED_INDEX" }));
   const failed = await cliRun(edited, ["validate"]);
   assert.equal(failed.exitCode, 1);
   const codes = [failed.result.error.code, ...(failed.result.error.problems ?? []).map((problem) => problem.code)];
   assert.ok(codes.includes("pages.generated_identity"), JSON.stringify(failed.result.error));
 
-  const linked = await fixture(site, workspaceWithGeneratedTag({
+  const linked = await fixture(site, workspaceWithGeneratedFolder({
     introductionBody: {
       type: "doc",
       content: [{
@@ -14931,7 +14957,7 @@ test("validate refuses a generated page whose identity was edited, and autolinks
   const warned = await cliRun(linked, ["validate"]);
   assert.equal(warned.exitCode, 0, warned.stderr);
   assert.deepEqual(warned.result.linkWarnings.items.map((item) => [item.code, item.file, item.text]), [
-    ["content.link_autolinked", TAG_SOURCE, "ASP.NET"],
+    ["content.link_autolinked", FOLDER_SOURCE, "ASP.NET"],
   ]);
 });
 

@@ -77,7 +77,7 @@ const FIELD_HELP = Object.freeze({
     description:
       "The Taproot place being reviewed. The site fills in its name, address and coordinates from this record. Find "
       + "it with 'places search <name and city>' and 'places select <googlePlaceId> <sessionToken>'. The site publishes the "
-      + "place's category in the byline and files the review under /places/<category>; change it for this site with "
+      + "place's category in the byline; change it for this site with "
       + "'places category set <placeId> <category>'.",
   },
   place: {
@@ -263,7 +263,7 @@ const TYPE_DETAILS = Object.freeze({
   },
   [TEMPLATE_PLACE_REVIEW]: {
     displayName: "Place review",
-    summary: "A review of a place with a three-step rating, listed on the site's places archive.",
+    summary: "A review of a place with a three-step rating; its address card opens the place on Google Maps, and its location byline opens the site's map page when it has one.",
     body: "Everything after the front matter is the review body.",
     markdownExample: PLACE_REVIEW_EXAMPLE,
     documentExample: documentExample(
@@ -284,20 +284,14 @@ const TYPE_DETAILS = Object.freeze({
   [TEMPLATE_GENERATED]: {
     displayName: "Generated page",
     summary:
-      "A listing Taproot generates from the site's content: a tag, the tags index, a published year or month, a place "
-      + "archive, or a folder. You cannot create one; you customize its title, breadcrumb, description and introduction.",
+      "A listing Taproot generates from the site's content: the published archive, the map or a folder. You cannot create "
+      + "one; you customize its title, breadcrumb, description and introduction. A folder index is a search "
+      + "destination when it has an introduction or renders at least three cards; otherwise it carries noindex.",
     documentExample: documentExample(
       TEMPLATE_GENERATED,
       {},
       {
-        kind: "GENERATED_PAGE_KIND_TAG",
-        tagId: "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a",
-        year: 0,
-        month: 0,
-        countryCode: "",
-        regionCode: "",
-        citySlug: "",
-        categorySlug: "",
+        kind: "GENERATED_PAGE_KIND_FOLDER_INDEX",
         customTitle: "Trail notes",
         breadcrumbTitle: "",
         customDescription: "Field notes from the trails I walk most often.",
@@ -305,8 +299,7 @@ const TYPE_DETAILS = Object.freeze({
       },
     ),
     dataFields: [
-      "kind and the identity fields (tagId, year, month, countryCode, regionCode, citySlug, categorySlug): what the "
-      + "page is, written by pull. Leave them as pulled; a push that changes them is refused (pages.generated_identity)",
+      "kind: what the page is, written by pull. Leave it as pulled; a push that changes it is refused (pages.generated_identity)",
       "customTitle: string; empty uses the generated title (the page's reader-facing title)",
       "breadcrumbTitle: string; empty uses the generated label (used on pages beneath this one)",
       "customDescription: string, at most 1000 characters, about 160 shown in search results; empty uses the "

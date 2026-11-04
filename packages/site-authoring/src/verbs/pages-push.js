@@ -51,6 +51,7 @@ import {
   FRONT_MATTER_KEYS,
   PAGE_TEMPLATES,
   requireTemplateName,
+  RETIRED_GENERATED_PAGE_KINDS,
   sentDisplayDate,
   TEMPLATE_FREE_FORM,
   TEMPLATE_GENERATED,
@@ -483,6 +484,20 @@ function peekJsonTemplate(text) {
     return documentTemplate(parsed);
   } catch {
     return TEMPLATE_FREE_FORM;
+  }
+}
+
+/**
+ * Whether a generated-page source names a kind Taproot retired (TR01308). The
+ * site deletes such a page on its next synchronization, but until then it is still listed,
+ * so a pulled source of that kind is judged here, before its document is read.
+ */
+function isRetiredGeneratedSource(source) {
+  if (source.template !== TEMPLATE_GENERATED || typeof source.text !== "string") return false;
+  try {
+    return RETIRED_GENERATED_PAGE_KINDS.includes(JSON.parse(source.text)?.data?.kind);
+  } catch {
+    return false;
   }
 }
 
@@ -1293,7 +1308,6 @@ export async function planPages({
       let observedRecord;
       let legalRevisionGuard;
       requireCompletePageMetadata(source);
-      const document_ = await convertWorkspacePageSource({ source, mediaManifest, content });
 
       const target = manifestEntry?.pageId !== undefined
         ? liveById.get(manifestEntry.pageId)
@@ -1307,21 +1321,26 @@ export async function planPages({
           file,
         );
       }
-      const generated = documentTemplate(document_) === TEMPLATE_GENERATED;
-      if (documentTemplate(document_) === TEMPLATE_LEGAL && target === undefined && manifestEntry?.pageId !== undefined) {
-        throw documentError("pages.legal_missing", `'${file}' tracks a legal page that the site no longer lists. Pull and reconcile it before creating another page.`, file);
-      }
-      if (generated && target === undefined) {
+      // A generated source the site no longer has, or whose kind Taproot retired
+      // (TR01308; the site deletes the page on its next synchronization), is
+      // judged before its document is read: it is reported stale like any
+      // other and never refused as an unknown kind that blocks the push.
+      const generated = source.template === TEMPLATE_GENERATED;
+      const retiredKind = generated && isRetiredGeneratedSource(source);
+      if (generated && (target === undefined || retiredKind)) {
         if (targeted) {
           throw documentError(
             "pages.generated_create",
-            `'${file}' is a generated-page source, but the site has no generated page for it. Taproot creates `
-              + "generated pages from the site's content; a push cannot create one. If the page no longer exists, "
-              + "delete this file and run 'taproot-site pull'.",
+            retiredKind
+              ? `'${file}' is the source of a generated page of a kind Taproot no longer publishes, and a push `
+                + "cannot send one. Delete the file."
+              : `'${file}' is a generated-page source, but the site has no generated page for it. Taproot creates `
+                + "generated pages from the site's content; a push cannot create one. If the page no longer exists, "
+                + "delete this file and run 'taproot-site pull'.",
             file,
           );
         }
-        // The site retired this page (its tag, month, place or folder is gone),
+        // The site retired this page (its folder or its kind is gone),
         // which is Taproot's doing, not a mistake in the workspace: it cannot
         // block the pages that do exist.
         staleGenerated.push({ file, path: displayPagePath(pagePath) });
@@ -1330,6 +1349,10 @@ export async function planPages({
             + "nothing is sent for it. Delete the file, or run 'taproot-site pull' to refresh the workspace.",
         );
         return;
+      }
+      const document_ = await convertWorkspacePageSource({ source, mediaManifest, content });
+      if (documentTemplate(document_) === TEMPLATE_LEGAL && target === undefined && manifestEntry?.pageId !== undefined) {
+        throw documentError("pages.legal_missing", `'${file}' tracks a legal page that the site no longer lists. Pull and reconcile it before creating another page.`, file);
       }
       // The file-keyed entry is gone whenever the file was renamed or replaced —
       // which is exactly what the pull, delete the `.pm.json`, author a `.md`
@@ -1371,7 +1394,7 @@ export async function planPages({
         && targetEntry.file === file
         && targetEntry.sourceFormat === source.sourceFormat;
       // An untouched generated page is not this push's to judge. Taproot
-      // moves its revision and its path on its own (a tag rename, a month that
+      // moves its revision and its path on its own (a folder that
       // gained a post), and refusing the whole push for a page nothing here
       // sends would make one renamed page block every other edit.
       let untouchedGenerated = false;

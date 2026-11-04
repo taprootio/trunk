@@ -572,6 +572,46 @@
       "rule": "redirect.source_generated_file"
     },
     {
+      "submitted": "/map/places.json",
+      "normalized": "/map/places.json",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/map/Places.json",
+      "normalized": "/map/Places.json",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/map/places.json/old",
+      "normalized": "/map/places.json/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/published/months.json",
+      "normalized": "/published/months.json",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/published/2026/03.json",
+      "normalized": "/published/2026/03.json",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/published/months.json/old",
+      "normalized": "/published/months.json/old",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/published/Months.json",
+      "normalized": "/published/Months.json",
+      "rule": "redirect.source_generated_file"
+    },
+    {
+      "submitted": "/published/2026/03",
+      "normalized": "/published/2026/03",
+      "rule": null
+    },
+    {
       "submitted": "/blog/0123456789abcdef0123456789abcdef.txt",
       "normalized": "/blog/0123456789abcdef0123456789abcdef.txt",
       "rule": null

@@ -139,7 +139,7 @@ const VERBS = Object.freeze([
       + "appearance, header, brand, footer, navigation, redirects, and forms are checked with the validators the "
       + "pushes use, and every problem is reported at once in error.problems (each with its file, code, and field) "
       + "rather than one per run. A pulled workspace is checked offline against the pages (generated ones included, "
-      + "so navigation to a section or tag page resolves), images, and baselines its manifests recorded at the pull. "
+      + "so navigation to a folder index resolves), images, and baselines its manifests recorded at the pull. "
       + "A link whose address is only http(s):// plus its own text (left by older editor autolinking) is reported in "
       + "linkWarnings without refusing; pages push reports the same for the pages it sends. "
       + "The site checks that can run offline are reported in findings (a rule id, severity, file, and the value "
@@ -287,7 +287,7 @@ const VERBS = Object.freeze([
       + "and pull again. A locally edited '.pm.json' is kept rather than overwritten for the same reason. "
       + "First revisions adopted without a completed body comparison are counted in pages.revisionsRecordedWithoutBodyComparison "
       + "and announced on the human channel. New downloads and compared bodies are excluded. "
-      + "A page Taproot generates (a tag, an archive, a place, a folder) is pulled as an update-only '.pm.json' "
+      + "A page Taproot generates (the published archive, the map or a folder) is pulled as an update-only '.pm.json' "
       + "(template 'generated'): you edit its custom title, breadcrumb title, custom description and introduction, "
       + "and the manifest keeps the title and description the site reports. "
       + "A form a page places is written back by its key, the name 'forms/<key>.json' uses, though the site stores "
@@ -445,7 +445,7 @@ const VERBS = Object.freeze([
       + "'places category list', which prints the closed list; a name outside it is refused, and capitalization is "
       + "ignored. Use it when Google's own category for a place is not the one this site wants, such as a park filed "
       + "under Other. The category is this site's alone and applies to every review of that place here: the place "
-      + "itself and other sites do not change. Place-review bylines and the /places/<category> pages use it from the "
+      + "itself and other sites do not change. Place-review bylines use it from the "
       + "next deployment, which a changed category alone is enough to start. Undo it with 'places category clear'.",
   },
   {

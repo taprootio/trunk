@@ -728,7 +728,7 @@ export async function pull(invocation) {
       registeredFiles.add(record.file);
     }
     const tracked = await resolveTrackedSources(config.workspaceDir, authorable, registry, onProgress);
-    // A generated page the site retired (its tag, month, place or folder is
+    // A generated page the site retired (its folder or its kind is
     // gone) leaves its pulled file behind: authored content, so pull will not
     // delete it, and settles it before naming any page's file so that a page
     // created since at the same path never writes over it. It is recorded

@@ -184,35 +184,26 @@ test("init exports a pulled generated page as an editable source that validates 
   const { source } = await sourceWorkspace(t);
   const manifestFile = path.join(source, ".taproot-site-manifest.json");
   const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
-  const identity = {
-    kind: "GENERATED_PAGE_KIND_TAG",
-    tagId: "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a",
-    year: 0,
-    month: 0,
-    countryCode: "",
-    regionCode: "",
-    citySlug: "",
-    categorySlug: "",
-  };
+  const identity = { kind: "GENERATED_PAGE_KIND_FOLDER_INDEX" };
   manifest.pages.push({
     pageId: "a0000000-0000-4000-8000-0000000000e1",
     resourceId: "a0000000-0000-4000-8000-0000000000e2",
-    path: "tags/trails",
+    path: "trails",
     title: "Trails",
-    description: "Pages tagged with Trails.",
+    description: "Pages in Trails.",
     status: "PAGE_STATUS_PUBLISHED",
     templateType: "TEMPLATE_TYPE_GENERATED",
     hasDraft: false,
     isGenerated: true,
-    file: "pages/tags/trails.pm.json",
+    file: "pages/trails.pm.json",
     sourceFormat: "prosemirror",
     workspaceMode: "editable",
     generated: identity,
   });
   await writeFile(manifestFile, JSON.stringify(manifest));
-  await mkdir(path.join(source, "pages", "tags"), { recursive: true });
+  await mkdir(path.join(source, "pages"), { recursive: true });
   await writeFile(
-    path.join(source, "pages", "tags", "trails.pm.json"),
+    path.join(source, "pages", "trails.pm.json"),
     JSON.stringify({
       template: "generated",
       data: { ...identity, customTitle: "", breadcrumbTitle: "", customDescription: "Field notes." },
@@ -230,8 +221,7 @@ test("init exports a pulled generated page as an editable source that validates 
   assert.equal(document_.template, "generated");
   assert.equal(document_.data.customDescription, "Field notes.");
   // The identity record travels with the page, so the exported workspace can still check it.
-  assert.equal(exported.generated.kind, "GENERATED_PAGE_KIND_TAG");
-  assert.equal(exported.generated.tagId, document_.data.tagId);
+  assert.equal(exported.generated.kind, "GENERATED_PAGE_KIND_FOLDER_INDEX");
   const result = await invoke(source, ["validate", output]);
   assert.equal(result.exit, 0, result.stderr);
 });

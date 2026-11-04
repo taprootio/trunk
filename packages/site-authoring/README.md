@@ -140,7 +140,7 @@ with no credential, no network, and no write: every page source (metadata,
 Markdown conversion, media references, content vocabulary, section contexts),
 page paths and templates against the pages the pull recorded, navigation,
 redirects, forms, and the complete theme, appearance, header, brand, and
-footer. Navigation to a generated page (a section, tag or place page) resolves
+footer. Navigation to a generated page (a section or folder page) resolves
 against the pages the pull recorded. It reports every problem at once in
 `error.problems`, each with its file, code, and field, instead of one per run.
 Warnings never refuse: `linkWarnings` names a link whose address is only
@@ -506,12 +506,11 @@ listings only while that person can still be named: a former member's page, or
 a member who can no longer create pages, reports none, and a push that names
 someone else on it is refused as a conflict.
 
-Pages Taproot generates from the site's content — a tag, the tags index, a
-published year or month, a place archive, a folder — are update-only sources.
-`pull` writes each as `pages/<name>.pm.json` with `"template": "generated"`:
-`data` holds what the page is (`kind`, `tagId`, `year`, `month`, `countryCode`,
-`regionCode`, `citySlug`, `categorySlug`, which you leave as pulled) and the four
-things that are yours to author: `customTitle`, `breadcrumbTitle`,
+Pages Taproot generates from the site's content — the published archive, a
+folder — are update-only sources. `pull` writes each as
+`pages/<name>.pm.json` with `"template": "generated"`: `data` holds what the
+page is (`kind`, which you leave as pulled) and the four things
+that are yours to author: `customTitle`, `breadcrumbTitle`,
 `customDescription` and `introductionBody`. An empty string means "use the
 generated default"; the description then falls back to the introduction's first
 paragraph, else the system default. The manifest keeps the title and description
@@ -525,8 +524,8 @@ move one (`pages.generated_move`) or change its kind or identity
 (`pages.generated_identity`, also when the manifest has no record of what the
 file was pulled as: run `pull`); there is no Markdown form
 (`pages.generated_markdown`). A generated page you did not edit never blocks a
-push of the whole workspace, even when Taproot moved it since the pull (a tag was
-renamed). If the site no longer has the page (its tag, month or folder is gone),
+push of the whole workspace, even when Taproot changed it since the pull. If the
+site no longer has the page (its folder is gone, or Taproot retired its kind),
 a whole-workspace push reports the file under `pages.staleGeneratedSources` and
 sends nothing for it, and `pull` says so; delete the file. Naming that path in
 `pages push <page-path>` is refused with `pages.generated_create`. A description over 160 characters is warned about,
@@ -857,8 +856,8 @@ taproot-site places category clear <placeId>
 `list` prints the closed list `set` accepts; a name outside it is refused, and
 capitalization is ignored. The category is the site's alone and applies to every
 review of that place on the site: the place itself and other sites do not
-change. Place-review bylines and the `/places/<category>` pages use it from the
-site's next deployment, including reviews nobody has edited. `clear` removes it.
+change. Place-review bylines use it from the site's next deployment, including
+reviews nobody has edited. `clear` removes it.
 Both need the same page-editing permission as `places select`.
 
 ### Pages generated in 0.18.0
@@ -892,7 +891,7 @@ once).
   page's title, description or author; `pull` keeps the edit until `pages push`
   sends it. Descriptions are warned about over 160 characters and refused over
   1000, here and by Taproot.
-- Generated pages (tags, archives, places, folders) pull as update-only sources
+- Generated pages (the published archive, the map, folders) pull as update-only sources
   whose custom title, breadcrumb, description and introduction you can edit.
 - Pages are authorless by default. `authors list`, `authors add` and
   `authors.json` name a member who can create pages or a site author without a

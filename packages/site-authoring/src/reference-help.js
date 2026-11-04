@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 45;
+export const REFERENCE_VERSION = 47;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -755,7 +755,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "those away, so '/x/../visit' would be checked as itself and served as '/visit' — past the occupancy, "
       + "chain, and loop rules that were asked about a different path. Write the resolved path instead.",
       "origin is reported by the site and ignored on push: 'authored' is what you declared, 'path_history' is "
-      + "what a page or tag rename recorded. Pull the map, edit it, push the whole thing back — an entry you "
+      + "what a page rename recorded. Pull the map, edit it, push the whole thing back — an entry you "
       + "did not change keeps its origin.",
       "Refused, offline and again at the site, each naming the entry index: a chain (a target that is itself a "
       + "source in the same map); a loop (an entry targeting itself); a duplicate path; a gone entry carrying a "
@@ -786,7 +786,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "check does not see may belong to a release the edge has not switched to yet; deploy --staging waits for "
       + "staging to serve the new release and reports stagingServed.",
       "A source cannot name a file the site generates: '/index.html' or any page's own 'index.html', '/404.html', "
-      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', a path under the sitemap or robots names, or the "
+      + "'/sitemap.xml', '/robots.txt', '/favicon.ico', the published archive's data files ('/published/months.json' "
+      + "and '/published/<year>/<month>.json'), the map page's data file ('/map/places.json'), a path under any of those names, or the "
       + "search-engine key file Taproot publishes when a site tells search engines about its releases (32 "
       + "lowercase hexadecimal characters followed by '.txt', in any capitals). Nothing under "
       + "'/taproot/<version>/' (for example '/taproot/5.0.62/manifest.json') can be a source either: the platform "
@@ -870,8 +871,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "refused as forms.page_not_found, so push the page first. It need not be published to save the form, but "
       + "a deploy whose release does not publish that page is refused, naming the form and the page. The path in "
       + "each release is the one the page has in that release, so the published form never asks the site where "
-      + "to go. The page must be one you created, the home page included: a generated page (folder, tag or "
-      + "archive index), the 404 page, a legal page (help page legal), a profile home and an integration-managed page are refused as forms.page_not_allowed. The button text and the confirmation belong to the form, not to the page that places it: "
+      + "to go. The page must be one you created, the home page included: a generated page (a folder index or "
+      + "the published archive), the 404 page, a legal page (help page legal), a profile home and an integration-managed page are refused as forms.page_not_allowed. The button text and the confirmation belong to the form, not to the page that places it: "
       + "the 'form' component takes only formKey.",
       "A form's contact address is the value of one email field, stored with each submission. That is what lets the "
       + "owner find and delete every row for a visitor who asks. With exactly one email field, that field is the "

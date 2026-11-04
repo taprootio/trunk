@@ -628,8 +628,7 @@ test("an article or album names its place by id, sends it for the site to fill i
 // TR01195 — the generated template
 // ---------------------------------------------------------------------------
 
-const TAG_ID = "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a";
-const generatedData = (extra = {}) => ({ kind: "GENERATED_PAGE_KIND_TAG", tagId: TAG_ID, ...extra });
+const generatedData = (extra = {}) => ({ kind: "GENERATED_PAGE_KIND_FOLDER_INDEX", ...extra });
 
 test("a generated page reads from the site with its defaults written out and no date or cover", () => {
   const document_ = workspaceDocumentFromPage({
@@ -638,9 +637,7 @@ test("a generated page reads from the site with its defaults written out and no 
     template: {
       templateType: "TEMPLATE_TYPE_GENERATED",
       generatedPageData: {
-        kind: "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
-        year: 2024,
-        month: 5,
+        kind: "GENERATED_PAGE_KIND_PUBLISHED_INDEX",
         customDescription: "Spring.",
         introductionBody: { type: "doc", content: [] },
       },
@@ -649,14 +646,7 @@ test("a generated page reads from the site with its defaults written out and no 
   assert.deepEqual(document_, {
     template: "generated",
     data: {
-      kind: "GENERATED_PAGE_KIND_PUBLISHED_MONTH",
-      tagId: "",
-      year: 2024,
-      month: 5,
-      countryCode: "",
-      regionCode: "",
-      citySlug: "",
-      categorySlug: "",
+      kind: "GENERATED_PAGE_KIND_PUBLISHED_INDEX",
       customTitle: "",
       breadcrumbTitle: "",
       customDescription: "Spring.",
@@ -673,18 +663,17 @@ test("a generated page reads from the site with its defaults written out and no 
 });
 
 test("a generated source is strict about its shape, and its description is bounded", () => {
-  const file = "pages/tags/trails.pm.json";
+  const file = "pages/trails.pm.json";
   const parse = (data, extra = {}) => typedDocumentFromJson({ template: "generated", data, ...extra }, file);
   assert.equal(parse(generatedData({ customDescription: "  Trim me.  " })).data.customDescription, "Trim me.");
   assert.equal(parse(generatedData({ customDescription: "x".repeat(1000) })).data.customDescription.length, 1000);
   for (
     const [label, bad, extra] of [
       ["an unknown field", generatedData({ slug: "trails" })],
-      ["a missing kind", { tagId: TAG_ID }],
+      ["a missing kind", { customTitle: "Trails" }],
       ["the unknown kind", { kind: "GENERATED_PAGE_KIND_UNKNOWN" }],
-      ["a tag id that is not a UUID", generatedData({ tagId: "trails" })],
-      ["a fractional year", generatedData({ year: 2024.5 })],
-      ["a month of 13", generatedData({ month: 13 })],
+      ["a tag id the data no longer carries", generatedData({ tagId: "0198a3f2-7c4e-4a10-9b2d-3f6e5d4c3b2a" })],
+      ["a year the data no longer carries", generatedData({ year: 2024 })],
       ["a non-string title", generatedData({ customTitle: 3 })],
       ["a non-document introduction", generatedData({ introductionBody: "text" })],
       ["a date the page does not carry", generatedData(), { displayDate: "2024-01-01" }],

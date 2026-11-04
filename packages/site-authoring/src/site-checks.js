@@ -282,6 +282,13 @@ export function normalizeRedirectPath(value) {
 const GENERATED_ROOT_FILES = ["404.html", "sitemap.xml", "robots.txt", "favicon.ico"];
 // The IndexNow key file (TR01304) is named by a pattern, so it cannot join the list above.
 const INDEX_NOW_KEY_FILE = /^[a-f0-9]{32}\.txt$/u;
+// The /published archive's data files (TR01309): months.json and yyyy/mm.json, with anything beneath either;
+// a marker at one of those names fails every publish in the generator's occupancy check. The API mirror is
+// SiteRedirectMap.IsPublishedArchiveDataPath.
+const PUBLISHED_ARCHIVE_ROOT = "published";
+const ARCHIVE_MONTHS_FILE = "months.json";
+const ARCHIVE_YEAR_SEGMENT = /^\d{4}$/u;
+const ARCHIVE_MONTH_FILE = /^\d{2}\.json$/iu;
 const INTEGRATION_DATA_ROOT = "integrations";
 const MAX_MARKER_SEGMENT_BYTES = 200;
 const MAX_OUTPUT_PATH_LENGTH = 1_024;
@@ -289,6 +296,18 @@ const WINDOWS_DEVICE_STEMS = new Set(["con", "prn", "aux", "nul"]);
 function isWindowsDeviceSegment(segment) {
     const stem = segment.split(".", 1)[0].toLowerCase();
     return WINDOWS_DEVICE_STEMS.has(stem) || /^(?:com|lpt)[1-9]$/u.test(stem);
+}
+function isPublishedArchiveDataPath(segments) {
+    if (segments.length < 2 || segments[0].toLowerCase() !== PUBLISHED_ARCHIVE_ROOT)
+        return false;
+    if (segments[1].toLowerCase() === ARCHIVE_MONTHS_FILE)
+        return true;
+    return segments.length >= 3 && ARCHIVE_YEAR_SEGMENT.test(segments[1]) && ARCHIVE_MONTH_FILE.test(segments[2]);
+}
+// The /map page's data file (TR01321), with anything beneath it, for the same reason.
+// The API mirrors this in SiteRedirectMap.IsPlaceMapDataPath.
+function isPlaceMapDataPath(segments) {
+    return segments.length >= 2 && segments[0].toLowerCase() === "map" && segments[1].toLowerCase() === "places.json";
 }
 function isStorable(decoded) {
     const output = `${decoded}/index.html`;
@@ -319,7 +338,9 @@ export function redirectSourceRule(edgePath) {
         return refuse(RULE_REDIRECT_SOURCE_INTEGRATION_DATA);
     if (isRuntimeMirrorPath(decoded))
         return refuse(RULE_REDIRECT_SOURCE_RUNTIME_MIRROR);
-    if (GENERATED_ROOT_FILES.includes(first.toLowerCase()) || INDEX_NOW_KEY_FILE.test(first.toLowerCase())) {
+    if (GENERATED_ROOT_FILES.includes(first.toLowerCase()) || INDEX_NOW_KEY_FILE.test(first.toLowerCase())
+        || isPublishedArchiveDataPath(segments)
+        || isPlaceMapDataPath(segments)) {
         return refuse(RULE_REDIRECT_SOURCE_GENERATED_FILE);
     }
     if (!isStorable(decoded))

@@ -1,6 +1,26 @@
 {
   "entries": [
     {
+      "version": "0.28.0",
+      "note": "Taproot no longer generates /places, year and month, or tag pages, so a generated page's data drops those fields. One /published page lists every month, a folder page reaches search only with an introduction or three cards, and a review's location byline opens Google Maps.",
+      "behavior": [
+        "The /published/<year> and /published/<year>/<month> pages are no longer generated. One /published page carries a year and a month picker filled from JSON files the release writes (published/months.json and published/<year>/<month>.json), and a content byline links to /published?year=YYYY&month=M. Those file paths are refused as redirect sources with redirect.source_generated_file.",
+        "A generated page's data drops year and month beside the place fields: pull writes kind and the four authored fields, and a source that still carries year or month is refused by pages push with pages.document_shape as an unsupported field: delete the year and month lines from sources pulled before this release (every generated page pulled earlier carries year: 0 and month: 0).",
+        "The /places index, country, region, city and category pages are no longer generated, so a site has no generated page of those kinds to pull. On a published review, article or album with a place on a site with no map page, the location byline opens the place's Google Maps listing in a new tab; the review's category byline is plain text.",
+        "A generated page's data holds kind and the four authored fields. pull no longer writes countryCode, regionCode, citySlug or categorySlug, and a source that still carries one is refused by pages push with pages.document_shape as an unsupported field: delete the four lines from sources pulled before this release.",
+        "/places is no longer a reserved path, so a page may be authored there.",
+        "A workspace that pulled a /places page before this release keeps that file: pages push reports it as the source of a generated page Taproot no longer publishes and sends the rest, whether or not the site has synchronized the page away yet; naming its path is refused with pages.generated_create. Delete the file.",
+        "Taproot no longer generates tag pages (/tags and /tags/<slug>): tags stay page metadata with no public page, a workspace that pulled one keeps the file and pages push reports it as the source of a page Taproot no longer publishes, and /tags is no longer a reserved path. A generated page's data holds kind and the four authored fields; tagId leaves the identity, and a source that still carries it is refused by pages push with pages.document_shape as an unsupported field: delete the line from sources pulled before this release.",
+        "A folder index is a search destination when it has an introduction or renders at least three cards; otherwise it carries noindex and leaves the sitemap. Write the page's introductionBody in its pulled .pm.json source to make a small folder one.",
+        "Taproot generates a /map page for a site with a public post that has a location. It is a new generated kind in pulls, /map and every path under it are reserved, and /map/places.json cannot be a redirect source.",
+        "The help reference version is 47."
+      ],
+      "help": [
+        "pages",
+        "page"
+      ]
+    },
+    {
       "version": "0.27.1",
       "note": "The site checks refuse a page or redirect source named like a search-engine key file, which the platform now publishes at the site root.",
       "behavior": [
