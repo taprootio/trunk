@@ -928,6 +928,22 @@ export const INTEGRATION_OPENAPI_SCHEMAS = Object.freeze({
       "siteId": {
         "type": "string",
         "description": "Owning site for SITE scope; empty for PROFILE and ACCOUNT."
+      },
+      "defaultDescription": {
+        "type": "string",
+        "description": "Image-owned default; empty means no description."
+      },
+      "descriptionRevision": {
+        "type": "integer",
+        "description": "Required as expected_revision when changing the default.",
+        "format": "int64"
+      },
+      "siteResponsiveUrls": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ImageUrl"
+        },
+        "description": "Public site-attributed variants for SITE scope only."
       }
     },
     "additionalProperties": false,
