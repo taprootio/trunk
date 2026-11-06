@@ -1,6 +1,23 @@
 {
   "entries": [
     {
+      "version": "0.29.0",
+      "note": "Pages gain an image-row component for linked pictures at a set height and a product-grid component for priced cards with a button each; feature-grid help states its icon sizes and square crop, and published feature-grid icons now render at the documented sizes.",
+      "behavior": [
+        "A free-form page may hold an image-row component: one to twelve pictures at one height (small 2.5rem/40px, medium 4rem/64px, large 6rem/96px at a 16px root), each with required alt text, required width and height, and an optional link. Pictures keep their own shape, are never cropped or framed, and one wider than the row shrinks to fit. See help component image-row.",
+        "help component feature-grid states the icon box sizes (small 3rem/48px, medium 6rem/96px, large 10rem/160px, xlarge 16rem/256px at a 16px root) and that icons are cropped to a square and framed by the site's image border. Published feature-grid icons now render at those sizes; before this release they filled the item's width with a 2em margin, so re-check existing grids after the runtime update.",
+        "A free-form page may hold a product-grid component: one to a hundred equal-height cards for things to buy or book, each with a title, free-text price and note, badge, description, up to eight feature lines, an optional 16:9 image and one button that links to any checkout; columns 2 to 4, standard or compact density, a border width, and a highlighted card drawn in the site's action color. Site checks now read buttonUrl and linkUrl addresses, so a card-grid, cta or product-grid link to a missing page is reported. See help component product-grid.",
+        "A free-form page may hold a social-links component: one to twelve links, each a platform from a fixed list (Instagram, Facebook, Yelp, YouTube, TikTok, LinkedIn, X, Threads, Bluesky, Mastodon, Pinterest, or Website for any other site) with an https address and an optional label the link reads to screen readers; icons at small 1.5rem, medium 2rem or large 3rem, aligned start, center or end (the align field), with labels shown or hidden. The address must be absolute https, without credentials, to a domain of unaccented letters, digits and hyphens. See help component social-links.",
+        "Footer settings gain socialLinks: up to twelve links with an id, a platform key, an https address and an optional label, published as an icon row between the bottom copy and the utility links. The footer draft hash moves to footer-draft-v4, so every footer draft hash issued before this release is stale once: pull the footer again before pushing it. See help footer.",
+        "The help reference version is 48."
+      ],
+      "help": [
+        "components",
+        "component",
+        "footer"
+      ]
+    },
+    {
       "version": "0.28.0",
       "note": "Taproot no longer generates /places, year and month, or tag pages, so a generated page's data drops those fields. One /published page lists every month, a folder page reaches search only with an introduction or three cards, and a review's location byline opens Google Maps.",
       "behavior": [

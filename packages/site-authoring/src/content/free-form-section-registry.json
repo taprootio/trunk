@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -569,6 +569,42 @@
       "label": "Video embed",
       "measure": "wide",
       "rootPlacement": "flow"
+    },
+    "image-row": {
+      "label": "Image Row",
+      "measure": "wide",
+      "rootPlacement": "flow",
+      "maxItems": 12,
+      "heights": {
+        "small": "2.5rem",
+        "medium": "4rem",
+        "large": "6rem"
+      }
+    },
+    "product-grid": {
+      "label": "Product Grid",
+      "measure": "wide",
+      "rootPlacement": "flow",
+      "maxItems": 100,
+      "limits": {
+        "title": 80,
+        "price": 40,
+        "priceNote": 60,
+        "badge": 40,
+        "description": 240,
+        "feature": 80,
+        "features": 8,
+        "buttonText": 40
+      },
+      "imageAspectRatio": { "width": 16, "height": 9 }
+    },
+    "social-links": {
+      "label": "Social Links",
+      "measure": "wide",
+      "rootPlacement": "flow",
+      "maxItems": 12,
+      "limits": { "label": 120 },
+      "sizes": { "small": "1.5rem", "medium": "2rem", "large": "3rem" }
     }
   },
   "integrationPlacement": {

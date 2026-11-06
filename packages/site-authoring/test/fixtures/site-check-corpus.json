@@ -248,6 +248,17 @@
         "/x…",
         "/αβ"
       ]
+    },
+    {
+      "name": "component button and card link addresses are read (buttonUrl, linkUrl)",
+      "currentPath": "rates",
+      "templateData": {
+        "componentData": "{&quot;items&quot;:[{&quot;buttonUrl&quot;:&quot;/join&quot;}],&quot;cards&quot;:[{&quot;linkUrl&quot;:&quot;/programs/strength&quot;}]}"
+      },
+      "expected": [
+        "/join",
+        "/programs/strength"
+      ]
     }
   ],
   "redirectSources": [
@@ -721,6 +732,20 @@
         "α"
       ],
       "expected": []
+    },
+    {
+      "name": "a component button address to a page the site lacks is reported",
+      "currentPath": "rates",
+      "templateData": {
+        "componentData": "{&quot;items&quot;:[{&quot;buttonUrl&quot;:&quot;/join&quot;},{&quot;buttonUrl&quot;:&quot;/gone&quot;}],&quot;cards&quot;:[{&quot;linkUrl&quot;:&quot;/programs/strength&quot;}]}"
+      },
+      "sitePagePaths": [
+        "join",
+        "programs/strength"
+      ],
+      "expected": [
+        "/gone"
+      ]
     }
   ],
   "pageStructure": [

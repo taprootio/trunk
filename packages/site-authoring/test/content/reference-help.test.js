@@ -1,3 +1,4 @@
+import registry from "../../src/content/free-form-section-registry.json" with { type: "json" };
 import { BUILT_IN_IMAGE_TEXTURES } from "@taprootio/espalier/shared/image-texture-registry";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -58,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 47);
+  assert.equal(REFERENCE_VERSION, 48);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -834,4 +835,104 @@ test("the preview topic tells a reader how long a staging review lasts, from the
 test("help settings lists analyticsConsentPrompt as read-only, because no push verb writes it", () => {
   const field = getSettingsReference().groups.flatMap((group) => group.fields).find((entry) => entry.path === "settings.analyticsConsentPrompt");
   assert.match(field.write, /^read-only/u);
+});
+
+test("the product-grid reference prints the registry's bounds, the button pair and the price-note rule (TR01323)", () => {
+  const limits = registry.components["product-grid"].limits;
+  const component = getComponentReference("product-grid");
+  const items = component.properties.find((property) => property.name === "items");
+  assert.equal(items.required, true);
+  assert.equal(items.schema.minItems, 1);
+  assert.equal(items.schema.maxItems, registry.components["product-grid"].maxItems);
+  const byName = Object.fromEntries(items.schema.items.properties.map((property) => [property.name, property]));
+  assert.equal(byName.title.required, true);
+  assert.equal(byName.title.schema.maxLength, limits.title);
+  assert.equal(byName.price.schema.maxLength, limits.price);
+  assert.equal(byName.priceNote.schema.maxLength, limits.priceNote);
+  assert.equal(byName.badge.schema.maxLength, limits.badge);
+  assert.equal(byName.description.schema.maxLength, limits.description);
+  assert.equal(byName.features.schema.maxItems, limits.features);
+  assert.equal(byName.features.schema.items.maxLength, limits.feature);
+  assert.equal(byName.buttonText.schema.maxLength, limits.buttonText);
+  assert.match(byName.buttonText.schema.description, /cut off in narrow columns/u);
+  assert.match(byName.priceNote.schema.description, /refused without a price/u);
+  assert.equal(byName.image.required, false);
+  assert.deepEqual(byName.image.schema.type, ["object", "null"]);
+  const columns = component.properties.find((property) => property.name === "columns");
+  assert.deepEqual(columns.schema.enum, [2, 3, 4]);
+  const printed = formatReferenceResult({ topic: "component", component });
+  assert.match(printed, /cut off in narrow columns/u);
+  assert.match(printed, /items\[\]\.features/u);
+});
+
+test("the image-row reference prints its bounds, required image fields and heights in rem and px (TR01322)", () => {
+  const component = getComponentReference("image-row");
+  const items = component.properties.find((property) => property.name === "items");
+  assert.equal(items.required, true);
+  assert.equal(items.editorInitial.kind, "omitted");
+  assert.deepEqual(items.whenOmitted, { kind: "invalid" });
+  assert.equal(items.schema.minItems, 1);
+  assert.equal(items.schema.maxItems, 12);
+  const image = items.schema.items.properties.find((property) => property.name === "image").schema;
+  assert.equal(image.type, "object");
+  assert.equal(image.markdownType, "string");
+  assert.match(image.description, /Alt text is required/u);
+  const byName = Object.fromEntries(image.properties.map((property) => [property.name, property]));
+  assert.equal(byName.alt.required, true);
+  assert.equal(byName.alt.schema.minLength, 1);
+  assert.equal(byName.width.required, true);
+  assert.equal(byName.width.schema.minimum, 1);
+  assert.equal(byName.height.schema.minimum, 1);
+  const height = component.properties.find((property) => property.name === "height");
+  assert.match(height.schema.description, /small 2\.5rem \(40px\), medium 4rem \(64px\), large 6rem \(96px\)/u);
+  const align = component.properties.find((property) => property.name === "align");
+  assert.match(align.schema.description, /start is the left edge and end the right edge/u);
+  const printed = formatReferenceResult({ topic: "component", component });
+  assert.match(printed, /40px/u);
+  assert.match(printed, /never cropped or framed/u);
+  assert.match(printed, /Width and height are required/u);
+});
+
+test("the feature-grid reference states its icon sizes and square crop (TR01322)", () => {
+  const component = getComponentReference("feature-grid");
+  const notes = component.accessibility.join(" ");
+  assert.match(notes, /small 3rem \(48px\), medium 6rem \(96px\), large 10rem \(160px\), xlarge 16rem \(256px\)/u);
+  assert.match(notes, /cropped to a square/u);
+  assert.match(formatReferenceResult({ topic: "component", component }), /cropped to a square/u);
+});
+
+test("the social-links reference lists the platforms, the https-only address and the registry's bounds (TR01324)", () => {
+  const entry = registry.components["social-links"];
+  const component = getComponentReference("social-links");
+  const items = component.properties.find((property) => property.name === "items");
+  assert.equal(items.required, true);
+  assert.equal(items.schema.minItems, 1);
+  assert.equal(items.schema.maxItems, entry.maxItems);
+  const byName = Object.fromEntries(items.schema.items.properties.map((property) => [property.name, property]));
+  assert.equal(byName.platform.required, true);
+  assert.deepEqual(byName.platform.schema.enum, [
+    "instagram",
+    "facebook",
+    "yelp",
+    "youtube",
+    "tiktok",
+    "linkedin",
+    "x",
+    "threads",
+    "bluesky",
+    "mastodon",
+    "pinterest",
+    "other",
+  ]);
+  assert.equal(byName.url.required, true);
+  assert.equal(byName.url.schema.format, "https-url");
+  assert.equal(byName.url.schema.maxLength, 2048);
+  assert.match(byName.url.schema.description, /absolute https URL without credentials/u);
+  assert.match(byName.url.schema.description, /accented or non-English letters are not supported/u);
+  assert.equal(byName.label.required, false);
+  assert.equal(byName.label.schema.maxLength, entry.limits.label);
+  const size = component.properties.find((property) => property.name === "size");
+  assert.deepEqual(size.schema.enum, ["small", "medium", "large"]);
+  const align = component.properties.find((property) => property.name === "align");
+  assert.deepEqual(align.schema.enum, ["start", "center", "end"]);
 });

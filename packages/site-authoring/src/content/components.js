@@ -4,7 +4,10 @@
 // copy — the generator's Playwright Node process, for one — cannot load this
 // pipeline at all once a component module is in the graph.
 import { BUILT_IN_IMAGE_TEXTURES } from "@taprootio/espalier/shared/image-texture-registry";
+import registry from "./free-form-section-registry.json" with { type: "json" };
 import { hasAsciiControl } from "../errors.js";
+import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "../social-link-url.js";
+import socialPlatforms from "../social-platforms.json" with { type: "json" };
 import {
   CONTENT_ERROR_CODES as CODES,
   CONTENT_LIMITS,
@@ -61,14 +64,28 @@ const boundedStr = (maximumLength, options = {}) => str({ maximumLength, ...opti
 const bool = () => Object.freeze({ kind: "boolean" });
 const num = (options = {}) => Object.freeze({ kind: "number", ...options });
 const enumOf = (...values) => Object.freeze({ kind: "enum", values: Object.freeze(values) });
-const list = (item) => Object.freeze({ kind: "array", item });
+/** An array of `item`; `minItems`/`maxItems` bound it below the global cap (TR01322). */
+const list = (item, options = {}) => Object.freeze({ kind: "array", item, ...options });
 const shape = (fields, options = {}) => Object.freeze({ kind: "object", fields: Object.freeze(fields), ...options });
-const image = () => Object.freeze({ kind: "image" });
-const safeUrl = (options = {}) => Object.freeze({ kind: "safe-url", ...options });
+/**
+ * A processed-image record or null. `required` refuses null, `altRequired`
+ * refuses a blank alt and `dimensionsRequired` demands positive width and
+ * height, for a component whose images are the content (TR01322).
+ */
+const image = (options = {}) => Object.freeze({ kind: "image", ...options });
+/**
+ * A safe URL; `https: true` is the social-link rule (absolute https to a plain
+ * domain, TR01324), which also makes the field required and refuses an empty
+ * value, so every reader of `required` agrees.
+ */
+const safeUrl = (options = {}) =>
+  Object.freeze({ kind: "safe-url", ...(options.https ? { required: true, allowEmpty: false } : {}), ...options });
 /** A CSS length the published renderer accepts as a per-block override; `allowNone` adds `none` (a max height). */
 const cssLength = (options = {}) => Object.freeze({ kind: "css-length", ...options });
 const textureName = () => Object.freeze({ kind: "texture-name", maximumLength: 64 });
 const withOmission = (spec, whenOmitted) => Object.freeze({ ...spec, whenOmitted: Object.freeze(whenOmitted) });
+/** The same spec with a description `help component` prints beside its constraints. */
+const described = (spec, description) => Object.freeze({ ...spec, description });
 
 /**
  * `ComponentImageData`. `src` and `urls` are the only required-by-key fields
@@ -362,11 +379,142 @@ const FORM = Object.freeze({
   formKey: str({ required: true, nonWhitespace: true }),
 });
 
+/**
+ * The image field table an image spec validates against. The shared table
+ * leaves alt and dimensions optional; a spec that requires them swaps in
+ * stricter entries at the same positions so canonical order is unchanged.
+ */
+function imageFieldsFor(spec) {
+  if (!spec.altRequired && !spec.dimensionsRequired) return COMPONENT_IMAGE_FIELDS;
+  return Object.freeze({
+    ...COMPONENT_IMAGE_FIELDS,
+    ...(spec.dimensionsRequired
+      ? {
+        width: num({ integer: true, minimum: 1, required: true }),
+        height: num({ integer: true, minimum: 1, required: true }),
+      }
+      : {}),
+    ...(spec.altRequired
+      ? {
+        alt: str({
+          required: true,
+          nonWhitespace: true,
+          // What the author can act on: in Markdown the alt is the media manifest's, not the fence's.
+          blankDetail: "alt text that names the picture or its destination; in Markdown the alt comes from the "
+            + "media manifest entry the image path names",
+        }),
+      }
+      : {}),
+  });
+}
+
+/** The registry owns the row heights; the help text and the renderer derive from the same map. */
+const IMAGE_ROW_HEIGHTS = registry.components["image-row"].heights;
+const IMAGE_ROW_HEIGHT_HELP = `Each image's height: ${
+  Object.entries(IMAGE_ROW_HEIGHTS)
+    .map(([name, rem]) => `${name} ${rem} (${Number.parseFloat(rem) * 16}px)`)
+    .join(", ")
+} at a 16px root; width follows each image's own shape, never cropped or framed.`;
+
+/**
+ * `ImageRowData` (TR01322). A row of pictures carries no other text, so every
+ * image needs alt text and the dimensions the row sizes it by.
+ */
+const IMAGE_ROW = Object.freeze({
+  items: list(
+    shape({
+      image: image({ required: true, altRequired: true, dimensionsRequired: true }),
+      url: safeUrl(),
+    }),
+    { minItems: 1, maxItems: registry.components["image-row"].maxItems, required: true },
+  ),
+  height: described(enumOf(...Object.keys(IMAGE_ROW_HEIGHTS)), IMAGE_ROW_HEIGHT_HELP),
+  align: described(
+    enumOf("start", "center", "end"),
+    "Where the images sit when they do not fill the row: start is the left edge and end the right edge in a "
+      + "left-to-right page.",
+  ),
+});
+
+/**
+ * `ProductGridData` (TR01323). The registry owns the text bounds, the item cap
+ * and the crop shape; the generator's readiness check and the editor read the
+ * same entry, so no side can drift. Blank optional text counts as absent on
+ * every side; the cross-field hook below decides the button pair and the
+ * price note.
+ */
+const PRODUCT_GRID_ENTRY = registry.components["product-grid"];
+const PRODUCT_GRID_LIMITS = PRODUCT_GRID_ENTRY.limits;
+const PRODUCT_GRID_BUTTON_TEXT_NOTE = "Keep it short; long text is cut off in narrow columns.";
+const PRODUCT_GRID = Object.freeze({
+  items: list(
+    shape({
+      image: image(),
+      title: boundedStr(PRODUCT_GRID_LIMITS.title, { required: true, nonWhitespace: true }),
+      price: described(boundedStr(PRODUCT_GRID_LIMITS.price), "Free text, such as \"$145\", \"From $30\" or \"Free\"."),
+      priceNote: described(boundedStr(PRODUCT_GRID_LIMITS.priceNote), "Shown beside the price, such as \"per month\"; refused without a price."),
+      badge: boundedStr(PRODUCT_GRID_LIMITS.badge),
+      description: boundedStr(PRODUCT_GRID_LIMITS.description),
+      features: list(
+        described(boundedStr(PRODUCT_GRID_LIMITS.feature, { nonWhitespace: true }), "One line each; a line break inside a feature is refused."),
+        { maxItems: PRODUCT_GRID_LIMITS.features },
+      ),
+      buttonText: described(
+        boundedStr(PRODUCT_GRID_LIMITS.buttonText),
+        `${PRODUCT_GRID_BUTTON_TEXT_NOTE} Needs a buttonUrl, and a buttonUrl needs it.`,
+      ),
+      buttonUrl: safeUrl(),
+      highlighted: bool(),
+      cropState: CROP_STATE,
+    }),
+    { minItems: 1, maxItems: PRODUCT_GRID_ENTRY.maxItems, required: true },
+  ),
+  columns: num({ values: Object.freeze([2, 3, 4]) }),
+  density: described(enumOf("standard", "compact"), "compact tightens the card padding and gaps; nothing is hidden."),
+  borderWidth: num({
+    integer: true,
+    minimum: 0,
+    description: "Pixel border around each card; 0 boxes nothing. A highlighted card always draws at least 2px.",
+  }),
+});
+
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
   return Object.freeze(value);
 }
+
+const HTTPS_URL_DESCRIPTION =
+  `an absolute https URL without credentials, at most ${SOCIAL_LINK_URL_MAX_LENGTH} characters, to a domain name of unaccented letters, digits and hyphens`;
+const UNSUPPORTED_DOMAIN_NOTE =
+  "Domain names with accented or non-English letters are not supported here; use a footer bottom link for that site.";
+const SOCIAL_LINKS_ENTRY = registry.components["social-links"];
+const SOCIAL_PLATFORM_KEYS = socialPlatforms.platforms.map((platform) => platform.key);
+const SOCIAL_LINKS_SIZE_HELP = `The icon's edge: ${
+  Object.entries(SOCIAL_LINKS_ENTRY.sizes).map(([name, rem]) => `${name} ${rem} (${Number.parseFloat(rem) * 16}px)`).join(", ")
+} at a 16px root.`;
+/** Social links (TR01324): the registry entry owns the cap, the label length and the sizes; the shared rule owns the address. */
+const SOCIAL_LINKS = Object.freeze({
+  items: list(
+    shape({
+      platform: described(
+        Object.freeze({ ...enumOf(...SOCIAL_PLATFORM_KEYS), required: true }),
+        `The platform whose icon the link shows: ${
+          socialPlatforms.platforms.map((platform) => `${platform.key} (${platform.name})`).join(", ")
+        }. other is any website and needs a label.`,
+      ),
+      url: safeUrl({ https: true }),
+      label: described(
+        boundedStr(SOCIAL_LINKS_ENTRY.limits.label),
+        "The name screen readers announce instead of the platform name, shown beside the icon when showLabels is true; required for other, and a blank one is refused.",
+      ),
+    }),
+    { minItems: 1, maxItems: SOCIAL_LINKS_ENTRY.maxItems, required: true },
+  ),
+  size: described(enumOf(...Object.keys(SOCIAL_LINKS_ENTRY.sizes)), SOCIAL_LINKS_SIZE_HELP),
+  align: described(enumOf("start", "center", "end"), "Where the row sits across the page: start, center or end."),
+  showLabels: described(bool(), "Show each link's text beside its icon; when false the text is read by screen readers only."),
+});
 
 function component(fields, displayName, summary, defaultData, accessibility, example, authoring) {
   return deepFreeze({
@@ -499,6 +647,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Each linked item needs a title that remains meaningful as link text.",
       "Icon images need descriptive alt text when they convey information; otherwise use an empty alt value.",
       "Item title and description are plain text: an item's url makes the whole item the link, and no link can be placed inside the text. Put linked prose in a paragraph beside the grid.",
+      "iconSize sets the icon box: small 3rem (48px), medium 6rem (96px), large 10rem (160px), xlarge 16rem (256px) at a 16px root.",
+      "Icons are cropped to a square and framed by the site's image border. For badges, logos or any picture that must keep its shape, use the image-row component instead.",
     ],
     {
       items: [
@@ -700,6 +850,112 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       markdownExample: "```component:video-embed\n{\"url\": \"https://youtu.be/dQw4w9WgXcQ\", \"title\": \"A walk through the studio before your first class.\"}\n```",
     },
   ),
+  "image-row": component(
+    IMAGE_ROW,
+    "Image Row",
+    "A wrapping row of pictures at one height, each with alt text and an optional link, never cropped or framed.",
+    { height: "medium", align: "start" },
+    [
+      "Every image needs alt text: a row of pictures carries no other text. For a linked image the alt is the link's name, so name the destination or action, such as \"Download on the App Store\"; for an unlinked image, describe the picture.",
+      "In Markdown the alt comes from the media manifest entry the image path names; a blank alt is refused.",
+      "Each image keeps its own shape at the chosen height and is never cropped or framed; an image wider than the row shrinks to fit. Width and height are required so the row can size the image; media upload records them.",
+      "Links open in the same tab, as card-grid and feature-grid links do.",
+    ],
+    {
+      items: [
+        {
+          image: {
+            imageId: "6b2d7c4e-1f3a-4b5c-9d8e-7f6a5b4c3d2e",
+            src: "https://static.example.test/site/img/app-store-badge.webp",
+            urls: [{ minWidth: 240, url: "https://static.example.test/site/img/app-store-badge-240.webp" }],
+            width: 1200,
+            height: 400,
+            alt: "Download on the App Store",
+          },
+          url: "https://apps.apple.com/app/id123456789",
+        },
+        {
+          image: {
+            imageId: "7c3e8d5f-2a4b-4c6d-8e9f-6a5b4c3d2e1f",
+            src: "https://static.example.test/site/img/google-play-badge.webp",
+            urls: [{ minWidth: 240, url: "https://static.example.test/site/img/google-play-badge-240.webp" }],
+            width: 1350,
+            height: 400,
+            alt: "Get it on Google Play",
+          },
+          url: "https://play.google.com/store/apps/details?id=example",
+        },
+      ],
+      height: "small",
+      align: "start",
+    },
+  ),
+  "product-grid": component(
+    PRODUCT_GRID,
+    "Product Grid",
+    "Equal-height cards for things to buy or book: a title, free-text price and price note, badge, description, features and one button each, linking to any checkout.",
+    { columns: 3, density: "standard", borderWidth: 0 },
+    [
+      "A button's visible text is its accessible name, and the product's title heads the same list item, so \"Buy now\" on every card reads with its product. Say what the button does, such as \"Buy now\" or \"Book a trial\".",
+      PRODUCT_GRID_BUTTON_TEXT_NOTE,
+      "buttonText and buttonUrl go together: text without an address and an address without text are both refused. Links open in the same tab, as card-grid and feature-grid links do.",
+      "price is free text (\"From $30\", \"Free\"); priceNote is shown beside it and refused without a price.",
+      "An image is optional and cropped to 16:9. Its alt may be blank when the title already says what the picture shows; in Markdown the alt comes from the media manifest entry.",
+      "highlighted draws a border of at least 2px (the borderWidth when that is larger) and the badge in the site's action color to mark one card, such as the most popular plan. The grid displays products only: no cart, payments or inventory.",
+    ],
+    {
+      items: [
+        {
+          image: null,
+          title: "Intro offer",
+          price: "$49",
+          priceNote: "for two weeks",
+          badge: "New students",
+          description: "Unlimited classes for your first two weeks.",
+          features: ["Any class, any time", "No commitment"],
+          buttonText: "Buy now",
+          buttonUrl: "https://pay.example.test/intro",
+          highlighted: false,
+        },
+        {
+          image: null,
+          title: "Monthly unlimited",
+          price: "$145",
+          priceNote: "per month",
+          badge: "Most popular",
+          description: "Every class on the schedule, plus the sauna.",
+          features: ["Unlimited classes", "Sauna included", "Pause any time"],
+          buttonText: "Join now",
+          buttonUrl: "https://pay.example.test/monthly",
+          highlighted: true,
+        },
+      ],
+      columns: 3,
+      density: "standard",
+      borderWidth: 0,
+    },
+  ),
+  "social-links": component(
+    SOCIAL_LINKS,
+    "Social Links",
+    "A row of links to the site's social profiles, each with its platform's icon, an https address and an optional label.",
+    { size: "medium", align: "start", showLabels: false },
+    [
+      "A link's text is its accessible name: the label if set, else the platform's name. With showLabels false the text is visually hidden and read by screen readers only, so the name is the same either way.",
+      "Link only to accounts you control; each platform's brand rules apply to its mark. " + UNSUPPORTED_DOMAIN_NOTE,
+      "platform other is any website and needs a label, such as \"Book online\". A named platform's link carries rel=\"me\"; a Website link carries no rel.",
+    ],
+    {
+      items: [
+        { platform: "instagram", url: "https://www.instagram.com/shywellness" },
+        { platform: "facebook", url: "https://www.facebook.com/shywellness", label: "SHY Wellness on Facebook" },
+        { platform: "other", url: "https://shywellness.example/book", label: "Book online" },
+      ],
+      size: "medium",
+      align: "start",
+      showLabels: false,
+    },
+  ),
 });
 
 export const COMPONENT_TYPES = Object.freeze(Object.keys(COMPONENT_DEFINITIONS));
@@ -754,8 +1010,18 @@ function referenceSchema(spec) {
         ...(spec.patternSource !== undefined
           ? { pattern: spec.patternSource, description: `Must be ${spec.patternDescription}.` }
           : {}),
+        // A `described()` string says what the text is for (TR01323).
+        ...(spec.description ? { description: spec.description } : {}),
       };
     case "safe-url":
+      if (spec.https) {
+        return {
+          type: "string",
+          format: "https-url",
+          maxLength: SOCIAL_LINK_URL_MAX_LENGTH,
+          description: `An ${HTTPS_URL_DESCRIPTION.slice(3)}. ${UNSUPPORTED_DOMAIN_NOTE}`,
+        };
+      }
       return {
         type: "string",
         format: spec.allowEmpty === false ? "safe-url" : "safe-url-or-empty",
@@ -783,7 +1049,11 @@ function referenceSchema(spec) {
     case "uuid":
       return { type: "string", format: "lowercase-uuid" };
     case "enum":
-      return { type: "string", enum: [...spec.values] };
+      return {
+        type: "string",
+        enum: [...spec.values],
+        ...(spec.description ? { description: spec.description } : {}),
+      };
     case "number": {
       const schema = { type: spec.integer ? "integer" : "number" };
       if (spec.values) schema.enum = [...spec.values];
@@ -796,7 +1066,12 @@ function referenceSchema(spec) {
       return schema;
     }
     case "array":
-      return { type: "array", maxItems: MAX_ITEMS, items: referenceSchema(spec.item) };
+      return {
+        type: "array",
+        ...(spec.minItems !== undefined ? { minItems: spec.minItems } : {}),
+        maxItems: spec.maxItems ?? MAX_ITEMS,
+        items: referenceSchema(spec.item),
+      };
     case "object":
       return {
         type: spec.nullable ? ["object", "null"] : "object",
@@ -805,15 +1080,16 @@ function referenceSchema(spec) {
       };
     case "image":
       return {
-        type: ["object", "null"],
+        type: spec.required ? "object" : ["object", "null"],
         // What a Markdown component fence takes instead (TR01187).
-        markdownType: ["string", "null"],
-        description:
-          "In Markdown, a media path recorded by media upload (such as \"media/photo.webp\"), or null; pages push "
-          + "stores the image record. A .pm.json document carries that record: keep imageId, src, and urls keys so "
-          + "the server can rewrite delivery URLs.",
+        markdownType: spec.required ? "string" : ["string", "null"],
+        description: `In Markdown, a media path recorded by media upload (such as "media/photo.webp")${
+          spec.required ? "" : ", or null"
+        }; pages push stores the image record. A .pm.json document carries that record: keep imageId, src, and urls keys so the server can rewrite delivery URLs.${
+          spec.altRequired ? " Alt text is required." : ""
+        }${spec.dimensionsRequired ? " Width and height are required." : ""}`,
         additionalProperties: false,
-        properties: referenceProperties(COMPONENT_IMAGE_FIELDS),
+        properties: referenceProperties(imageFieldsFor(spec)),
       };
     default:
       throw new TypeError(`Unknown component schema kind '${spec.kind}'.`);
@@ -866,10 +1142,13 @@ function describe(spec) {
     case "object":
       return "an object";
     case "image":
-      return "a media path in Markdown, an image object in .pm.json, or null";
+      return spec.required
+        ? "a media path in Markdown or an image object in .pm.json"
+        : "a media path in Markdown, an image object in .pm.json, or null";
     case "uuid":
       return "a canonical lowercase UUID";
     case "safe-url":
+      if (spec.https) return HTTPS_URL_DESCRIPTION;
       return `${
         spec.allowEmpty === false ? "a" : "an empty string or a"
       } safe HTTP(S), mailto, tel, non-protocol-relative root path, fragment, query, or relative URL; backslashes and ASCII control characters are rejected`;
@@ -896,12 +1175,19 @@ function validateValue(spec, value, path, errors) {
   switch (spec.kind) {
     case "string":
       if (typeof value !== "string") fail("a string");
-      else if (spec.nonWhitespace && value.trim() === "") fail("a string containing non-whitespace text");
+      else if (spec.nonWhitespace && value.trim() === "") {
+        fail(spec.blankDetail ?? "a string containing non-whitespace text");
+      }
       else if (spec.maximumLength !== undefined && value.length > spec.maximumLength) {
         fail(`a string of at most ${spec.maximumLength} characters`);
       } else if (spec.pattern !== undefined && !spec.pattern.test(value)) fail(spec.patternDescription);
       return;
     case "safe-url":
+      if (spec.https) {
+        // Judged exactly as written: a hand-written document is not trimmed.
+        if (!isSocialLinkUrl(value)) fail(describe(spec));
+        return;
+      }
       if (
         typeof value !== "string"
         || (value === "" && spec.allowEmpty === false)
@@ -961,8 +1247,13 @@ function validateValue(spec, value, path, errors) {
         fail("an array");
         return;
       }
-      if (value.length > MAX_ITEMS) {
-        fail(`at most ${MAX_ITEMS} entries`);
+      if (spec.minItems !== undefined && value.length < spec.minItems) {
+        fail(`at least ${spec.minItems} entries`);
+        return;
+      }
+      const maxItems = spec.maxItems ?? MAX_ITEMS;
+      if (value.length > maxItems) {
+        fail(`at most ${maxItems} entries`);
         return;
       }
       value.forEach((entry, index) => validateValue(spec.item, entry, `${path}/${index}`, errors));
@@ -977,13 +1268,17 @@ function validateValue(spec, value, path, errors) {
       return;
     }
     case "image": {
-      // `ComponentImageData | null` — null is the documented "no image" value.
-      if (value === null) return;
-      if (!isPlainObject(value)) {
-        fail("an image object or null");
+      // `ComponentImageData | null` — null is the documented "no image" value
+      // unless the component's images are its content.
+      if (value === null) {
+        if (spec.required) fail("an image object");
         return;
       }
-      validateFields(COMPONENT_IMAGE_FIELDS, value, path, errors);
+      if (!isPlainObject(value)) {
+        fail(spec.required ? "an image object" : "an image object or null");
+        return;
+      }
+      validateFields(imageFieldsFor(spec), value, path, errors);
       return;
     }
     default:
@@ -1111,6 +1406,77 @@ export function validateComponentBlock(componentType, componentData, basePath) {
           CODES.componentData,
           "A linked card must have a visible title.",
         ));
+      }
+    }
+  }
+  if (componentType === "product-grid" && Array.isArray(parsed.items)) {
+    // Blank text is absent; a whitespace-only address is already refused by
+    // `safeUrl` above, so trimming it here adds no second error (TR01323).
+    for (const [index, item] of parsed.items.entries()) {
+      if (!isPlainObject(item)) continue;
+      // The editor keeps one feature per line, so a feature is one line.
+      if (Array.isArray(item.features)) {
+        for (const [featureIndex, feature] of item.features.entries()) {
+          if (typeof feature === "string" && /[\r\n]/u.test(feature)) {
+            errors.push(contentError(
+              `${dataPath}/items/${index}/features/${featureIndex}`,
+              CODES.componentData,
+              "A feature is one line; put the rest in another feature or the description.",
+            ));
+          }
+        }
+      }
+      // A wrong-type field or a whitespace-only address was refused by
+      // `validateFields` above; a second error at the same path would say
+      // nothing new, so each rule skips a pair with a wrong-type field and
+      // the other rule still runs, as the generator's readiness check does.
+      const wrongType = (field) => Object.hasOwn(item, field) && typeof item[field] !== "string";
+      if (!wrongType("buttonText") && !wrongType("buttonUrl")) {
+        const text = typeof item.buttonText === "string" ? item.buttonText.trim() : "";
+        const rawUrl = typeof item.buttonUrl === "string" ? item.buttonUrl : "";
+        const url = rawUrl.trim();
+        const urlAlreadyRefused = rawUrl.length > 0 && url.length === 0;
+        if (text.length > 0 && url.length === 0 && !urlAlreadyRefused) {
+          errors.push(contentError(
+            `${dataPath}/items/${index}/buttonUrl`,
+            CODES.componentData,
+            "A product with button text needs a buttonUrl, or clear the text.",
+          ));
+        }
+        if (url.length > 0 && text.length === 0) {
+          errors.push(contentError(
+            `${dataPath}/items/${index}/buttonText`,
+            CODES.componentData,
+            "A product with a buttonUrl needs buttonText, or clear the address.",
+          ));
+        }
+      }
+      if (!wrongType("price") && !wrongType("priceNote")) {
+        const price = typeof item.price === "string" ? item.price.trim() : "";
+        const note = typeof item.priceNote === "string" ? item.priceNote.trim() : "";
+        if (note.length > 0 && price.length === 0) {
+          errors.push(contentError(
+            `${dataPath}/items/${index}/price`,
+            CODES.componentData,
+            "A product with a priceNote needs a price, or clear the note.",
+          ));
+        }
+      }
+    }
+  }
+  if (componentType === "social-links" && Array.isArray(parsed.items)) {
+    // One error per label path: a blank label first, else a Website link
+    // without one. A wrong-type label or platform was refused above (TR01324).
+    for (const [index, item] of parsed.items.entries()) {
+      if (!isPlainObject(item)) continue;
+      if ((Object.hasOwn(item, "label") && typeof item.label !== "string") || typeof item.platform !== "string") continue;
+      const label = typeof item.label === "string" ? item.label : "";
+      const path = `${dataPath}/items/${index}/label`;
+      // The shared whitespace set, so no layer's own trim admits a label another refuses.
+      if (label !== "" && trimSocialLinkInput(label) === "") {
+        errors.push(contentError(path, CODES.componentData, "A label must have text, or leave it out."));
+      } else if (item.platform === "other" && trimSocialLinkInput(label) === "") {
+        errors.push(contentError(path, CODES.componentData, "A Website link needs a label."));
       }
     }
   }

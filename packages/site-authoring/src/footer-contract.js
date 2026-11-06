@@ -4,6 +4,8 @@ import {
   isContactOrWebUrl,
 } from "./contact-url.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
+import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "./social-link-url.js";
+import socialPlatforms from "./social-platforms.json" with { type: "json" };
 import { FOOTER_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
 
 export const FOOTER_LIMITS = Object.freeze({
@@ -12,6 +14,7 @@ export const FOOTER_LIMITS = Object.freeze({
   groupsPerColumn: 6,
   linksPerGroup: 12,
   bottomLinks: 8,
+  socialLinks: 12,
   richTextParagraphs: 12,
   richTextRuns: 200,
   groupHeadingLength: 80,
@@ -56,10 +59,12 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
     "bottomContent",
     "featureImage",
     "showBrandText",
+    "socialLinks",
   ]),
   FooterLinkColumn: Object.freeze(["id", "groups"]),
   FooterLinkGroup: Object.freeze(["id", "heading", "links"]),
   FooterLink: Object.freeze(["id", "label", "pageResourceId", "externalUrl"]),
+  FooterSocialLink: Object.freeze(["id", "platform", "url", "label"]),
   FooterRichText: Object.freeze(["paragraphs"]),
   FooterRichTextParagraph: Object.freeze(["runs"]),
   FooterRichTextRun: Object.freeze(["text", "bold", "italic", "underline", "link"]),
@@ -81,6 +86,13 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
   FooterFeatureImageSettings: Object.freeze(["imageId", "imageUrl", "alt", "responsiveUrls"]),
   FooterFeatureResponsiveImageUrl: Object.freeze(["minWidth", "url"]),
 });
+
+/** The platform keys a footer social link may name, in the vocabulary's order; `other` is the Website link. */
+export const SOCIAL_PLATFORM_KEYS = Object.freeze(socialPlatforms.platforms.map((platform) => platform.key));
+export const OTHER_SOCIAL_PLATFORM = "other";
+export const SOCIAL_LINK_URL_REQUIREMENT =
+  `must be an absolute https URL without credentials, at most ${SOCIAL_LINK_URL_MAX_LENGTH} characters, `
+  + "to a domain name of unaccented letters, digits and hyphens, like https://www.instagram.com/yourname";
 
 export const FOOTER_READ_ONLY_FIELDS = Object.freeze([
   "light.backgroundImageUrl",
@@ -314,6 +326,40 @@ function footerLink(value, path, seenLinkIds, knownPageResourceIds, tolerateStor
   };
 }
 
+// Mirrors the server's social-link rules (TR01324) in the same order: the id
+// shares the footer's seen set, the platform is a vocabulary key, the address
+// is judged after the shared trim, and a label is optional text that is
+// refused when it is only whitespace and required for a Website link.
+function socialLink(value, path, seenLinkIds, tolerateStoredValues) {
+  value = object(value, path);
+  closed(value, "FooterSocialLink", path);
+  const id = stableId(value.id, `${path}.id`, seenLinkIds, "link");
+  // A stored platform that later leaves the vocabulary must still pull, as a
+  // stored bottom-link address does; only an authored document is refused.
+  if (typeof value.platform !== "string" || (!tolerateStoredValues && !SOCIAL_PLATFORM_KEYS.includes(value.platform))) {
+    fail("footer.field_invalid", `${path}.platform must be one of ${SOCIAL_PLATFORM_KEYS.join(", ")}.`, `${path}.platform`);
+  }
+  if (typeof value.url !== "string") {
+    fail("footer.url_invalid", `${path}.url ${SOCIAL_LINK_URL_REQUIREMENT}.`, `${path}.url`);
+  }
+  const url = trimSocialLinkInput(value.url);
+  if (!tolerateStoredValues && !isSocialLinkUrl(url)) {
+    fail("footer.url_invalid", `${path}.url ${SOCIAL_LINK_URL_REQUIREMENT}.`, `${path}.url`);
+  }
+  const rawLabel = value.label === undefined ? "" : value.label;
+  const label = normalizedSingleLine(rawLabel, FOOTER_LIMITS.linkLabelLength, `${path}.label`, { tolerateStoredValues });
+  if (!tolerateStoredValues) {
+    // Blank is judged with the shared whitespace set, as the page component and the handler judge it.
+    if (rawLabel.length > 0 && trimSocialLinkInput(label) === "") {
+      fail("footer.text_required", `${path}.label: A label must have text, or leave it out.`, `${path}.label`);
+    }
+    if (trimSocialLinkInput(label) === "" && value.platform === OTHER_SOCIAL_PLATFORM) {
+      fail("footer.text_required", `${path}.label: A Website link needs a label.`, `${path}.label`);
+    }
+  }
+  return { id, platform: value.platform, url, label };
+}
+
 function footerLinks(values, path, maximum, seenLinkIds, knownPageResourceIds, tolerateStoredValues) {
   return array(values, path, maximum).map((value, index) =>
     footerLink(value, `${path}[${index}]`, seenLinkIds, knownPageResourceIds, tolerateStoredValues)
@@ -463,6 +509,7 @@ export function footerDefaults() {
     bottomContent: { paragraphs: [] },
     featureImage: undefined,
     showBrandText: true,
+    socialLinks: [],
   };
 }
 
@@ -571,6 +618,8 @@ function normalizeFooterDocument(
     ),
     ...(normalizedFeatureImage === undefined ? {} : { featureImage: normalizedFeatureImage }),
     showBrandText: boolean(value.showBrandText, true, "footerSettings.showBrandText"),
+    socialLinks: array(value.socialLinks, "footerSettings.socialLinks", FOOTER_LIMITS.socialLinks)
+      .map((link, index) => socialLink(link, `footerSettings.socialLinks[${index}]`, seenLinkIds, tolerateStoredValues)),
   };
 }
 
@@ -684,4 +733,14 @@ export const FOOTER_EXAMPLE = Object.freeze({
     alt: "A sunlit creative studio with books, artwork, and a writing desk",
   }),
   showBrandText: true,
+  // The icon row between the bottom content and the bottom links. A label is
+  // the link's text; without one the platform's name is read out.
+  socialLinks: Object.freeze([
+    Object.freeze({
+      id: "7c1f3a52-9d4e-4b8a-8f1e-2a6c9d0e4b11",
+      platform: "instagram",
+      url: "https://www.instagram.com/examplestudio",
+      label: "Example Studio on Instagram",
+    }),
+  ]),
 });

@@ -284,6 +284,7 @@ test("footer limits stay aligned with the server and shared image-processing sou
     groupsPerColumn: "MaxGroupsPerColumn",
     linksPerGroup: "MaxLinksPerGroup",
     bottomLinks: "MaxBottomLinks",
+    socialLinks: "MaxSocialLinks",
     richTextParagraphs: "MaxRichTextParagraphs",
     richTextRuns: "MaxRichTextRuns",
     groupHeadingLength: "GroupHeadingMaxLength",
@@ -371,6 +372,115 @@ test("footer validation rejects closed-shape, target, identity, media, text, and
       },
       code: "footer.id_invalid",
       field: "footerSettings.bottomLinks[0].id",
+    },
+    {
+      name: "thirteenth social link",
+      mutate: (footer) => {
+        footer.socialLinks = Array.from({ length: FOOTER_LIMITS.socialLinks + 1 }, (_, index) => ({
+          id: `${index.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`,
+          platform: "instagram",
+          url: `https://www.instagram.com/profile${index}`,
+        }));
+      },
+      code: "footer.collection_too_large",
+      field: "footerSettings.socialLinks",
+    },
+    {
+      name: "unknown social platform",
+      mutate: (footer) => {
+        footer.socialLinks[0].platform = "Instagram";
+      },
+      code: "footer.field_invalid",
+      field: "footerSettings.socialLinks[0].platform",
+    },
+    {
+      name: "missing social platform",
+      mutate: (footer) => {
+        delete footer.socialLinks[0].platform;
+      },
+      code: "footer.field_invalid",
+      field: "footerSettings.socialLinks[0].platform",
+    },
+    {
+      name: "http social address",
+      mutate: (footer) => {
+        footer.socialLinks[0].url = "http://www.instagram.com/examplestudio";
+      },
+      code: "footer.url_invalid",
+      field: "footerSettings.socialLinks[0].url",
+    },
+    {
+      name: "social address with credentials",
+      mutate: (footer) => {
+        footer.socialLinks[0].url = "https://user:pass@www.instagram.com/examplestudio";
+      },
+      code: "footer.url_invalid",
+      field: "footerSettings.socialLinks[0].url",
+    },
+    {
+      name: "missing social address",
+      mutate: (footer) => {
+        delete footer.socialLinks[0].url;
+      },
+      code: "footer.url_invalid",
+      field: "footerSettings.socialLinks[0].url",
+    },
+    {
+      name: "empty social address",
+      mutate: (footer) => {
+        footer.socialLinks[0].url = "";
+      },
+      code: "footer.url_invalid",
+      field: "footerSettings.socialLinks[0].url",
+    },
+    {
+      name: "social link id shared with a bottom link",
+      mutate: (footer) => {
+        footer.socialLinks[0].id = footer.bottomLinks[0].id;
+      },
+      code: "footer.id_duplicate",
+      field: "footerSettings.socialLinks[0].id",
+    },
+    {
+      name: "website social link without a label",
+      mutate: (footer) => {
+        footer.socialLinks[0].platform = "other";
+        delete footer.socialLinks[0].label;
+      },
+      code: "footer.text_required",
+      field: "footerSettings.socialLinks[0].label",
+    },
+    {
+      name: "whitespace-only social label",
+      mutate: (footer) => {
+        footer.socialLinks[0].label = " \t ";
+      },
+      code: "footer.text_required",
+      field: "footerSettings.socialLinks[0].label",
+    },
+    {
+      name: "social label of only U+FEFF",
+      mutate: (footer) => {
+        footer.socialLinks[0].label = "\ufeff";
+      },
+      code: "footer.text_required",
+      field: "footerSettings.socialLinks[0].label",
+    },
+    {
+      name: "social label too long",
+      mutate: (footer) => {
+        footer.socialLinks[0].label = "x".repeat(FOOTER_LIMITS.linkLabelLength + 1);
+      },
+      code: "footer.text_invalid",
+      field: "footerSettings.socialLinks[0].label",
+    },
+    {
+      name: "unknown social link field",
+      mutate: (footer) => {
+        footer.socialLinks[0].externalUrl = "https://example.com";
+      },
+      code: "footer.field_unknown",
+      field: "footerSettings.socialLinks[0].externalUrl",
     },
     {
       name: "unknown pulled page",
@@ -489,6 +599,19 @@ test("workspace projection strips server delivery URLs and preserves stable imag
   assert.equal("backgroundImageUrl" in projected.light, false);
   assert.equal("imageUrl" in projected.featureImage, false);
   assert.equal("responsiveUrls" in projected.featureImage, false);
+});
+
+test("server-read projection keeps a social link whose platform left the vocabulary, which authoring refuses", () => {
+  const response = structuredClone(FOOTER_EXAMPLE);
+  response.socialLinks[0].platform = "myspace";
+
+  const projected = projectFooterSettingsForWorkspace(response);
+  assert.equal(projected.socialLinks[0].platform, "myspace");
+  assert.equal(computeFooterDraftHash(projected), computeFooterDraftHash(response));
+  assert.throws(
+    () => validateFooterDocument(projected),
+    (error) => error?.code === "footer.field_invalid" && error?.field === "footerSettings.socialLinks[0].platform",
+  );
 });
 
 test("server-read projection preserves values stricter than authoring without changing the draft hash", () => {

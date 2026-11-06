@@ -116,6 +116,13 @@
         {
           "type": "componentBlock",
           "attrs": {
+            "componentType": "feature-grid",
+            "componentData": "{\"items\":[{\"icon\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"title\":\"Small icon\",\"description\":\"An icon at the smallest size.\",\"url\":\"\"}],\"columns\":2,\"iconSize\":\"small\",\"borderWidth\":0}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
             "componentType": "card-grid",
             "componentData": "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}"
           }
@@ -132,6 +139,27 @@
           "attrs": {
             "componentType": "testimonial",
             "componentData": "{\"items\":[{\"quote\":\"Two months in, I can hold poses I could not attempt in January.\",\"authorName\":\"Marcus Ellery\",\"authorTitle\":\"Barre regular\",\"authorImage\":null}],\"carousel\":true,\"borderWidth\":1}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "image-row",
+            "componentData": "{\"items\":[{\"image\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"url\":\"/classes\"},{\"image\":{\"imageId\":\"88888888-9999-4aaa-8bbb-cccccccccccc\",\"src\":\"/wordmark-media.webp\",\"urls\":[{\"minWidth\":2000,\"url\":\"/wordmark-media.webp\"}],\"width\":2000,\"height\":400,\"alt\":\"Riverbend Wellness wordmark\"},\"url\":\"\"}],\"height\":\"large\",\"align\":\"start\"}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "product-grid",
+            "componentData": "{\"items\":[{\"image\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"title\":\"Intro offer\",\"price\":\"$49\",\"priceNote\":\"for two weeks\",\"badge\":\"New students\",\"description\":\"Unlimited classes for your first two weeks.\",\"features\":[\"Any class, any time\"],\"buttonText\":\"Buy now\",\"buttonUrl\":\"https://pay.example.test/intro\",\"highlighted\":false},{\"image\":null,\"title\":\"Monthly unlimited\",\"price\":\"$145\",\"priceNote\":\"per month\",\"badge\":\"Most popular\",\"description\":\"Every class on the schedule, the sauna, and a guest pass each month for a friend who wants to try the studio.\",\"features\":[\"Unlimited classes\",\"Sauna included\",\"One guest pass a month\",\"Pause any time\"],\"buttonText\":\"Join now\",\"buttonUrl\":\"https://pay.example.test/monthly\",\"highlighted\":true},{\"image\":null,\"title\":\"Ten-class pack\",\"price\":\"$180\",\"description\":\"Ten classes to use within six months.\",\"buttonText\":\"Buy now\",\"buttonUrl\":\"/rates/ten-pack\"},{\"image\":null,\"title\":\"Drop-in\",\"price\":\"$22\",\"priceNote\":\"per class\",\"buttonText\":\"Book a class\",\"buttonUrl\":\"/classes\"},{\"image\":null,\"title\":\"Sauna session\",\"price\":\"$18\",\"description\":\"Thirty minutes in the infrared sauna.\",\"features\":[\"Towels provided\",\"Book up to a week ahead\"],\"buttonText\":\"Book now\",\"buttonUrl\":\"/sauna\"},{\"image\":null,\"title\":\"Private session\",\"price\":\"From $90\",\"description\":\"One-to-one coaching with a teacher of your choice.\"},{\"image\":null,\"title\":\"Student membership\",\"price\":\"$95\",\"priceNote\":\"per month\",\"badge\":\"Student ID required\",\"buttonText\":\"Join now\",\"buttonUrl\":\"https://pay.example.test/student\"},{\"image\":null,\"title\":\"Supercalifragilisticexpialidociousmembershipbundleoffer2026\",\"price\":\"Pricequotedonrequestforthisbundle\",\"description\":\"A bundle for families and small teams.\",\"buttonText\":\"Ask about a quote for this family bundle\",\"buttonUrl\":\"mailto:hello@example.test\"}],\"columns\":3,\"density\":\"standard\",\"borderWidth\":1}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "social-links",
+            "componentData": "{\"items\":[{\"platform\":\"instagram\",\"url\":\"https://www.instagram.com/shywellness\"},{\"platform\":\"facebook\",\"url\":\"https://www.facebook.com/shywellness\",\"label\":\"SHY Wellness on Facebook\"},{\"platform\":\"other\",\"url\":\"https://shywellness.example/book\",\"label\":\"Book online\"}],\"size\":\"medium\",\"align\":\"start\",\"showLabels\":false}"
           }
         }
       ]

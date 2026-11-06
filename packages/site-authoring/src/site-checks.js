@@ -159,7 +159,9 @@ function addHtmlLinks(links, html, currentPagePath) {
 }
 function isUrlProperty(name) {
     const lower = name.toLowerCase();
-    return lower === "href" || lower === "url" || lower === "link" || lower === "pagepath";
+    // Component buttons and cards (cta, card-grid, product-grid; TR01323).
+    return lower === "href" || lower === "url" || lower === "link" || lower === "pagepath"
+        || lower === "buttonurl" || lower === "linkurl";
 }
 function addEncodedComponentLinks(links, value, currentPagePath) {
     const decoded = htmlDecodeRepeatedly(value);

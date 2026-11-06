@@ -35,6 +35,8 @@ import {
   FOOTER_FIELD_INVENTORY,
   FOOTER_LIMITS,
   FOOTER_READ_ONLY_FIELDS,
+  SOCIAL_LINK_URL_REQUIREMENT,
+  SOCIAL_PLATFORM_KEYS,
   validateFooterDocument,
 } from "./footer-contract.js";
 import {
@@ -589,6 +591,11 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
     maximumParagraphs: FOOTER_LIMITS.richTextParagraphs,
   },
   "FooterSettings.bottomLinks": { type: "FooterLink[]", default: [], maximumItems: FOOTER_LIMITS.bottomLinks },
+  "FooterSettings.socialLinks": {
+    type: "FooterSocialLink[]",
+    default: [],
+    maximumItems: FOOTER_LIMITS.socialLinks,
+  },
   "FooterSettings.light": { type: "FooterSchemeSettings", default: "scheme defaults" },
   "FooterSettings.dark": { type: "FooterSchemeSettings", default: "scheme defaults" },
   "FooterSettings.featureImage": { type: "FooterFeatureImageSettings|null", default: null },
@@ -608,6 +615,14 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
     type: "contact-or-web-url",
     exclusiveWith: "pageResourceId",
     maximumLength: FOOTER_LIMITS.externalUrlLength,
+  },
+  "FooterSocialLink.id": { type: "canonical-lowercase-uuid", required: true },
+  "FooterSocialLink.platform": { type: "social-platform-key", required: true, values: SOCIAL_PLATFORM_KEYS },
+  "FooterSocialLink.url": { type: "https-url", required: true, maximumLength: FOOTER_LIMITS.externalUrlLength },
+  "FooterSocialLink.label": {
+    type: "plain-text",
+    requiredWhen: "platform is other",
+    maximumLength: FOOTER_LIMITS.linkLabelLength,
   },
   "FooterRichText.paragraphs": { type: "FooterRichTextParagraph[]", default: [] },
   "FooterRichTextParagraph.runs": { type: "FooterRichTextRun[]", default: [] },
@@ -703,6 +718,12 @@ export function getFooterReference() {
       "Each link has exactly one target: a tracked pageResourceId, or an externalUrl that is an absolute "
       + "credential-free http/https URL, or a mailto:/tel: contact URL such as tel:+15555550123. A contact URL is "
       + "published exactly as authored, so write the number the way it should be dialled.",
+    socialLinkRule:
+      "Each social link names a platform key (" + SOCIAL_PLATFORM_KEYS.join(", ") + ") and a url that "
+      + SOCIAL_LINK_URL_REQUIREMENT + ". The label is the link's text and what screen readers announce; "
+      + "leave it empty to use the platform's name, and give one to every other (Website) link. Domain names "
+      + "with accented or non-English letters are not supported here; use a bottom link for that site. "
+      + "The row renders between the bottom content and the bottom links.",
     imageRule:
       "Image ids come from pull or media upload. Feature images require alt text; background art is decorative.",
     readOnlyProjections: FOOTER_READ_ONLY_FIELDS,
@@ -837,7 +858,8 @@ export function formatPresentationReference(reference) {
     ).join("\n\n");
     return reference.title + "\nUsage: " + reference.usage + "\nWorkspace: "
       + reference.workspaceFile + " :: " + reference.workspacePath + "\n\nClosed schema:\n"
-      + messages + "\n\nTargets: " + reference.targetRule + "\nImages: " + reference.imageRule
+      + messages + "\n\nTargets: " + reference.targetRule + "\nSocial links: " + reference.socialLinkRule
+      + "\nImages: " + reference.imageRule
       + "\nConcurrency: " + reference.concurrency
       + "\nTheme interaction: " + reference.themeInteraction + "\nRead-only projections: "
       + reference.readOnlyProjections.join(", ") + "\n\nWorkflow:\n"

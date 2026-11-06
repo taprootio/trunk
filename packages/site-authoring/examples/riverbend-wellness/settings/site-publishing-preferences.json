@@ -18,6 +18,14 @@
           "pageResourceId": "a0000000-0000-4000-8000-000000000013"
         }
       ],
+      "socialLinks": [
+        {
+          "id": "a0000000-0000-4000-8000-000000000048",
+          "platform": "instagram",
+          "url": "https://instagram.example.test/riverbendwellness",
+          "label": "Riverbend on Instagram"
+        }
+      ],
       "light": {
         "backgroundColor": "--esp-color-layer-1",
         "textColor": "--esp-color-text",

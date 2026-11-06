@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 47;
+export const REFERENCE_VERSION = 48;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -1938,6 +1938,7 @@ function schemaConstraints(schema) {
   const constraints = [];
   if (schema.minimum !== undefined) constraints.push(`minimum ${schema.minimum}`);
   if (schema.maximum !== undefined) constraints.push(`maximum ${schema.maximum}`);
+  if (schema.minItems !== undefined) constraints.push(`minimum ${schema.minItems} items`);
   if (schema.maxItems !== undefined) constraints.push(`maximum ${schema.maxItems} items`);
   if (schema.minLength !== undefined) constraints.push(`minimum length ${schema.minLength}`);
   if (schema.maxLength !== undefined) constraints.push(`maximum length ${schema.maxLength}`);
@@ -1953,7 +1954,12 @@ function schemaConstraints(schema) {
 
 function formatSchemaLine(name, schema, required, indent) {
   const constraints = schemaConstraints(schema);
-  const label = schema.markdownType ? "media path | null in Markdown; object | null in .pm.json" : schemaLabel(schema);
+  // A required image (TR01322) takes no null in either form.
+  const label = schema.markdownType
+    ? Array.isArray(schema.type)
+      ? "media path | null in Markdown; object | null in .pm.json"
+      : "media path in Markdown; object in .pm.json"
+    : schemaLabel(schema);
   return `${indent}${name.padEnd(Math.max(1, 28 - indent.length))} ${label}; ${
     required ? "required" : "optional"
   }${constraints.length > 0 ? `; ${constraints.join("; ")}` : ""}`;

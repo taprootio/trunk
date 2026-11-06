@@ -289,7 +289,30 @@ test("Espalier warnings are terminal-safe and bounded before callers receive the
 test("the footer draft hash stays byte-compatible with the server default", () => {
   assert.equal(
     computeFooterDraftHash({}),
-    "998f0ceea24d03efe6455c2333a4fea6a325e145bec3bf20c59f4556efc829c0",
+    "b2afba6ee8f2cefd02b138657391e5f3778944e1f8205cff168f920b9b623032",
+  );
+});
+
+// The same two links are pinned by the server and the editor, so a port that
+// appends the social-link fields in another order fails here.
+test("the footer draft hash stays byte-compatible with the server over two social links", () => {
+  assert.equal(
+    computeFooterDraftHash({
+      socialLinks: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          platform: "instagram",
+          url: "https://www.instagram.com/shywellness",
+        },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          platform: "other",
+          url: "https://shywellness.example/book",
+          label: "Book online",
+        },
+      ],
+    }),
+    "a4eb0ff35d3c408bdd35be9e03ace92dde6dfac9b7a0e4ec1624825bbfa50d9b",
   );
 });
 

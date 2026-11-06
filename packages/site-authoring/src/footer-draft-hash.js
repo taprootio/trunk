@@ -88,7 +88,7 @@ export function stableJson(value) {
 // the canonical form.
 export function computeFooterDraftHash(settings = {}) {
   const canonical = [];
-  append(canonical, "footer-draft-v3");
+  append(canonical, "footer-draft-v4");
   append(canonical, settings.enabled === true);
   append(canonical, settings.showBrand ?? true);
   append(canonical, settings.showBrandText ?? true);
@@ -113,6 +113,7 @@ export function computeFooterDraftHash(settings = {}) {
   if (hasAsideCta) appendLink(canonical, settings.asideCta);
   appendRichText(canonical, settings.bottomContent);
   appendLinks(canonical, settings.bottomLinks);
+  appendSocialLinks(canonical, settings.socialLinks);
   appendScheme(canonical, settings.light);
   appendScheme(canonical, settings.dark);
 
@@ -130,6 +131,18 @@ function appendLinks(canonical, rawLinks) {
   const links = Array.isArray(rawLinks) ? rawLinks : [];
   append(canonical, links.length);
   for (const link of links) appendLink(canonical, link);
+}
+
+function appendSocialLinks(canonical, rawLinks) {
+  const links = Array.isArray(rawLinks) ? rawLinks : [];
+  append(canonical, links.length);
+  for (const rawLink of links) {
+    const link = rawLink ?? {};
+    append(canonical, normalizeId(link.id));
+    append(canonical, link.platform ?? "");
+    append(canonical, link.url ?? "");
+    append(canonical, link.label ?? "");
+  }
 }
 
 // Coalesce rather than default so the canonical form stays total even for a

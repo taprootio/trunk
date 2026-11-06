@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import registry from "../../src/content/free-form-section-registry.json" with { type: "json" };
 import {
   canonicalizeComponentData,
   getComponentDefinition,
@@ -159,6 +160,29 @@ const COMPLETE = {
     textureScale: "coarse",
     imageMotion: "drift-end",
   },
+  "image-row": {
+    items: [{ image: IMAGE, url: "/classes" }, { image: IMAGE, url: "" }],
+    height: "large",
+    align: "center",
+  },
+  "product-grid": {
+    items: [{
+      image: IMAGE,
+      title: "Monthly unlimited",
+      price: "$145",
+      priceNote: "per month",
+      badge: "Most popular",
+      description: "Every class on the schedule.",
+      features: ["Unlimited classes", "Sauna included"],
+      buttonText: "Join now",
+      buttonUrl: "https://pay.example.test/monthly",
+      highlighted: true,
+      cropState: null,
+    }],
+    columns: 3,
+    density: "compact",
+    borderWidth: 1,
+  },
 };
 
 /** One violation per shape, each the kind a hand-authoring agent makes. */
@@ -171,6 +195,8 @@ const VIOLATIONS = {
   "latest-posts": ["count", 13, "/attrs/componentData/count"],
   "card-grid": ["columns", 4, "/attrs/componentData/columns"],
   "image-banner": ["ratio", "16/9", "/attrs/componentData/ratio"],
+  "image-row": ["height", "huge", "/attrs/componentData/height"],
+  "product-grid": ["density", "loose", "/attrs/componentData/density"],
 };
 
 const validate = (componentType, data) =>
@@ -700,4 +726,186 @@ test("the video blocks describe the two fields and keep them last in declaration
     Object.keys(JSON.parse(canonicalizeComponentData("video", { ...example, borderWidth: "2px", maxHeight: "50vh" }))).slice(-2),
     ["maxHeight", "borderWidth"],
   );
+});
+
+test("a product grid bounds every text, pairs the button fields and needs a price under a note (TR01323)", async (testContext) => {
+  const limits = registry.components["product-grid"].limits;
+  const grid = (items, rest = {}) => ({ items, columns: 3, density: "standard", borderWidth: 0, ...rest });
+  const product = (overrides = {}) => ({ image: null, title: "Intro offer", ...overrides });
+  const paths = (data) => validate("product-grid", data).map((error) => [error.code, error.path]);
+  const text = (length) => "x".repeat(length);
+  const bounded = [
+    ["title", (value) => product({ title: value }), limits.title],
+    ["price", (value) => product({ price: value }), limits.price],
+    ["priceNote", (value) => product({ price: "$1", priceNote: value }), limits.priceNote],
+    ["badge", (value) => product({ badge: value }), limits.badge],
+    ["description", (value) => product({ description: value }), limits.description],
+    ["buttonText", (value) => product({ buttonText: value, buttonUrl: "/go" }), limits.buttonText],
+  ];
+  for (const [field, build, limit] of bounded) {
+    await testContext.test(`${field} accepts ${limit} characters and refuses ${limit + 1}`, () => {
+      assert.deepEqual(paths(grid([build(text(limit))])), []);
+      assert.deepEqual(paths(grid([build(text(limit + 1))])), [["content.component_data", `/attrs/componentData/items/0/${field}`]]);
+    });
+  }
+  await testContext.test(`a feature line accepts ${limits.feature} characters and refuses ${limits.feature + 1}`, () => {
+    assert.deepEqual(paths(grid([product({ features: [text(limits.feature)] })])), []);
+    assert.deepEqual(paths(grid([product({ features: [text(limits.feature + 1)] })])), [["content.component_data", "/attrs/componentData/items/0/features/0"]]);
+  });
+  await testContext.test(`${limits.features} features are accepted and ${limits.features + 1} refused`, () => {
+    assert.deepEqual(paths(grid([product({ features: Array.from({ length: limits.features }, (_, i) => `Feature ${i}`) })])), []);
+    assert.deepEqual(paths(grid([product({ features: Array.from({ length: limits.features + 1 }, (_, i) => `Feature ${i}`) })])), [["content.component_data", "/attrs/componentData/items/0/features"]]);
+  });
+  await testContext.test("one hundred items are accepted and a hundred and one refused", () => {
+    const maxItems = registry.components["product-grid"].maxItems;
+    assert.deepEqual(paths(grid(Array.from({ length: maxItems }, () => product()))), []);
+    assert.deepEqual(paths(grid(Array.from({ length: maxItems + 1 }, () => product()))), [["content.component_data", "/attrs/componentData/items"]]);
+  });
+  const refusals = [
+    ["a blank title", grid([product({ title: "  " })]), "/attrs/componentData/items/0/title"],
+    ["a blank feature bullet", grid([product({ features: ["Towels", " "] })]), "/attrs/componentData/items/0/features/1"],
+    ["a feature with a line break", grid([product({ features: ["Towels", "Studio access\nincluding weekends"] })]), "/attrs/componentData/items/0/features/1"],
+    ["button text without an address", grid([product({ buttonText: "Buy now" })]), "/attrs/componentData/items/0/buttonUrl"],
+    ["an address without button text", grid([product({ buttonUrl: "/go" })]), "/attrs/componentData/items/0/buttonText"],
+    ["a whitespace-only address", grid([product({ buttonText: "Buy", buttonUrl: " " })]), "/attrs/componentData/items/0/buttonUrl"],
+    ["a price note without a price", grid([product({ priceNote: "per month" })]), "/attrs/componentData/items/0/price"],
+    ["an unsafe address", grid([product({ buttonText: "Buy", buttonUrl: "javascript:alert(1)" })]), "/attrs/componentData/items/0/buttonUrl"],
+    ["zero items", grid([]), "/attrs/componentData/items"],
+    ["five columns", grid([product()], { columns: 5 }), "/attrs/componentData/columns"],
+    ["one column", grid([product()], { columns: 1 }), "/attrs/componentData/columns"],
+    ["an unknown density", grid([product()], { density: "loose" }), "/attrs/componentData/density"],
+    ["a negative border", grid([product()], { borderWidth: -1 }), "/attrs/componentData/borderWidth"],
+    ["a non-boolean highlighted", grid([product({ highlighted: "yes" })]), "/attrs/componentData/items/0/highlighted"],
+    ["a non-string address beside button text", grid([product({ buttonText: "Buy", buttonUrl: 5 })]), "/attrs/componentData/items/0/buttonUrl"],
+    ["a non-string button text beside an address", grid([product({ buttonText: 5, buttonUrl: "/go" })]), "/attrs/componentData/items/0/buttonText"],
+    ["a non-string price beside a note", grid([product({ price: 145, priceNote: "per month" })]), "/attrs/componentData/items/0/price"],
+    ["an unknown item field", grid([product({ sku: "A1" })]), "/attrs/componentData/items/0/sku"],
+    ["an unknown field", grid([product()], { gap: "wide" }), "/attrs/componentData/gap"],
+  ];
+  for (const [label, data, path] of refusals) {
+    await testContext.test(`refuses ${label}`, () => {
+      assert.deepEqual(paths(data), [["content.component_data", path]]);
+    });
+  }
+  await testContext.test("still reports a note without a price beside a non-string address", () => {
+    assert.deepEqual(paths(grid([product({ buttonText: "Buy", buttonUrl: 5, priceNote: "per month" })])), [
+      ["content.component_data", "/attrs/componentData/items/0/buttonUrl"],
+      ["content.component_data", "/attrs/componentData/items/0/price"],
+    ]);
+  });
+  await testContext.test("treats whitespace-only button text with an empty address as absent", () => {
+    assert.deepEqual(paths(grid([product({ buttonText: "  ", buttonUrl: "" })])), []);
+  });
+  await testContext.test("accepts an item with only a title, a null image and an omitted image", () => {
+    assert.deepEqual(paths(grid([product(), { title: "Drop-in" }])), []);
+  });
+  await testContext.test("canonicalizes in declaration order", () => {
+    assert.equal(
+      canonicalizeComponentData("product-grid", { borderWidth: 1, items: [{ buttonUrl: "/a", title: "T", buttonText: "Go", image: null }], density: "compact", columns: 2 }),
+      JSON.stringify({ items: [{ image: null, title: "T", buttonText: "Go", buttonUrl: "/a" }], columns: 2, density: "compact", borderWidth: 1 }),
+    );
+  });
+});
+
+test("an image row needs one to twelve measured images with alt text and safe links (TR01322)", async (testContext) => {
+  const row = (items, rest = {}) => ({ items, height: "medium", align: "start", ...rest });
+  const paths = (data) => validate("image-row", data).map((error) => [error.code, error.path]);
+  const item = (overrides = {}) => ({ image: { ...IMAGE, ...overrides }, url: "" });
+  const cases = [
+    ["a blank alt", row([item({ alt: "  " })]), "/attrs/componentData/items/0/image/alt"],
+    ["a missing alt", row([{ image: Object.fromEntries(Object.entries(IMAGE).filter(([key]) => key !== "alt")), url: "" }]),
+      "/attrs/componentData/items/0/image/alt"],
+    ["a zero width", row([item({ width: 0 })]), "/attrs/componentData/items/0/image/width"],
+    ["a missing height", row([{ image: Object.fromEntries(Object.entries(IMAGE).filter(([key]) => key !== "height")), url: "" }]),
+      "/attrs/componentData/items/0/image/height"],
+    ["a null image", row([{ image: null, url: "" }]), "/attrs/componentData/items/0/image"],
+    ["zero items", row([]), "/attrs/componentData/items"],
+    ["a thirteenth item", row(Array.from({ length: 13 }, () => item())), "/attrs/componentData/items"],
+    ["an unknown item field", row([{ ...item(), caption: "x" }]), "/attrs/componentData/items/0/caption"],
+    ["an unsafe link", row([{ ...item(), url: "javascript:alert(1)" }]), "/attrs/componentData/items/0/url"],
+    ["an unknown field", row([item()], { gap: "wide" }), "/attrs/componentData/gap"],
+  ];
+  for (const [label, data, path] of cases) {
+    await testContext.test(`refuses ${label}`, () => {
+      assert.deepEqual(paths(data), [["content.component_data", path]]);
+    });
+  }
+  await testContext.test("names the media manifest in the blank-alt message", () => {
+    const [error] = validate("image-row", row([item({ alt: " " })]));
+    assert.match(error.message, /media manifest entry the image path names/u);
+  });
+  await testContext.test("refuses omitted items as required", () => {
+    assert.deepEqual(paths({ height: "small" }), [["content.component_data", "/attrs/componentData/items"]]);
+  });
+  await testContext.test("accepts twelve linked and unlinked items", () => {
+    assert.deepEqual(validate("image-row", row(Array.from({ length: 12 }, (_, index) => ({ ...item(), url: index % 2 ? "/go" : "" })))), []);
+  });
+  await testContext.test("canonicalizes in declaration order", () => {
+    assert.equal(
+      canonicalizeComponentData("image-row", { align: "end", items: [{ url: "/a", image: IMAGE }], height: "small" }),
+      JSON.stringify({ items: [{ image: IMAGE, url: "/a" }], height: "small", align: "end" }),
+    );
+  });
+});
+
+test("a social-links row needs a known platform and an https address per link, a label for a Website link, and holds 1 to 12 links (TR01324)", async (testContext) => {
+  const entry = registry.components["social-links"];
+  const row = (items, rest = {}) => ({ items, size: "medium", align: "start", showLabels: false, ...rest });
+  const link = (overrides = {}) => ({ platform: "instagram", url: "https://www.instagram.com/shy", ...overrides });
+  const paths = (data) => validate("social-links", data).map((error) => [error.code, error.path]);
+  await testContext.test("accepts a valid list, an omitted and an empty label on a known platform, and canonicalizes in declaration order", () => {
+    assert.deepEqual(
+      paths(row([link(), link({ platform: "other", url: "https://shy.example/book", label: "Book online" }), link({ label: "" })])),
+      [],
+    );
+    assert.deepEqual(paths(row(Array.from({ length: entry.maxItems }, () => link()))), []);
+    assert.equal(
+      canonicalizeComponentData("social-links", {
+        showLabels: true,
+        align: "end",
+        items: [{ url: "https://x.com/shy", label: "On X", platform: "x" }],
+        size: "large",
+      }),
+      JSON.stringify({ items: [{ platform: "x", url: "https://x.com/shy", label: "On X" }], size: "large", align: "end", showLabels: true }),
+    );
+  });
+  const refusals = [
+    ["an unknown platform", row([link({ platform: "myspace" })]), "/attrs/componentData/items/0/platform"],
+    ["a missing platform", row([{ url: "https://x.com/shy" }]), "/attrs/componentData/items/0/platform"],
+    ["a missing url", row([{ platform: "x" }]), "/attrs/componentData/items/0/url"],
+    ["an empty url", row([link({ url: "" })]), "/attrs/componentData/items/0/url"],
+    ["an http url", row([link({ url: "http://www.instagram.com/shy" })]), "/attrs/componentData/items/0/url"],
+    ["a url with credentials", row([link({ url: "https://user:pass@www.instagram.com/shy" })]), "/attrs/componentData/items/0/url"],
+    ["a padded url, judged as written", row([link({ url: "https://www.instagram.com/shy " })]), "/attrs/componentData/items/0/url"],
+    [
+      "a 2049-character url",
+      row([link({ url: `https://example.com/${"a".repeat(2049 - "https://example.com/".length)}` })]),
+      "/attrs/componentData/items/0/url",
+    ],
+    ["zero items", row([]), "/attrs/componentData/items"],
+    ["items that is not an array", row("x"), "/attrs/componentData/items"],
+    ["an item that is not an object", row(["x"]), "/attrs/componentData/items/0"],
+    ["a 13th item", row(Array.from({ length: entry.maxItems + 1 }, () => link())), "/attrs/componentData/items"],
+    ["a Website link without a label", row([link({ platform: "other", url: "https://shy.example" })]), "/attrs/componentData/items/0/label"],
+    ["a Website link with a blank label", row([link({ platform: "other", url: "https://shy.example", label: " " })]), "/attrs/componentData/items/0/label"],
+    ["a whitespace-only label on a known platform", row([link({ label: "  " })]), "/attrs/componentData/items/0/label"],
+    ["a label of only U+0085 on a known platform", row([link({ label: "\u0085" })]), "/attrs/componentData/items/0/label"],
+    ["a Website link labelled only U+FEFF", row([link({ platform: "other", label: "\ufeff" })]), "/attrs/componentData/items/0/label"],
+    ["a 121-character label", row([link({ label: "x".repeat(entry.limits.label + 1) })]), "/attrs/componentData/items/0/label"],
+    ["a non-boolean showLabels", row([link()], { showLabels: "yes" }), "/attrs/componentData/showLabels"],
+    ["an unknown size", row([link()], { size: "huge" }), "/attrs/componentData/size"],
+    ["an unknown align", row([link()], { align: "middle" }), "/attrs/componentData/align"],
+    ["an unknown field", row([link()], { gap: "wide" }), "/attrs/componentData/gap"],
+    ["an unknown item field", row([link({ icon: "x" })]), "/attrs/componentData/items/0/icon"],
+  ];
+  for (const [label, data, path] of refusals) {
+    await testContext.test(`refuses ${label}`, () => {
+      assert.deepEqual(paths(data), [["content.component_data", path]]);
+    });
+  }
+  await testContext.test("an optional safeUrl field elsewhere still accepts an omitted and an empty value", () => {
+    const grid = (items) => ({ items, columns: 3, density: "standard", borderWidth: 0 });
+    assert.deepEqual(validate("product-grid", grid([{ title: "T" }])).map((error) => error.path), []);
+    assert.deepEqual(validate("product-grid", grid([{ title: "T", buttonText: "", buttonUrl: "" }])).map((error) => error.path), []);
+  });
 });

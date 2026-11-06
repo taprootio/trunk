@@ -24,6 +24,12 @@ const AUTHORED_MEDIA = {
     alt: "A welcoming hot yoga class",
   },
   "media/starburst.webp": { imageId: IMAGE_ID, width: 1200, height: 1200, alt: "" },
+  "media/wordmark.webp": {
+    imageId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+    width: 2000,
+    height: 400,
+    alt: "Riverbend Wellness wordmark",
+  },
   "media/class.webp": { imageId: IMAGE_ID, width: 1920, height: 1080, alt: "A hot yoga class" },
   "media/class-portrait.webp": {
     imageId: "9a8b7c6d-5e4f-4321-a098-76543210fedc",
@@ -43,14 +49,23 @@ const resolveImage = async (reference) => ({
 
 /**
  * The shared section fixture renders with delivery URLs; converted Markdown
- * stores the hero image with them empty.
+ * stores the hero image, the row images and the grid icons with them empty.
  */
 function withoutDeliveryUrls(document) {
+  const blank = (image) => (image !== null && typeof image === "object" ? { ...image, src: "", urls: [] } : image);
   return JSON.parse(JSON.stringify(document), (key, value) => {
     if (key !== "componentData" || typeof value !== "string") return value;
     const data = JSON.parse(value);
-    if (data.media === null || typeof data.media !== "object") return value;
-    return JSON.stringify({ ...data, media: { ...data.media, src: "", urls: [] } });
+    const next = { ...data };
+    if (data.media !== null && typeof data.media === "object") next.media = blank(data.media);
+    if (Array.isArray(data.items)) {
+      next.items = data.items.map((item) => ({
+        ...item,
+        ...(Object.hasOwn(item, "image") ? { image: blank(item.image) } : {}),
+        ...(Object.hasOwn(item, "icon") ? { icon: blank(item.icon) } : {}),
+      }));
+    }
+    return next.media === data.media && next.items === data.items ? value : JSON.stringify(next);
   });
 }
 
@@ -529,6 +544,9 @@ const GOLDENS = [
       + "```component:feature-grid\n"
       + "{\"items\":[{\"icon\":null,\"title\":\"Start where you are\",\"description\":\"A grounded first step for every body.\",\"url\":\"/classes\"},{\"icon\":null,\"title\":\"Build steady strength\",\"description\":\"A repeatable practice with room to progress.\",\"url\":\"/classes\"}],\"columns\":2,\"iconSize\":\"medium\",\"borderWidth\":1}\n"
       + "```\n\n"
+      + "```component:feature-grid\n"
+      + "{\"items\":[{\"icon\":\"media/hero-media.webp\",\"title\":\"Small icon\",\"description\":\"An icon at the smallest size.\",\"url\":\"\"}],\"columns\":2,\"iconSize\":\"small\",\"borderWidth\":0}\n"
+      + "```\n\n"
       + "```component:card-grid\n"
       + "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}\n"
       + "```\n\n"
@@ -537,6 +555,15 @@ const GOLDENS = [
       + "```\n\n"
       + "```component:testimonial\n"
       + "{\"items\":[{\"quote\":\"Two months in, I can hold poses I could not attempt in January.\",\"authorName\":\"Marcus Ellery\",\"authorTitle\":\"Barre regular\",\"authorImage\":null}],\"carousel\":true,\"borderWidth\":1}\n"
+      + "```\n\n"
+      + "```component:image-row\n"
+      + "{\"items\":[{\"image\":\"media/hero-media.webp\",\"url\":\"/classes\"},{\"image\":\"media/wordmark.webp\",\"url\":\"\"}],\"height\":\"large\",\"align\":\"start\"}\n"
+      + "```\n\n"
+      + "```component:product-grid\n"
+      + "{\"items\":[{\"image\":\"media/hero-media.webp\",\"title\":\"Intro offer\",\"price\":\"$49\",\"priceNote\":\"for two weeks\",\"badge\":\"New students\",\"description\":\"Unlimited classes for your first two weeks.\",\"features\":[\"Any class, any time\"],\"buttonText\":\"Buy now\",\"buttonUrl\":\"https://pay.example.test/intro\",\"highlighted\":false},{\"image\":null,\"title\":\"Monthly unlimited\",\"price\":\"$145\",\"priceNote\":\"per month\",\"badge\":\"Most popular\",\"description\":\"Every class on the schedule, the sauna, and a guest pass each month for a friend who wants to try the studio.\",\"features\":[\"Unlimited classes\",\"Sauna included\",\"One guest pass a month\",\"Pause any time\"],\"buttonText\":\"Join now\",\"buttonUrl\":\"https://pay.example.test/monthly\",\"highlighted\":true},{\"image\":null,\"title\":\"Ten-class pack\",\"price\":\"$180\",\"description\":\"Ten classes to use within six months.\",\"buttonText\":\"Buy now\",\"buttonUrl\":\"/rates/ten-pack\"},{\"image\":null,\"title\":\"Drop-in\",\"price\":\"$22\",\"priceNote\":\"per class\",\"buttonText\":\"Book a class\",\"buttonUrl\":\"/classes\"},{\"image\":null,\"title\":\"Sauna session\",\"price\":\"$18\",\"description\":\"Thirty minutes in the infrared sauna.\",\"features\":[\"Towels provided\",\"Book up to a week ahead\"],\"buttonText\":\"Book now\",\"buttonUrl\":\"/sauna\"},{\"image\":null,\"title\":\"Private session\",\"price\":\"From $90\",\"description\":\"One-to-one coaching with a teacher of your choice.\"},{\"image\":null,\"title\":\"Student membership\",\"price\":\"$95\",\"priceNote\":\"per month\",\"badge\":\"Student ID required\",\"buttonText\":\"Join now\",\"buttonUrl\":\"https://pay.example.test/student\"},{\"image\":null,\"title\":\"Supercalifragilisticexpialidociousmembershipbundleoffer2026\",\"price\":\"Pricequotedonrequestforthisbundle\",\"description\":\"A bundle for families and small teams.\",\"buttonText\":\"Ask about a quote for this family bundle\",\"buttonUrl\":\"mailto:hello@example.test\"}],\"columns\":3,\"density\":\"standard\",\"borderWidth\":1}\n"
+      + "```\n\n"
+      + "```component:social-links\n"
+      + "{\"items\":[{\"platform\":\"instagram\",\"url\":\"https://www.instagram.com/shywellness\"},{\"platform\":\"facebook\",\"url\":\"https://www.facebook.com/shywellness\",\"label\":\"SHY Wellness on Facebook\"},{\"platform\":\"other\",\"url\":\"https://shywellness.example/book\",\"label\":\"Book online\"}],\"size\":\"medium\",\"align\":\"start\",\"showLabels\":false}\n"
       + "```\n"
       + ":::",
     doc: withoutDeliveryUrls(representativeSectionDocument),

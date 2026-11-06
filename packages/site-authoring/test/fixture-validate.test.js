@@ -39,6 +39,8 @@ const AUTHORED_THEME_GROUPS = new Set(["anchors", "roles", "contexts", "intents"
 const SHY_PAGE_ID = "00000000-0000-4000-8000-000000000791";
 const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
 const SHY_IMAGE_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
+// The image-row wordmark the composition fixture carries (TR01322).
+const SHY_WORDMARK_IMAGE_ID = "88888888-9999-4aaa-8bbb-cccccccccccc";
 
 function sink() {
   let value = "";
@@ -541,7 +543,7 @@ test("the canonical SHY composition document executes through the same quiet off
   // This case owns the SHY document, so it asserts against the fixture's own
   // baseline rather than a literal total an unrelated fixture edit would break.
   const basePageCount = manifest.pages.length;
-  manifest.fixture.imageIds.push(SHY_IMAGE_ID);
+  manifest.fixture.imageIds.push(SHY_IMAGE_ID, SHY_WORDMARK_IMAGE_ID);
   manifest.pages.push({
     pageId: SHY_PAGE_ID,
     resourceId: SHY_RESOURCE_ID,

@@ -1,0 +1,435 @@
+{
+  "description": "Addresses a social link accepts and refuses, judged exactly as written, with the result of trimming each (TR01324). Every copy of shared/social-link-url.ts and the API's own port must agree.",
+  "entries": [
+    {
+      "value": "https://www.instagram.com/shywellness",
+      "valid": true,
+      "trimmed": "https://www.instagram.com/shywellness"
+    },
+    {
+      "value": "https://x.com/shywellness",
+      "valid": true,
+      "trimmed": "https://x.com/shywellness"
+    },
+    {
+      "value": "https://bsky.app/profile/shy.bsky.social",
+      "valid": true,
+      "trimmed": "https://bsky.app/profile/shy.bsky.social"
+    },
+    {
+      "value": "https://mastodon.social/@shywellness",
+      "valid": true,
+      "trimmed": "https://mastodon.social/@shywellness"
+    },
+    {
+      "value": "https://www.yelp.com/biz/shy-wellness",
+      "valid": true,
+      "trimmed": "https://www.yelp.com/biz/shy-wellness"
+    },
+    {
+      "value": "https://www.linkedin.com/in/shywellness",
+      "valid": true,
+      "trimmed": "https://www.linkedin.com/in/shywellness"
+    },
+    {
+      "value": "https://youtube.com/@shywellness",
+      "valid": true,
+      "trimmed": "https://youtube.com/@shywellness"
+    },
+    {
+      "value": "https://www.tiktok.com/@shywellness",
+      "valid": true,
+      "trimmed": "https://www.tiktok.com/@shywellness"
+    },
+    {
+      "value": "https://www.threads.net/@shywellness",
+      "valid": true,
+      "trimmed": "https://www.threads.net/@shywellness"
+    },
+    {
+      "value": "https://example.com",
+      "valid": true,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com/",
+      "valid": true,
+      "trimmed": "https://example.com/"
+    },
+    {
+      "value": "https://example.com/?a=b",
+      "valid": true,
+      "trimmed": "https://example.com/?a=b"
+    },
+    {
+      "value": "https://example.com?a=b",
+      "valid": true,
+      "trimmed": "https://example.com?a=b"
+    },
+    {
+      "value": "https://example.com/book#top",
+      "valid": true,
+      "trimmed": "https://example.com/book#top"
+    },
+    {
+      "value": "HTTPS://Example.Com",
+      "valid": true,
+      "trimmed": "HTTPS://Example.Com"
+    },
+    {
+      "value": "https://EXAMPLE.COM",
+      "valid": true,
+      "trimmed": "https://EXAMPLE.COM"
+    },
+    {
+      "value": "https://example.com:443/a",
+      "valid": true,
+      "trimmed": "https://example.com:443/a"
+    },
+    {
+      "value": "https://a-b.example.co.uk/path",
+      "valid": true,
+      "trimmed": "https://a-b.example.co.uk/path"
+    },
+    {
+      "value": "https://x9.example",
+      "valid": true,
+      "trimmed": "https://x9.example"
+    },
+    {
+      "value": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true,
+      "trimmed": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "valid": true,
+      "trimmed": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "value": "http://example.com",
+      "valid": false,
+      "trimmed": "http://example.com"
+    },
+    {
+      "value": "https://user:pass@example.com",
+      "valid": false,
+      "trimmed": "https://user:pass@example.com"
+    },
+    {
+      "value": "https://user@example.com",
+      "valid": false,
+      "trimmed": "https://user@example.com"
+    },
+    {
+      "value": "https://@example.com",
+      "valid": false,
+      "trimmed": "https://@example.com"
+    },
+    {
+      "value": "https://:@example.com",
+      "valid": false,
+      "trimmed": "https://:@example.com"
+    },
+    {
+      "value": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false,
+      "trimmed": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "value": "https:example.com",
+      "valid": false,
+      "trimmed": "https:example.com"
+    },
+    {
+      "value": "https:/example.com",
+      "valid": false,
+      "trimmed": "https:/example.com"
+    },
+    {
+      "value": "https:///example.com",
+      "valid": false,
+      "trimmed": "https:///example.com"
+    },
+    {
+      "value": "https://exam ple.com",
+      "valid": false,
+      "trimmed": "https://exam ple.com"
+    },
+    {
+      "value": "https://example.com/a b",
+      "valid": false,
+      "trimmed": "https://example.com/a b"
+    },
+    {
+      "value": "https://example.com:",
+      "valid": false,
+      "trimmed": "https://example.com:"
+    },
+    {
+      "value": "https://example.com:0",
+      "valid": false,
+      "trimmed": "https://example.com:0"
+    },
+    {
+      "value": "https://example.com:65536",
+      "valid": false,
+      "trimmed": "https://example.com:65536"
+    },
+    {
+      "value": "https://example.com:abc",
+      "valid": false,
+      "trimmed": "https://example.com:abc"
+    },
+    {
+      "value": "https://example.com.",
+      "valid": false,
+      "trimmed": "https://example.com."
+    },
+    {
+      "value": "https://ex%61mple.com",
+      "valid": false,
+      "trimmed": "https://ex%61mple.com"
+    },
+    {
+      "value": "https://my_site.example.com",
+      "valid": false,
+      "trimmed": "https://my_site.example.com"
+    },
+    {
+      "value": "https://-x.example.com",
+      "valid": false,
+      "trimmed": "https://-x.example.com"
+    },
+    {
+      "value": "https://x-.example.com",
+      "valid": false,
+      "trimmed": "https://x-.example.com"
+    },
+    {
+      "value": "https://localhost",
+      "valid": false,
+      "trimmed": "https://localhost"
+    },
+    {
+      "value": "https://1.2.3.4",
+      "valid": false,
+      "trimmed": "https://1.2.3.4"
+    },
+    {
+      "value": "https://1.2.3",
+      "valid": false,
+      "trimmed": "https://1.2.3"
+    },
+    {
+      "value": "https://0x7f.1",
+      "valid": false,
+      "trimmed": "https://0x7f.1"
+    },
+    {
+      "value": "https://127.0.0.0x1",
+      "valid": false,
+      "trimmed": "https://127.0.0.0x1"
+    },
+    {
+      "value": "https://127.0.0.0X1",
+      "valid": false,
+      "trimmed": "https://127.0.0.0X1"
+    },
+    {
+      "value": "https://0x7f.0x1",
+      "valid": false,
+      "trimmed": "https://0x7f.0x1"
+    },
+    {
+      "value": "https://a.0x",
+      "valid": false,
+      "trimmed": "https://a.0x"
+    },
+    {
+      "value": "https://example.com\\path",
+      "valid": false,
+      "trimmed": "https://example.com\\path"
+    },
+    {
+      "value": "https://example.com/",
+      "valid": false,
+      "trimmed": "https://example.com/"
+    },
+    {
+      "value": "https://example.com/\u0007",
+      "valid": false,
+      "trimmed": "https://example.com/\u0007"
+    },
+    {
+      "value": "https://exam​ple.com",
+      "valid": false,
+      "trimmed": "https://exam​ple.com"
+    },
+    {
+      "value": "https://exa­mple.com",
+      "valid": false,
+      "trimmed": "https://exa­mple.com"
+    },
+    {
+      "value": "https://example.com/​",
+      "valid": false,
+      "trimmed": "https://example.com/​"
+    },
+    {
+      "value": "https://a.b．com",
+      "valid": false,
+      "trimmed": "https://a.b．com"
+    },
+    {
+      "value": "https://1.2.3.４",
+      "valid": false,
+      "trimmed": "https://1.2.3.４"
+    },
+    {
+      "value": "https://Kelly.example",
+      "valid": false,
+      "trimmed": "https://Kelly.example"
+    },
+    {
+      "value": "https://kelly.Kom",
+      "valid": false,
+      "trimmed": "https://kelly.Kom"
+    },
+    {
+      "value": "https://İ.example",
+      "valid": false,
+      "trimmed": "https://İ.example"
+    },
+    {
+      "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "valid": false,
+      "trimmed": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+    },
+    {
+      "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "valid": false,
+      "trimmed": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "value": "https://😀.example",
+      "valid": false,
+      "trimmed": "https://😀.example"
+    },
+    {
+      "value": "https://xn--a.example",
+      "valid": false,
+      "trimmed": "https://xn--a.example"
+    },
+    {
+      "value": "https://XN--a.example",
+      "valid": false,
+      "trimmed": "https://XN--a.example"
+    },
+    {
+      "value": "https://xn--bcher-kva.example",
+      "valid": false,
+      "trimmed": "https://xn--bcher-kva.example"
+    },
+    {
+      "value": "https://example.com/ ",
+      "valid": false,
+      "trimmed": "https://example.com/"
+    },
+    {
+      "value": "https://example.com/ ",
+      "valid": false,
+      "trimmed": "https://example.com/"
+    },
+    {
+      "value": "https://example.com/‮",
+      "valid": false,
+      "trimmed": "https://example.com/‮"
+    },
+    {
+      "value": "https://example.com/️",
+      "valid": false,
+      "trimmed": "https://example.com/️"
+    },
+    {
+      "value": "ftp://example.com",
+      "valid": false,
+      "trimmed": "ftp://example.com"
+    },
+    {
+      "value": "//example.com",
+      "valid": false,
+      "trimmed": "//example.com"
+    },
+    {
+      "value": "example.com",
+      "valid": false,
+      "trimmed": "example.com"
+    },
+    {
+      "value": "",
+      "valid": false,
+      "trimmed": ""
+    },
+    {
+      "value": " https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com ",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "\thttps://example.com\n",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": " https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com ",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": " https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com　",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "﻿https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com﻿",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "https://example.com",
+      "valid": false,
+      "trimmed": "https://example.com"
+    },
+    {
+      "value": "  ",
+      "valid": false,
+      "trimmed": ""
+    }
+  ]
+}
