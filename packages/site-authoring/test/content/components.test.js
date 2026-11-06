@@ -270,17 +270,82 @@ test("holds creative component options to their published vocabularies", async (
     ["card-grid", "presentation", ["cards", "editorial", "featured", "poster"], "gallery"],
     ["card-grid", "imageAspect", ["auto", "landscape", "square", "portrait"], "cinematic"],
     ["card-grid", "interaction", ["none", "lift", "zoom", "caption-reveal"], "tilt"],
+    ["card-grid", "imageFit", ["cover", "contain"], "fill"],
+    // These two mean something only with `contain` (TR01326).
+    ["card-grid", "imageHeight", Object.keys(registry.components["image-row"].heights), "huge", { imageFit: "contain" }],
+    ["card-grid", "imageAlign", ["start", "center", "end"], "left", { imageFit: "contain" }],
   ];
 
-  for (const [componentType, field, accepted, rejected] of cases) {
+  for (const [componentType, field, accepted, rejected, base = {}] of cases) {
     await testContext.test(`${componentType}.${field}`, () => {
       for (const value of accepted) {
-        assert.deepEqual(validate(componentType, { ...COMPLETE[componentType], [field]: value }), []);
+        assert.deepEqual(validate(componentType, { ...COMPLETE[componentType], ...base, [field]: value }), []);
       }
-      const errors = validate(componentType, { ...COMPLETE[componentType], [field]: rejected });
+      const errors = validate(componentType, { ...COMPLETE[componentType], ...base, [field]: rejected });
       assert.deepEqual(errors.map((error) => error.path), [`/attrs/componentData/${field}`]);
     });
   }
+});
+
+test("a card grid's image options hold together and need measured images (TR01326)", async (testContext) => {
+  const grid = (rest = {}, image = IMAGE) => ({ cards: [{ image, title: "Logo" }], columns: 2, ...rest });
+  const paths = (data) => validate("card-grid", data).map((error) => [error.code, error.path]);
+  const field = (name) => ["content.component_data", `/attrs/componentData/${name}`];
+  const spacings = Object.keys(registry.components["card-grid"].imageSpacings);
+
+  await testContext.test("refuses imageHeight and imageAlign with cover, whether named or omitted", () => {
+    for (const imageFit of [undefined, "cover"]) {
+      assert.deepEqual(paths(grid({ imageFit, imageHeight: "small" })), [field("imageHeight")]);
+      assert.deepEqual(paths(grid({ imageFit, imageAlign: "end" })), [field("imageAlign")]);
+      assert.deepEqual(paths(grid({ imageFit, imageHeight: "small", imageAlign: "end" })), [
+        field("imageHeight"),
+        field("imageAlign"),
+      ]);
+    }
+  });
+  await testContext.test("reports only the invalid imageFit when it is wrong", () => {
+    assert.deepEqual(paths(grid({ imageFit: "fill", imageHeight: "small" })), [field("imageFit")]);
+  });
+  await testContext.test("accepts imageHeight and imageAlign with contain", () => {
+    assert.deepEqual(paths(grid({ imageFit: "contain", imageHeight: "large", imageAlign: "center" })), []);
+  });
+  await testContext.test("accepts imageSpacing with either fit, on each side with each value, and empty", () => {
+    for (const imageFit of ["cover", "contain"]) {
+      assert.deepEqual(paths(grid({ imageFit, imageSpacing: {} })), []);
+      for (const side of ["top", "bottom", "start", "end"]) {
+        for (const value of spacings) {
+          assert.deepEqual(paths(grid({ imageFit, imageSpacing: { [side]: value } })), [], `${imageFit} ${side} ${value}`);
+        }
+      }
+    }
+  });
+  await testContext.test("refuses a string, an unknown side and an unknown value at their paths", () => {
+    assert.deepEqual(paths(grid({ imageSpacing: "small" })), [field("imageSpacing")]);
+    assert.deepEqual(paths(grid({ imageSpacing: { left: "small" } })), [field("imageSpacing/left")]);
+    assert.deepEqual(paths(grid({ imageSpacing: { top: "huge" } })), [field("imageSpacing/top")]);
+  });
+  await testContext.test("refuses a contained image with a zero or missing dimension at its own path", () => {
+    const without = (key) => Object.fromEntries(Object.entries(IMAGE).filter(([name]) => name !== key));
+    const cases = [
+      [{ ...IMAGE, width: 0 }, ["width"]],
+      [{ ...IMAGE, height: 0 }, ["height"]],
+      [without("width"), ["width"]],
+      [without("height"), ["height"]],
+      [{ ...IMAGE, width: 0, height: 0 }, ["width", "height"]],
+    ];
+    for (const [image, dimensions] of cases) {
+      assert.deepEqual(
+        paths(grid({ imageFit: "contain" }, image)),
+        dimensions.map((dimension) => field(`cards/0/image/${dimension}`)),
+      );
+      // Zero is still stored by the editor's upload, so cover keeps accepting it.
+      assert.deepEqual(paths(grid({ imageFit: "cover" }, image)), []);
+    }
+  });
+  await testContext.test("adds no second error for a wrong-type dimension, and accepts a null image", () => {
+    assert.deepEqual(paths(grid({ imageFit: "contain" }, { ...IMAGE, width: "wide" })), [field("cards/0/image/width")]);
+    assert.deepEqual(paths(grid({ imageFit: "contain" }, null)), []);
+  });
 });
 
 test("defaults creative component options", () => {

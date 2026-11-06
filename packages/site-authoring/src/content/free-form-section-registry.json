@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -548,7 +548,13 @@
     "card-grid": {
       "label": "Card Grid",
       "measure": "wide",
-      "rootPlacement": "flow"
+      "rootPlacement": "flow",
+      "imageSpacings": {
+        "none": "0rem",
+        "small": "1em",
+        "medium": "2em",
+        "text": "var(--esp-size-small-to-normal, 1rem)"
+      }
     },
     "image-banner": {
       "label": "Image Banner",

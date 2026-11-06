@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 48;
+export const REFERENCE_VERSION = 49;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({

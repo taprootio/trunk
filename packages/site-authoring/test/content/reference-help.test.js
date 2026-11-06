@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 48);
+  assert.equal(REFERENCE_VERSION, 49);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -891,6 +891,40 @@ test("the image-row reference prints its bounds, required image fields and heigh
   assert.match(printed, /40px/u);
   assert.match(printed, /never cropped or framed/u);
   assert.match(printed, /Width and height are required/u);
+});
+
+test("the card-grid reference prints the image options, their sizes in rem and px and when images are cropped (TR01326)", () => {
+  const component = getComponentReference("card-grid");
+  const names = component.properties.map((property) => property.name);
+  assert.deepEqual(names.slice(names.indexOf("imageAspect"), names.indexOf("imageAspect") + 5), [
+    "imageAspect",
+    "imageFit",
+    "imageHeight",
+    "imageAlign",
+    "imageSpacing",
+  ]);
+  const byName = Object.fromEntries(component.properties.map((property) => [property.name, property]));
+  assert.deepEqual(byName.imageFit.schema.enum, ["cover", "contain"]);
+  assert.deepEqual(byName.imageFit.whenOmitted, { kind: "value", value: "cover" });
+  assert.deepEqual(byName.imageHeight.schema.enum, ["small", "medium", "large"]);
+  assert.match(byName.imageHeight.schema.description, /small 2\.5rem \(40px\), medium 4rem \(64px\), large 6rem \(96px\)/u);
+  assert.deepEqual(byName.imageAlign.schema.enum, ["start", "center", "end"]);
+  assert.equal(byName.imageSpacing.schema.additionalProperties, false);
+  assert.ok(byName.imageSpacing.schema.description);
+  const sides = Object.fromEntries(byName.imageSpacing.schema.properties.map((property) => [property.name, property.schema]));
+  assert.deepEqual(Object.keys(sides), ["top", "bottom", "start", "end"]);
+  for (const side of Object.values(sides)) assert.deepEqual(side.enum, ["none", "small", "medium", "text"]);
+  const notes = component.accessibility.join(" ");
+  assert.match(notes, /small 2\.5rem \(40px\), medium 4rem \(64px\), large 6rem \(96px\) at a 16px root/u);
+  assert.match(notes, /imageFit contain never crops/u);
+  assert.match(notes, /cover.*cut to the fixed imageAspect/u);
+  assert.match(notes, /wider than its card shrinks to fit/u);
+  assert.match(notes, /imageHeight and imageAlign are refused with cover/u);
+  assert.match(notes, /width and height, which media upload records/u);
+  assert.match(notes, /saved crop shows that crop/u);
+  const printed = formatReferenceResult({ topic: "component", component });
+  assert.match(printed, /imageSpacing/u);
+  assert.match(printed, /imageFit/u);
 });
 
 test("the feature-grid reference states its icon sizes and square crop (TR01322)", () => {

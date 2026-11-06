@@ -130,6 +130,27 @@
         {
           "type": "componentBlock",
           "attrs": {
+            "componentType": "card-grid",
+            "componentData": "{\"cards\":[{\"image\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"title\":\"Photo card\",\"description\":\"A photo sits flush with the top of its card.\",\"linkUrl\":\"\"}],\"columns\":2,\"imageAspect\":\"auto\",\"borderWidth\":0}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "card-grid",
+            "componentData": "{\"cards\":[{\"image\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"title\":\"Whole picture\",\"description\":\"Shown whole at a set height.\",\"linkUrl\":\"\"},{\"image\":{\"imageId\":\"88888888-9999-4aaa-8bbb-cccccccccccc\",\"src\":\"/wordmark-media.webp\",\"urls\":[{\"minWidth\":2000,\"url\":\"/wordmark-media.webp\"}],\"width\":2000,\"height\":400,\"alt\":\"Riverbend Wellness wordmark\"},\"title\":\"Wide wordmark\",\"description\":\"Shrinks to fit a narrow card.\",\"linkUrl\":\"\"}],\"columns\":3,\"imageFit\":\"contain\",\"imageHeight\":\"large\",\"imageAlign\":\"center\",\"borderWidth\":0}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
+            "componentType": "card-grid",
+            "componentData": "{\"cards\":[{\"image\":{\"imageId\":\"77777777-8888-4999-8aaa-bbbbbbbbbbbb\",\"src\":\"/hero-media.webp\",\"urls\":[{\"minWidth\":640,\"url\":\"/hero-media.webp\"}],\"width\":1200,\"height\":800,\"alt\":\"A welcoming hot yoga class\"},\"title\":\"Inset photo\",\"description\":\"\",\"linkUrl\":\"\"}],\"columns\":2,\"imageAspect\":\"landscape\",\"imageSpacing\":{\"top\":\"text\",\"start\":\"text\",\"end\":\"text\"},\"borderWidth\":0}"
+          }
+        },
+        {
+          "type": "componentBlock",
+          "attrs": {
             "componentType": "testimonial",
             "componentData": "{\"items\":[{\"quote\":\"The 6am class is the reason I finally kept a morning routine.\",\"authorName\":\"Priya Raman\",\"authorTitle\":\"Member since 2023\",\"authorImage\":null},{\"quote\":\"I came in nervous and left already planning my next visit.\",\"authorName\":\"Dana Whitfield\",\"authorTitle\":\"First-time student\",\"authorImage\":null}],\"columns\":2,\"borderWidth\":1}"
           }

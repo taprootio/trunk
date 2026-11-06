@@ -65,7 +65,12 @@ function withoutDeliveryUrls(document) {
         ...(Object.hasOwn(item, "icon") ? { icon: blank(item.icon) } : {}),
       }));
     }
-    return next.media === data.media && next.items === data.items ? value : JSON.stringify(next);
+    if (Array.isArray(data.cards)) {
+      next.cards = data.cards.map((card) => ({ ...card, image: blank(card.image) }));
+    }
+    return next.media === data.media && next.items === data.items && next.cards === data.cards
+      ? value
+      : JSON.stringify(next);
   });
 }
 
@@ -549,6 +554,15 @@ const GOLDENS = [
       + "```\n\n"
       + "```component:card-grid\n"
       + "{\"cards\":[{\"image\":null,\"title\":\"Wide card\",\"description\":\"Uses the full site well.\",\"linkUrl\":\"\"}],\"columns\":2,\"borderWidth\":0}\n"
+      + "```\n\n"
+      + "```component:card-grid\n"
+      + "{\"cards\":[{\"image\":\"media/hero-media.webp\",\"title\":\"Photo card\",\"description\":\"A photo sits flush with the top of its card.\",\"linkUrl\":\"\"}],\"columns\":2,\"imageAspect\":\"auto\",\"borderWidth\":0}\n"
+      + "```\n\n"
+      + "```component:card-grid\n"
+      + "{\"cards\":[{\"image\":\"media/hero-media.webp\",\"title\":\"Whole picture\",\"description\":\"Shown whole at a set height.\",\"linkUrl\":\"\"},{\"image\":\"media/wordmark.webp\",\"title\":\"Wide wordmark\",\"description\":\"Shrinks to fit a narrow card.\",\"linkUrl\":\"\"}],\"columns\":3,\"imageFit\":\"contain\",\"imageHeight\":\"large\",\"imageAlign\":\"center\",\"borderWidth\":0}\n"
+      + "```\n\n"
+      + "```component:card-grid\n"
+      + "{\"cards\":[{\"image\":\"media/hero-media.webp\",\"title\":\"Inset photo\",\"description\":\"\",\"linkUrl\":\"\"}],\"columns\":2,\"imageAspect\":\"landscape\",\"imageSpacing\":{\"top\":\"text\",\"start\":\"text\",\"end\":\"text\"},\"borderWidth\":0}\n"
       + "```\n\n"
       + "```component:testimonial\n"
       + "{\"items\":[{\"quote\":\"The 6am class is the reason I finally kept a morning routine.\",\"authorName\":\"Priya Raman\",\"authorTitle\":\"Member since 2023\",\"authorImage\":null},{\"quote\":\"I came in nervous and left already planning my next visit.\",\"authorName\":\"Dana Whitfield\",\"authorTitle\":\"First-time student\",\"authorImage\":null}],\"columns\":2,\"borderWidth\":1}\n"

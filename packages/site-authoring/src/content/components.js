@@ -247,6 +247,22 @@ const LATEST_POSTS = Object.freeze({
   bannerScheme: enumOf("auto", "light", "dark"),
 });
 
+/** The registry owns the row heights; the help text and the renderer derive from the same map. */
+const IMAGE_ROW_HEIGHTS = registry.components["image-row"].heights;
+const IMAGE_ROW_HEIGHT_SIZES = Object.entries(IMAGE_ROW_HEIGHTS)
+  .map(([name, rem]) => `${name} ${rem} (${Number.parseFloat(rem) * 16}px)`)
+  .join(", ");
+const IMAGE_ROW_HEIGHT_HELP =
+  `Each image's height: ${IMAGE_ROW_HEIGHT_SIZES} at a 16px root; width follows each image's own shape, never cropped or framed.`;
+
+/** The registry owns the card image spacings too; each side takes the same four names (TR01326). */
+const CARD_IMAGE_SPACINGS = registry.components["card-grid"].imageSpacings;
+const CARD_IMAGE_SPACING_NAMES = Object.keys(CARD_IMAGE_SPACINGS);
+const CARD_IMAGE_SPACING_VALUES =
+  `none (0), small (${CARD_IMAGE_SPACINGS.small}), medium (${CARD_IMAGE_SPACINGS.medium}) or text (the same padding as around the card's text)`;
+const CARD_IMAGE_SPACING_SIDE_HELP = (side, defaults) =>
+  `Space on the ${side} of each card image: ${CARD_IMAGE_SPACING_VALUES}. Left out, it is ${defaults}.`;
+
 /** `CardGridData`. `cropState` is the one genuinely optional field in types.ts. */
 const CARD_GRID = Object.freeze({
   cards: withOmission(
@@ -262,6 +278,36 @@ const CARD_GRID = Object.freeze({
   columns: num({ values: Object.freeze([2, 3]) }),
   presentation: enumOf("cards", "editorial", "featured", "poster"),
   imageAspect: enumOf("auto", "landscape", "square", "portrait"),
+  imageFit: withOmission(
+    described(
+      enumOf("cover", "contain"),
+      "cover fills the card and crops each image to imageAspect; contain shows the whole image at imageHeight, never cropped or framed, and needs each image's width and height.",
+    ),
+    { kind: "value", value: "cover" },
+  ),
+  imageHeight: described(
+    enumOf(...Object.keys(IMAGE_ROW_HEIGHTS)),
+    `${IMAGE_ROW_HEIGHT_HELP} Only with imageFit contain, where it is medium when left out; refused otherwise.`,
+  ),
+  imageAlign: described(
+    enumOf("start", "center", "end"),
+    "Where each whole image sits across its card, not the text: start is the left edge and end the right edge in a left-to-right page. Only with imageFit contain, where it is start when left out; refused otherwise.",
+  ),
+  imageSpacing: described(
+    shape({
+      top: described(enumOf(...CARD_IMAGE_SPACING_NAMES), CARD_IMAGE_SPACING_SIDE_HELP("top", "none with cover and small with contain")),
+      bottom: described(enumOf(...CARD_IMAGE_SPACING_NAMES), CARD_IMAGE_SPACING_SIDE_HELP("bottom", "none")),
+      start: described(
+        enumOf(...CARD_IMAGE_SPACING_NAMES),
+        CARD_IMAGE_SPACING_SIDE_HELP("left edge (start)", "none with cover and text with contain"),
+      ),
+      end: described(
+        enumOf(...CARD_IMAGE_SPACING_NAMES),
+        CARD_IMAGE_SPACING_SIDE_HELP("right edge (end)", "none with cover and text with contain"),
+      ),
+    }),
+    "Space around each card image; name only the sides to change, and a side left out keeps its default for the fit. With imageFit contain, start moves an image aligned to start and end moves one aligned to end; otherwise they only limit how wide the image can be.",
+  ),
   interaction: enumOf("none", "lift", "zoom", "caption-reveal"),
   borderWidth: num({
     integer: true,
@@ -407,14 +453,6 @@ function imageFieldsFor(spec) {
       : {}),
   });
 }
-
-/** The registry owns the row heights; the help text and the renderer derive from the same map. */
-const IMAGE_ROW_HEIGHTS = registry.components["image-row"].heights;
-const IMAGE_ROW_HEIGHT_HELP = `Each image's height: ${
-  Object.entries(IMAGE_ROW_HEIGHTS)
-    .map(([name, rem]) => `${name} ${rem} (${Number.parseFloat(rem) * 16}px)`)
-    .join(", ")
-} at a 16px root; width follows each image's own shape, never cropped or framed.`;
 
 /**
  * `ImageRowData` (TR01322). A row of pictures carries no other text, so every
@@ -648,7 +686,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Icon images need descriptive alt text when they convey information; otherwise use an empty alt value.",
       "Item title and description are plain text: an item's url makes the whole item the link, and no link can be placed inside the text. Put linked prose in a paragraph beside the grid.",
       "iconSize sets the icon box: small 3rem (48px), medium 6rem (96px), large 10rem (160px), xlarge 16rem (256px) at a 16px root.",
-      "Icons are cropped to a square and framed by the site's image border. For badges, logos or any picture that must keep its shape, use the image-row component instead.",
+      "Icons are cropped to a square and framed by the site's image border. For badges, logos or any picture that must keep its shape, use the image-row component instead, or a card-grid with imageFit contain when each needs a card.",
     ],
     {
       items: [
@@ -713,6 +751,14 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Every linked card needs a title that describes its destination.",
       "Card images need descriptive alt text unless they are decorative.",
       "Card title and description are plain text: a card's linkUrl makes the whole card the link, and no link can be placed inside the text. Put linked prose in a paragraph beside the grid.",
+      "Images are cropped when imageFit is cover, the default: each is cut to the fixed imageAspect, while imageAspect auto follows the picture's own shape up to the page's height cap. imageFit contain never crops; it shows the whole image.",
+      "For a logo or mark use imageFit contain with a tightly cropped file that has no built-in padding, and set the size with imageHeight and the space around it with imageSpacing, not by padding the file.",
+      `imageHeight sets the height of a whole image: ${IMAGE_ROW_HEIGHT_SIZES} at a 16px root. Width follows the image's shape, and an image wider than its card shrinks to fit.`,
+      "imageHeight and imageAlign are refused with cover, and when imageFit is left out, which means cover. With contain, imageHeight is medium and imageAlign is start when left out. imageAlign moves the image only, never the text.",
+      `imageSpacing is an object with any of top, bottom, start and end, each ${CARD_IMAGE_SPACING_VALUES}. It works with either fit.`,
+      "A side left out of imageSpacing keeps its default, so name only the sides to change. Defaults for cover: none on every side. Defaults for contain: top small, bottom none, start and end text.",
+      "imageFit contain needs each card image's width and height, which media upload records; a card image with a missing or zero size is refused.",
+      "A card with a saved crop shows that crop under contain; replace the image with the whole file to show all of it. The Zoom interaction has no effect on a whole image.",
     ],
     {
       cards: [
@@ -1077,6 +1123,7 @@ function referenceSchema(spec) {
         type: spec.nullable ? ["object", "null"] : "object",
         additionalProperties: false,
         properties: referenceProperties(spec.fields),
+        ...(spec.description ? { description: spec.description } : {}),
       };
     case "image":
       return {
@@ -1342,6 +1389,44 @@ export function expandComponentAuthoringShorthand(componentType, source) {
 }
 
 /**
+ * The card grid's image rules that need two fields (TR01326): imageHeight and
+ * imageAlign only mean something with `contain`, and a contained image is
+ * sized from its stored width and height. The published renderer's readiness
+ * check applies the same rules at the same paths.
+ */
+function validateCardImageFit(parsed, dataPath, errors) {
+  const fit = parsed.imageFit;
+  // An invalid imageFit was already reported by `validateFields`.
+  if (fit !== undefined && fit !== "cover" && fit !== "contain") return;
+  if (fit !== "contain") {
+    for (const field of ["imageHeight", "imageAlign"]) {
+      if (parsed[field] === undefined) continue;
+      errors.push(contentError(
+        `${dataPath}/${field}`,
+        CODES.componentData,
+        `${field} applies only when imageFit is "contain"; remove ${field}, or set imageFit to "contain".`,
+      ));
+    }
+    return;
+  }
+  if (!Array.isArray(parsed.cards)) return;
+  for (const [index, card] of parsed.cards.entries()) {
+    if (!isPlainObject(card) || !isPlainObject(card.image)) continue;
+    for (const dimension of ["width", "height"]) {
+      const value = card.image[dimension];
+      // A wrong-type dimension was already reported by `validateFields`.
+      if (value !== undefined && typeof value !== "number") continue;
+      if (value !== undefined && value !== 0) continue;
+      errors.push(contentError(
+        `${dataPath}/cards/${index}/image/${dimension}`,
+        CODES.componentData,
+        `With imageFit "contain" a card image needs its ${dimension} in pixels; upload the image again with media upload, or set imageFit to "cover".`,
+      ));
+    }
+  }
+}
+
+/**
  * Validates a `componentBlock`'s `componentType` and `componentData` pair.
  *
  * `basePath` is the JSON pointer of the owning node's `attrs`; findings inside
@@ -1392,6 +1477,7 @@ export function validateComponentBlock(componentType, componentData, basePath) {
   const fields = isComponentType(componentType) ? COMPONENT_SHAPES[componentType] : undefined;
   if (!fields) return errors;
   validateFields(fields, parsed, dataPath, errors);
+  if (componentType === "card-grid") validateCardImageFit(parsed, dataPath, errors);
   if (componentType === "card-grid" && Array.isArray(parsed.cards)) {
     for (const [index, card] of parsed.cards.entries()) {
       if (

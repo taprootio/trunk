@@ -1,6 +1,19 @@
 {
   "entries": [
     {
+      "version": "0.30.0",
+      "note": "A card-grid can show each card's image whole at a set height, aligned and unframed, with chosen space on any side of the image, so a logo no longer needs a wide padded file.",
+      "behavior": [
+        "A card-grid takes imageFit (cover, the default, or contain), imageHeight (small 2.5rem/40px, medium 4rem/64px, large 6rem/96px at a 16px root), imageAlign (start, center or end) and imageSpacing (an object with any of top, bottom, start and end, each none, small, medium or text). With contain the whole image shows at imageHeight, never cropped or framed, and an image wider than its card shrinks to fit; each card image needs a nonzero width and height, which media upload records. imageHeight and imageAlign are refused unless imageFit is contain. A side left out of imageSpacing keeps its default for the fit: cover has none on every side; contain has small above, none below and text (the padding around the card's text) at start and end. See help component card-grid.",
+        "A card-grid image now sits flush with the top of its card, because the article image margin no longer reaches it. A site gets this on its next publish.",
+        "The help reference version is 49."
+      ],
+      "help": [
+        "components",
+        "component"
+      ]
+    },
+    {
       "version": "0.29.0",
       "note": "Pages gain an image-row component for linked pictures at a set height and a product-grid component for priced cards with a button each; feature-grid help states its icon sizes and square crop, and published feature-grid icons now render at the documented sizes.",
       "behavior": [
