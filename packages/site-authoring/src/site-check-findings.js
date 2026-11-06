@@ -2,7 +2,7 @@ import { sanitizeDiagnostic } from "./errors.js";
 import { boundedByBytes } from "./session.js";
 import rules from "./site-check-rules.json" with { type: "json" };
 import { isFormKey } from "./forms-contract.js";
-import { DESCRIPTION_WARN_LENGTH, pageStructureFindings, TITLE_WARN_LENGTH } from "./page-structure-checks.js";
+import { DESCRIPTION_MINIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, localAuthoringMetadata, METADATA_RULE_IDS, pageStructureFindings, TITLE_MINIMUM_LENGTH, TITLE_WARN_LENGTH } from "./page-structure-checks.js";
 import { missingPageLinkFindings, normalizedPathSet } from "./site-checks.js";
 import { documentTemplate, TEMPLATE_FREE_FORM, TEMPLATE_GENERATED } from "./typed-pages.js";
 import { displayPagePath } from "./workspace.js";
@@ -51,13 +51,15 @@ export const SITE_CHECK_WORDING = Object.freeze({
   },
   "seo.heading_before_title": (finding) =>
     `has the heading '${finding.subject}' before the page's h1; it publishes as an h${finding.detail}`,
-  "a11y.image_alt_missing": () => "places an image with no alt text",
+  "a11y.image_default_missing": () => "has no default image description; set one with media images describe, then deploy",
   "a11y.link_text_empty": (finding) => `has a link to ${finding.subject} with no text`,
-  "seo.title_long": (finding) =>
-    `has a title of ${finding.detail} characters; search results show about ${TITLE_WARN_LENGTH}`,
-  "seo.description_missing": () => "has no description; search results use the start of the page instead",
-  "seo.description_long": (finding) =>
-    `has a description of ${finding.detail} characters; search results show about ${DESCRIPTION_WARN_LENGTH}`,
+  "seo.title_missing": () => "has no title; add one that identifies the page",
+  "seo.title_short": (finding) => `has a title of ${finding.detail} characters; consider a more specific title (guidance: ${TITLE_MINIMUM_LENGTH}–${TITLE_WARN_LENGTH})`,
+  "seo.title_long": (finding) => `has a title of ${finding.detail} characters; consider shortening it (guidance: ${TITLE_MINIMUM_LENGTH}–${TITLE_WARN_LENGTH})`,
+  "seo.description_missing": () => "has no description; add a short account of what the page offers",
+  "seo.description_short": (finding) => `has a description of ${finding.detail} characters; consider adding useful detail (guidance: ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH})`,
+  "seo.description_long": (finding) => `has a description of ${finding.detail} characters; consider shortening it (guidance: ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH})`,
+  "seo.description_matches_title": () => "has a description that repeats its title; explain what readers will find",
   "seo.social_image_fallback": (finding) =>
     finding.detail === "first_image"
       ? "has no cover image; link previews use the page's first image only when it is public and at least 1200 pixels wide"
@@ -91,15 +93,17 @@ const OFFLINE_DOCUMENT_RULES = new Set(
 function structureFindingsFor(page) {
   if (page.document === null || typeof page.document !== "object") return [];
   const template = documentTemplate(page.document);
-  // A generated page's title and description come from the site, not from an author.
-  if (template === TEMPLATE_GENERATED) return [];
   const freeForm = template === TEMPLATE_FREE_FORM;
   return pageStructureFindings(
     {
       freeForm,
       body: freeForm ? page.document : undefined,
-      title: page.title,
-      description: page.declaredDescription ?? page.description,
+      ...localAuthoringMetadata({
+        title: page.title,
+        description: page.metadataDescriptionKnown === false ? undefined : page.declaredDescription ?? page.description,
+        homePage: page.pagePath === "" || page.pagePath === "/",
+        generated: template === TEMPLATE_GENERATED ? page.document.data ?? {} : undefined,
+      }),
     },
     OFFLINE_DOCUMENT_RULES,
   );
@@ -166,6 +170,8 @@ export function evaluateOfflineSiteChecks({
     },
     siteChecks: {
       ranOffline: rulesRunningAt("validate"),
+      // Local values are checked above; only a deployment knows every effective fallback.
+      deferredToDeployment: [...METADATA_RULE_IDS],
       // Rules that need the site's own records; `taproot-site status` shows what the site finds.
       checkedBySite: SITE_CHECK_RULES.filter((rule) => !rule.runsAt.includes("validate") && rule.runsAt.includes("health"))
         .map((rule) => rule.id),
@@ -173,7 +179,7 @@ export function evaluateOfflineSiteChecks({
       checkedAtDeploy: SITE_CHECK_RULES.filter((rule) =>
         !rule.runsAt.includes("validate") && !rule.runsAt.includes("health") && rule.runsAt.includes("deploy")
       ).map((rule) => rule.id),
-      // Rules only the page editor evaluates: a cover, a description field, or a description's length (which the CLI reports as descriptionWarnings).
+      // Rules only the page editor evaluates, such as its selected cover.
       checkedInEditor: SITE_CHECK_RULES.filter((rule) =>
         !rule.runsAt.includes("validate") && !rule.runsAt.includes("health") && !rule.runsAt.includes("deploy")
         && rule.runsAt.includes("edit")

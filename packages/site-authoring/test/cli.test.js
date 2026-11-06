@@ -8,6 +8,7 @@ import test from "node:test";
 import { runCli } from "../src/cli.js";
 import { SiteAuthoringError } from "../src/errors.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
+import { REFERENCE_VERSION } from "../src/reference-help.js";
 
 const SHIPPED_FIXTURE_DIRECTORY = shippedFixtureDirectory();
 const PAGE_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -49,6 +50,9 @@ const ROUTES = [
   { arguments_: ["theme", "push"], verb: "theme push" },
   { arguments_: ["footer", "push"], verb: "footer push" },
   { arguments_: ["media", "upload"], verb: "media upload" },
+  { arguments_: ["media", "images", "list", "--json"], verb: "media images list" },
+  { arguments_: ["media", "images", "get", PAGE_ID], verb: "media images get", imageId: PAGE_ID },
+  { arguments_: ["media", "images", "describe", PAGE_ID, "--description", "A bird", "--expected-revision", "0"], verb: "media images describe", imageId: PAGE_ID },
   { arguments_: ["approve"], verb: "approve" },
   { arguments_: ["deploy", "--staging"], verb: "deploy", deployTarget: "staging" },
   { arguments_: ["deploy", "--production"], verb: "deploy", deployTarget: "production" },
@@ -107,6 +111,7 @@ test("routes every verb to its own handler with the parsed invocation", async (t
       assert.equal(invocations[0].reviewPath, route.reviewPath);
       assert.equal(invocations[0].pageSelector, route.pageSelector);
       assert.equal(invocations[0].keyName, route.keyName);
+      assert.equal(invocations[0].imageId, route.imageId);
       assert.deepEqual(invocations[0].previewIds, route.previewIds);
       assert.deepEqual(JSON.parse(stdout.read()), successResult(route.verb));
     });
@@ -178,6 +183,7 @@ test("the shipped status handler honors explicit config from a config-free cwd a
     if (url.pathname.endsWith("/publishing/readiness")) {
       body = {
         state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] },
         approvedPageCount: 0,
         blockedPageCount: 0,
         hasCandidateChanges: false,
@@ -684,7 +690,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "media"],
-      match: /^Media upload contract/u,
+      match: /^Image defaults and media upload/u,
       contains: [
         "workspace root",
         "logo@2x.png",
@@ -759,7 +765,7 @@ test("serves page and component reference help without configuration, credential
     },
     {
       arguments_: ["help", "theme"],
-      match: /^Espalier 6\.7\.0 complete site-theme contract/u,
+      match: /^Espalier \d+\.\d+\.\d+ complete site-theme contract/u,
       contains: ["Design workflow", "brand-color-model", "semantic-engine", "Valid complete pair"],
     },
     {
@@ -892,7 +898,7 @@ test("emits versioned machine-readable reference topics", async (context) => {
           ok: true,
           cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
           verb: "help",
-          referenceVersion: 49,
+          referenceVersion: REFERENCE_VERSION,
           topic: scenario.topic,
         },
       );

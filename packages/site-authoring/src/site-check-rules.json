@@ -1,10 +1,11 @@
 {
-  "version": 1,
-  "about": "The catalogue of site checks (TR01085, TR00947). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body plus cheap site lookups, 'site' rules read the site's own records, 'document' rules read only one document and its metadata, so the editor and the CLI evaluate them from shared/page-structure-checks.ts and the server does not. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline), deploy, health, edit (the editor, over the open document in the browser). appliesTo, when present, limits a rule to those page types. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
+  "version": 2,
+  "about": "The catalogue of site checks (TR01085, TR00947). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body plus cheap site lookups, 'site' rules read the site's own records, 'document' rules read only one document and its metadata, so the editor and the CLI evaluate them from shared/page-structure-checks.ts and the generator compiles deployment advice from the same pure evaluator. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline), deploy, health, edit (the editor, over the open document in the browser). appliesTo, when present, limits a rule to those page types. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
   "runPoints": ["save", "validate", "deploy", "health", "edit"],
   "rules": [
     { "id": "link.page_missing", "severity": "warning", "scope": "page", "runsAt": ["save", "validate", "health"], "subject": "page_path", "detail": "none" },
     { "id": "image.missing", "severity": "warning", "scope": "page", "runsAt": ["save", "health"], "subject": "image_id", "detail": "none" },
+    { "id": "a11y.image_default_missing", "severity": "warning", "scope": "site", "runsAt": ["deploy", "health"], "subject": "image_id", "detail": "none" },
     { "id": "form.none_chosen", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "none", "detail": "none" },
     { "id": "form.unreadable", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_reference_text", "detail": "none" },
     { "id": "form.missing", "severity": "error", "scope": "page", "runsAt": ["save", "deploy", "health"], "subject": "form_id", "detail": "none" },
@@ -24,11 +25,14 @@
     { "id": "seo.h1_multiple", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "h1_claimant" },
     { "id": "seo.heading_renumbered", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "authored_and_published_level" },
     { "id": "seo.heading_before_title", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "heading_text", "detail": "published_level" },
-    { "id": "a11y.image_alt_missing", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "image_id", "detail": "none" },
     { "id": "a11y.link_text_empty", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["validate", "edit"], "subject": "link_target", "detail": "none" },
-    { "id": "seo.title_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit"], "subject": "none", "detail": "character_count" },
-    { "id": "seo.description_missing", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit"], "subject": "none", "detail": "none" },
-    { "id": "seo.description_long", "severity": "warning", "scope": "document", "runsAt": ["edit"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.title_missing", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "none" },
+    { "id": "seo.title_short", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.title_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.description_missing", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "none" },
+    { "id": "seo.description_short", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.description_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
+    { "id": "seo.description_matches_title", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "none" },
     { "id": "seo.social_image_fallback", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["edit"], "subject": "none", "detail": "social_image_source" }
   ]
 }

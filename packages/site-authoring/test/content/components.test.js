@@ -8,6 +8,7 @@ import {
   isComponentType,
   validateComponentBlock,
 } from "../../src/content/components.js";
+import { stripImageDescriptionHydration } from "../../src/content/image-description-document.js";
 import { validateDocument } from "../../src/content/validate-document.js";
 import { CONTENT_LIMITS } from "../../src/content/vocabulary.js";
 
@@ -878,6 +879,8 @@ test("an image row needs one to twelve measured images with alt text and safe li
   const item = (overrides = {}) => ({ image: { ...IMAGE, ...overrides }, url: "" });
   const cases = [
     ["a blank alt", row([item({ alt: "  " })]), "/attrs/componentData/items/0/image/alt"],
+    ["a blank custom alt", row([item({ alt: "  ", descriptionMode: "custom" })]), "/attrs/componentData/items/0/image/alt"],
+    ["a decorative alt", row([item({ alt: "", descriptionMode: "decorative" })]), "/attrs/componentData/items/0/image/alt"],
     ["a missing alt", row([{ image: Object.fromEntries(Object.entries(IMAGE).filter(([key]) => key !== "alt")), url: "" }]),
       "/attrs/componentData/items/0/image/alt"],
     ["a zero width", row([item({ width: 0 })]), "/attrs/componentData/items/0/image/width"],
@@ -904,6 +907,18 @@ test("an image row needs one to twelve measured images with alt text and safe li
   });
   await testContext.test("accepts twelve linked and unlinked items", () => {
     assert.deepEqual(validate("image-row", row(Array.from({ length: 12 }, (_, index) => ({ ...item(), url: index % 2 ? "/go" : "" })))), []);
+  });
+  await testContext.test("accepts omitted inherited alt while keeping dimensions required", () => {
+    const inherited = { ...IMAGE, descriptionMode: "inherit" };
+    delete inherited.alt;
+    assert.deepEqual(paths(row([{ image: inherited }])), []);
+    assert.deepEqual(paths(row([{ image: { ...inherited, width: 0 } }])), [
+      ["content.component_data", "/attrs/componentData/items/0/image/width"],
+    ]);
+    delete inherited.height;
+    assert.deepEqual(paths(row([{ image: inherited }])), [
+      ["content.component_data", "/attrs/componentData/items/0/image/height"],
+    ]);
   });
   await testContext.test("canonicalizes in declaration order", () => {
     assert.equal(
@@ -973,4 +988,59 @@ test("a social-links row needs a known platform and an https address per link, a
     assert.deepEqual(validate("product-grid", grid([{ title: "T" }])).map((error) => error.path), []);
     assert.deepEqual(validate("product-grid", grid([{ title: "T", buttonText: "", buttonUrl: "" }])).map((error) => error.path), []);
   });
+});
+
+test("component images preserve description modes and canonicalize inherited text without limiting legacy overrides", () => {
+  for (const mode of [null, "inherit", "custom", "decorative"]) {
+    const contextual = mode === "decorative" ? "" : "Contextual text".repeat(100);
+    const data = { image: { ...IMAGE, alt: contextual, descriptionMode: mode }, altText: contextual, descriptionMode: mode };
+    assert.deepEqual(validate("image-banner", data), []);
+    const canonical = JSON.parse(canonicalizeComponentData("image-banner", data));
+    assert.equal(canonical.descriptionMode, mode);
+    assert.equal(canonical.image.descriptionMode, mode);
+    assert.equal(canonical.altText, mode === "inherit" ? undefined : contextual);
+    assert.equal(canonical.image.alt, mode === "inherit" ? undefined : contextual);
+  }
+  for (const mode of ["", "default", false]) {
+    for (const data of [{ image: { ...IMAGE, descriptionMode: mode } }, { image: IMAGE, descriptionMode: mode }]) {
+      assert.ok(validate("image-banner", data).some(error => error.path.endsWith("/descriptionMode")));
+    }
+  }
+});
+
+test("Image Row and Product Grid inherited images survive a canonical authored round trip", async (testContext) => {
+  for (const componentType of ["image-row", "product-grid"]) {
+    await testContext.test(componentType, () => {
+      const image = { ...IMAGE, alt: "Shared default", descriptionMode: "inherit", defaultDescription: "Shared default", descriptionRevision: "8" };
+      const data = { items: [{ image, ...(componentType === "product-grid" ? { title: "A photograph" } : { url: "/gallery" }) }] };
+      const projected = stripImageDescriptionHydration(data);
+      assert.deepEqual(validate(componentType, projected), []);
+      const canonical = canonicalizeComponentData(componentType, projected);
+      assert.deepEqual(validate(componentType, canonical), []);
+      const authored = JSON.parse(canonical);
+      assert.deepEqual(authored.items[0].image, {
+        imageId: IMAGE.imageId,
+        src: IMAGE.src,
+        urls: IMAGE.urls,
+        width: IMAGE.width,
+        height: IMAGE.height,
+        descriptionMode: "inherit",
+      });
+      assert.equal(canonicalizeComponentData(componentType, authored), canonical);
+      for (const [field, value] of [["descriptionMode", "default"], ["thumbHash", "abc"]]) {
+        assert.deepEqual(validate(componentType, {
+          ...authored,
+          items: [{ ...authored.items[0], image: { ...IMAGE, [field]: value } }],
+        }).map((error) => [error.code, error.path]), [["content.component_data", `/attrs/componentData/items/0/image/${field}`]]);
+      }
+    });
+  }
+});
+
+test("Product Grid image descriptions keep alt optional in every mode", () => {
+  for (const descriptionMode of [null, "inherit", "custom", "decorative"]) {
+    for (const alt of [undefined, ""]) {
+      assert.deepEqual(validate("product-grid", { items: [{ title: "A photograph", image: { ...IMAGE, descriptionMode, alt } }] }), []);
+    }
+  }
 });

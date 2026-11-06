@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.7.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.8.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -122,6 +122,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/content/components.js",
     "src/content/free-form-section-registry.json",
     "src/content/free-form-sections.js",
+    "src/content/image-description-document.js",
+    "src/content/image-description-validation.js",
     "src/content/index.js",
     "src/content/inline-facts.js",
     "src/content/link-warnings.js",
@@ -157,6 +159,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/forms-workspace.js",
     // The heading outline the generator publishes with, and the page-structure checks that replay it (TR00947).
     "src/heading-outline.js",
+    "src/image-description-contract.js",
     "src/image-metadata.js",
     "src/index.js",
     "src/json-guard.js",
@@ -164,6 +167,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/marketing-api.js",
     "src/marketing-contract.js",
     "src/marketing-workspace.js",
+    "src/navigation-readiness.js",
     "src/navigation-workspace.js",
     "src/output.js",
     "src/page-metadata.js",
@@ -211,6 +215,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/logout.js",
     "src/verbs/marketing-pull.js",
     "src/verbs/marketing-push.js",
+    "src/verbs/media-images.js",
     "src/verbs/media-upload.js",
     "src/verbs/nav-push.js",
     "src/verbs/pages-delete.js",

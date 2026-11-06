@@ -1,6 +1,8 @@
 import { FREE_FORM_TEMPLATE_VERSION, TEMPLATE_TYPE_FREE_FORM } from "./api.js";
 import { isVideoEmbedId } from "./content/video-embed-url.js";
 import { SiteAuthoringError } from "./errors.js";
+import { isImageDescriptionMode } from "./content/image-description-validation.js";
+import { stripImageDescriptionHydration } from "./content/image-description-document.js";
 import { requireDescriptionLength } from "./page-metadata.js";
 
 /**
@@ -323,7 +325,7 @@ const RECIPE_KEYS = [
   "cookingMethod",
 ];
 const ALBUM_KEYS = ["introductionBody", "images", "seamless", "borderWidth", "place"];
-const ALBUM_IMAGE_KEYS = ["imageId", "caption", "width", "height"];
+const ALBUM_IMAGE_KEYS = ["imageId", "caption", "width", "height", "altText", "descriptionMode"];
 const ALBUM_MAXIMUM_BORDER_WIDTH = 20;
 const MAXIMUM_MINUTES = 100_000;
 const MAXIMUM_SERVINGS = 10_000;
@@ -372,12 +374,17 @@ const DATA_BUILDERS = Object.freeze({
       ["introductionBody", raw.introductionBody],
       [
         "images",
-        raw.images.map((image) => ({
-          imageId: image.imageId,
-          caption: image.caption ?? "",
-          width: image.width ?? 0,
-          height: image.height ?? 0,
-        })),
+        raw.images.map((image) => {
+          const authored = stripImageDescriptionHydration(image);
+          return definedEntries([
+            ["imageId", authored.imageId],
+            ["caption", authored.caption ?? ""],
+            ["width", authored.width ?? 0],
+            ["height", authored.height ?? 0],
+            ["altText", authored.altText],
+            ["descriptionMode", authored.descriptionMode],
+          ]);
+        }),
       ],
       ["seamless", raw.seamless],
       ["borderWidth", raw.borderWidth],
@@ -486,6 +493,14 @@ function canonicalSourceData(template, data, file) {
       requireKeys(image, ALBUM_IMAGE_KEYS, file, at);
       requireIdentifier(image.imageId, file, `${at}.imageId`);
       if (image.caption !== undefined) requireString(image.caption, file, `${at}.caption`);
+      if (!isImageDescriptionMode(image.descriptionMode)) {
+        throw fail(
+          "pages.document_shape",
+          `'${file}' ${at}.descriptionMode must be inherit, custom or decorative.`,
+          `${file}:${at}.descriptionMode`,
+        );
+      }
+      if (image.altText !== undefined && image.altText !== null) requireString(image.altText, file, `${at}.altText`);
       if (image.width !== undefined) requireCount(image.width, file, `${at}.width`, 100_000);
       if (image.height !== undefined) requireCount(image.height, file, `${at}.height`, 100_000);
     });
@@ -684,8 +699,9 @@ export function workspaceDocumentFromPage(page, listedTemplateType) {
   if (name === undefined) return undefined;
   const raw = template[PAGE_TEMPLATES[name].dataKey];
   if (!isPlainObject(raw)) return undefined;
-  if (name === TEMPLATE_FREE_FORM) return isPlainObject(raw.body) ? raw.body : undefined;
-  const data = PAGE_PROJECTIONS[name](raw);
+  const authored = stripImageDescriptionHydration(raw);
+  if (name === TEMPLATE_FREE_FORM) return isPlainObject(authored.body) ? authored.body : undefined;
+  const data = PAGE_PROJECTIONS[name](authored);
   if (data === undefined) return undefined;
   // A generated page's date and cover are not part of its source: a push leaves them as the site holds them.
   const generated = name === TEMPLATE_GENERATED || name === TEMPLATE_LEGAL;

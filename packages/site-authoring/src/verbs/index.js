@@ -17,6 +17,9 @@ import {
   VERB_MARKETING_PULL,
   VERB_MARKETING_PUSH,
   VERB_MEDIA_UPLOAD,
+  VERB_MEDIA_IMAGES_LIST,
+  VERB_MEDIA_IMAGES_GET,
+  VERB_MEDIA_IMAGES_DESCRIBE,
   VERB_NAV_PUSH,
   VERB_PAGES_DELETE,
   VERB_PAGES_META_SET,
@@ -58,6 +61,7 @@ import { logout } from "./logout.js";
 import { marketingPull } from "./marketing-pull.js";
 import { marketingPush } from "./marketing-push.js";
 import { mediaUpload } from "./media-upload.js";
+import { mediaImagesDescribe, mediaImagesGet, mediaImagesList } from "./media-images.js";
 import { navPush } from "./nav-push.js";
 import { pagesDelete } from "./pages-delete.js";
 import { pagesMetaSet } from "./pages-meta-set.js";
@@ -118,6 +122,9 @@ import { whoami } from "./whoami.js";
  * ```
  * {
  *   fixturePath,   // validate: one offline authoring-fixture directory
+ *   imageId,       // media images get/describe: site-owned library image UUID
+ *   pageSize, pageToken, missingDescription, // media images list
+ *   imageDescription, clearDescription, expectedRevision, onlyIfMissing, // media images describe
  *   paths,         // media upload: files and/or directories to upload;
  *                  //   with none, the workspace's media/ directory is walked
  *   formKeys,      // forms validate / push: narrow to these form keys;
@@ -187,6 +194,9 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_MARKETING_PUSH]: marketingPush,
   [VERB_LINK_BUILD]: linkBuild,
   [VERB_MEDIA_UPLOAD]: mediaUpload,
+  [VERB_MEDIA_IMAGES_LIST]: mediaImagesList,
+  [VERB_MEDIA_IMAGES_GET]: mediaImagesGet,
+  [VERB_MEDIA_IMAGES_DESCRIBE]: mediaImagesDescribe,
   [VERB_APPROVE]: approve,
   [VERB_DEPLOY]: deploy,
   [VERB_PREVIEW_PAGE]: previewPage,

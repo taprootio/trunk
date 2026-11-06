@@ -39,6 +39,9 @@ import {
   VERB_MARKETING_PULL,
   VERB_MARKETING_PUSH,
   VERB_MEDIA_UPLOAD,
+  VERB_MEDIA_IMAGES_LIST,
+  VERB_MEDIA_IMAGES_GET,
+  VERB_MEDIA_IMAGES_DESCRIBE,
   VERB_NAV_PUSH,
   VERB_PAGES_DELETE,
   VERB_PAGES_META_SET,
@@ -94,6 +97,7 @@ import { FONT_CATEGORIES, getFontCatalogReference } from "./font-catalog.js";
 import { LINK_SOURCES } from "./marketing-contract.js";
 import { assertCliCurrent } from "./session.js";
 import { ApiError } from "./transport.js";
+import { imageDescriptionOptions, imageListOptions, requireImageId } from "./image-description-contract.js";
 import { formatThemeResolve } from "./theme-resolve.js";
 import { MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS } from "./theme-validation.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
@@ -148,10 +152,14 @@ const VERBS = Object.freeze([
       + "title or hero title is the page's h1, seo.h1_demoted when a # heading is published as an h2 because the "
       + "banner's overlay text, a hero title or an earlier # heading already is the h1 (detail names which), "
       + "seo.heading_renumbered and seo.heading_before_title for headings published at another level, "
-      + "a11y.image_alt_missing and a11y.link_text_empty; for any page seo.title_long and seo.description_missing. "
-      + "siteChecks.checkedInEditor names the rules only the page editor evaluates (a cover, a description field, or a description's length, which descriptionWarnings reports here); "
-      + "siteChecks.checkedBySite names the rules that need the site's own records (images, forms), which "
-      + "'status' reports under siteHealth. A redirect source the site would refuse names its rule in "
+      + "a11y.link_text_empty. Image-default completeness is deferred to the stored deployment report that status reads; "
+      + "placement alt strings do not decide whether an image default is missing. Known author-entered metadata also receives missing, "
+      + "short, long and repeated-title description advice (title guidance 15–70 characters; description 50–160). "
+      + "These are writing suggestions, never requirements. Generated custom values are checked; generated "
+      + "defaults, home-page settings and unknown fields are listed in siteChecks.deferredToDeployment. "
+      + "siteChecks.checkedInEditor names rules only the page editor evaluates, such as a selected cover; "
+      + "siteChecks.checkedBySite names rules whose evidence comes from site records; 'status' reads their "
+      + "stored deployment report under siteHealth without compiling or rescanning drafts. A redirect source the site would refuse names its rule in "
       + "error.problems[].rule. This proves local structure and semantics only. It does not prove "
       + "authorization, live site ownership, concurrency, persisted round trips, or rendering: 'plan' checks a "
       + "workspace against the live site, and 'pages push --dry-run' does that for pages alone. "
@@ -713,6 +721,46 @@ const VERBS = Object.freeze([
       + " with none, the workspace's media/ directory is walked.",
   },
   {
+    name: VERB_MEDIA_IMAGES_LIST,
+    surface: SURFACE_DOCS_PRESENTATION,
+    capabilities: [CAPABILITY_CONTENT],
+    surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DESIGN] },
+    tokens: ["media", "images", "list"],
+    summary: "Read one page of the site's image defaults, optionally only missing descriptions.",
+    imageListOptions: true,
+    json: true,
+    note: "Returns images.items and images.nextPageToken. Pass that cursor unchanged for the next page. "
+      + "Filtering happens on the server before pagination; no page bodies or per-image reads are scanned. "
+      + "Description revisions are decimal strings. Preview URLs are for inspection, may expire, and are omitted from GITHUB_OUTPUT.",
+  },
+  {
+    name: VERB_MEDIA_IMAGES_GET,
+    surface: SURFACE_DOCS_PRESENTATION,
+    capabilities: [CAPABILITY_CONTENT],
+    surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DESIGN] },
+    tokens: ["media", "images", "get"],
+    summary: "Read one site-owned library image's default description and revision.",
+    positionals: "imageId",
+    json: true,
+    note: "The image must belong to the selected site's ordinary library; profile, account and installation media are excluded. "
+      + "Use the returned descriptionRevision unchanged when saving. No workspace file is written.",
+  },
+  {
+    name: VERB_MEDIA_IMAGES_DESCRIBE,
+    surface: SURFACE_DOCS_PRESENTATION,
+    capabilities: [CAPABILITY_CONTENT],
+    surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DESIGN] },
+    tokens: ["media", "images", "describe"],
+    summary: "Save or clear an image-owned default with its expected revision.",
+    positionals: "imageId",
+    imageDescriptionOptions: true,
+    json: true,
+    note: "Supply exactly one of --description and --clear, plus --expected-revision from list/get. "
+      + "Text is outer-trimmed and limited by the server to 1000 Unicode scalar values; blank text clears to null. "
+      + "--if-missing is checked atomically on the server and cannot clear. A conflict never retries or overwrites another edit. "
+      + "This changes the reusable image default, never a page-body override. Existing published output changes only after deployment.",
+  },
+  {
     name: VERB_APPROVE,
     surface: SURFACE_STANDARD,
     capabilities: [CAPABILITY_CONTENT],
@@ -977,6 +1025,8 @@ function verbHelp(verb) {
     ? " <page-path> [--title <text>] [--description <text>] [--author <handle-or-email>]"
     : verb.positionals === "authorHandle"
     ? " <handle> --name <display-name> [--email <address>]"
+    : verb.positionals === "imageId"
+    ? " <image-id>"
     : verb.positionals
     ? ` [${verb.positionals === "paths" ? "path" : "page-path"}...]`
     : "";
@@ -1006,6 +1056,16 @@ function verbHelp(verb) {
     ? `\n  --title <text>       The page's title.
   --description <text> The page's description for search results and link previews; '' clears it.
   --author <ref>       Credit a page that has no author: a site author's handle or a member's email address.`
+    : "";
+  const imageOptions = verb.imageListOptions
+    ? `\n  --missing-description  Filter to images whose own default is missing.
+  --page-size <n>        Images in this page, 1–100 (default 25).
+  --page-token <cursor>  The preceding result's images.nextPageToken, unchanged.`
+    : verb.imageDescriptionOptions
+    ? `\n  --description <text>   Set the shared image default; --description=<text> accepts leading hyphens.
+  --clear                Clear the default instead of supplying --description.
+  --expected-revision <n> Required decimal revision from list/get, including 0.
+  --if-missing           Save only while the stored default is still null; cannot clear.`
     : "";
   const authorOptions = verb.authorOptions
     ? `\n  --name <text>        The name readers see on the byline (required).
@@ -1116,7 +1176,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${jsonOption}${resolveOptions}${dryRunOption}${archiveOption}${linkOptions}${planOption}${nameOption}${note}
+${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${imageOptions}${jsonOption}${resolveOptions}${dryRunOption}${archiveOption}${linkOptions}${planOption}${nameOption}${note}
 `;
 }
 
@@ -1164,6 +1224,15 @@ function parseLinkOption(rest, index, argument) {
     );
   }
   return { name, value, consumed: inline === undefined ? 1 : 0 };
+}
+
+function parseImageOption(rest, index, argument) {
+  const equals = argument.indexOf("=");
+  const name = equals < 0 ? argument : argument.slice(0, equals);
+  const value = equals < 0 ? rest[index + 1] : argument.slice(equals + 1);
+  if (typeof value !== "string" || (equals < 0 && value.startsWith("--")))
+    throw usageError("cli.option_value", `${name} requires a value.`, { field: name.slice(2) });
+  return { name, value, consumed: equals < 0 ? 1 : 0 };
 }
 
 function usageError(code, message, options = {}) {
@@ -1546,6 +1615,7 @@ function parseArguments(arguments_) {
   let planHash;
   let archive = false;
   const linkValues = {};
+  const imageValues = {};
   let metaTitle;
   let metaDescription;
   let metaAuthor;
@@ -1735,6 +1805,23 @@ function parseArguments(arguments_) {
       index += 1;
       continue;
     }
+    if ((verb.imageListOptions && (argument === "--missing-description"))
+      || (verb.imageDescriptionOptions && (argument === "--clear" || argument === "--if-missing"))) {
+      const field = { "--missing-description": "missingDescription", "--clear": "clearDescription", "--if-missing": "onlyIfMissing" }[argument];
+      if (imageValues[field]) throw usageError("cli.duplicate_option", `${argument} may be supplied only once.`);
+      imageValues[field] = true;
+      continue;
+    }
+    const imageOption = argument.split("=", 1)[0];
+    if ((verb.imageListOptions && ["--page-size", "--page-token"].includes(imageOption))
+      || (verb.imageDescriptionOptions && ["--description", "--expected-revision"].includes(imageOption))) {
+      const field = { "--page-size": "pageSize", "--page-token": "pageToken", "--description": "imageDescription", "--expected-revision": "expectedRevision" }[imageOption];
+      if (imageValues[field] !== undefined) throw usageError("cli.duplicate_option", `${imageOption} may be supplied only once.`);
+      const parsed = parseImageOption(rest, index, argument);
+      imageValues[field] = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
     if (argument.startsWith("-")) {
       throw usageError("cli.unknown_option", "The command contains an unknown option.");
     }
@@ -1838,6 +1925,12 @@ function parseArguments(arguments_) {
       { field: "title" },
     );
   }
+  if (verb.positionals === "imageId") {
+    if (positionals.length !== 1) throw usageError("media.image_id_invalid", "Name exactly one image UUID.", { field: "imageId" });
+    requireImageId(positionals[0]);
+  }
+  if (verb.imageListOptions) imageListOptions(imageValues);
+  if (verb.imageDescriptionOptions) imageDescriptionOptions(imageValues);
   if (verb.positionals === "authorHandle" && positionals.length !== 1) {
     throw usageError("authors.handle_missing", "authors add needs exactly one handle, such as jane-doe.", {
       field: "handle",
@@ -1908,6 +2001,7 @@ function parseArguments(arguments_) {
     ...(planHash === undefined ? {} : { planHash }),
     ...(archive ? { archive } : {}),
     ...linkValues,
+    ...imageValues,
     ...(metaTitle === undefined ? {} : { metaTitle }),
     ...(metaDescription === undefined ? {} : { metaDescription }),
     ...(metaAuthor === undefined ? {} : { metaAuthor }),
@@ -1919,7 +2013,7 @@ function parseArguments(arguments_) {
         values: positionals,
         scalar: verb.positionals === "pageSelector" || verb.positionals === "fixturePath" || verb.positionals === "metaPagePath"
           || verb.positionals === "deletePagePath" || verb.positionals === "siteSelector" || verb.positionals === "environmentSelector"
-          || verb.positionals === "authorHandle",
+          || verb.positionals === "authorHandle" || verb.positionals === "imageId",
       }
       : undefined,
   };
@@ -2016,6 +2110,8 @@ export async function runCli({
       ...(parsed.metaAuthor === undefined ? {} : { metaAuthor: parsed.metaAuthor }),
       ...(parsed.authorName === undefined ? {} : { authorName: parsed.authorName }),
       ...(parsed.authorEmail === undefined ? {} : { authorEmail: parsed.authorEmail }),
+      ...Object.fromEntries(["pageSize", "pageToken", "missingDescription", "imageDescription", "clearDescription", "expectedRevision", "onlyIfMissing"]
+        .filter((field) => parsed[field] !== undefined).map((field) => [field, parsed[field]])),
       capabilities: parsed.capabilities,
       surface: parsed.surface,
       surfaceCapabilities: parsed.surfaceCapabilities,

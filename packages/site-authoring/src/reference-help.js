@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 49;
+export const REFERENCE_VERSION = 50;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -1018,10 +1018,14 @@ const WORKFLOW_REFERENCES = Object.freeze({
     }),
   }),
   media: Object.freeze({
-    title: "Media upload contract",
-    summary: "Upload workspace-root-relative raster files and videos; images are recorded in .taproot-site-media.json and videos report their ids.",
-    usage: `${CLI_BINARY_NAME} media upload [path...]`,
+    title: "Image defaults and media upload",
+    summary: "Read and change site-owned image defaults by ID, or upload workspace-root-relative raster files and videos.",
+    usage: `${CLI_BINARY_NAME} media images list|get|describe | media upload [path...]`,
     details: Object.freeze([
+      "media images list returns one page in images.items and images.nextPageToken; pass --page-size 1–100 (default 25) and --page-token with that exact cursor for the next page. --missing-description is a server-side filter for a null image-owned default, independent of placement alt text, captions or decorative mode. No per-result reads or page-body scans run. The authoritative default-completeness findings are in the frozen deployment report that status reads; local validate does not infer them from placement strings.",
+      "media images get <image-id> reads one library image in the selected site. Both reads expose imageId, uploadedName, defaultDescription (null when missing), descriptionRevision as a decimal string, width, height, processingState, previewUrl and responsivePreviewUrls. Preview URLs are for inspection, may expire, and are omitted from GITHUB_OUTPUT. They are not descriptions and these verbs write no workspace file.",
+      "media images describe <image-id> --description <text> --expected-revision <n> saves the default; --clear replaces --description to remove it. Supply the exact revision from list/get, including 0. --if-missing is an atomic server condition, requires nonblank text, and refuses an existing default. Conflicts report media.image_description_conflict or media.image_description_exists with exit 1; read the current image and reconcile, never retry by overwriting it blindly. Input/option errors use exit 2.",
+      "The server owns the 1000-Unicode-scalar limit: outer whitespace is trimmed, blank text becomes null, and oversized text is rejected without truncation. Descriptions may contain Unicode and newlines. The CLI preserves their text in JSON and never copies preview URLs or resolved defaults into page bodies. Site media management is required for all three verbs; profile/account/installation media are excluded. A default edit affects inherited usages at the next selected deployment; current published and in-flight snapshots keep their frozen text, while contextual overrides and decorative placements keep their choices.",
       "Paths are relative to the configured workspace root, not the shell's current directory.",
       "PNG, JPEG, GIF, and WebP are accepted. Each file uploads as its own image: a name such as logo@2x.png is only a filename, nothing pairs it with logo.png, and the platform generates the display sizes from the one file you assign (see help appearance for logos).",
       "For header logos prefer genuine transparent PNG/WebP, check contrast in both themes, and include a simplified square favicon. See help appearance for branding guidance.",

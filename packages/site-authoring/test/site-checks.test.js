@@ -121,7 +121,7 @@ test("the bounded findings keep the link warnings when a frequent rule fires on 
   }));
   const lines = [];
   const { findings } = evaluateOfflineSiteChecks({ planned, pagePaths: [], onProgress: (line) => lines.push(line) });
-  assert.equal(findings.total, 401);
+  assert.equal(findings.total, 801);
   assert.equal(findings.truncated, true);
   assert.equal(findings.items[0].rule, "link.page_missing");
   assert.match(lines[0], /pages\/p399\.md links to \/gone/u);
@@ -134,4 +134,41 @@ test("a truncated page manifest skips the link check rather than calling a link 
   assert.equal(complete.findings.total, 1);
   assert.equal(truncated.findings.total, 0);
   assert.deepEqual(truncated.siteChecks.skipped, ["link.page_missing"]);
+});
+
+
+test("metadata advice covers every authored template without refusing valid short wording", () => {
+  for (const template of ["free-form", "article", "recipe", "album", "place-review", "legal"]) {
+    const document = template === "free-form" ? { type: "doc", content: [] } : { template, data: {} };
+    const { findings } = evaluateOfflineSiteChecks({
+      planned: [{ file: "pages/about.pm.json", pagePath: "about", title: "About", description: "About", document }],
+      pagePaths: ["about"],
+    });
+    assert.deepEqual(findings.items.map((finding) => finding.rule), [
+      "seo.title_short", "seo.description_short", "seo.description_matches_title",
+    ], template);
+    assert.equal(findings.errors, 0);
+  }
+});
+
+test("generated custom metadata is checked while effective defaults, homepage settings and unknown fields defer", () => {
+  const generated = {
+    file: "pages/jelly.pm.json", pagePath: "jelly", title: "Old generated title", description: "Old generated description",
+    document: { template: "generated", data: { customTitle: "Jelly", customDescription: " JELLY " } },
+  };
+  const custom = evaluateOfflineSiteChecks({ planned: [generated], pagePaths: ["jelly"] });
+  assert.deepEqual(custom.findings.items.map((finding) => finding.rule), [
+    "seo.title_short", "seo.description_short", "seo.description_matches_title",
+  ]);
+  for (const page of [
+    { ...generated, document: { template: "generated", data: { customTitle: "", customDescription: "" } } },
+    { ...generated, pagePath: "" },
+    { file: "pages/unknown.pm.json", pagePath: "unknown", document: { template: "article", data: {} } },
+    { ...generated, metadataDescriptionKnown: false, title: undefined, document: { template: "article", data: {} } },
+  ]) {
+    const result = evaluateOfflineSiteChecks({ planned: [page], pagePaths: [] });
+    assert.equal(result.findings.total, 0);
+    assert.ok(result.siteChecks.deferredToDeployment.includes("seo.title_missing"));
+    assert.ok(result.siteChecks.deferredToDeployment.includes("seo.description_matches_title"));
+  }
 });

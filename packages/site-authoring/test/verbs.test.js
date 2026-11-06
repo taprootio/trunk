@@ -3255,7 +3255,7 @@ test("pages meta set refuses what it cannot set and warns on a long description 
     });
     const result = await VERB_HANDLERS["pages meta set"](invocation);
     assert.equal(result.descriptionWarnings.items[0].length, 161);
-    assert.ok(progress.some((line) => line.includes("search results show about 160")));
+    assert.ok(progress.some((line) => line.includes("consider shortening it")));
   });
 });
 
@@ -10649,6 +10649,7 @@ function deployRoutes({
       pattern: READINESS,
       reply: {
         state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] },
         approvedPageCount: 1,
         selectedPageCount: 1,
         hasCandidateChanges: true,
@@ -11306,7 +11307,8 @@ test("deploy --staging refuses an empty candidate before it reaches the API", as
     {
       method: "POST",
       pattern: READINESS,
-      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: false, blockers: [] },
+      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, hasCandidateChanges: false, blockers: [] },
     },
   ]);
   const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
@@ -11344,7 +11346,8 @@ test("deploy --staging excludes a deselected failed-media page from redirect rea
   const routes = deployRoutes().map((route) => route.pattern !== READINESS ? route : {
     ...route,
     reply: (call) => call.body.useExactPageSelection === true
-      ? { state: "PAGE_PUBLISHING_READINESS_STATE_READY", approvedPageCount: 1, selectedPageCount: 0,
+      ? { state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, approvedPageCount: 1, selectedPageCount: 0,
         hasCandidateChanges: true, redirectsChanged: true, blockers: [] }
       : { state: "PAGE_PUBLISHING_READINESS_STATE_FAILED", hasCandidateChanges: true,
         blockers: [{ imageId: IMAGE_ID, uploadedName: "unselected.jpg",
@@ -11410,6 +11413,28 @@ test("deploy --staging names the site-wide changes it publishes when nothing els
     [false, true, true],
   );
 });
+
+for (const navigationReadiness of [
+  { state: "NAVIGATION_PUBLISHING_READINESS_STATE_UNKNOWN", blockers: [] },
+  { state: "NAVIGATION_PUBLISHING_READINESS_STATE_BLOCKED", blockers: [] },
+  { state: "NAVIGATION_PUBLISHING_READINESS_STATE_BLOCKED", blockers: [{
+    pageId: ABOUT_PAGE_ID, title: "Jelly", path: "jelly", reason: "NAVIGATION_PUBLISHING_READINESS_BLOCKER_REASON_FOLDER_NEEDS_RELEASED_CONTENT",
+  }] },
+]) {
+  test(`deploy --staging refuses navigation independently of media: ${JSON.stringify(navigationReadiness)}`, async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(deployRoutes({ readiness: {
+      navigationReadiness,
+      blockers: [{ imageId: IMAGE_ID, state: "PAGE_PUBLISHING_READINESS_STATE_WAITING", message: "Still processing." }],
+    } }));
+    const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+    await assert.rejects(deploy(invocation), (error) =>
+      error?.code === "deploy.navigation_blocked" && error?.field === "Navigation"
+      && /media blocker/u.test(error.message)
+      && (navigationReadiness.blockers.length === 0 || /Jelly.*qualifying page under this path/u.test(error.message)));
+    assert.equal(wire.matching("POST", DEPLOY).length, 0);
+  });
+}
 
 test("deploy --staging refuses a candidate Taproot reports media blockers on", async (site) => {
   const workspace = await fixture(site, {
@@ -12398,6 +12423,21 @@ test("a rejected preview handoff never leaks its bearer through failure or progr
 // status
 // ---------------------------------------------------------------------------
 
+function storedHealthReport(overrides = {}) {
+  return {
+    status: "complete",
+    deploymentId: DEPLOYMENT_ID,
+    outputReleaseId: SNAPSHOT_ID,
+    inputHash: "a".repeat(64),
+    checkedAt: "2026-11-04T12:00:00.000Z",
+    ruleVersion: "2",
+    coverage: ["metadata", "links", "deployment_form_guards", "deployment_image_guards", "image_defaults"],
+    assessedPageCount: 1,
+    environment: "production",
+    ...overrides,
+  };
+}
+
 test("status reports deployments, readiness, image processing and site health", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
@@ -12406,6 +12446,10 @@ test("status reports deployments, readiness, image processing and site health", 
       pattern: READINESS,
       reply: {
         state: "PAGE_PUBLISHING_READINESS_STATE_WAITING",
+        navigationReadiness: {
+          state: "NAVIGATION_PUBLISHING_READINESS_STATE_BLOCKED",
+          blockers: [{ title: "Notes", path: "notes", reason: "NAVIGATION_PUBLISHING_READINESS_BLOCKER_REASON_PAGE_NOT_INCLUDED" }],
+        },
         approvedPageCount: 3,
         blockedPageCount: 1,
         hasSuccessfulStagingDeployment: true,
@@ -12453,7 +12497,7 @@ test("status reports deployments, readiness, image processing and site health", 
     {
       method: "GET",
       pattern: SITE_HEALTH,
-      reply: {
+      reply: storedHealthReport({
         findings: [{
           ruleId: "link.page_missing",
           severity: "SITE_FINDING_SEVERITY_WARNING",
@@ -12473,7 +12517,7 @@ test("status reports deployments, readiness, image processing and site health", 
         errorCount: 1,
         warningCount: 1,
         pageCount: 1,
-      },
+      }),
     },
   ]);
   const { invocation, progress } = invoke(workspace, wire, { verb: "status" });
@@ -12481,6 +12525,9 @@ test("status reports deployments, readiness, image processing and site health", 
 
   assert.equal(result.readiness.state, "PAGE_PUBLISHING_READINESS_STATE_WAITING");
   assert.equal(result.readiness.blockers.length, 1);
+  assert.equal(result.readiness.navigationReadiness.state, "NAVIGATION_PUBLISHING_READINESS_STATE_BLOCKED");
+  assert.equal(result.readiness.navigationReadiness.blockers[0].title, "Notes");
+  assert.ok(progress.some((line) => /Notes.*Include this approved page/u.test(line)));
   assert.equal(result.deployments.items[0].status, "DEPLOYMENT_STATUS_QUEUED");
   assert.equal(result.deployments.items[1].status, "DEPLOYMENT_STATUS_COMPLETED");
   assert.equal(result.images.total, 2);
@@ -12488,6 +12535,17 @@ test("status reports deployments, readiness, image processing and site health", 
   assert.equal(result.images.failedItems[0].reason, "decode failed");
   assert.deepEqual(result.siteHealth, {
     covered: true,
+    status: "complete",
+    deploymentId: DEPLOYMENT_ID,
+    outputReleaseId: SNAPSHOT_ID,
+    inputHash: "a".repeat(64),
+    checkedAt: "2026-11-04T12:00:00.000Z",
+    ruleVersion: "2",
+    coverage: storedHealthReport().coverage,
+    assessedPages: 1,
+    environment: "production",
+    unpublishedChangesAssessed: false,
+    imageFindings: [],
     errors: 1,
     warnings: 1,
     pages: 1,
@@ -12512,20 +12570,21 @@ test("status reports deployments, readiness, image processing and site health", 
       },
     ],
   });
-  assert.ok(progress.some((line) => /Site health: 1 problem\(s\) and 1 warning\(s\) on 1 page/u.test(line)));
+  assert.ok(progress.some((line) => /Site health \(production, checked 2026-11-04T12:00:00\.000Z\): 1 problem\(s\) and 1 warning\(s\)\. Unpublished changes are outside this report/u.test(line)));
 });
 
 test("status says when the deployment log it read is only one page", async (site) => {
   const workspace = await fixture(site);
   const wire = api([
-    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, blockers: [] } },
     {
       method: "GET",
       pattern: DEPLOYMENTS,
       reply: { deployments: [deploymentRecord({ status: "DEPLOYMENT_STATUS_COMPLETED" })], nextPageToken: "more" },
     },
     { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } },
-    { method: "GET", pattern: SITE_HEALTH, reply: {} },
+    { method: "GET", pattern: SITE_HEALTH, reply: { status: "not_checked" } },
   ]);
   const { invocation } = invoke(workspace, wire, { verb: "status" });
   const result = await status(invocation);
@@ -12533,7 +12592,11 @@ test("status says when the deployment log it read is only one page", async (site
   // log is unbounded and only its recent end is read.
   assert.equal(result.deployments.total, 1);
   assert.equal(result.deployments.listTruncated, true);
-  assert.deepEqual(result.siteHealth, { covered: true, errors: 0, warnings: 0, pages: 0, findings: [] });
+  assert.deepEqual(result.siteHealth, {
+    covered: false,
+    status: "not_checked",
+    reason: "Not checked yet; deploy the site to create a report.",
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -13246,7 +13309,8 @@ test("no verb ever emits the credential, upload capability, or page contents", a
     {
       method: "POST",
       pattern: READINESS,
-      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", hasCandidateChanges: true, blockers: [] },
+      reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, hasCandidateChanges: true, blockers: [] },
     },
     {
       method: "POST",
@@ -13493,7 +13557,7 @@ test("status bounds the site-health findings it lists and says so", async (conte
     { method: "POST", pattern: READINESS, reply: {} },
     { method: "GET", pattern: DEPLOYMENTS, reply: {} },
     { method: "GET", pattern: SITE_IMAGES, reply: {} },
-    { method: "GET", pattern: SITE_HEALTH, reply: { findings, warningCount: 150, pageCount: 150, truncated: true } },
+    { method: "GET", pattern: SITE_HEALTH, reply: storedHealthReport({ findings, warningCount: 150, pageCount: 150, assessedPageCount: 150, truncated: true }) },
   ]);
   const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
   assert.equal(result.siteHealth.warnings, 150);
@@ -13946,7 +14010,8 @@ test("status on a managed Docs site reports the reads it cannot make as not cove
         navigationChanged: true,
       },
     },
-    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", blockers: [] } },
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY",
+        navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, blockers: [] } },
     { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
   ]);
   const result = await status(invoke(workspace, wire, { verb: "status", surface: "docs-presentation" }).invocation);
@@ -14984,7 +15049,7 @@ test("validate reports a link to a page the workspace lacks as a warning, and na
     uploaded: true,
     files: {
       "pages/notes.md":
-        "---\ntitle: Notes\npath: notes\ndescription: Notes for the team.\n---\n\n# Notes\n\nSee [the team](/team), [this page](/notes) and [the web](https://example.com).\n",
+        "---\ntitle: Notes for everyone\npath: notes\ndescription: Notes about the team and its work, projects, and useful references.\n---\n\n# Notes\n\nSee [the team](/team), [this page](/notes) and [the web](https://example.com).\n",
     },
   }));
   const validated = await cliRun(workspace, ["validate"]);
@@ -15005,7 +15070,7 @@ test("validate reports a link to a page the workspace lacks as a warning, and na
   const clean = await fixture(site, wholeWorkspace({
     uploaded: true,
     files: {
-      "pages/notes.md": "---\ntitle: Notes\npath: notes\ndescription: Notes for the team.\n---\n\n# Notes\n\nSee [this page](/notes).\n",
+      "pages/notes.md": "---\ntitle: Notes for everyone\npath: notes\ndescription: Notes about the team and its work, projects, and useful references.\n---\n\n# Notes\n\nSee [this page](/notes).\n",
     },
   }));
   const quiet = await cliRun(clean, ["validate"]);
@@ -15014,7 +15079,7 @@ test("validate reports a link to a page the workspace lacks as a warning, and na
 });
 
 test("validate warns when a free-form page has no h1, or a banner or earlier heading already claims it (TR00947)", async (site) => {
-  const front = (path) => `---\ntitle: Page\npath: ${path}\ndescription: A page.\n---\n\n`;
+  const front = (path) => `---\ntitle: A useful page title\npath: ${path}\ndescription: A useful overview of this topic, with enough detail for readers.\n---\n\n`;
   const workspace = await fixture(site, wholeWorkspace({
     uploaded: true,
     files: {
@@ -15160,11 +15225,11 @@ test("pages push says the workspace has no form file when the site lacks the key
     error?.code === "pages.form_unknown" && /forms push/u.test(error.message) && !/workspace has no/u.test(error.message));
 });
 
-test("validate calls out a long title and a missing description on any page (TR00947)", async (site) => {
+test("validate calls out a long title and a confirmed empty description (TR01319)", async (site) => {
   const workspace = await fixture(site, wholeWorkspace({
     uploaded: true,
     files: {
-      "pages/long.md": `---\ntitle: ${"A very long title ".repeat(5).trim()}\npath: long\n---\n\n# Long\n`,
+      "pages/long.md": `---\ntitle: ${"A very long title ".repeat(5).trim()}\npath: long\ndescription:\n---\n\n# Long\n`,
     },
   }));
   const validated = await cliRun(workspace, ["validate"]);

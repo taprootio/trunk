@@ -1,4 +1,5 @@
 import registry from "./free-form-section-registry.json" with { type: "json" };
+import { imageDescriptionIssues, pickImageDescriptionFields } from "./image-description-validation.js";
 
 import {
   CONTENT_ERROR_CODES as CODES,
@@ -42,6 +43,12 @@ function decorationDeliveryUrlIsSafe(value) {
       && parsed.password === "";
   } catch {
     return false;
+  }
+}
+
+function validateImageDescription(image, path, label, report) {
+  for (const issue of imageDescriptionIssues(image)) {
+    report(`${path}/${issue.field}`, CODES.attrInvalid, `${label} ${issue.field} must ${issue.expected}.`);
   }
 }
 
@@ -170,6 +177,7 @@ function normalizeProcessedSectionImage(value, definition, path, label, report) 
     reject(`${path}/alt`, CODES.attrInvalid, `${label} alt must be a string.`);
   }
 
+  validateImageDescription(value, path, label, reject);
   if (!valid) return undefined;
   return Object.freeze({
     imageId: value.imageId,
@@ -182,6 +190,7 @@ function normalizeProcessedSectionImage(value, definition, path, label, report) 
     ...(Object.hasOwn(value, "width") ? { width: value.width } : {}),
     ...(Object.hasOwn(value, "height") ? { height: value.height } : {}),
     ...(Object.hasOwn(value, "alt") ? { alt: value.alt } : {}),
+    ...pickImageDescriptionFields(value),
   });
 }
 
@@ -457,6 +466,7 @@ export function normalizeFreeFormSectionDecoration(
     if (Object.hasOwn(image, "alt") && typeof image.alt !== "string") {
       report(`${imagePath}/alt`, CODES.attrInvalid, "Section decoration image alt must be a string.");
     }
+    validateImageDescription(image, imagePath, "Section decoration image", report);
   }
 
   for (const [name, definition] of Object.entries(fields)) {
@@ -500,6 +510,7 @@ export function normalizeFreeFormSectionDecoration(
     ...(Object.hasOwn(image, "width") ? { width: image.width } : {}),
     ...(Object.hasOwn(image, "height") ? { height: image.height } : {}),
     ...(Object.hasOwn(image, "alt") ? { alt: image.alt } : {}),
+    ...pickImageDescriptionFields(image),
   };
   const normalized = { image: Object.freeze(normalizedImage) };
   for (const [name, definition] of Object.entries(fields)) {

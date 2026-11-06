@@ -8,6 +8,7 @@
  */
 
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
+import { imageDescriptionIssues } from "./image-description-validation.js";
 import {
   explicitImageMaxHeight,
   mediaOverrideStyleParts,
@@ -820,11 +821,15 @@ function renderSection(
 }
 
 type NormalizedSectionImage = {
+  imageId: string;
   src: string;
   urls: Array<{ minWidth: number; url: string }>;
   width?: number;
   height?: number;
   alt?: string;
+  descriptionMode?: string | null;
+  defaultDescription?: string | null;
+  descriptionRevision?: number | string | null;
 };
 
 type NormalizedSectionBackground = {
@@ -912,12 +917,17 @@ function normalizeSectionImage(
     || (hasOwn(value, "height") && !isPositiveInteger(value.height))
     || (hasOwn(value, "alt") && typeof value.alt !== "string")
   ) return undefined;
+  if (imageDescriptionIssues(value).length > 0) return undefined;
   return {
+    imageId: value.imageId as string,
     src,
     urls: candidates,
     width: isPositiveInteger(value.width) ? value.width : undefined,
     height: isPositiveInteger(value.height) ? value.height : undefined,
     alt: typeof value.alt === "string" ? value.alt : undefined,
+    descriptionMode: value.descriptionMode as string | null | undefined,
+    defaultDescription: value.defaultDescription as string | null | undefined,
+    descriptionRevision: value.descriptionRevision as number | string | null | undefined,
   };
 }
 

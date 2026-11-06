@@ -1,3 +1,4 @@
+import { describeNavigationReadiness, reportNavigationReadiness } from "../navigation-readiness.js";
 import {
   getDeploySelection,
   getPublishingReadiness,
@@ -162,7 +163,7 @@ export async function status(invocation) {
     if (!presentationOnly) {
       onProgress("Reading image processing state.");
       ({ images, summary, truncated } = await listSiteImages(client, siteId));
-      onProgress("Reading site health.");
+      onProgress("Reading the stored deployment health report.");
       health = await getSiteHealth(client, siteId);
     }
     const reportedFindings = boundedList(health.findings, MAXIMUM_HEALTH_FINDINGS);
@@ -184,10 +185,14 @@ export async function status(invocation) {
     const reportedDeployments = boundedList(deployments, MAXIMUM_DEPLOYMENTS);
     const blockers = boundedList(readiness.blockers, MAXIMUM_BLOCKERS);
 
+    onProgress(describeNavigationReadiness(readiness.navigationReadiness));
+    const assessed = ["complete", "incomplete"].includes(health.status) && Boolean(health.deploymentId);
     if (!presentationOnly) {
-      onProgress(
-        `Site health: ${health.errorCount} problem(s) and ${health.warningCount} warning(s) on ${health.pageCount} page(s).`,
-      );
+      onProgress(assessed
+        ? `Site health (${health.environment}, checked ${health.checkedAt}): ${health.errorCount} problem(s) and ${health.warningCount} warning(s). Unpublished changes are outside this report.`
+        : health.status === "not_checked"
+        ? "Site health: not checked yet. Deploy the site to create a report."
+        : "Site health: no complete supported deployment assessment is available.");
     }
 
     return successResult(VERB_STATUS, siteId, {
@@ -196,6 +201,7 @@ export async function status(invocation) {
       ...(presentationOnly ? { authoringSurface: SURFACE_DOCS_PRESENTATION } : {}),
       readiness: {
         state: readiness.state,
+        navigationReadiness: reportNavigationReadiness(readiness.navigationReadiness),
         approvedPageCount: readiness.approvedPageCount,
         blockedPageCount: readiness.blockedPageCount,
         hasCandidateChanges: readiness.hasCandidateChanges,
@@ -227,12 +233,20 @@ export async function status(invocation) {
         ...(truncated ? { listTruncated: true } : {}),
       },
       siteHealth: presentationOnly ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE } : {
-        covered: true,
+        covered: assessed,
+        status: health.status ?? "unknown",
+        ...(assessed ? {
+        deploymentId: health.deploymentId, outputReleaseId: health.outputReleaseId,
+        inputHash: health.inputHash, checkedAt: health.checkedAt, ruleVersion: health.ruleVersion,
+        coverage: health.coverage, assessedPages: health.assessedPageCount, environment: health.environment,
+        unpublishedChangesAssessed: false,
         errors: health.errorCount,
         warnings: health.warningCount,
         pages: health.pageCount,
         findings: reportedFindings.items,
+        imageFindings: health.images,
         ...(reportedFindings.truncated || health.truncated ? { findingsTruncated: true } : {}),
+        } : { reason: health.status === "not_checked" ? "Not checked yet; deploy the site to create a report." : "A complete supported deployment assessment is unavailable." }),
       },
     });
   });

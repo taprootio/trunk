@@ -157,12 +157,20 @@ banner title or hero title is the page's `<h1>`; `seo.h1_demoted` when a `#` hea
 publishes as an `<h2>` because the banner's overlay text, a hero title or an earlier
 `#` heading already is the `<h1>` (`detail` says which); `seo.h1_multiple` for a hero
 title after the `<h1>`; `seo.heading_renumbered` and `seo.heading_before_title` for
-headings published at another level; and `a11y.image_alt_missing` and
-`a11y.link_text_empty`. Any page gets `seo.title_long` and `seo.description_missing`.
-`siteChecks.checkedInEditor` names the rules only the page editor evaluates (a cover, a description field, or a
-description's length, which `descriptionWarnings` reports here). `siteChecks.checkedBySite` names the rules that need the site's own
-records, such as placed images and forms: `status` reports those under
-`siteHealth`; `siteChecks.checkedAtDeploy` names the ones only a deploy applies. A redirect source the site would refuse also names its rule in
+headings published at another level; and `a11y.link_text_empty`. Image-default
+completeness (`a11y.image_default_missing`) comes from the stored deployment
+report, using frozen image defaults. Placement alt strings and decorative choices
+do not fill a missing reusable default. Known author-entered metadata receives missing, short and
+long title/description advice, plus `seo.description_matches_title` when the description
+repeats its title. The writing guidance is 15–70 characters for titles and 50–160 for
+descriptions, counted as Unicode characters after outer trimming. These suggestions
+never require padding or truncation and never refuse a save, push or deploy.
+Generated custom values are checked locally. Generated defaults, home-page settings
+and unknown fields defer to deployment in `siteChecks.deferredToDeployment`.
+`siteChecks.checkedInEditor` names rules only the page editor evaluates, such as a selected cover. `siteChecks.checkedBySite` names the rules that need the site's own
+records, such as referenced images and forms: `status` reads the stored deployment
+report under `siteHealth` without scanning current drafts or compiling a new report;
+`siteChecks.checkedAtDeploy` names the ones only a deploy applies. A redirect source the site would refuse also names its rule in
 `error.problems[].rule`.
 
 `taproot-site validate <fixture-directory>` checks a complete offline fixture
@@ -585,6 +593,49 @@ not atomic together: a failure reports in `error.completedWrites` which steps
 completed, which failed, and which did not run, and the next `plan` shows
 finished steps as nothing to do. Redirects, forms, approval, and deployment
 stay separate commands.
+Image defaults belong to the reusable image. Use the selected site's ordinary
+library, without rewriting page bodies:
+
+```bash
+taproot-site media images list --missing-description --page-size 25 --json
+taproot-site media images get <image-id> --json
+taproot-site media images describe <image-id> --description 'A red bird on a branch.' --expected-revision 0 --if-missing --json
+taproot-site media images describe <image-id> --clear --expected-revision 1 --json
+```
+
+List returns one page in `images.items`, `images.totalImages` for the filtered
+library, and `images.nextPageToken`; pass a nonempty cursor unchanged with
+`--page-token` to continue. `--page-size` accepts 1–100. Filtering happens on the
+server before pagination, and reads make no per-image requests. If a page's
+text and previews exceed the output bound, repeat the same cursor with a smaller
+page size. No rows are silently omitted. Zero matches is a successful empty list.
+
+Each image exposes `imageId`, `uploadedName`, nullable `defaultDescription`,
+`descriptionRevision`, dimensions, processing state, `previewUrl` and
+`responsivePreviewUrls`. Revisions are decimal strings so JavaScript cannot
+round an int64 value; pass them unchanged as `--expected-revision`. Preview URLs
+are validated HTTPS addresses for inspection, may expire, and stay out of
+`GITHUB_OUTPUT`. No image metadata is written to a workspace file by these verbs.
+
+Describe requires exactly one of `--description` and `--clear`. The server trims
+outer whitespace, turns empty/whitespace input into null, and rejects text longer
+than 1000 Unicode scalar values without truncation. Unicode and newlines are
+preserved in JSON. `--if-missing` is checked atomically at the write and cannot
+clear a default. A stale revision reports `media.image_description_conflict`; an
+existing default under the condition reports `media.image_description_exists`.
+Both exit 1 and leave the stored text alone. Read the current image, reconcile,
+and use its revision for a new intentional save; mutations never retry
+automatically. Invalid input exits 2. Permission and credential refusals keep the
+ordinary API error codes. Every verb requires `site.media.manage`, and images
+from another site, profile/account scope, or an installation remain inaccessible.
+
+Defaults apply to inherited usages after the next selected deployment. Current
+public output and in-flight releases retain their frozen text; custom overrides,
+decorative choices and unrelated album captions remain independent. Missing
+means the image's default is absent, even when a placement has contextual text.
+These commands populate no production content automatically. `help media` has
+the full read/write contract.
+
 `media upload [path...]` uploads raster files and records each one in
 `.taproot-site-media.json`; Markdown then names an image by its path (such as
 `media/photo.webp`) everywhere an image goes, from body images to component and
@@ -704,12 +755,17 @@ It stages; nothing reaches an audience until `deploy --staging` publishes the
 candidate and `deploy --production` promotes that completed staging
 deployment. `status` reports the platform authoring switch, the CLI release,
 deployments, readiness, image processing, and site health under Content
-permission. `siteHealth` lists the site checks' findings over the latest editable
-body of each page: a rule id, a severity (`error` or `warning`), the page, and
-the value found. It reports `covered: true`, `errors`, `warnings`, `pages`, and
-`findings`; an empty list means no check found anything. Output is bounded to 100
-findings, with an explicit `findingsTruncated` flag. A denied, malformed, or
-failed read fails `status` instead of implying a clean site.
+permission. `siteHealth` reads the last successful production deployment's stored
+report. It includes the deployment and output identities, input hash, checked time,
+rule version, coverage, assessed page count and status. Unpublished edits are
+outside that report. Page findings identify the rule, severity, page and value;
+image findings group each missing default description with its affected pages.
+Known reports include `covered: true`, `errors`, `warnings`, `pages` and `findings`.
+Only a complete report with zero findings establishes that the assessed candidate
+has no warnings. Missing, unsupported and incomplete assessments are explicit.
+Output is bounded to 100 page findings, with an explicit `findingsTruncated` flag.
+Preview URLs appear only in normal output and are omitted from GitHub output.
+A denied, malformed or failed read fails `status` instead of implying a clean site.
 
 ## Output contract
 

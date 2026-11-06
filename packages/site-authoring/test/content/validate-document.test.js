@@ -1344,3 +1344,14 @@ test("bounds a hostile identifier before it reaches a message or a path", () => 
   assert.ok(!result.errors[0].message.includes("\u001b"));
   assert.ok(result.errors[0].message.length < 200);
 });
+
+
+test("inline image description modes preserve authored contextual text and reject invalid modes", () => {
+  for (const mode of [undefined, null, "inherit", "custom", "decorative"]) {
+    assertValid(doc(image({ alt: "Legacy or custom text".repeat(100), ...(mode === undefined ? {} : { descriptionMode: mode }) })));
+  }
+  for (const mode of ["", "default", false, 1, {}]) {
+    const result = validateDocument(doc(image({ descriptionMode: mode })));
+    assert.ok(result.errors.some(error => error.path === "/content/0/attrs/descriptionMode" && error.code === "content.attr_invalid"));
+  }
+});

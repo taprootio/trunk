@@ -72,9 +72,8 @@ test("decoration normalization preserves the processed-image delivery shape and 
   assert.ok(Object.isFrozen(result.decoration.image.urls));
 });
 
-test("decoration normalization derives every enum, bound, and tint token from registry version 14", () => {
+test("decoration normalization derives every enum, bound, and tint token from the registry", () => {
   const decoration = FREE_FORM_SECTION_REGISTRY.section.attrs.decoration;
-  assert.equal(FREE_FORM_SECTION_REGISTRY.version, 14);
   assert.equal(decoration.closed, true);
   assert.deepEqual(decoration.fields.anchor.values, [
     "top-start",
@@ -367,4 +366,23 @@ test("a section image converted from a media path is accepted unfilled, and only
     assert.notDeepEqual(normalizeFreeFormSectionBackground({ image: unfilled, portraitImage: image }).errors, []);
     assert.notDeepEqual(normalizeFreeFormSectionDecoration({ image }).errors, []);
   }
+});
+
+
+test("all section image positions retain authored modes and valid readonly hydration until workspace projection", () => {
+  const cases = [
+    value => normalizeFreeFormSectionBackground({ image: value }),
+    value => normalizeFreeFormSectionBackground({ image: processedImage(), portraitImage: value }),
+    value => normalizeFreeFormSectionDecoration({ image: value }),
+  ];
+  const selected = [result => result.background?.image, result => result.background?.portraitImage, result => result.decoration?.image];
+  const input = { ...processedImage(), alt: "Contextual text", descriptionMode: "custom",
+    defaultDescription: "Library text", descriptionRevision: "8" };
+  cases.forEach((normalize, index) => {
+    const result = normalize(input);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(selected[index](result), input);
+    const refused = normalize({ ...input, descriptionMode: "invalid" });
+    assert.ok(refused.errors.some(error => error.path.endsWith("/descriptionMode") && error.code === "content.attr_invalid"));
+  });
 });

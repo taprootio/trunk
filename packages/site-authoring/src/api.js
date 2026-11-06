@@ -1,4 +1,6 @@
+import { normalizeNavigationReadiness } from "./navigation-readiness.js";
 import { normalizeLatestCliVersion } from "./cli-release.js";
+import { imageDescriptionRevision, isImageId, safeImagePreviewUrl } from "./image-description-contract.js";
 import {
   BANDWIDTH_ALLOWANCE_REFUSAL_REASON,
   CANONICAL_TIMESTAMP,
@@ -1153,6 +1155,65 @@ export async function listSiteImages(client, siteId, requestOptions = {}, { imag
   return { images, summary, truncated: true };
 }
 
+function normalizeDescriptionImage(value, siteId, expectedImageId) {
+  const code = "api.image_description_contract";
+  const record = requireObject(value, code, "image library entry");
+  const wire = requireObject(record.image, code, "image");
+  const image = normalizeImage(wire);
+  if (!isImageId(image.imageId) || wire.siteId !== siteId
+    || wire.ownershipScope !== IMAGE_OWNERSHIP_SCOPE_SITE
+    || (expectedImageId !== undefined && image.imageId !== expectedImageId)) {
+    throw new SiteAuthoringError(code, "Taproot returned an image outside the requested site library.");
+  }
+  const descriptionRevision = imageDescriptionRevision(wire.descriptionRevision ?? "0");
+  const defaultDescription = wire.defaultDescription === undefined || wire.defaultDescription === null || wire.defaultDescription === ""
+    ? null : wire.defaultDescription;
+  if (descriptionRevision === undefined || (defaultDescription !== null
+    && (typeof defaultDescription !== "string" || !defaultDescription.isWellFormed()))) {
+    throw new SiteAuthoringError(code, "Taproot returned invalid image description metadata.");
+  }
+  return {
+    imageId: image.imageId,
+    uploadedName: image.uploadedName,
+    defaultDescription,
+    descriptionRevision,
+    width: image.width,
+    height: image.height,
+    processingState: image.processingState,
+    previewUrl: safeImagePreviewUrl(image.url),
+    responsivePreviewUrls: image.responsiveUrls.slice(0, 8)
+      .map((url) => ({ minWidth: url.minWidth, url: safeImagePreviewUrl(url.url) }))
+      .filter((url) => url.url !== ""),
+  };
+}
+
+/** One bounded page, filtered by the server before its cursor is applied. */
+export async function listSiteImageDescriptions(client, siteId, { pageSize, pageToken, missingDescription }) {
+  const response = requireObject(await client.request(sitePath(siteId, `images${query([
+    ["pageSize", pageSize], ["pageToken", pageToken], ["missingDescription", missingDescription || undefined],
+  ])}`)), "api.image_description_contract", "site images");
+  if (response.images !== undefined && !Array.isArray(response.images))
+    throw new SiteAuthoringError("api.image_description_contract", "Taproot returned an invalid image list.");
+  if (response.nextPageToken !== undefined && typeof response.nextPageToken !== "string")
+    throw new SiteAuthoringError("api.image_description_contract", "Taproot returned an invalid image cursor.");
+  return {
+    items: (response.images ?? []).map((entry) => normalizeDescriptionImage(entry, siteId)),
+    nextPageToken: response.nextPageToken ?? "",
+    totalImages: safeCount(response.totalImages),
+  };
+}
+
+export async function getSiteImageDescription(client, siteId, imageId) {
+  return normalizeDescriptionImage(
+    await client.request(sitePath(siteId, `images/${encodeURIComponent(imageId)}`)), siteId, imageId);
+}
+
+export async function updateSiteImageDescription(client, siteId, imageId, body) {
+  return normalizeDescriptionImage(await client.request(sitePath(siteId, `images/${encodeURIComponent(imageId)}/description`), {
+    method: "PATCH", body,
+  }), siteId, imageId);
+}
+
 /** The site checks' findings over the latest editable page bodies, authorized by Content. */
 export async function getSiteHealth(client, siteId) {
   const code = "api.site_health_contract";
@@ -1191,10 +1252,55 @@ export async function getSiteHealth(client, siteId) {
       detail: text(finding.detail),
     };
   });
+  const statuses = new Set(["not_checked", "complete", "incomplete", "unsupported"]);
+  const status = statuses.has(response.status) ? response.status : "unknown";
+  const optionalId = (value, field) => value === undefined || value === "" ? undefined : requireCanonicalUuid(value, code, field);
+  const deploymentId = optionalId(response.deploymentId, "deploymentId");
+  const outputReleaseId = optionalId(response.outputReleaseId, "outputReleaseId");
+  const claimsAssessment = status === "complete" || status === "incomplete" && Boolean(deploymentId || outputReleaseId);
+  if (claimsAssessment && (!deploymentId || !outputReleaseId || !CANONICAL_TIMESTAMP.test(response.checkedAt ?? "")
+    || typeof response.inputHash !== "string" || !/^[0-9a-f]{64}$/u.test(response.inputHash)
+    || typeof response.ruleVersion !== "string" || response.ruleVersion === ""
+    || !Array.isArray(response.coverage) || response.coverage.length === 0)) {
+    throw new SiteAuthoringError(code, "Taproot returned an assessed report without its immutable deployment identity.");
+  }
+  if (response.coverage !== undefined && (!Array.isArray(response.coverage) || response.coverage.some(area => typeof area !== "string"))) {
+    throw new SiteAuthoringError(code, "Taproot returned invalid health coverage.", { field: "coverage" });
+  }
+  if (response.images !== undefined && !Array.isArray(response.images)) {
+    throw new SiteAuthoringError(code, "Taproot returned invalid image findings.", { field: "images" });
+  }
+  const images = (response.images ?? []).map(value => {
+    const image = requireObject(value, code, "image finding");
+    if (!Array.isArray(image.affectedPages) || image.affectedPages.length === 0) {
+      throw new SiteAuthoringError(code, "Taproot returned an image finding without affected pages.");
+    }
+    return {
+      imageId: requireCanonicalUuid(image.imageId, code, "imageId"), name: text(image.name),
+      previewUrl: safeImagePreviewUrl(image.previewUrl),
+      affectedPages: image.affectedPages.map(page => ({
+        pageId: requireCanonicalUuid(page?.pageId, code, "affectedPages.pageId"),
+        title: text(page?.title), path: text(page?.path),
+      })),
+    };
+  });
+  const errors = count(response.errorCount, "errorCount");
+  const warnings = count(response.warningCount, "warningCount");
+  const keptErrors = findings.filter(finding => finding.severity === "error").length;
+  const keptWarnings = findings.length - keptErrors + images.length;
+  if (claimsAssessment && (errors < keptErrors || warnings < keptWarnings ||
+      response.truncated !== true && (errors !== keptErrors || warnings !== keptWarnings))) {
+    throw new SiteAuthoringError(code, "Taproot returned health totals that disagree with the stored findings.");
+  }
   return {
-    findings,
-    errorCount: count(response.errorCount, "errorCount"),
-    warningCount: count(response.warningCount, "warningCount"),
+    findings, images, status, assessmentKnown: status !== "unknown",
+    ...(deploymentId ? { deploymentId } : {}), ...(outputReleaseId ? { outputReleaseId } : {}),
+    inputHash: text(response.inputHash), checkedAt: text(response.checkedAt), ruleVersion: text(response.ruleVersion),
+    coverage: response.coverage ?? [], assessedPageCount: count(response.assessedPageCount, "assessedPageCount"),
+    environment: response.environment === "staging" ? "staging" : "production",
+    stagedDeploymentId: optionalId(response.stagedDeploymentId, "stagedDeploymentId"),
+    errorCount: errors,
+    warningCount: warnings,
     pageCount: count(response.pageCount, "pageCount"),
     truncated: response.truncated === true,
   };
@@ -1257,6 +1363,7 @@ export async function getPublishingReadiness(client, siteId, selection = {}) {
   }));
   return {
     state: typeof response.state === "string" ? response.state : "PAGE_PUBLISHING_READINESS_STATE_UNKNOWN",
+    navigationReadiness: normalizeNavigationReadiness(response.navigationReadiness),
     approvedPageCount: safeCount(response.approvedPageCount),
     selectedPageCount: safeCount(response.selectedPageCount),
     blockedPageCount: safeCount(response.blockedPageCount),

@@ -1,5 +1,16 @@
 {
-  "version": 14,
+  "version": 15,
+
+  "imageDescription": {
+    "fields": {
+      "descriptionMode": { "kind": "mode", "storage": "persisted" },
+      "defaultDescription": { "kind": "text", "storage": "hydratedReadOnly" },
+      "descriptionRevision": { "kind": "revision", "storage": "hydratedReadOnly" }
+    },
+    "modes": ["inherit", "custom", "decorative"],
+    "maxDefaultDescriptionScalars": 1000,
+    "maxRevision": "9223372036854775807"
+  },
   "section": {
     "nodeType": "section",
     "label": "Section",
@@ -84,7 +95,10 @@
             "optionalKeys": [
               "width",
               "height",
-              "alt"
+              "alt",
+              "descriptionMode",
+              "defaultDescription",
+              "descriptionRevision"
             ],
             "urls": {
               "minItems": 1,
@@ -124,7 +138,10 @@
             "optionalKeys": [
               "width",
               "height",
-              "alt"
+              "alt",
+              "descriptionMode",
+              "defaultDescription",
+              "descriptionRevision"
             ],
             "urls": {
               "minItems": 1,
@@ -237,7 +254,10 @@
             "optionalKeys": [
               "width",
               "height",
-              "alt"
+              "alt",
+              "descriptionMode",
+              "defaultDescription",
+              "descriptionRevision"
             ],
             "urls": {
               "minItems": 1,

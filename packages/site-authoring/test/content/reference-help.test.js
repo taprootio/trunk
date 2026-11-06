@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 49);
+  assert.equal(REFERENCE_VERSION, 50);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -262,7 +262,9 @@ test("the free-form reference exposes the production document vocabulary and aut
   });
   const decorationImage = page.sections.decoration.fields.find((field) => field.name === "image");
   assert.deepEqual(decorationImage.requiredKeys, ["imageId", "src", "urls"]);
-  assert.deepEqual(decorationImage.optionalKeys, ["width", "height", "alt"]);
+  assert.deepEqual(decorationImage.optionalKeys, [
+    "width", "height", "alt", "descriptionMode", "defaultDescription", "descriptionRevision",
+  ]);
   assert.deepEqual(decorationImage.responsiveUrls, {
     minItems: 1,
     maxItems: 5,
@@ -877,6 +879,7 @@ test("the image-row reference prints its bounds, required image fields and heigh
   assert.equal(image.type, "object");
   assert.equal(image.markdownType, "string");
   assert.match(image.description, /Alt text is required/u);
+  assert.match(image.description, /unless descriptionMode is inherit; inherited text must resolve before deployment/u);
   const byName = Object.fromEntries(image.properties.map((property) => [property.name, property]));
   assert.equal(byName.alt.required, true);
   assert.equal(byName.alt.schema.minLength, 1);

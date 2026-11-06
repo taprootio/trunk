@@ -1,3 +1,4 @@
+import { describeNavigationReadiness, isNavigationReady, reportNavigationReadiness } from "../navigation-readiness.js";
 import {
   DEPLOYMENT_ENVIRONMENT_PRODUCTION,
   DEPLOYMENT_ENVIRONMENT_STAGING,
@@ -154,6 +155,7 @@ function reportReadiness(readiness) {
   const blockers = boundedList(readiness.blockers, MAXIMUM_REPORTED_BLOCKERS);
   return {
     state: readiness.state,
+    navigationReadiness: reportNavigationReadiness(readiness.navigationReadiness),
     approvedPageCount: readiness.approvedPageCount,
     selectedPageCount: readiness.selectedPageCount,
     blockedPageCount: readiness.blockedPageCount,
@@ -350,6 +352,15 @@ export async function deploy(invocation) {
       // The estimate must recognize the request it is about to be followed by.
       ...(invocation.allowFailedPreview === true ? { allowFailedPreview: true } : {}),
     });
+    onProgress(describeNavigationReadiness(readiness.navigationReadiness));
+    if (!isNavigationReady(readiness.navigationReadiness)) {
+      const media = readiness.blockers.length ? ` This candidate also has ${readiness.blockers.length} media blocker(s).` : "";
+      throw new SiteAuthoringError(
+        "deploy.navigation_blocked",
+        describeNavigationReadiness(readiness.navigationReadiness) + media,
+        { field: "Navigation", status: readiness.navigationReadiness.state },
+      );
+    }
     if (readiness.blockers.length > 0) {
       throw new SiteAuthoringError(
         "deploy.media_blocked",

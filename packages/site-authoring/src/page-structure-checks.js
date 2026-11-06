@@ -26,11 +26,16 @@ export const RULE_H1_DEMOTED = "seo.h1_demoted";
 export const RULE_H1_MULTIPLE = "seo.h1_multiple";
 export const RULE_HEADING_RENUMBERED = "seo.heading_renumbered";
 export const RULE_HEADING_BEFORE_TITLE = "seo.heading_before_title";
-export const RULE_IMAGE_ALT_MISSING = "a11y.image_alt_missing";
+// Image completeness is assessed from frozen library defaults during deployment.
+export const RULE_IMAGE_DEFAULT_MISSING = "a11y.image_default_missing";
 export const RULE_LINK_TEXT_EMPTY = "a11y.link_text_empty";
+export const RULE_TITLE_MISSING = "seo.title_missing";
+export const RULE_TITLE_SHORT = "seo.title_short";
 export const RULE_TITLE_LONG = "seo.title_long";
 export const RULE_DESCRIPTION_MISSING = "seo.description_missing";
+export const RULE_DESCRIPTION_SHORT = "seo.description_short";
 export const RULE_DESCRIPTION_LONG = "seo.description_long";
+export const RULE_DESCRIPTION_MATCHES_TITLE = "seo.description_matches_title";
 export const RULE_SOCIAL_IMAGE_FALLBACK = "seo.social_image_fallback";
 const RULE_ORDER = [
     RULE_H1_MISSING,
@@ -38,17 +43,42 @@ const RULE_ORDER = [
     RULE_H1_MULTIPLE,
     RULE_HEADING_RENUMBERED,
     RULE_HEADING_BEFORE_TITLE,
-    RULE_IMAGE_ALT_MISSING,
     RULE_LINK_TEXT_EMPTY,
+    RULE_TITLE_MISSING,
+    RULE_TITLE_SHORT,
     RULE_TITLE_LONG,
     RULE_DESCRIPTION_MISSING,
+    RULE_DESCRIPTION_SHORT,
     RULE_DESCRIPTION_LONG,
+    RULE_DESCRIPTION_MATCHES_TITLE,
     RULE_SOCIAL_IMAGE_FALLBACK,
 ];
-/** Search results cut a title off after about this many characters. */
-export const TITLE_WARN_LENGTH = 60;
-/** Search results cut a description off after about this many characters. */
+/** Product guidance for useful metadata, not search-engine limits. */
+export const TITLE_MINIMUM_LENGTH = 15;
+export const TITLE_WARN_LENGTH = 70;
+export const DESCRIPTION_MINIMUM_LENGTH = 50;
 export const DESCRIPTION_WARN_LENGTH = 160;
+export const METADATA_RULE_IDS = [
+    RULE_TITLE_MISSING,
+    RULE_TITLE_SHORT,
+    RULE_TITLE_LONG,
+    RULE_DESCRIPTION_MISSING,
+    RULE_DESCRIPTION_SHORT,
+    RULE_DESCRIPTION_LONG,
+    RULE_DESCRIPTION_MATCHES_TITLE,
+];
+/** Local authoring cannot resolve a home page's site settings or generated fallbacks. */
+export function localAuthoringMetadata(input) {
+    if (input.homePage)
+        return {};
+    if (input.generated) {
+        return {
+            title: input.generated.customTitle?.trim() ? input.generated.customTitle : undefined,
+            description: input.generated.customDescription?.trim() ? input.generated.customDescription : undefined,
+        };
+    }
+    return { title: input.title, description: input.description };
+}
 const MAXIMUM_DEPTH = 256;
 const MAXIMUM_SUBJECT_LENGTH = 80;
 const characters = (value) => [...value].length;
@@ -162,16 +192,6 @@ function walkBody(body) {
             case "taprootImage": {
                 imageCount++;
                 seeContent();
-                if (!nonBlank(node.attrs?.alt)) {
-                    const id = node.attrs?.imageId;
-                    findings.push({
-                        ruleId: RULE_IMAGE_ALT_MISSING,
-                        severity: "warning",
-                        subject: typeof id === "string" ? id : "",
-                        detail: "",
-                        path,
-                    });
-                }
                 return;
             }
             case "componentBlock": {
@@ -182,19 +202,10 @@ function walkBody(body) {
                 const fixedLevel = componentFixedHeadingLevel(type, data);
                 if (type === "image-banner" && imageSource(data.image)) {
                     imageCount++;
-                    if (!nonBlank(data.altText)) {
-                        findings.push({ ruleId: RULE_IMAGE_ALT_MISSING, severity: "warning", subject: "", detail: "", path });
-                    }
                 }
                 // The social preview also draws on a hero's picture.
                 if (type === "hero-section" && imageSource(data.media)) {
                     imageCount++;
-                    if (!nonBlank(data.media.alt)) {
-                        findings.push({ ruleId: RULE_IMAGE_ALT_MISSING, severity: "warning", subject: "", detail: "", path });
-                    }
-                }
-                if (type === "cta" && imageSource(data.mediaImage) && !nonBlank(data.mediaImage.alt)) {
-                    findings.push({ ruleId: RULE_IMAGE_ALT_MISSING, severity: "warning", subject: "", detail: "", path });
                 }
                 if (opensPage) {
                     recordFixedHeading(outline, 1);
@@ -322,27 +333,21 @@ function collectFindings(page) {
         findings.push(...walked.findings);
         imageCount = walked.imageCount;
     }
-    if (typeof page.title === "string" && characters(page.title.trim()) > TITLE_WARN_LENGTH) {
-        findings.push({
-            ruleId: RULE_TITLE_LONG,
-            severity: "warning",
-            subject: "",
-            detail: String(characters(page.title.trim())),
-        });
-    }
-    if (typeof page.description === "string") {
-        const description = page.description.trim();
-        if (description === "") {
-            findings.push({ ruleId: RULE_DESCRIPTION_MISSING, severity: "warning", subject: "", detail: "" });
-        }
-        else if (characters(description) > DESCRIPTION_WARN_LENGTH) {
-            findings.push({
-                ruleId: RULE_DESCRIPTION_LONG,
-                severity: "warning",
-                subject: "",
-                detail: String(characters(description)),
-            });
-        }
+    const checkText = (value, minimum, maximum, missingRule, shortRule, longRule) => {
+        if (typeof value !== "string")
+            return;
+        const count = characters(value.trim());
+        const ruleId = count === 0 ? missingRule : count < minimum ? shortRule : count > maximum ? longRule : undefined;
+        if (ruleId)
+            findings.push({ ruleId, severity: "warning", subject: "", detail: count === 0 ? "" : String(count) });
+    };
+    checkText(page.title, TITLE_MINIMUM_LENGTH, TITLE_WARN_LENGTH, RULE_TITLE_MISSING, RULE_TITLE_SHORT, RULE_TITLE_LONG);
+    checkText(page.description, DESCRIPTION_MINIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, RULE_DESCRIPTION_MISSING, RULE_DESCRIPTION_SHORT, RULE_DESCRIPTION_LONG);
+    const normalize = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ").toLowerCase() : undefined;
+    const title = normalize(page.title);
+    const description = normalize(page.description);
+    if (title && description && title === description) {
+        findings.push({ ruleId: RULE_DESCRIPTION_MATCHES_TITLE, severity: "warning", subject: "", detail: "" });
     }
     if (page.freeForm && page.hasCover === false) {
         findings.push({

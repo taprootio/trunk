@@ -159,6 +159,14 @@ export async function writeGithubActionsOutput(outputPath, result) {
   const safeResult = structuredClone(result);
   if (safeResult.verb === "preview page") delete safeResult.url;
   if (safeResult.stagingPreview) delete safeResult.stagingPreview.url;
+  if (["media images list", "media images get", "media images describe"].includes(safeResult.verb)) {
+    const images = safeResult.image ? [safeResult.image] : safeResult.images?.items ?? [];
+    for (const image of images) {
+      delete image.previewUrl;
+      delete image.responsivePreviewUrls;
+    }
+  }
+  for (const image of safeResult.siteHealth?.imageFindings ?? []) delete image.previewUrl;
   const json = requireBoundedJson(safeResult);
   const delimiter = githubDelimiter(json);
   const lines = [

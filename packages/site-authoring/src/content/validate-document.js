@@ -1,3 +1,4 @@
+import { IMAGE_DESCRIPTION_MODES } from "./image-description-validation.js";
 import { validateComponentBlock } from "./components.js";
 import {
   FREE_FORM_SECTION_REGISTRY,
@@ -180,6 +181,7 @@ const IMAGE_ATTRS = Object.freeze({
   ),
   urls: URLS_SPEC,
   alt: optionalString(),
+  descriptionMode: optionalEnum(IMAGE_DESCRIPTION_MODES),
   width: optionalPositiveInteger(),
   height: optionalPositiveInteger(),
   crop: CROP_SPEC,

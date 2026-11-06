@@ -1548,7 +1548,8 @@ export async function planPages({
         pagePath,
         title: sentTitle,
         // Only the owner's own description is warned about for length: the derived one is not theirs to shorten.
-        ...(generated ? { declaredDescription: document_.data.customDescription } : {}),
+        declaredDescription: generated ? document_.data.customDescription : declaredDescription,
+        metadataDescriptionKnown: generated || typeof declaredDescription === "string",
         contentKey,
         unchanged,
         description: sentDescription,

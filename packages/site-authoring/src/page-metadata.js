@@ -4,9 +4,9 @@ import { boundedByBytes } from "./session.js";
 import { displayPagePath } from "./workspace.js";
 
 /**
- * A page description is what search results and link previews show. Past about
- * 160 characters search engines cut it off, so it is warned about; past 1000 it
- * is refused, here and by the API (TR01194).
+ * Description length advice is shared with the document rules. The separate
+ * descriptionWarnings output stays compatible; the 1000-character storage
+ * maximum is still enforced here and by the API (TR01194).
  */
 export { DESCRIPTION_WARN_LENGTH };
 export const DESCRIPTION_MAXIMUM_LENGTH = 1000;
@@ -20,27 +20,27 @@ export function requireDescriptionLength(description, field = "description") {
     throw new SiteAuthoringError(
       "pages.description_too_long",
       `The description is ${length(description)} characters; it may be at most ${DESCRIPTION_MAXIMUM_LENGTH} `
-        + `(search results show about ${DESCRIPTION_WARN_LENGTH}).`,
+        + `(the writing guidance is at most ${DESCRIPTION_WARN_LENGTH}).`,
       { field },
     );
   }
 }
 
-/** Warnings for descriptions search results will cut off, named per page. */
+/** The compatible length-warning output for known author-entered descriptions. */
 export function descriptionWarnings(pages, onProgress) {
   const items = [];
   for (const page of pages ?? []) {
-    const description = page.declaredDescription ?? page.description;
-    if (typeof description !== "string" || length(description) <= DESCRIPTION_WARN_LENGTH) continue;
+    const description = page.metadataDescriptionKnown === false ? undefined : page.declaredDescription ?? page.description;
+    if (typeof description !== "string" || length(description.trim()) <= DESCRIPTION_WARN_LENGTH) continue;
     const item = {
       code: PAGE_DESCRIPTION_LONG,
       file: page.file,
       path: displayPagePath(page.pagePath ?? page.path),
-      length: length(description),
+      length: length(description.trim()),
     };
     onProgress(
-      `Warning: ${item.file}'s description is ${item.length} characters; search results show about `
-        + `${DESCRIPTION_WARN_LENGTH}.`,
+      `Warning: ${item.file}'s description is ${item.length} characters; consider shortening it `
+        + `(guidance: at most ${DESCRIPTION_WARN_LENGTH}).`,
     );
     items.push(item);
   }

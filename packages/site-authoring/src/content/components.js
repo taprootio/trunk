@@ -8,6 +8,8 @@ import registry from "./free-form-section-registry.json" with { type: "json" };
 import { hasAsciiControl } from "../errors.js";
 import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "../social-link-url.js";
 import socialPlatforms from "../social-platforms.json" with { type: "json" };
+import { IMAGE_DESCRIPTION_MODES } from "./image-description-validation.js";
+import { stripImageDescriptionHydration } from "./image-description-document.js";
 import {
   CONTENT_ERROR_CODES as CODES,
   CONTENT_LIMITS,
@@ -69,8 +71,8 @@ const list = (item, options = {}) => Object.freeze({ kind: "array", item, ...opt
 const shape = (fields, options = {}) => Object.freeze({ kind: "object", fields: Object.freeze(fields), ...options });
 /**
  * A processed-image record or null. `required` refuses null, `altRequired`
- * refuses a blank alt and `dimensionsRequired` demands positive width and
- * height, for a component whose images are the content (TR01322).
+ * requires authored alt unless inherited, and `dimensionsRequired` demands
+ * positive width and height for a component whose images are the content (TR01322).
  */
 const image = (options = {}) => Object.freeze({ kind: "image", ...options });
 /**
@@ -115,6 +117,7 @@ const COMPONENT_IMAGE_FIELDS = Object.freeze({
   width: num({ integer: true, minimum: 0 }),
   height: num({ integer: true, minimum: 0 }),
   alt: str(),
+  descriptionMode: Object.freeze({ ...enumOf(...IMAGE_DESCRIPTION_MODES), nullable: true }),
 });
 
 /**
@@ -320,6 +323,7 @@ const CARD_GRID = Object.freeze({
 const IMAGE_BANNER = Object.freeze({
   image: image(),
   altText: str(),
+  descriptionMode: Object.freeze({ ...enumOf(...IMAGE_DESCRIPTION_MODES), nullable: true }),
   overlayText: str(),
   // One supporting sentence and at most one link under the headline: the copy
   // stack Espalier 6.1 lays out with a bounded measure (TR00819).
@@ -429,9 +433,11 @@ const FORM = Object.freeze({
  * The image field table an image spec validates against. The shared table
  * leaves alt and dimensions optional; a spec that requires them swaps in
  * stricter entries at the same positions so canonical order is unchanged.
+ * Inherited alt is delivery state, removed before a workspace round trip.
  */
-function imageFieldsFor(spec) {
-  if (!spec.altRequired && !spec.dimensionsRequired) return COMPONENT_IMAGE_FIELDS;
+function imageFieldsFor(spec, value) {
+  const altRequired = spec.altRequired && value?.descriptionMode !== "inherit";
+  if (!altRequired && !spec.dimensionsRequired) return COMPONENT_IMAGE_FIELDS;
   return Object.freeze({
     ...COMPONENT_IMAGE_FIELDS,
     ...(spec.dimensionsRequired
@@ -440,7 +446,7 @@ function imageFieldsFor(spec) {
         height: num({ integer: true, minimum: 1, required: true }),
       }
       : {}),
-    ...(spec.altRequired
+    ...(altRequired
       ? {
         alt: str({
           required: true,
@@ -902,7 +908,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     "A wrapping row of pictures at one height, each with alt text and an optional link, never cropped or framed.",
     { height: "medium", align: "start" },
     [
-      "Every image needs alt text: a row of pictures carries no other text. For a linked image the alt is the link's name, so name the destination or action, such as \"Download on the App Store\"; for an unlinked image, describe the picture.",
+      "Every image needs alt text unless its descriptionMode is inherit, in which case the inherited description must resolve to non-blank text before deployment. A row of pictures carries no other text. For a linked image the alt is the link's name, so name the destination or action, such as \"Download on the App Store\"; for an unlinked image, describe the picture.",
       "In Markdown the alt comes from the media manifest entry the image path names; a blank alt is refused.",
       "Each image keeps its own shape at the chosen height and is never cropped or framed; an image wider than the row shrinks to fit. Width and height are required so the row can size the image; media upload records them.",
       "Links open in the same tab, as card-grid and feature-grid links do.",
@@ -1133,7 +1139,7 @@ function referenceSchema(spec) {
         description: `In Markdown, a media path recorded by media upload (such as "media/photo.webp")${
           spec.required ? "" : ", or null"
         }; pages push stores the image record. A .pm.json document carries that record: keep imageId, src, and urls keys so the server can rewrite delivery URLs.${
-          spec.altRequired ? " Alt text is required." : ""
+          spec.altRequired ? " Alt text is required unless descriptionMode is inherit; inherited text must resolve before deployment." : ""
         }${spec.dimensionsRequired ? " Width and height are required." : ""}`,
         additionalProperties: false,
         properties: referenceProperties(imageFieldsFor(spec)),
@@ -1325,7 +1331,7 @@ function validateValue(spec, value, path, errors) {
         fail(spec.required ? "an image object" : "an image object or null");
         return;
       }
-      validateFields(imageFieldsFor(spec), value, path, errors);
+      validateFields(imageFieldsFor(spec, value), value, path, errors);
       return;
     }
     default:
@@ -1593,9 +1599,10 @@ export function canonicalizeComponentData(componentType, data) {
   const fields = isComponentType(componentType) ? COMPONENT_SHAPES[componentType] : undefined;
   if (!fields) throw new TypeError("canonicalizeComponentData requires a known component type.");
   if (!isPlainObject(data)) throw new TypeError("canonicalizeComponentData requires an object.");
+  const authored = stripImageDescriptionHydration(data);
   const ordered = {};
   for (const key of Object.keys(fields)) {
-    if (Object.hasOwn(data, key)) ordered[key] = orderValue(fields[key], data[key]);
+    if (Object.hasOwn(authored, key)) ordered[key] = orderValue(fields[key], authored[key]);
   }
   for (const key of Object.keys(data)) {
     if (!Object.hasOwn(fields, key)) throw new TypeError("canonicalizeComponentData requires validated data.");

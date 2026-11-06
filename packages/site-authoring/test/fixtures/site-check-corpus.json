@@ -1733,7 +1733,7 @@
       }
     },
     {
-      "name": "an image without alt text is called out, one with alt text is not",
+      "name": "Image defaults are deferred to deployment: an image without alt text is called out, one with alt text is not",
       "input": {
         "freeForm": true,
         "body": {
@@ -1768,16 +1768,10 @@
           ]
         }
       },
-      "expected": [
-        {
-          "ruleId": "a11y.image_alt_missing",
-          "subject": "11111111-1111-4111-8111-111111111111",
-          "detail": ""
-        }
-      ]
+      "expected": []
     },
     {
-      "name": "a hero picture or a call to action picture without alt text is called out",
+      "name": "Image defaults are deferred to deployment: a hero picture or a call to action picture without alt text is called out",
       "input": {
         "freeForm": true,
         "body": {
@@ -1820,21 +1814,10 @@
         },
         "hasCover": true
       },
-      "expected": [
-        {
-          "ruleId": "a11y.image_alt_missing",
-          "subject": "",
-          "detail": ""
-        },
-        {
-          "ruleId": "a11y.image_alt_missing",
-          "subject": "",
-          "detail": ""
-        }
-      ]
+      "expected": []
     },
     {
-      "name": "a banner image without alt text is called out",
+      "name": "Image defaults are deferred to deployment: a banner image without alt text is called out",
       "input": {
         "freeForm": true,
         "body": {
@@ -1862,13 +1845,7 @@
           ]
         }
       },
-      "expected": [
-        {
-          "ruleId": "a11y.image_alt_missing",
-          "subject": "",
-          "detail": ""
-        }
-      ]
+      "expected": []
     },
     {
       "name": "a link with no text is called out, a link split by formatting is not",
@@ -1963,7 +1940,7 @@
       ]
     },
     {
-      "name": "a title longer than search results show is called out",
+      "name": "a title above the writing guidance is called out",
       "input": {
         "freeForm": true,
         "body": {
@@ -1983,13 +1960,13 @@
             }
           ]
         },
-        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
       },
       "expected": [
         {
           "ruleId": "seo.title_long",
           "subject": "",
-          "detail": "61"
+          "detail": "71"
         }
       ]
     },
@@ -2014,7 +1991,7 @@
             }
           ]
         },
-        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
       },
       "expected": []
     },
@@ -2050,7 +2027,7 @@
       ]
     },
     {
-      "name": "a description longer than search results show is called out",
+      "name": "a description above the writing guidance is called out",
       "input": {
         "freeForm": true,
         "body": {
@@ -2279,19 +2256,274 @@
             }
           ]
         },
-        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         "description": ""
       },
       "expected": [
         {
           "ruleId": "seo.title_long",
           "subject": "",
-          "detail": "61"
+          "detail": "71"
         },
         {
           "ruleId": "seo.description_missing",
           "subject": "",
           "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "metadata title boundary 0",
+      "input": {
+        "freeForm": false,
+        "title": ""
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "metadata title boundary 14",
+      "input": {
+        "freeForm": false,
+        "title": "tttttttttttttt"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_short",
+          "subject": "",
+          "detail": "14"
+        }
+      ]
+    },
+    {
+      "name": "metadata title boundary 15",
+      "input": {
+        "freeForm": false,
+        "title": "ttttttttttttttt"
+      },
+      "expected": []
+    },
+    {
+      "name": "metadata title boundary 70",
+      "input": {
+        "freeForm": false,
+        "title": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+      },
+      "expected": []
+    },
+    {
+      "name": "metadata title boundary 71",
+      "input": {
+        "freeForm": false,
+        "title": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_long",
+          "subject": "",
+          "detail": "71"
+        }
+      ]
+    },
+    {
+      "name": "metadata description boundary 0",
+      "input": {
+        "freeForm": false,
+        "description": ""
+      },
+      "expected": [
+        {
+          "ruleId": "seo.description_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "metadata description boundary 49",
+      "input": {
+        "freeForm": false,
+        "description": "ddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.description_short",
+          "subject": "",
+          "detail": "49"
+        }
+      ]
+    },
+    {
+      "name": "metadata description boundary 50",
+      "input": {
+        "freeForm": false,
+        "description": "dddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "expected": []
+    },
+    {
+      "name": "metadata description boundary 160",
+      "input": {
+        "freeForm": false,
+        "description": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "expected": []
+    },
+    {
+      "name": "metadata description boundary 161",
+      "input": {
+        "freeForm": false,
+        "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.description_long",
+          "subject": "",
+          "detail": "161"
+        }
+      ]
+    },
+    {
+      "name": "whitespace-only metadata is missing without short or matching advice",
+      "input": {
+        "freeForm": false,
+        "title": " \t\n ",
+        "description": "\n \t"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_missing",
+          "subject": "",
+          "detail": ""
+        },
+        {
+          "ruleId": "seo.description_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "surrogate-pair title characters count once",
+      "input": {
+        "freeForm": false,
+        "title": "🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_short",
+          "subject": "",
+          "detail": "14"
+        }
+      ]
+    },
+    {
+      "name": "surrogate-pair description characters count once",
+      "input": {
+        "freeForm": false,
+        "description": "🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱"
+      },
+      "expected": []
+    },
+    {
+      "name": "outer whitespace does not count toward title length",
+      "input": {
+        "freeForm": false,
+        "title": "  aaaaaaaaaaaaaa\n"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_short",
+          "subject": "",
+          "detail": "14"
+        }
+      ]
+    },
+    {
+      "name": "internal whitespace counts before comparison normalization",
+      "input": {
+        "freeForm": false,
+        "title": "a             b"
+      },
+      "expected": []
+    },
+    {
+      "name": "equal normalized metadata also carries its distinct short advice",
+      "input": {
+        "freeForm": false,
+        "title": "  Hello\t WORLD  ",
+        "description": "hello world"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_short",
+          "subject": "",
+          "detail": "12"
+        },
+        {
+          "ruleId": "seo.description_short",
+          "subject": "",
+          "detail": "11"
+        },
+        {
+          "ruleId": "seo.description_matches_title",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "unequal normalized metadata does not match",
+      "input": {
+        "freeForm": false,
+        "title": "A useful page title",
+        "description": "A different useful description with enough detail to introduce this page."
+      },
+      "expected": []
+    },
+    {
+      "name": "both confirmed empty metadata fields have only missing advice",
+      "input": {
+        "freeForm": false,
+        "title": "",
+        "description": ""
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_missing",
+          "subject": "",
+          "detail": ""
+        },
+        {
+          "ruleId": "seo.description_missing",
+          "subject": "",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "name": "unknown metadata has no guessed empty findings",
+      "input": {
+        "freeForm": false
+      },
+      "expected": []
+    },
+    {
+      "name": "a legitimate short title remains advisory",
+      "input": {
+        "freeForm": false,
+        "title": "About"
+      },
+      "expected": [
+        {
+          "ruleId": "seo.title_short",
+          "subject": "",
+          "detail": "5"
         }
       ]
     }
