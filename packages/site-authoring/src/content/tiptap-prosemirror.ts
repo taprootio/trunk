@@ -9,6 +9,7 @@
 
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 import { imageDescriptionIssues } from "./image-description-validation.js";
+import { isExternalLink, NEW_TAB_CUE_HTML, relWithNewTabTokens } from "./external-link.js";
 import {
   explicitImageMaxHeight,
   mediaOverrideStyleParts,
@@ -101,6 +102,12 @@ export interface RenderProseMirrorOptions {
   headingLevel?: (authored: number) => number;
   /** Claims the page's one LCP slot before rendering a section photo. */
   claimSectionBackgroundImage?: () => boolean;
+  /**
+   * The site's own hosts (TR01327). With it, external links open in a new tab
+   * unless the author chose otherwise; without it nothing is decided here, so
+   * previews and PDFs render as before.
+   */
+  siteHosts?: ReadonlySet<string>;
 }
 
 export function createEmptyProseMirrorDocument(): ProseMirrorDocument {
@@ -264,7 +271,7 @@ function renderNode(
         renderNodes(node.content ?? [], options, "nested"),
       );
     case "text":
-      return renderTextNode(node);
+      return renderTextNode(node, options);
     case "hardBreak":
       return "<br>";
     case "heading":
@@ -345,15 +352,15 @@ function renderIntegrationPlacement(node: ProseMirrorNode, options: RenderProseM
   }, selected.html);
 }
 
-function renderTextNode(node: ProseMirrorNode): string {
+function renderTextNode(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
   let rendered = escapeHtml(node.text ?? "");
   for (const mark of node.marks ?? []) {
-    rendered = wrapMark(rendered, mark);
+    rendered = wrapMark(rendered, mark, options);
   }
   return rendered;
 }
 
-function wrapMark(html: string, mark: ProseMirrorMark): string {
+function wrapMark(html: string, mark: ProseMirrorMark, options: RenderProseMirrorOptions): string {
   switch (mark.type) {
     case "bold":
       return `<strong>${html}</strong>`;
@@ -368,7 +375,7 @@ function wrapMark(html: string, mark: ProseMirrorMark): string {
     case "link": {
       const href = stringAttr(mark.attrs?.href);
       if (!href || !isSafeUrl(href)) return html;
-      return renderElement("a", { href, ...linkRelAttributes(mark.attrs) }, html);
+      return renderLink(href, mark.attrs, html, options);
     }
     default:
       return html;
@@ -410,7 +417,7 @@ type NormalizedTable = {
  * omit one malformed table rather than reinterpret arbitrary blocks as cells.
  */
 function renderTable(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
-  const table = normalizeTable(node);
+  const table = normalizeTable(node, options);
   if (!table) return "";
 
   const header = renderElement(
@@ -456,7 +463,7 @@ function renderTable(node: ProseMirrorNode, options: RenderProseMirrorOptions): 
   );
 }
 
-function normalizeTable(node: ProseMirrorNode): NormalizedTable | undefined {
+function normalizeTable(node: ProseMirrorNode, options: RenderProseMirrorOptions): NormalizedTable | undefined {
   const definition = freeFormSectionRegistry.table;
   if (!hasOnlySerializedKeys(node, ["type", "attrs", "content"])) return undefined;
   const attrs = node.attrs;
@@ -496,7 +503,7 @@ function normalizeTable(node: ProseMirrorNode): NormalizedTable | undefined {
     return undefined;
   }
 
-  const headerCells = normalizeTableRow(headerRow, definition.nodeTypes.header, true);
+  const headerCells = normalizeTableRow(headerRow, definition.nodeTypes.header, true, options);
   if (!headerCells) return undefined;
   const normalizedDataRows: string[][] = [];
   for (const row of dataRows) {
@@ -508,7 +515,7 @@ function normalizeTable(node: ProseMirrorNode): NormalizedTable | undefined {
       || !Array.isArray(row.content)
       || row.content.length !== columnCount
     ) return undefined;
-    const normalized = normalizeTableRow(row, definition.nodeTypes.cell, false);
+    const normalized = normalizeTableRow(row, definition.nodeTypes.cell, false, options);
     if (!normalized) return undefined;
     normalizedDataRows.push(normalized);
   }
@@ -524,6 +531,7 @@ function normalizeTableRow(
   row: ProseMirrorNode,
   expectedCellType: string,
   header: boolean,
+  options: RenderProseMirrorOptions,
 ): string[] | undefined {
   if (!Array.isArray(row.content)) return undefined;
   const cells: string[] = [];
@@ -534,7 +542,7 @@ function normalizeTableRow(
       || cell.type !== expectedCellType
       || !hasNoAttrs(cell)
     ) return undefined;
-    const normalized = normalizeTableCell(cell);
+    const normalized = normalizeTableCell(cell, options);
     if (!normalized) return undefined;
     if (header && freeFormSectionRegistry.table.cells.headerNonWhitespace && normalized.text.trim() === "") {
       return undefined;
@@ -544,7 +552,10 @@ function normalizeTableRow(
   return cells;
 }
 
-function normalizeTableCell(cell: ProseMirrorNode): { html: string; text: string } | undefined {
+function normalizeTableCell(
+  cell: ProseMirrorNode,
+  options: RenderProseMirrorOptions,
+): { html: string; text: string } | undefined {
   const paragraphs = cell.content;
   const paragraph = paragraphs?.[0];
   if (
@@ -574,7 +585,7 @@ function normalizeTableCell(cell: ProseMirrorNode): { html: string; text: string
         || inlineNode.text === ""
       ) return undefined;
       text += inlineNode.text;
-      html.push(renderTextNode(inlineNode));
+      html.push(renderTextNode(inlineNode, options));
     } else if (inlineNode.type === "hardBreak") {
       if (
         !hasOnlySerializedKeys(inlineNode, ["type", "attrs", "marks"])
@@ -659,7 +670,7 @@ function renderInlineFacts(
   if (!facts) return "";
   const items = facts.map((fact) => {
     const value = fact.url
-      ? renderElement("a", { href: fact.url }, escapeHtml(fact.value))
+      ? renderLink(fact.url, {}, escapeHtml(fact.value), options)
       : escapeHtml(fact.value);
     const label = fact.label === undefined
       ? ""
@@ -1030,7 +1041,7 @@ type NormalizedSectionDecoration = {
   anchor: string;
   inlineOffsetPercent: number;
   blockOffsetPercent: number;
-  inlineSizePercent: number;
+  size: string;
   opacity: number;
   tintToken: string;
 };
@@ -1042,7 +1053,7 @@ function normalizedSectionDecorationStyle(value: unknown): string[] | undefined 
     `--esp-section-decoration-image: url("${escapeCssString(decoration.imageUrl)}")`,
     `--esp-section-decoration-color: var(${decoration.tintToken})`,
     `--esp-section-decoration-position: ${sectionDecorationPosition(decoration)}`,
-    `--esp-section-decoration-size: ${decoration.inlineSizePercent}% auto`,
+    `--esp-section-decoration-size: ${decoration.size}`,
     `--esp-section-decoration-opacity: ${decoration.opacity}`,
   ];
 }
@@ -1064,6 +1075,10 @@ function normalizeSectionDecoration(value: unknown): NormalizedSectionDecoration
   const anchor = value.anchor ?? fields.anchor.default;
   const inlineOffsetPercent = value.inlineOffsetPercent ?? fields.inlineOffsetPercent.default;
   const blockOffsetPercent = value.blockOffsetPercent ?? fields.blockOffsetPercent.default;
+  // TR01329: width and height sizes are exclusive. Read the raw keys, because
+  // the width default is filled in below.
+  if (value.inlineSizePercent !== undefined && value.blockSizePercent !== undefined) return undefined;
+  const blockSizePercent = value.blockSizePercent;
   const inlineSizePercent = value.inlineSizePercent ?? fields.inlineSizePercent.default;
   const opacity = value.opacity ?? fields.opacity.default;
   const tint = value.tint ?? fields.tint.default;
@@ -1074,7 +1089,12 @@ function normalizeSectionDecoration(value: unknown): NormalizedSectionDecoration
   if (!isBoundedNumber(blockOffsetPercent, fields.blockOffsetPercent.minimum, fields.blockOffsetPercent.maximum)) {
     return undefined;
   }
-  if (
+  if (blockSizePercent !== undefined) {
+    if (
+      !isBoundedNumber(blockSizePercent, fields.blockSizePercent.minimum, fields.blockSizePercent.maximum)
+      || !Number.isInteger(blockSizePercent)
+    ) return undefined;
+  } else if (
     !isBoundedNumber(inlineSizePercent, fields.inlineSizePercent.minimum, fields.inlineSizePercent.maximum)
     || !Number.isInteger(inlineSizePercent)
   ) return undefined;
@@ -1088,7 +1108,7 @@ function normalizeSectionDecoration(value: unknown): NormalizedSectionDecoration
     anchor,
     inlineOffsetPercent,
     blockOffsetPercent,
-    inlineSizePercent,
+    size: blockSizePercent !== undefined ? `auto ${blockSizePercent}%` : `${inlineSizePercent}% auto`,
     opacity,
     tintToken,
   };
@@ -1416,7 +1436,11 @@ export const LINK_REL_TOKENS = [
   "privacy-policy",
   "terms-of-service",
 ] as const;
-/** The targets a link may carry; only `_blank` changes what renders. */
+/**
+ * The targets a link may carry. `_blank` opens a new tab and `_self` keeps the
+ * tab; with a site host set, any other value leaves the choice to the external
+ * link rule (TR01327).
+ */
 export const LINK_TARGETS = ["_blank", "_self"] as const;
 /**
  * The editor stored this rel, with `target="_blank"`, on every link before
@@ -1445,18 +1469,42 @@ export function chosenLinkRelTokens(rel: unknown): string[] | undefined {
 /**
  * The `rel` and `target` a link publishes with: the author's allowed tokens in
  * their order, and noopener and noreferrer whenever it opens a new tab.
- * Anything else stored is ignored.
+ * `_blank` opens a new tab and `_self` keeps the tab. Any other target, or a
+ * mark with the old editor rel (whose target was never a choice), follows the
+ * external link rule when a host set is supplied, and otherwise stays in the
+ * tab. Anything else stored is ignored.
  */
-export function linkRelAttributes(attrs: Record<string, unknown> | undefined): { rel?: string; target?: string } {
+export function linkRelAttributes(
+  attrs: Record<string, unknown> | undefined,
+  href?: string,
+  siteHosts?: ReadonlySet<string>,
+): { rel?: string; target?: string } {
   const stored = chosenLinkRelTokens(attrs?.rel);
-  if (!stored) return {};
-  const newTab = stringAttr(attrs?.target)?.trim().toLowerCase() === "_blank";
+  const target = stringAttr(attrs?.target)?.trim().toLowerCase();
+  const byRule = () => siteHosts !== undefined && isExternalLink(href, siteHosts);
+  const newTab = stored && (target === "_blank" || target === "_self")
+    ? target === "_blank"
+    : byRule();
   const allowed: readonly string[] = LINK_REL_TOKENS;
-  const rel = new Set([
-    ...stored.filter((token) => allowed.includes(token)),
-    ...(newTab ? ["noopener", "noreferrer"] : []),
-  ]);
-  return { ...(rel.size ? { rel: [...rel].join(" ") } : {}), ...(newTab ? { target: "_blank" } : {}) };
+  const kept = (stored ?? []).filter((token) => allowed.includes(token));
+  const rel = newTab ? relWithNewTabTokens(kept.join(" ")) : [...new Set(kept)].join(" ");
+  return { ...(rel ? { rel } : {}), ...(newTab ? { target: "_blank" } : {}) };
+}
+
+/**
+ * An anchor with the attributes `linkRelAttributes` chooses. Only a publish
+ * passes a host set, and only then does a new-tab link carry its hidden cue,
+ * because the editor preview and legal PDFs have no rule to hide it (TR01327).
+ */
+function renderLink(
+  href: string,
+  attrs: Record<string, unknown> | undefined,
+  html: string,
+  options: RenderProseMirrorOptions,
+): string {
+  const linkAttributes = linkRelAttributes(attrs, href, options.siteHosts);
+  const cue = options.siteHosts !== undefined && linkAttributes.target === "_blank" ? NEW_TAB_CUE_HTML : "";
+  return renderElement("a", { href, ...linkAttributes }, `${html}${cue}`);
 }
 
 function isSafeUrl(url: string): boolean {

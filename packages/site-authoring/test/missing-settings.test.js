@@ -130,6 +130,18 @@ test("present invalid values retain their value errors instead of being classifi
   }
 });
 
+test("a workspace pulled before blockSpacing existed reports it as missing", async (context) => {
+  const root = await workspace(context, (documents) => {
+    delete documents["taproot-styles.json"].blockSpacing;
+  });
+
+  await assert.rejects(() => validateThemeWorkspace(root, SITE_ID, new Set()), (error) => {
+    assert.equal(error.code, "theme.settings_missing");
+    assert.ok(error.details.some((detail) => detail.field === "taproot-styles.blockSpacing"));
+    return true;
+  });
+});
+
 test("optional omitted footer colors and valid empty scalar values still validate", async (context) => {
   const root = await workspace(context);
   const result = await validateThemeWorkspace(root, SITE_ID, new Set());

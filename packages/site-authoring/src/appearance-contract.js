@@ -1,3 +1,4 @@
+import { BLOCK_SPACINGS, DEFAULT_BLOCK_SPACING } from "./block-flow.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
 import {
   SETTINGS_TYPE_BRAND,
@@ -25,6 +26,16 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     type: "enum",
     values: Object.freeze(["system", "light", "dark"]),
     default: "light",
+  }),
+  // The names come from the synced block-flow rules, so a spacing the page
+  // has no scale for can never pass validation (TR01328).
+  Object.freeze({
+    settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
+    name: "blockSpacing",
+    path: "taproot-styles.blockSpacing",
+    type: "enum",
+    values: Object.freeze(Object.keys(BLOCK_SPACINGS)),
+    default: DEFAULT_BLOCK_SPACING,
   }),
   ...["lightLogoId", "darkLogoId", "lightCanvasImageId", "darkCanvasImageId"].map((name) =>
     Object.freeze({

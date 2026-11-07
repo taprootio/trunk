@@ -1,6 +1,32 @@
 {
   "entries": [
     {
+      "version": "0.32.0",
+      "note": "Links to other sites open in a new tab on published pages with nothing to set; target=\"_self\" keeps a link mark in the same tab; page blocks get real default spacing with a site-wide setting.",
+      "behavior": [
+        "An absolute http or https link to a host other than the site's own now publishes target=\"_blank\" and rel with noopener noreferrer added, with nothing to set. This covers link marks in page text and tables, inline facts, and the links of feature-grid, image-row, card-grid, product-grid, hero-section, cta, image-banner and social-links components, and the footer. mailto and tel links, relative paths, fragments, queries and the site's own addresses (including www.) stay in the same tab; a subdomain counts as another host. Component links have no setting to keep them in the tab.",
+        "A link mark keeps its own choice: target=\"_blank\" opens a new tab for any link, and target=\"_self\" keeps even an external link in the same tab. In Markdown write {target=\"_self\"} after the link; in .pm.json set attrs.target to \"_self\". A mark with a null target, or with the editor's old default rel, follows the default. See help page free-form.",
+        "Header navigation follows the same rule: an item or linked group with an http or https address on another host opens in a new tab. mailto and tel items, page items and the site's own addresses stay in the same tab.",
+        "A link that opens a new tab now says \"(opens in a new tab)\" to a screen reader, with no change on screen. This covers component links, link marks, navigation and the footer.",
+        "Help for component links and the image-row and product-grid notes no longer say links open in the same tab.",
+        "Existing pages change at the site's next whole-site render, such as a settings or navigation change. Pages an incremental publish copies forward keep their old links until then.",
+        "Page blocks get real default spacing. Text, tables and every component sit one gap apart, where components used to have no space from the text before them; the last text block of a padded section gets the same gap as room before the section ends; a heading's top margin scales with it. Banners stay flush with their neighbors.",
+        "New required setting blockSpacing in settings/taproot-styles.json (Brand & style > Block spacing): compact, standard or roomy scales the gap to 0.75, 1 or 1.5 times, in both color schemes. Standard keeps text where it is today.",
+        "spacer blocks add their height to the new gap instead of replacing it, so review hand-placed spacers and remove the ones that only worked around tight spacing.",
+        "blockSpacing is required on theme push like every other appearance field. A workspace pulled before this version does not hold it: run pull again before theme push, or add \"blockSpacing\": \"standard\" to settings/taproot-styles.json.",
+        "A site shows the new spacing after its next whole-site render, such as a settings or navigation change. Pages an incremental publish copies forward keep their old spacing until then.",
+        "A section decoration can be sized by height. Set blockSizePercent (an integer from 10 to 200) for \"auto N%\" in place of inlineSizePercent; the two cannot be combined, and neither set keeps the width default of 40. See help page free-form.",
+        "The help reference version is 51."
+      ],
+      "help": [
+        "page",
+        "components",
+        "component",
+        "settings",
+        "appearance"
+      ]
+    },
+    {
       "version": "0.31.0",
       "note": "Image defaults can be listed, read and changed safely through media images; metadata advice uses consistent title and description guidance.",
       "behavior": [

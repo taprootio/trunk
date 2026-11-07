@@ -72,6 +72,34 @@ test("decoration normalization preserves the processed-image delivery shape and 
   assert.ok(Object.isFrozen(result.decoration.image.urls));
 });
 
+test("decoration normalization keeps a height size without adding a width size", () => {
+  const result = normalizeFreeFormSectionDecoration({ image: processedImage(), blockSizePercent: 115 });
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.decoration.blockSizePercent, 115);
+  assert.equal(Object.hasOwn(result.decoration, "inlineSizePercent"), false);
+});
+
+test("decoration normalization leaves a decoration with neither size at the width default only", () => {
+  const { decoration } = normalizeFreeFormSectionDecoration({ image: processedImage() });
+
+  assert.equal(decoration.inlineSizePercent, 40);
+  assert.equal(Object.hasOwn(decoration, "blockSizePercent"), false);
+});
+
+test("decoration normalization reports one conflict when both sizes are set", () => {
+  const result = normalizeFreeFormSectionDecoration({
+    image: processedImage(),
+    inlineSizePercent: 40,
+    blockSizePercent: 115,
+  });
+
+  assert.equal(result.decoration, undefined);
+  assert.deepEqual(result.errors.map((error) => [error.code, error.path]), [
+    ["content.attr_invalid", "/attrs/decoration/blockSizePercent"],
+  ]);
+});
+
 test("decoration normalization derives every enum, bound, and tint token from the registry", () => {
   const decoration = FREE_FORM_SECTION_REGISTRY.section.attrs.decoration;
   assert.equal(decoration.closed, true);
@@ -90,6 +118,7 @@ test("decoration normalization derives every enum, bound, and tint token from th
       inlineOffsetPercent: [-50, 50, 0],
       blockOffsetPercent: [-50, 50, 0],
       inlineSizePercent: [10, 100, 40],
+      blockSizePercent: [10, 200, undefined],
       opacity: [0, 1, 0.12],
     },
   );
@@ -287,6 +316,30 @@ test("decoration validation reports closed-shape, range, type, and delivery fail
       { image: processedImage(), inlineSizePercent: 10.5 },
       "content.attr_invalid",
       "/attrs/decoration/inlineSizePercent",
+    ],
+    [
+      "height size range",
+      { image: processedImage(), blockSizePercent: 201 },
+      "content.attr_invalid",
+      "/attrs/decoration/blockSizePercent",
+    ],
+    [
+      "integer height size",
+      { image: processedImage(), blockSizePercent: 115.5 },
+      "content.attr_invalid",
+      "/attrs/decoration/blockSizePercent",
+    ],
+    [
+      "numeric height size",
+      { image: processedImage(), blockSizePercent: "115" },
+      "content.attr_invalid",
+      "/attrs/decoration/blockSizePercent",
+    ],
+    [
+      "one size at a time",
+      { image: processedImage(), inlineSizePercent: 40, blockSizePercent: 115 },
+      "content.attr_invalid",
+      "/attrs/decoration/blockSizePercent",
     ],
     ["finite opacity", { image: processedImage(), opacity: Number.NaN }, "content.attr_invalid", "/attrs/decoration/opacity"],
     ["semantic tint", { image: processedImage(), tint: "--esp-color-link" }, "content.attr_invalid", "/attrs/decoration/tint"],

@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
 
   "imageDescription": {
     "fields": {
@@ -316,6 +316,12 @@
             "default": 40,
             "minimum": 10,
             "maximum": 100
+          },
+          "blockSizePercent": {
+            "type": "integer",
+            "required": false,
+            "minimum": 10,
+            "maximum": 200
           },
           "opacity": {
             "type": "number",

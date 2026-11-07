@@ -708,7 +708,13 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     "Spacer",
     "Intentional vertical separation with an optional decorative divider.",
     { height: "medium", showDivider: false, dividerStyle: "solid", dividerWidth: 1 },
-    ["Do not use spacing alone to communicate document structure; keep headings and landmarks semantic."],
+    [
+      "Do not use spacing alone to communicate document structure; keep headings and landmarks semantic.",
+      "Blocks already sit one gap apart, set by the site's blockSpacing (help settings). A spacer adds its height to "
+      + "that gap: after text the gap is the spacer's height plus one gap, and between two components it is one gap, "
+      + "the height, and one gap. Review spacers placed to work around tight spacing, and remove ones that are no "
+      + "longer needed.",
+    ],
     { height: "large", showDivider: true, dividerStyle: "solid", dividerWidth: 1 },
   ),
   "latest-posts": component(
@@ -911,7 +917,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Every image needs alt text unless its descriptionMode is inherit, in which case the inherited description must resolve to non-blank text before deployment. A row of pictures carries no other text. For a linked image the alt is the link's name, so name the destination or action, such as \"Download on the App Store\"; for an unlinked image, describe the picture.",
       "In Markdown the alt comes from the media manifest entry the image path names; a blank alt is refused.",
       "Each image keeps its own shape at the chosen height and is never cropped or framed; an image wider than the row shrinks to fit. Width and height are required so the row can size the image; media upload records them.",
-      "Links open in the same tab, as card-grid and feature-grid links do.",
+      "A link to another site opens in a new tab with nothing to set. The site's own addresses, relative paths, mailto: and tel: links open in the same tab.",
     ],
     {
       items: [
@@ -950,7 +956,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     [
       "A button's visible text is its accessible name, and the product's title heads the same list item, so \"Buy now\" on every card reads with its product. Say what the button does, such as \"Buy now\" or \"Book a trial\".",
       PRODUCT_GRID_BUTTON_TEXT_NOTE,
-      "buttonText and buttonUrl go together: text without an address and an address without text are both refused. Links open in the same tab, as card-grid and feature-grid links do.",
+      "buttonText and buttonUrl go together: text without an address and an address without text are both refused. A button to another site opens in a new tab with nothing to set. The site's own addresses, relative paths, mailto: and tel: links open in the same tab.",
       "price is free text (\"From $30\", \"Free\"); priceNote is shown beside it and refused without a price.",
       "An image is optional and cropped to 16:9. Its alt may be blank when the title already says what the picture shows; in Markdown the alt comes from the media manifest entry.",
       "highlighted draws a border of at least 2px (the borderWidth when that is larger) and the badge in the site's action color to mark one card, such as the most popular plan. The grid displays products only: no cart, payments or inventory.",
@@ -995,7 +1001,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     [
       "A link's text is its accessible name: the label if set, else the platform's name. With showLabels false the text is visually hidden and read by screen readers only, so the name is the same either way.",
       "Link only to accounts you control; each platform's brand rules apply to its mark. " + UNSUPPORTED_DOMAIN_NOTE,
-      "platform other is any website and needs a label, such as \"Book online\". A named platform's link carries rel=\"me\"; a Website link carries no rel.",
+      "platform other is any website and needs a label, such as \"Book online\". A link to another site opens in a new tab with nothing to set: a named platform's link publishes rel=\"me noopener noreferrer\", a Website link publishes rel=\"noopener noreferrer\", and a link to the site's own address stays in the same tab.",
     ],
     {
       items: [
@@ -1071,7 +1077,7 @@ function referenceSchema(spec) {
           type: "string",
           format: "https-url",
           maxLength: SOCIAL_LINK_URL_MAX_LENGTH,
-          description: `An ${HTTPS_URL_DESCRIPTION.slice(3)}. ${UNSUPPORTED_DOMAIN_NOTE}`,
+          description: `An ${HTTPS_URL_DESCRIPTION.slice(3)}. ${UNSUPPORTED_DOMAIN_NOTE} A link to another site opens in a new tab with nothing to set.`,
         };
       }
       return {
@@ -1079,7 +1085,7 @@ function referenceSchema(spec) {
         format: spec.allowEmpty === false ? "safe-url" : "safe-url-or-empty",
         description: `${
           spec.allowEmpty === false ? "An" : "Empty, or an"
-        } explicit HTTP(S), mailto, or tel URL; a root-relative path that does not begin with //; a fragment; a query; or a relative URL. Backslashes and ASCII control characters are rejected. Contact URLs require a non-empty body and refuse tel:// and mailto:// authority forms.`,
+        } explicit HTTP(S), mailto, or tel URL; a root-relative path that does not begin with //; a fragment; a query; or a relative URL. Backslashes and ASCII control characters are rejected. Contact URLs require a non-empty body and refuse tel:// and mailto:// authority forms. A web address on another site opens in a new tab with nothing to set; the site's own addresses, relative paths, fragments, queries, mailto and tel links do not.`,
       };
     case "css-length":
       return { type: "string", description: `Must be ${describe(spec)}.` };

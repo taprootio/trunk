@@ -91,7 +91,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", async () => {
   await assert.doesNotReject(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "6.8.0");
+  assert.equal(getThemeReference().espalierVersion, "6.9.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -190,6 +190,7 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
   assert.deepEqual(
     {
       defaultScheme: defaults["settings.defaultScheme"],
+      blockSpacing: defaults["settings.blockSpacing"],
       lightCanvasImageOpacity: defaults["settings.lightCanvasImageOpacity"],
       darkCanvasImageOpacity: defaults["settings.darkCanvasImageOpacity"],
       headerLayout: defaults["settings.headerLayout"],
@@ -205,6 +206,7 @@ test("appearance help defaults stay aligned with the domain settings defaults", 
     },
     {
       defaultScheme: "light",
+      blockSpacing: "standard",
       lightCanvasImageOpacity: 1,
       darkCanvasImageOpacity: 1,
       headerLayout: "standard",

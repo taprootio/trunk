@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 50);
+  assert.equal(REFERENCE_VERSION, 51);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -284,6 +284,7 @@ test("the free-form reference exposes the production document vocabulary and aut
       inlineOffsetPercent: [-50, 50, 0],
       blockOffsetPercent: [-50, 50, 0],
       inlineSizePercent: [10, 100, 40],
+      blockSizePercent: [10, 200, undefined],
       opacity: [0, 1, 0.12],
     },
   );
@@ -528,6 +529,9 @@ test("plain-text free-form help prints decoration bounds, tint mapping, and alph
   assert.match(output, /Section decoration \(closed object\):/u);
   assert.match(output, /inlineOffsetPercent[^\n]+bounds -50 through 50/u);
   assert.match(output, /inlineSizePercent[^\n]+bounds 10 through 100/u);
+  assert.match(output, /blockSizePercent[^\n]+optional; no default[^\n]+bounds 10 through 200/u);
+  assert.doesNotMatch(output, /default undefined/u);
+  assert.match(output, /Size guidance:[^\n]+blockSizePercent[^\n]+cannot be combined/u);
   assert.match(output, /opacity[^\n]+bounds 0 through 1/u);
   for (const [tint, token] of Object.entries(FREE_FORM_SECTION_REGISTRY.section.attrs.decoration.fields.tint.tokenByValue)) {
     assert.match(output, new RegExp(`${tint}\\s+${token}`, "u"));

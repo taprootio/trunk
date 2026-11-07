@@ -972,6 +972,25 @@ targets are refused (`content.link_rel`, `content.link_target`). The editor's
 old default, `noopener noreferrer nofollow`, reads as no choice. See
 `taproot-site help page free-form`.
 
+### External links open in a new tab in 0.32.0
+
+A link to another site opens in a new tab with nothing to set. On the next
+render of a page, every absolute `http:` or `https:` address whose host is not
+one of the site's own hosts publishes `target="_blank"` with `noopener
+noreferrer` added after any `rel` tokens the link already carries. This covers
+link marks in page text and tables, and component links: feature-grid,
+image-row, card-grid, product-grid, hero-section, cta, image-banner and
+social-links, plus the footer and header navigation. Each of these links also
+says "(opens in a new tab)" to a screen reader, with no change on screen.
+`mailto:`, `tel:`, relative paths, fragments,
+queries and the site's own addresses stay in the same tab. A subdomain of the
+site is another host, so it opens in a new tab; `www.` is ignored. To keep a
+link mark in the same tab, write `target="_self"` after it in Markdown or set
+`attrs.target` to `"_self"` in `.pm.json`. Component links have no setting for
+this. Existing pages change when a publish renders the whole site, such as a
+settings or navigation change; pages an incremental publish copies forward keep
+their old links until then.
+
 ### What changed between releases
 
 Taproot accepts only the latest CLI, so an upgrade can be forced at any time.

@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.8.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.9.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -103,6 +103,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // the credential store so the fsync/rename discipline exists once.
     "src/atomic-file.js",
     "src/authors-contract.js",
+    // The block spacing choices and flow stylesheet, generated from shared/ (TR01328).
+    "src/block-flow.js",
     "src/bounded-file.js",
     "src/capabilities.js",
     "src/changelog.js",
@@ -120,6 +122,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // The content pipeline: the validation the server does not perform, the
     // Markdown converter, and the byte-parity copy of the canonical renderer.
     "src/content/components.js",
+    "src/content/external-link.js",
     "src/content/free-form-section-registry.json",
     "src/content/free-form-sections.js",
     "src/content/image-description-document.js",

@@ -520,6 +520,14 @@ export function getAppearanceReference() {
       + "so full-bleed designs usually pair headerWidth 'wide' with headerLayout 'centered-menu', which keeps the "
       + "brand left, the buttons right, and the navigation centered. validate prints a hint, never a failure, when a "
       + "root-band page ships with a contained header.",
+    blockSpacingContract:
+      "Blocks on a page space themselves: text, tables and components all sit one gap apart, and the gap follows the "
+      + "site's text size. blockSpacing scales it for the whole site in both color schemes: 'standard' keeps the gap "
+      + "equal to the text spacing, 'compact' is three quarters of it and 'roomy' is one and a half times it. "
+      + "A heading's top margin scales the same way. The last text block in a padded section gets the gap as extra "
+      + "room before the section ends, and an image banner stays flush with its neighbors. A spacer block adds its "
+      + "own height to the gap, so review spacers placed by hand. A site shows the change after its next whole-site "
+      + "render.",
     menuContract:
       "navDrawerStyle 'full-screen' (the published default) opens the mobile menu over the whole viewport with the "
       + "brand centered above large centered items and navDrawerTransition choosing how it appears (fade, slide-down, "
@@ -841,6 +849,7 @@ export function formatPresentationReference(reference) {
       + "\nLogo contrast: " + reference.logoContrastContract
       + "\nFavicon: " + reference.faviconContract
       + "\nHeader width: " + reference.headerWidthContract
+      + "\nBlock spacing: " + reference.blockSpacingContract
       + "\nMobile menu and menu font: " + reference.menuContract
       + "\nFooter: " + reference.footerBoundary
       + "\nFooter content guard: " + reference.footerContentGuard + "\n\nAtomic change set (one transaction):\n"

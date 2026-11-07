@@ -83,6 +83,15 @@ const TAPROOT_STYLES_ENTRIES = {
     "The color scheme a first-time visitor sees: light, dark, or system to follow the visitor's device.",
     "The starting scheme of every published page. A visitor who uses the theme toggle keeps their own choice.",
   ),
+  blockSpacing: entry(
+    `${BRAND} > Block spacing`,
+    "The space between blocks on every page: compact, standard or roomy. Standard keeps the gap equal to the text "
+      + "spacing; compact scales it to three quarters and roomy to one and a half times. Spacer blocks add their "
+      + "height on top.",
+    "Both color schemes, on every published page. A site shows the change after its next whole-site render, which "
+      + "happens when any settings group or navigation is selected for a stage or deploy. Pages copied forward from "
+      + "an earlier deploy keep their old spacing until then.",
+  ),
   lightLogoId: entry(
     `${BRAND} > Logo`,
     "The site-owned image used as the brand logo in the light scheme.",

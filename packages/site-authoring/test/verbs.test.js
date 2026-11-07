@@ -823,6 +823,7 @@ function themeWorkspace(overrides = {}) {
       lightTheme: agentTheme(DEFAULT_SITE_THEME.light.theme),
       darkTheme: agentTheme(DEFAULT_SITE_THEME.dark.theme),
       defaultScheme: "system",
+      blockSpacing: "roomy",
       lightLogoId: "",
       darkLogoId: "",
       lightCanvasImageId: "",
@@ -1334,6 +1335,7 @@ test("the settings catalog materializes only real enum members", async (site) =>
       lightTheme: projectPulledTheme({}, "light"),
       darkTheme: projectPulledTheme({}, "dark"),
       defaultScheme: "",
+      blockSpacing: "",
       lightCanvasImageOpacity: 0,
       darkLogoId: "",
     },
@@ -1513,7 +1515,7 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal(result.verb, "theme push");
   assert.equal(result.applied, true);
   assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
-  assert.equal(result.written.items.length, 26);
+  assert.equal(result.written.items.length, 27);
   // One read, one write: nothing else touches the site.
   assert.deepEqual(wire.calls.map((call) => call.method), ["GET", "POST"]);
   const save = wire.matching("POST", PRESENTATION)[0];
@@ -1525,7 +1527,7 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal("footerSettings" in save.body, false);
   assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
   assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
-  assert.equal(save.body.settings.length, 25);
+  assert.equal(save.body.settings.length, 26);
   assert.equal(
     save.body.settings.find((write) => write.setting === "lightLogoId")?.value,
     IMAGE_ID,

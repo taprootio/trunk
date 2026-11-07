@@ -469,8 +469,19 @@ export function normalizeFreeFormSectionDecoration(
     validateImageDescription(image, imagePath, "Section decoration image", report);
   }
 
+  // TR01329: width and height sizes are exclusive, so one conflict replaces both range checks.
+  const sizeConflict = Object.hasOwn(value, "inlineSizePercent") && Object.hasOwn(value, "blockSizePercent");
+  if (sizeConflict) {
+    report(
+      `${path}/blockSizePercent`,
+      CODES.attrInvalid,
+      "Section decoration blockSizePercent cannot be combined with inlineSizePercent. Use only one of the two sizes.",
+    );
+  }
+
   for (const [name, definition] of Object.entries(fields)) {
     if (name === "image" || !Object.hasOwn(value, name)) continue;
+    if (sizeConflict && (name === "inlineSizePercent" || name === "blockSizePercent")) continue;
     const fieldPath = `${path}/${name}`;
     const entry = value[name];
     if (definition.type === "enum") {
@@ -514,7 +525,13 @@ export function normalizeFreeFormSectionDecoration(
   };
   const normalized = { image: Object.freeze(normalizedImage) };
   for (const [name, definition] of Object.entries(fields)) {
-    if (name !== "image") normalized[name] = value[name] ?? definition.default;
+    if (name === "image") continue;
+    // A field with no default stays absent. The width default applies only without a height size.
+    const fallback = name === "inlineSizePercent" && Object.hasOwn(value, "blockSizePercent")
+      ? undefined
+      : definition.default;
+    const resolved = value[name] ?? fallback;
+    if (resolved !== undefined) normalized[name] = resolved;
   }
   return finish(Object.freeze(normalized));
 }

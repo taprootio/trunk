@@ -150,7 +150,7 @@ test("the shipped example fixture validates without credentials, network, or wri
       pages: 6,
       navigationItems: 3,
       themes: 2,
-      appearanceSettings: 23,
+      appearanceSettings: 24,
       footer: true,
     },
   );
@@ -325,7 +325,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       forms: 1,
       navigationItems: 10,
       themes: 2,
-      appearanceSettings: 23,
+      appearanceSettings: 24,
       footer: true,
     },
   );
@@ -465,7 +465,7 @@ test(
     const json = JSON.parse(result.stdout);
     assert.deepEqual(json.hints, []);
     assert.doesNotMatch(result.stderr, /Hint:/u);
-    assert.equal(json.validated.appearanceSettings, 23);
+    assert.equal(json.validated.appearanceSettings, 24);
   },
 );
 

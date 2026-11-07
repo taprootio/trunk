@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 50;
+export const REFERENCE_VERSION = 51;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -695,7 +695,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "PAGE uses resourceId from .taproot-site-manifest.json, never pageId or path.",
       "EXTERNAL_URL uses externalUrl; GROUP_HEADER has no target; every kind may carry children.",
       "externalUrl is an absolute credential-free http/https URL, or a mailto:/tel: contact URL such as "
-      + "tel:+15555550123, published exactly as authored.",
+      + "tel:+15555550123, published exactly as authored. An http or https address on another host opens in a new tab, "
+      + "and the link says so to a screen reader.",
     ]),
     example: Object.freeze({
       siteId: "<site-uuid>",
@@ -1409,6 +1410,8 @@ function decorationReference() {
     }\n## Rooted in warmth\n\nMove with confidence.\n:::`,
     maskGuidance:
       "Use a transparent PNG or WebP whose alpha channel contains only the mark. The active section context supplies the tint in both schemes.",
+    sizeGuidance:
+      "Set inlineSizePercent to size the art by the section's width, or blockSizePercent to size it by the section's height. The two cannot be combined.",
     opaqueWarning:
       "An opaque rectangle uses its whole alpha channel and will render as a tinted rectangle, not as a cut-out mark.",
   });
@@ -1453,7 +1456,7 @@ function inlineFactsReference() {
       + "mix labelled and standalone facts. An empty string is rejected, so omitting a label stays explicit. "
       + "Unicode spaces, tabs, and LF/CRLF line breaks are allowed; other C0/C1 controls, U+2028/U+2029, U+FEFF, and literal <br> tags are rejected. The label follows the value in reading order and is outside its link.",
     urlPolicy:
-      "Optional safe HTTP(S), mailto, tel, non-protocol-relative root, fragment, query, or relative URL. Empty/whitespace-only values, other schemes, backslashes, and ASCII controls are rejected; tel: remains a native link. Contact URLs require a body and refuse tel:// and mailto:// authority forms or control characters, consistently with navigation and footer links.",
+      "Optional safe HTTP(S), mailto, tel, non-protocol-relative root, fragment, query, or relative URL. Empty/whitespace-only values, other schemes, backslashes, and ASCII controls are rejected; tel: remains a native link. Contact URLs require a body and refuse tel:// and mailto:// authority forms or control characters, consistently with navigation and footer links. An absolute http(s) address on another site opens in a new tab with nothing to set; the site's own addresses and all other values keep the same tab.",
     markdown: Object.freeze({
       fence: INLINE_FACTS_DEFINITION.markdown.fence,
       body: INLINE_FACTS_DEFINITION.markdown.body,
@@ -1819,10 +1822,10 @@ const FREE_FORM_REFERENCE = Object.freeze({
         + "choice is per link, internal links included.",
       markdownRule:
         'Write {rel="…" target="…"} directly after the link\'s closing parenthesis: either attribute alone or both, '
-        + 'each double-quoted once. rel is space-separated; target="_blank" opens a new tab.',
+        + 'each double-quoted once. rel is space-separated; an external web address opens in a new tab on its own, target="_blank" opens a new tab for any link, and target="_self" keeps a link in the same tab.',
       pmJson:
         'In .pm.json, a link mark carries attrs.rel (a space-separated string, or null) and attrs.target ("_blank" '
-        + 'opens a new tab and publishes with noopener noreferrer added, "_self" or null keeps the same tab).',
+        + 'opens a new tab and publishes with noopener noreferrer added, "_self" keeps the same tab, and null leaves it to the default: an absolute http(s) link to another site opens in a new tab, and any other link keeps the same tab).',
       refusals:
         `Any other rel token, opener included, is refused (${CONTENT_ERROR_CODES.linkRel}); so is another target `
         + `(${CONTENT_ERROR_CODES.linkTarget}). The editor's old default, "noopener noreferrer nofollow", reads as no choice.`,
@@ -2039,9 +2042,15 @@ function formatRegistryField(field, indent = "  ") {
     : `; ${field.minScalars} through ${field.maxScalars} Unicode scalar values${
       field.nonWhitespace ? "; non-whitespace" : ""
     }`;
+  // TR01329: a field with no default key is absent until an author sets it.
+  const requirement = field.required
+    ? "required"
+    : Object.hasOwn(field, "default")
+    ? `default ${JSON.stringify(field.default)}`
+    : "optional; no default";
   const line = `${indent}${field.name.padEnd(Math.max(1, 20 - indent.length))} ${type}${
     field.nullable ? " | null" : ""
-  }; ${field.required ? "required" : `default ${JSON.stringify(field.default)}`}${bounds}${itemBounds}${scalarBounds}`;
+  }; ${requirement}${bounds}${itemBounds}${scalarBounds}`;
   return [line, ...(field.fields ?? []).map((child) => formatRegistryField(child, `${indent}  `))].join("\n");
 }
 
@@ -2128,7 +2137,7 @@ export function formatReferenceResult(result) {
       }\n  delivery URLs         ${page.sections.decoration.deliveryUrlPolicy}\n\nTint mapping:\n${
         Object.entries(page.sections.decoration.tintTokens).map(([name, token]) => `  ${name.padEnd(20)} ${token}`)
           .join("\n")
-      }\n\nTransparent-mask example:\n${page.sections.decoration.markdownExample}\n\nMask guidance: ${page.sections.decoration.maskGuidance}\nWarning: ${page.sections.decoration.opaqueWarning}\n\nRoot defaults and placement:\n${
+      }\n\nTransparent-mask example:\n${page.sections.decoration.markdownExample}\n\nMask guidance: ${page.sections.decoration.maskGuidance}\nSize guidance: ${page.sections.decoration.sizeGuidance}\nWarning: ${page.sections.decoration.opaqueWarning}\n\nRoot defaults and placement:\n${
         page.sections.placementMatrix.map(formatPlacement).join("\n")
       }\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${
         page.tables.structure.inlineNodes.join(", ")
