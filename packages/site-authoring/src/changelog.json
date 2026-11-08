@@ -1,6 +1,17 @@
 {
   "entries": [
     {
+      "version": "0.34.1",
+      "note": "Published pages no longer repeat the page title as the last breadcrumb; the trail ends at the parent, as it did before 0.34.0.",
+      "behavior": [
+        "The visible trail shows only the page's linked ancestors, because the page's title is already its heading. A folder's breadcrumbTitle names it only in the trails of pages beneath it, and the generated-page help and the folder editor's hint say so again. The page's structured data still ends its BreadcrumbList with the page itself. No command changed.",
+        "The help reference version is 54."
+      ],
+      "help": [
+        "page"
+      ]
+    },
+    {
       "version": "0.34.0",
       "note": "Published pages now end the breadcrumb trail with the current page, and the folder breadcrumb label is that page's last crumb. The reference pins Espalier 6.10.0. The help reference version is 53.",
       "behavior": [
