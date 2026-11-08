@@ -301,7 +301,7 @@ const TYPE_DETAILS = Object.freeze({
     dataFields: [
       "kind: what the page is, written by pull. Leave it as pulled; a push that changes it is refused (pages.generated_identity)",
       "customTitle: string; empty uses the generated title (the page's reader-facing title)",
-      "breadcrumbTitle: string; empty uses the generated label (used on pages beneath this one)",
+      "breadcrumbTitle: string; empty uses the generated label (used on pages beneath this one and as this page's own last crumb)",
       "customDescription: string, at most 1000 characters, about 160 shown in search results; empty uses the "
       + "introduction's first paragraph, else the generated description",
       "introductionBody: ProseMirror document (optional), shown above the generated listing",

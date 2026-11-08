@@ -1,6 +1,21 @@
 {
   "entries": [
     {
+      "version": "0.34.0",
+      "note": "Published pages now end the breadcrumb trail with the current page, and the folder breadcrumb label is that page's last crumb. The reference pins Espalier 6.10.0. The help reference version is 53.",
+      "behavior": [
+        "A folder's breadcrumbTitle now also names the folder as the last crumb of its own trail, as well as in the trails of pages beneath it. The generated-page help and the folder editor's hint say so.",
+        "Published pages show the current page as the last crumb of the trail, with no link, and carry their title, author, byline, menu, breadcrumb and brand links as plain HTML, from the next publish that renders them.",
+        "The reference pins Espalier 6.10.0, so theme and appearance checks use that release.",
+        "The help reference version is 53."
+      ],
+      "help": [
+        "page",
+        "pages",
+        "appearance"
+      ]
+    },
+    {
       "version": "0.32.0",
       "note": "Links to other sites open in a new tab on published pages with nothing to set; target=\"_self\" keeps a link mark in the same tab; page blocks get real default spacing with a site-wide setting.",
       "behavior": [
