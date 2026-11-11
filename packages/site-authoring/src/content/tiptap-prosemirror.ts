@@ -7,6 +7,7 @@
  * Keep those publishing copies in sync and covered by parity tests.
  */
 
+import { columnsAttributes, isColumnEligibleBlock } from "./free-form-columns.js";
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 import { imageDescriptionIssues } from "./image-description-validation.js";
 import { isExternalLink, NEW_TAB_CUE_HTML, relWithNewTabTokens } from "./external-link.js";
@@ -177,7 +178,7 @@ function isTextBlock(type: string): boolean {
     || type === "tableHeader";
 }
 
-type RenderPlacement = "root" | "section" | "nested";
+type RenderPlacement = "root" | "section" | "column" | "nested";
 type RenderOptionsWithLayout = RenderProseMirrorOptions & { fullWidthImages?: boolean };
 
 function renderNodes(
@@ -301,7 +302,9 @@ function renderNode(
     case "horizontalRule":
       return "<hr>";
     case "table":
-      return placement === "root" || placement === "section" ? renderTable(node, options) : "";
+      return placement === "root" || placement === "section" || placement === "column"
+        ? renderTable(node, options)
+        : "";
     case "taprootImage":
       return options.nodeRenderers?.taprootImage?.(node, { groupColumns, fullWidth: options.fullWidthImages === true })
         ?? renderTaprootImage(node, options);
@@ -311,6 +314,10 @@ function renderNode(
       return options.nodeRenderers?.componentBlock?.(node) ?? renderComponentBlock(node);
     case "integrationPlacement":
       return renderIntegrationPlacement(node, options);
+    case "columns":
+      return placement === "section" ? renderColumns(node, options) : "";
+    case "column":
+      return "";
     case "section":
       return renderSection(
         node.content ?? [],
@@ -665,7 +672,7 @@ function renderInlineFacts(
   options: RenderProseMirrorOptions,
   placement: RenderPlacement,
 ): string {
-  if (placement !== "root" && placement !== "section") return "";
+  if (placement !== "root" && placement !== "section" && placement !== "column") return "";
   const facts = normalizeInlineFacts(node);
   if (!facts) return "";
   const items = facts.map((fact) => {
@@ -722,6 +729,27 @@ function normalizeInlineFacts(node: ProseMirrorNode): NormalizedInlineFact[] | u
     facts.push({ value: factValue, label, url });
   }
   return facts;
+}
+
+function renderColumns(node: ProseMirrorNode, options: RenderOptionsWithLayout): string {
+  const attrs = columnsAttributes(node);
+  const regions = node.content;
+  if (
+    !attrs || !regions || regions.length !== attrs.count
+    || regions.some(region =>
+      region.type !== "column" || !region.content?.length || region.content.some(block => !isColumnEligibleBlock(block))
+    )
+  ) return "";
+  return renderElement(
+    "esp-columns",
+    {
+      "data-taproot-columns": true,
+      ratio: attrs.ratio === "equal" ? undefined : attrs.ratio,
+    },
+    regions.map(region =>
+      renderElement("div", { "data-taproot-column": true }, renderNodes(region.content ?? [], options, "column"))
+    ).join(""),
+  );
 }
 
 function renderSection(

@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { atomicWriteFile } from "./atomic-file.js";
 import { parseAuthorReference } from "./authors-contract.js";
+import { LIMITS } from "./constants.js";
 import { hasAsciiControl, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 import {
   noteEntry,
@@ -274,7 +275,7 @@ export const MEDIA_MANIFEST_VERSION = 2;
 export const WORKSPACE_LIMITS = Object.freeze({
   // One authored page: a Markdown source or a ProseMirror document.
   documentBytes: 2 * 1024 * 1024,
-  navigationBytes: 1024 * 1024,
+  navigationBytes: LIMITS.navigationWorkspaceBytes,
   // The redirect map: sized from the contract's own bounds (entries, path
   // and target bytes, pretty-printed JSON overhead) rather than borrowed from
   // the navigation tree, so the site's own pulled map always reads back.

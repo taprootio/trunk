@@ -1,5 +1,6 @@
 import { BLOCK_SPACINGS, DEFAULT_BLOCK_SPACING } from "./block-flow.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
+import { HEADER_HEIGHT_MULTIPLIER_LIMITS, parseHeaderHeightMultiplier } from "./header-presentation.js";
 import {
   SETTINGS_TYPE_BRAND,
   SETTINGS_TYPE_SITE_HEADER,
@@ -37,15 +38,17 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     values: Object.freeze(Object.keys(BLOCK_SPACINGS)),
     default: DEFAULT_BLOCK_SPACING,
   }),
-  ...["lightLogoId", "darkLogoId", "lightCanvasImageId", "darkCanvasImageId"].map((name) =>
-    Object.freeze({
-      settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
-      name,
-      path: `taproot-styles.${name}`,
-      type: "site-owned-image-id",
-      default: "",
-    })
-  ),
+  ...["lightLogoId", "darkLogoId", "lightCompactLogoId", "darkCompactLogoId", "lightCanvasImageId", "darkCanvasImageId"]
+    .map((name) =>
+      Object.freeze({
+        settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
+        name,
+        path: `taproot-styles.${name}`,
+        type: "site-owned-image-id",
+        optional: name === "lightCompactLogoId" || name === "darkCompactLogoId",
+        default: "",
+      })
+    ),
   ...["lightCanvasImageOpacity", "darkCanvasImageOpacity"].map((name) =>
     Object.freeze({
       settingsType: SETTINGS_TYPE_TAPROOT_STYLES,
@@ -125,8 +128,17 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     name: "headerPosition",
     path: "site-header.headerPosition",
     type: "enum",
-    values: Object.freeze(["normal", "sticky"]),
+    values: Object.freeze(["normal", "sticky", "fixed"]),
     default: "normal",
+  }),
+  Object.freeze({
+    settingsType: SETTINGS_TYPE_SITE_HEADER,
+    name: "headerHeightMultiplier",
+    path: "site-header.headerHeightMultiplier",
+    type: "header-height-multiplier",
+    ...HEADER_HEIGHT_MULTIPLIER_LIMITS,
+    optional: true,
+    default: "",
   }),
   Object.freeze({
     settingsType: SETTINGS_TYPE_SITE_HEADER,
@@ -199,6 +211,8 @@ function refuseRetiredScalarFonts(stylesDocument) {
 export const APPEARANCE_READ_ONLY_FIELDS = Object.freeze([
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.lightLogoUrl" }),
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.darkLogoUrl" }),
+  Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.lightCompactLogoUrl" }),
+  Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.darkCompactLogoUrl" }),
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.lightCanvasImageUrl" }),
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_TAPROOT_STYLES], path: "settings.darkCanvasImageUrl" }),
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_BRAND], path: "settings.faviconUrl" }),
@@ -225,9 +239,13 @@ export const APPEARANCE_IMAGE_FIELDS = Object.freeze(
 );
 
 export function appearanceImageIds(documents) {
-  return [...new Set(APPEARANCE_IMAGE_FIELDS
-    .map((field) => documents[field.settingsType]?.[field.name])
-    .filter((value) => isCanonicalUuid(value)))].sort();
+  return [
+    ...new Set(
+      APPEARANCE_IMAGE_FIELDS
+        .map((field) => documents[field.settingsType]?.[field.name])
+        .filter((value) => isCanonicalUuid(value)),
+    ),
+  ].sort();
 }
 
 function fail(code, message, field) {
@@ -243,6 +261,17 @@ function requireString(value, field, maximum = 256 * 1024) {
 
 function validateScalar(definition, value, knownImageIds) {
   switch (definition.type) {
+    case "header-height-multiplier": {
+      const height = parseHeaderHeightMultiplier(value);
+      if (!height) {
+        fail(
+          "theme.setting_invalid",
+          `${definition.path} must be a string from 1.0 through 5.0 in 0.1 steps.`,
+          definition.path,
+        );
+      }
+      return height.canonical;
+    }
     case "enum":
       if (typeof value !== "string" || !definition.values.includes(value)) {
         fail(
@@ -303,6 +332,13 @@ function validateScalar(definition, value, knownImageIds) {
   }
 }
 
+/** Compare authored aliases and omitted optional fields with the same values sent to Taproot. */
+export function appearanceScalarInput(definition, value) {
+  const input = value === undefined && definition.optional ? definition.default : value;
+  if (definition.type === "header-height-multiplier") return parseHeaderHeightMultiplier(input)?.canonical ?? input;
+  return input;
+}
+
 export function buildAppearanceScalarOperations(documents, knownImageIds) {
   if (!(knownImageIds instanceof Set)) {
     throw new TypeError("Appearance validation requires the known site-owned image identities.");
@@ -311,7 +347,11 @@ export function buildAppearanceScalarOperations(documents, knownImageIds) {
   return APPEARANCE_SCALAR_FIELDS.map((definition) => ({
     settingsType: definition.settingsType,
     setting: definition.name,
-    value: validateScalar(definition, documents[definition.settingsType]?.[definition.name], knownImageIds),
+    value: validateScalar(
+      definition,
+      appearanceScalarInput(definition, documents[definition.settingsType]?.[definition.name]),
+      knownImageIds,
+    ),
   }));
 }
 

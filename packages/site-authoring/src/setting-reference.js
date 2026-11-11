@@ -50,7 +50,8 @@ const OPACITY_RENDERS = "Sets the opacity of the canvas image layer in the same 
   + "canvas image is set.";
 
 /** The page background image's rendering, stated once for the theme reference, `help settings` and the README. */
-export const PAGE_BACKGROUND_IMAGE_RENDERING = "One layer across the whole page box, behind the content. The header and "
+export const PAGE_BACKGROUND_IMAGE_RENDERING =
+  "One layer across the whole page box, behind the content. The header and "
   + "footer paint their own opaque backgrounds over it, so it shows behind the main content only.";
 
 export const PAGE_BACKGROUND_VERSUS_CANVAS = Object.freeze({
@@ -104,6 +105,18 @@ const TAPROOT_STYLES_ENTRIES = {
     LOGO_RENDERS,
   ),
   darkLogoUrl: entry(`${BRAND} > Logo`, "Read-only: the delivery URL of darkLogoId."),
+  lightCompactLogoId: entry(
+    `${HEADER} > Compact logo`,
+    "Optional site-owned light-scheme logo for a Fixed header above 1.0. Hidden controls retain saved choices.",
+    "Only while the header is compact: this scheme's compact logo, then the other compact scheme, then the regular logo.",
+  ),
+  lightCompactLogoUrl: entry(`${HEADER} > Compact logo`, "Read-only: the delivery URL of lightCompactLogoId."),
+  darkCompactLogoId: entry(
+    `${HEADER} > Compact logo`,
+    "Optional site-owned dark-scheme logo for a Fixed header above 1.0. Hidden controls retain saved choices.",
+    "Only while the header is compact: this scheme's compact logo, then the other compact scheme, then the regular logo.",
+  ),
+  darkCompactLogoUrl: entry(`${HEADER} > Compact logo`, "Read-only: the delivery URL of darkCompactLogoId."),
   lightCanvasImageId: entry(
     "Brand & style > Page canvas > Canvas image",
     "The site-owned image painted in the side margins of a page in the light scheme.",
@@ -207,8 +220,13 @@ const HEADER_ENTRIES = {
   ),
   headerPosition: entry(
     `${HEADER} > Position`,
-    "normal lets the header scroll away with the page; sticky keeps it at the top once it reaches it.",
+    "normal scrolls away with the page; sticky stays at the top once reached; fixed stays at the viewport top with page space reserved.",
     "The header at the top of every published page.",
+  ),
+  headerHeightMultiplier: entry(
+    `${HEADER} > Header height`,
+    "A string such as \"1.8\", from \"1.0\" through \"5.0\" in 0.1 steps. Omit it for standard 1.0; integers normalize to one decimal digit.",
+    "The primary header bar; extra menu rows and controls keep their size. Fixed headers above 1.0 shrink to standard on scroll; Normal and Sticky retain their height.",
   ),
   showThemeToggle: entry(
     `${HEADER} > Theme toggle`,
@@ -468,7 +486,5 @@ export function formatSettingsReference(reference) {
     }`
   ).join("\n");
   const contrast = reference.pageBackgroundVersusCanvas;
-  return `${reference.title}\nUsage: ${reference.usage}\n\nPage background image versus canvas image:\n  - ${
-    contrast.pageBackground
-  }\n  - ${contrast.canvas}\n  - ${contrast.shared}\n\nApp controls stored inside the theme (help theme describes each field):\n${controls}\n\n${groups}\n`;
+  return `${reference.title}\nUsage: ${reference.usage}\n\nPage background image versus canvas image:\n  - ${contrast.pageBackground}\n  - ${contrast.canvas}\n  - ${contrast.shared}\n\nApp controls stored inside the theme (help theme describes each field):\n${controls}\n\n${groups}\n`;
 }

@@ -33,7 +33,7 @@ import { parseServedStagingRelease, readServedStagingRelease } from "../src/stag
 import { footerPush } from "../src/verbs/footer-push.js";
 import { VERB_HANDLERS } from "../src/verbs/index.js";
 import { mediaUpload } from "../src/verbs/media-upload.js";
-import { navPush } from "../src/verbs/nav-push.js";
+import { navPush, validateNavigationWorkspaceDocument } from "../src/verbs/nav-push.js";
 import { pagesPush } from "../src/verbs/pages-push.js";
 import { previewPage } from "../src/verbs/preview-page.js";
 import { projectPulledTheme } from "../src/theme-projection.js";
@@ -1485,7 +1485,7 @@ function presentationSaveReply(call, { footerSettings = {}, revision = NEXT_PRES
 
 test("theme push saves the complete change set in one request fenced by the pull baseline", async (site) => {
   const workspace = await fixture(site, {
-    ...themeWorkspace({ style: { lightLogoId: IMAGE_ID } }),
+    ...themeWorkspace({ style: { lightLogoId: IMAGE_ID, lightCompactLogoId: IMAGE_ID }, header: { headerPosition: "fixed", headerHeightMultiplier: "2" } }),
     ".taproot-site-media.json": {
       mediaManifestVersion: 2,
       siteId: SITE_ID,
@@ -1515,7 +1515,7 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal(result.verb, "theme push");
   assert.equal(result.applied, true);
   assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
-  assert.equal(result.written.items.length, 27);
+  assert.equal(result.written.items.length, 30);
   // One read, one write: nothing else touches the site.
   assert.deepEqual(wire.calls.map((call) => call.method), ["GET", "POST"]);
   const save = wire.matching("POST", PRESENTATION)[0];
@@ -1527,7 +1527,7 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal("footerSettings" in save.body, false);
   assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
   assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
-  assert.equal(save.body.settings.length, 26);
+  assert.equal(save.body.settings.length, 29);
   assert.equal(
     save.body.settings.find((write) => write.setting === "lightLogoId")?.value,
     IMAGE_ID,
@@ -1536,6 +1536,10 @@ test("theme push saves the complete change set in one request fenced by the pull
     save.body.settings.find((write) => write.setting === "lightLogoId")?.settingsType,
     "SETTING_TYPE_TAPROOT_STYLES",
   );
+  assert.equal(save.body.settings.find(write => write.setting === "headerHeightMultiplier")?.value, "2.0");
+  assert.equal(save.body.settings.find(write => write.setting === "headerPosition")?.value, "fixed");
+  assert.equal(save.body.settings.find(write => write.setting === "lightCompactLogoId")?.value, IMAGE_ID);
+  assert.equal(save.body.settings.some(write => write.setting.endsWith("CompactLogoUrl")), false);
   const themes = save.body.settings.slice(-2);
   assert.deepEqual(themes.map((write) => write.setting), ["lightTheme", "darkTheme"]);
   for (const write of themes) {
@@ -2011,6 +2015,24 @@ test("theme push succeeds when the same fonts live only inside the per-scheme th
 
   assert.equal(result.ok, true);
 });
+
+for (const numeric of ["1.8", "1e0"]) {
+  test(`theme push refuses numeric header height ${numeric} before any request`, async (site) => {
+    const workspace = await fixture(site, themeWorkspace());
+    const header = await readWorkspaceJson(workspace, "settings/site-header.json");
+    header.settings.headerHeightMultiplier = "HEIGHT_PLACEHOLDER";
+    await writeFile(
+      workspacePath(workspace, "settings/site-header.json"),
+      JSON.stringify(header).replace('"HEIGHT_PLACEHOLDER"', numeric),
+    );
+    const wire = api([]);
+    await assert.rejects(
+      themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
+      error => error?.code === "theme.setting_invalid" && error?.field === "site-header.headerHeightMultiplier",
+    );
+    assert.equal(wire.calls.length, 0);
+  });
+}
 
 test("theme push refuses an incomplete pair before the first API call", async (site) => {
   const invalidLight = agentTheme(DEFAULT_SITE_THEME.light.theme);
@@ -7799,6 +7821,97 @@ const NAV_PAGES_ROUTE = {
   },
 };
 
+test("nav push accepts its item ceiling and refuses the next item", () => {
+  const document = (children) => ({ siteId: SITE_ID, navItems: [{
+    id: navId(1), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "Legacy group",
+    children: Array.from({ length: children }, (_, index) => ({
+      id: navId(index + 2), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: `Link ${index}`, externalUrl: "https://example.com",
+    })),
+  }] });
+  assert.equal(validateNavigationWorkspaceDocument(document(1999), SITE_ID).items, 2000);
+  assert.throws(() => validateNavigationWorkspaceDocument(document(2000), SITE_ID), { code: "nav.too_many_items" });
+});
+
+test("nav push reads and saves a migrated legacy tree near the former byte limit", async (site) => {
+  const oldMaximumBytes = 1024 * 1024;
+  const legacy = {
+    siteId: SITE_ID,
+    navItems: Array.from({ length: 500 }, (_, index) => ({
+      id: navId(2 * index + 1),
+      kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+      title: `Legacy group ${index}`.padEnd(200, "x"),
+      externalUrl: "https://example.com/",
+      children: [{
+        id: navId(2 * index + 2),
+        kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+        title: `Existing child ${index}`.padEnd(200, "x"),
+        externalUrl: "https://example.com/",
+      }],
+    })),
+  };
+  const formatDocument = (document) => `${JSON.stringify(document, null, 2)}\n`;
+  const legacyItems = legacy.navItems.flatMap((item) => [item, ...item.children]);
+  const padding = Math.floor((oldMaximumBytes - 1 - Buffer.byteLength(formatDocument(legacy))) / legacyItems.length);
+  for (const item of legacyItems) item.externalUrl += "x".repeat(padding);
+  const legacyBytes = Buffer.byteLength(formatDocument(legacy));
+  assert.ok(legacyBytes < oldMaximumBytes && legacyBytes >= oldMaximumBytes - legacyItems.length);
+
+  // The API preserves each linked parent's destination as its same-title first child.
+  const migrated = legacy.navItems.map((item, index) => ({
+    id: item.id,
+    kind: "NAV_ITEM_KIND_GROUP_HEADER",
+    title: item.title,
+    children: [{
+      id: navId(legacyItems.length + index + 1),
+      kind: item.kind,
+      title: item.title,
+      externalUrl: item.externalUrl,
+    }, ...item.children],
+  }));
+  const document = { siteId: SITE_ID, navItems: migrated };
+  const normalized = withPrintedNavigationDefaults(migrated);
+  const response = { navItems: normalized, revision: NAVIGATION_REVISION };
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([], {
+      navigation: { file: "nav.json", items: 500, revision: NAVIGATION_REVISION },
+    }),
+    "nav.json": document,
+  });
+  const pulled = await readWorkspaceText(workspace, "nav.json");
+  assert.ok(Buffer.byteLength(pulled) > oldMaximumBytes);
+  assert.ok(Buffer.byteLength(pulled) <= LIMITS.navigationWorkspaceBytes);
+  assert.ok(Buffer.byteLength(JSON.stringify(response)) > oldMaximumBytes);
+  const wire = api([
+    { method: "GET", pattern: NAVIGATION, reply: response },
+    {
+      method: "PUT", pattern: NAVIGATION,
+      reply: (call) => {
+        assert.equal(call.body.expectedRevision, NAVIGATION_REVISION);
+        assert.deepEqual(call.body.navItems, normalized);
+        return response;
+      },
+    },
+  ]);
+
+  const result = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+  assert.equal(result.navigation.items, 1500);
+  assert.equal(result.navigation.revision, NAVIGATION_REVISION);
+  assert.equal(wire.matching("GET", NAVIGATION).length, 1);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 1);
+  assert.equal(await readWorkspaceText(workspace, "nav.json"), pulled);
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).navigation.items, 500);
+
+  await writeFile(
+    workspacePath(workspace, "nav.json"),
+    `${pulled}${" ".repeat(LIMITS.navigationWorkspaceBytes + 1 - Buffer.byteLength(pulled))}`,
+  );
+  await assert.rejects(
+    navPush(invoke(workspace, wire, { verb: "nav push" }).invocation),
+    (error) => error?.code === "workspace.file_too_large" && error.field === "nav.json",
+  );
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 1);
+});
+
 test("nav push re-reads the live tree immediately before replacing it whole", async (site) => {
   const workspace = await fixture(site, { ".taproot-site-manifest.json": manifestFixture([]), "nav.json": { siteId: SITE_ID, navItems: NAV_TREE } });
   const wire = api([
@@ -7952,6 +8065,32 @@ test("nav push records the tree the site answered with, even when another editor
   assert.equal(manifest.navigation.items, 0);
 });
 
+test("navigation default aliases settle an already-applied push without another write", async (context) => {
+  const aliases = [
+    ["position", "NAV_ITEM_POSITION_UNSPECIFIED", "NAV_ITEM_POSITION_MENU"],
+    ["appearance", "NAV_ITEM_APPEARANCE_UNSPECIFIED", "NAV_ITEM_APPEARANCE_LINK"],
+  ];
+  for (const [field, unspecified, explicit] of aliases) {
+    for (const value of [unspecified, explicit]) {
+      await context.test(value, async (site) => {
+        const item = { id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Sign in", externalUrl: "https://app.example.com/sign-in" };
+        const workspace = await fixture(site, {
+          ".taproot-site-manifest.json": manifestFixture([]),
+          "nav.json": { siteId: SITE_ID, navItems: [{ ...item, [field]: value }] },
+        });
+        const wire = api([{
+          method: "GET", pattern: NAVIGATION,
+          reply: { navItems: [{ ...item, [field]: unspecified, resourceId: "", children: [] }], revision: NAVIGATION_REVISION_AFTER_SAVE },
+        }]);
+        await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+        assert.equal(wire.matching("PUT", NAVIGATION).length, 0);
+        assert.deepEqual((await readWorkspaceJson(workspace, "nav.json")).navItems, [item]);
+        assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).navigation.revision, NAVIGATION_REVISION_AFTER_SAVE);
+      });
+    }
+  }
+});
+
 test("nav push advances the recorded revision, so the next push is fenced against what it saved (TR01231)", async (site) => {
   const workspace = await fixture(site, {
     ".taproot-site-manifest.json": manifestFixture([]),
@@ -8020,6 +8159,8 @@ function withPrintedNavigationDefaults(items) {
     title: item.title,
     resourceId: item.resourceId ?? "",
     externalUrl: item.externalUrl ?? "",
+    ...(item.position === undefined ? {} : { position: item.position }),
+    ...(item.appearance === undefined ? {} : { appearance: item.appearance }),
     children: withPrintedNavigationDefaults(item.children ?? []),
   }));
 }
@@ -8030,11 +8171,14 @@ test("navigation round-trips byte-identically through pull, nav push and pull (T
       id: navId(1),
       kind: "NAV_ITEM_KIND_GROUP_HEADER",
       title: "Company",
+      position: "NAV_ITEM_POSITION_UNSPECIFIED",
+      appearance: "NAV_ITEM_APPEARANCE_UNSPECIFIED",
       children: [
-        { id: navId(2), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Press", externalUrl: "https://example.com/press" },
+        { id: navId(2), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Press", externalUrl: "https://example.com/press", appearance: "NAV_ITEM_APPEARANCE_LINK" },
+        { id: navId(4), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Call", externalUrl: "tel:+15555550123", appearance: "NAV_ITEM_APPEARANCE_BUTTON" },
       ],
     },
-    { id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Contact", externalUrl: "mailto:hello@example.com" },
+    { id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Contact", externalUrl: "mailto:hello@example.com", position: "NAV_ITEM_POSITION_HEADER_END", appearance: "NAV_ITEM_APPEARANCE_BUTTON" },
   ]);
   const workspace = await fixture(site);
   const wire = api([
@@ -8057,6 +8201,10 @@ test("navigation round-trips byte-identically through pull, nav push and pull (T
   // The defaults the API prints are left out of the file.
   assert.doesNotMatch(pulled, /"externalUrl": ""|"resourceId": ""|"children": \[\]/u);
   assert.match(pulled, /"externalUrl": "https:\/\/example\.com\/press"/u);
+  assert.match(pulled, /"position": "NAV_ITEM_POSITION_HEADER_END"/u);
+  assert.doesNotMatch(pulled, /NAV_ITEM_POSITION_(?:UNSPECIFIED|MENU)/u);
+  assert.match(pulled, /"appearance": "NAV_ITEM_APPEARANCE_BUTTON"/u);
+  assert.doesNotMatch(pulled, /NAV_ITEM_APPEARANCE_(?:UNSPECIFIED|LINK)/u);
 
   // Pushing the pulled file rewrites it unchanged.
   await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
@@ -8072,9 +8220,12 @@ test("navigation round-trips byte-identically through pull, nav push and pull (T
           title: "Company",
           kind: "NAV_ITEM_KIND_GROUP_HEADER",
           id: navId(1),
-          children: [{ title: "Press", kind: "NAV_ITEM_KIND_EXTERNAL_URL", id: navId(2), externalUrl: "https://example.com/press" }],
+          children: [
+            { title: "Press", kind: "NAV_ITEM_KIND_EXTERNAL_URL", id: navId(2), externalUrl: "https://example.com/press", appearance: "NAV_ITEM_APPEARANCE_LINK" },
+            { appearance: "NAV_ITEM_APPEARANCE_BUTTON", title: "Call", kind: "NAV_ITEM_KIND_EXTERNAL_URL", id: navId(4), externalUrl: "tel:+15555550123" },
+          ],
         },
-        { title: "Contact", id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", externalUrl: "mailto:hello@example.com" },
+        { title: "Contact", id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", externalUrl: "mailto:hello@example.com", position: "NAV_ITEM_POSITION_HEADER_END", appearance: "NAV_ITEM_APPEARANCE_BUTTON" },
       ],
       siteId: SITE_ID,
     }),
@@ -8085,6 +8236,60 @@ test("navigation round-trips byte-identically through pull, nav push and pull (T
   // The next pull is byte-identical to what the push left.
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
   assert.equal(await read(), pulled);
+});
+
+test("a migrated linked-group response keeps its tree and revision through pull, nav push and pull", async (site) => {
+  // The API owns legacy normalization. This is its normalized response, including
+  // preserved page and external destinations as same-title first children.
+  let live = withPrintedNavigationDefaults([
+    {
+      id: navId(1), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "About",
+      children: [
+        { id: navId(2), kind: "NAV_ITEM_KIND_PAGE", title: "About", resourceId: resourceIdFor(ABOUT_PAGE_ID) },
+        { id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Team", externalUrl: "https://example.com/team" },
+      ],
+    },
+    {
+      id: navId(4), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "Resources",
+      children: [
+        { id: navId(5), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Resources", externalUrl: "https://example.com/resources" },
+        { id: navId(6), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "More" },
+      ],
+    },
+  ]);
+  const normalized = structuredClone(live);
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: NAVIGATION, reply: () => ({ navItems: live, revision: NAVIGATION_REVISION }) },
+    {
+      method: "PUT", pattern: NAVIGATION,
+      reply: (call) => {
+        assert.equal(call.body.expectedRevision, NAVIGATION_REVISION);
+        assert.deepEqual(call.body.navItems, normalized);
+        live = withPrintedNavigationDefaults(call.body.navItems);
+        return { navItems: live, revision: NAVIGATION_REVISION };
+      },
+    },
+    ...trackedRoutes({ body: paragraphDocument(BODY_MARKER) }).filter((route) => route.pattern !== NAVIGATION),
+  ]);
+
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  const pulled = await readWorkspaceText(workspace, "nav.json");
+  const document = await readWorkspaceJson(workspace, "nav.json");
+  assert.deepEqual(document.navItems.map((item) => [item.id, item.kind, item.children.map((child) => child.id)]), [
+    [navId(1), "NAV_ITEM_KIND_GROUP_HEADER", [navId(2), navId(3)]],
+    [navId(4), "NAV_ITEM_KIND_GROUP_HEADER", [navId(5), navId(6)]],
+  ]);
+  assert.equal(document.navItems[0].children[0].resourceId, resourceIdFor(ABOUT_PAGE_ID));
+  assert.equal(document.navItems[1].children[0].externalUrl, "https://example.com/resources");
+
+  const pushed = await navPush(invoke(workspace, wire, { verb: "nav push" }).invocation);
+  assert.equal(pushed.navigation.revision, NAVIGATION_REVISION);
+  assert.equal(wire.matching("PUT", NAVIGATION).length, 1);
+  assert.equal(await readWorkspaceText(workspace, "nav.json"), pulled);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.equal(await readWorkspaceText(workspace, "nav.json"), pulled);
+  assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).navigation.revision, NAVIGATION_REVISION);
 });
 
 test("nav push keeps the file's other top-level keys, and reports a failed local rewrite after the tree was replaced (TR01232)", async (site) => {
@@ -8217,6 +8422,18 @@ test("nav push refuses a malformed tree locally and names the item", async (test
       field: "navItems[0]",
     },
     {
+      name: "an unsupported appearance",
+      navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "A", externalUrl: "https://example.com", appearance: "NAV_ITEM_APPEARANCE_UNKNOWN" }],
+      code: "nav.appearance_invalid",
+      field: "navItems[0].appearance",
+    },
+    {
+      name: "a styled nested dropdown",
+      navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "A", children: [{ id: navId(2), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "B", appearance: "NAV_ITEM_APPEARANCE_BUTTON" }] }],
+      code: "nav.appearance_unavailable",
+      field: "navItems[0].children[0].appearance",
+    },
+    {
       name: "a PAGE item with no resource",
       navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_PAGE", title: "A" }],
       code: "nav.resource_missing",
@@ -8303,6 +8520,38 @@ test("nav push refuses a malformed tree locally and names the item", async (test
       // Local validation runs before any wire call, so a bad tree never reaches
       // the whole-tree replace.
       assert.equal(wire.calls.length, 0);
+    });
+  }
+});
+
+test("nav push refuses linked groups at their item path before sending a save", async (context) => {
+  const child = { id: navId(3), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Child", externalUrl: "https://example.com/child" };
+  for (const [kind, target] of [
+    ["NAV_ITEM_KIND_PAGE", { resourceId: resourceIdFor(ABOUT_PAGE_ID) }],
+    ["NAV_ITEM_KIND_EXTERNAL_URL", { externalUrl: "https://example.com" }],
+    ["NAV_ITEM_KIND_GROUP_HEADER", { externalUrl: "https://example.com" }],
+  ]) {
+    await context.test(kind, async (site) => {
+      const workspace = await fixture(site, {
+        ".taproot-site-manifest.json": manifestFixture([]),
+        "nav.json": {
+          siteId: SITE_ID,
+          navItems: [{
+            id: navId(1), kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "Root",
+            children: [{ id: navId(2), kind, title: "Linked parent", ...target, children: [child] }],
+          }],
+        },
+      });
+      const before = await readWorkspaceText(workspace, "nav.json");
+      const wire = api([]);
+      await assert.rejects(navPush(invoke(workspace, wire, { verb: "nav push" }).invocation), (error) => {
+        assert.equal(error.code, "nav.group_target_unexpected");
+        assert.equal(error.field, "navItems[0].children[0]");
+        assert.match(error.message, /Move the address into a child item/u);
+        return true;
+      });
+      assert.equal(wire.calls.length, 0);
+      assert.equal(await readWorkspaceText(workspace, "nav.json"), before);
     });
   }
 });

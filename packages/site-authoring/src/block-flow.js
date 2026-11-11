@@ -27,6 +27,7 @@ export const DEFAULT_BLOCK_SPACING = "standard";
 // which must not gain a margin.
 const FLOW_CONTAINERS = [
     "[data-section-content]",
+    "[data-taproot-column]",
     "[slot=\"body\"]",
     "[slot=\"introduction\"]",
     ".recipe-story",
@@ -74,6 +75,7 @@ ${SCALE_MAPPING}
 :where(${FLOW_CONTAINERS}) > :where(p, h1, h2, h3, h4, figure, blockquote, dl) {
   margin-block-end: 0;
 }
+esp-columns,
 taproot-hero,
 taproot-cta,
 taproot-testimonial,
@@ -83,6 +85,12 @@ taproot-card-grid,
 taproot-product-grid {
   display: block;
 }
+[data-taproot-column] {
+  display: flow-root;
+  min-inline-size: 0;
+}
+[data-taproot-column] > :first-child { margin-block-start: 0; }
+[data-taproot-column] > :last-child { margin-block-end: 0; }
 :is(${FLOW_CONTAINERS}) > :where(h1, h2, h3, h4, h5) {
   margin-block-start: calc(var(--esp-size-small-to-normal, 0.83em) * var(--taproot-block-scale, 1));
 }

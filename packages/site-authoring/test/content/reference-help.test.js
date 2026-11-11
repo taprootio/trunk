@@ -42,7 +42,7 @@ import {
   shippedFixtureDirectory,
 } from "../../src/fixture-contract.js";
 import { SETTINGS_GROUPS } from "../../src/settings-catalog.js";
-import { STAGING_REVIEW_SESSION_NOTE } from "../../src/constants.js";
+import { LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../../src/constants.js";
 import { getSettingsReference } from "../../src/setting-reference.js";
 import { getTypedPageReference, LEGAL_PLATFORM_LINK_GUIDANCE } from "../../src/typed-page-reference.js";
 import { MANIFEST_VERSION } from "../../src/workspace.js";
@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 54);
+  assert.equal(REFERENCE_VERSION, 56);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -351,7 +351,7 @@ test("table reference help is executable and documents every bound and correctio
   const tables = page.tables;
   assert.equal(page.document.tableNode, tables);
   assert.deepEqual(tables.nodeTypes, FREE_FORM_SECTION_REGISTRY.table.nodeTypes);
-  assert.deepEqual(tables.placement, { root: true, section: true, measure: "wide" });
+  assert.deepEqual(tables.placement, { root: true, section: true, column: true, measure: "wide" });
   assert.deepEqual(tables.limits, {
     captionScalars: { min: 1, max: 160, unit: "Unicode scalar values", nonWhitespace: true },
     dataRows: { min: 1, max: 100 },
@@ -425,7 +425,7 @@ test("inline-facts reference is executable and documents the canonical SHY row",
   const facts = page.inlineFacts;
   assert.equal(page.document.inlineFactsNode, facts);
   assert.equal(facts.nodeType, "inlineFacts");
-  assert.deepEqual(facts.placement, { root: true, section: true, measure: "wide" });
+  assert.deepEqual(facts.placement, { root: true, section: true, column: true, measure: "wide" });
   assert.equal(facts.attrs.items.minItems, 1);
   assert.equal(facts.attrs.items.maxItems, 6);
   assert.equal(facts.attrs.items.itemAdditionalProperties, false);
@@ -771,6 +771,40 @@ test("a workflow reference without a shipped fixture renders exactly as it did",
   assert.ok(human.includes("\n\nExample:\n"));
 });
 
+test("navigation help explains groups, placement and button appearance", () => {
+  const human = formatReferenceResult({ topic: "workflow", reference: getWorkflowReference("nav") });
+
+  assert.match(human, /Only GROUP_HEADER may carry children/u);
+  assert.match(human, /NAV_ITEM_POSITION_HEADER_END/u);
+  assert.match(human, /NAV_ITEM_POSITION_UNSPECIFIED and NAV_ITEM_POSITION_MENU/u);
+  assert.match(human, /Only top-level PAGE or EXTERNAL_URL leaves/u);
+  assert.match(human, /join the collapsed menu/u);
+  assert.match(human, /NAV_ITEM_APPEARANCE_BUTTON/u);
+  assert.match(human, /NAV_ITEM_APPEARANCE_UNSPECIFIED and NAV_ITEM_APPEARANCE_LINK/u);
+  assert.match(human, /PAGE and EXTERNAL_URL leaves can use Button at any depth/u);
+  assert.match(human, /GROUP_HEADER cannot use Button/u);
+  assert.match(human, /navItems\[n\]\.appearance/u);
+  assert.match(human, /current page stays noninteractive/u);
+  assert.match(human, /Display as/u);
+  assert.match(human, /may be empty/u);
+  assert.match(human, /nav\.group_target_unexpected/u);
+  assert.match(human, /Move the address into a child item/u);
+  assert.match(human, /same-title first child/u);
+  assert.match(human, /IDs stay stable across pulls/u);
+  assert.ok(human.includes(`at most ${LIMITS.navigationItems} items`));
+  assert.ok(human.includes(`nav.json is bounded to ${LIMITS.navigationWorkspaceBytes / (1024 * 1024)} MiB`));
+  assert.ok(human.includes(`GET and PUT replies are bounded to ${LIMITS.navigationResponseBytes / (1024 * 1024)} MiB`));
+  assert.equal(getWorkflowReference("nav").example.navItems[1].appearance, "NAV_ITEM_APPEARANCE_BUTTON");
+});
+
+
+test("WordPress import help preserves addressed parents as first destination children", () => {
+  const human = formatReferenceResult({ topic: "workflow", reference: getWorkflowReference("import") });
+  assert.match(human, /save its address in a same-title first leaf child with a fresh canonical UUID/u);
+  assert.match(human, /change the parent to GROUP_HEADER and clear its address, then append the original children in order/u);
+  assert.match(human, /nav push refuses it until the address is moved into a child item/u);
+});
+
 test("a fixture reference whose shipped file is unavailable still states the whole contract", () => {
   // What a `node_modules` pruner or an image-slimming step leaves behind: the
   // contract is complete without the example, so the topic drops the example
@@ -976,4 +1010,17 @@ test("the social-links reference lists the platforms, the https-only address and
   assert.deepEqual(size.schema.enum, ["small", "medium", "large"]);
   const align = component.properties.find((property) => property.name === "align");
   assert.deepEqual(align.schema.enum, ["start", "center", "end"]);
+});
+
+
+test("columns help is an executable free-form layout with registry-owned limits", async () => {
+  const page = getPageTypeReference("free-form");
+  assert.equal(page.columns.node, registry.columns);
+  assert.equal(page.columns.region, registry.column);
+  const { doc } = await markdownToProseMirror(page.columns.markdownSyntax, { resolveImage: async () => { throw new Error("No media in this example"); } });
+  assert.deepEqual(validateDocument(doc).errors, []);
+  assert.equal(doc.content[0].content[0].content.length, 2);
+  const text = formatReferenceResult({ topic: "page", page });
+  assert.match(text, /Columns inside sections/);
+  assert.match(text, /:::endcolumns/);
 });

@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { getNavigation, saveNavigation } from "../src/api.js";
 import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from "../src/constants.js";
 import { ApiError, capabilityRefusal, fieldViolations, planLimitRefusal, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
@@ -663,6 +664,70 @@ test("bounds a response body without incorporating its bytes in the error", asyn
     (error) => error?.code === "transport.response_too_large" && !error.message.includes(secret),
   );
   assert.equal(calls, 1);
+});
+
+test("navigation GET and PUT enforce their larger response budget", async (context) => {
+  const siteId = "aaaa1111-bbbb-4111-8111-cccc11111111";
+  const revision = "e".repeat(64);
+  const response = {
+    navItems: Array.from({ length: 1500 }, (_, index) => ({
+      id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+      kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+      title: "é".repeat(100),
+      resourceId: "",
+      externalUrl: `https://example.com/${"a".repeat(1700)}`,
+      children: [],
+    })),
+    revision,
+  };
+  const json = JSON.stringify(response);
+  assert.ok(Buffer.byteLength(json) > LIMITS.navigationWorkspaceBytes);
+  assert.ok(Buffer.byteLength(json) < LIMITS.navigationResponseBytes);
+  const atLimit = `${json}${" ".repeat(LIMITS.navigationResponseBytes - Buffer.byteLength(json))}`;
+
+  for (const [method, request] of [
+    ["GET", (client) => getNavigation(client, siteId)],
+    ["PUT", (client) => saveNavigation(client, siteId, response.navItems, revision)],
+  ]) {
+    for (const oversized of [false, true]) {
+      await context.test(`${method} ${oversized ? "refuses one byte over" : "accepts at"} the navigation bound`, async () => {
+        const bytes = Buffer.from(`${atLimit}${oversized ? " " : ""}`);
+        let calls = 0;
+        let cancelled = false;
+        const client = makeClient(async (url, init) => {
+          calls += 1;
+          assert.equal(new URL(url).pathname, `/api/v1/sites/${siteId}/navigation`);
+          assert.equal(init.method, method);
+          if (method === "PUT") {
+            assert.deepEqual(JSON.parse(init.body), { siteId, navItems: response.navItems, expectedRevision: revision });
+          }
+          let offset = 0;
+          return new Response(new ReadableStream({
+            pull(controller) {
+              if (offset === bytes.length) {
+                controller.close();
+                return;
+              }
+              const chunk = bytes.subarray(offset, offset + 64 * 1024);
+              offset += chunk.byteLength;
+              controller.enqueue(chunk);
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }, { highWaterMark: 0 }), { headers: { "content-type": "application/json" } });
+        });
+
+        if (oversized) {
+          await assert.rejects(request(client), { code: "transport.response_too_large" });
+          assert.equal(cancelled, true);
+        } else {
+          assert.deepEqual(await request(client), response);
+        }
+        assert.equal(calls, 1);
+      });
+    }
+  }
 });
 
 test("collects nested field violations without unbounded or unsafe values", () => {

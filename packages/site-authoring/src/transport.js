@@ -823,10 +823,8 @@ export class SiteApiClient {
     attempts = LIMITS.requestAttempts,
     deadline,
     now = this.now,
-    // How large a body this one call may read. The default bounds every read
-    // the way it always has; a caller raises it only for the one contract
-    // whose valid answer is larger, and never above what its workspace file
-    // may hold.
+    // Replies can include defaults omitted from workspace files, so an
+    // endpoint may need a larger, explicit response bound.
     maximumResponseBytes = LIMITS.apiResponseBytes,
   } = {}, replaceableMutation) {
     const url = new URL(path, this.apiBaseUrl);

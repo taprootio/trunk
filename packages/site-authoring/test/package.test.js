@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.10.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.13.1", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -123,6 +123,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // Markdown converter, and the byte-parity copy of the canonical renderer.
     "src/content/components.js",
     "src/content/external-link.js",
+    "src/content/free-form-columns.js",
     "src/content/free-form-section-registry.json",
     "src/content/free-form-sections.js",
     "src/content/image-description-document.js",
@@ -160,6 +161,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/forms-api.js",
     "src/forms-contract.js",
     "src/forms-workspace.js",
+    "src/header-presentation.js",
     // The heading outline the generator publishes with, and the page-structure checks that replay it (TR00947).
     "src/heading-outline.js",
     "src/image-description-contract.js",

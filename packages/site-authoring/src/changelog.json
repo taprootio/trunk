@@ -1,6 +1,46 @@
 {
   "entries": [
     {
+      "version": "0.36.0",
+      "note": "Navigation links can use Button styling, headers can scale and switch to compact logos, and sections can arrange content in responsive columns.",
+      "behavior": [
+        "Set optional nav.json appearance to NAV_ITEM_APPEARANCE_BUTTON on a PAGE or EXTERNAL_URL leaf at any depth. Appearance is independent of Menu or Header end placement. Dropdown headers cannot use Button; invalid values and group appearance are refused at the exact item appearance path before saving.",
+        "Omit appearance for Link. NAV_ITEM_APPEARANCE_UNSPECIFIED and NAV_ITEM_APPEARANCE_LINK are equivalent defaults; pull and nav push omit both while retaining Button. The app edits this under Display as and resets it to Link when a leaf becomes a dropdown.",
+        "Button links retain their destinations and external-link behavior in inline menus and the drawer. The current page keeps Button styling without becoming interactive. Existing published pages change at the next whole-site render.",
+        "Taproot refuses older authoring clients at sign-in and token exchange so a whole-tree push cannot drop saved appearance. Upgrade with npm install -g @taprootio/site-authoring@latest.",
+        "Set string headerHeightMultiplier in settings/site-header.json from \"1.0\" through \"5.0\" in 0.1 steps. Omitted, empty, \"1\" and \"1.0\" retain standard height and are omitted on pull; integer aliases such as \"2\" normalize to \"2.0\". JSON numbers and malformed or off-grid text are refused at the field path.",
+        "Header position now accepts fixed. Above standard height, Fixed shrinks its primary bar to standard on scroll; extra rows and controls keep their size. Normal and Sticky retain the configured height.",
+        "Optional lightCompactLogoId and darkCompactLogoId in settings/taproot-styles.json select alternate artwork for eligible compact headers. They use existing site-owned media handling; URLs are read-only. Inactive stored choices survive, and compact-only artwork never creates a missing regular brand.",
+        "Free-form sections accept structural two- or three-column regions, with equal widths or 40-60/60-40 for two columns. Markdown and JSON preserve ordinary blocks, forms and identities; narrow sections stack in source order. See help page free-form.",
+        "The help reference version is 56."
+      ],
+      "help": [
+        "nav",
+        "appearance",
+        "settings",
+        "page"
+      ]
+    },
+    {
+      "version": "0.35.0",
+      "note": "Header navigation groups expand without a destination; selected top-level links can sit beside the header controls and join the collapsed menu.",
+      "behavior": [
+        "The navigation limit rises from 1000 to 2000 items and the workspace file limit rises from 1 MiB to 2 MiB, so preserving legacy group destinations fits when pulled and pushed.",
+        "Only GROUP_HEADER may have children, and it has no destination. nav push refuses PAGE and EXTERNAL_URL items with children locally as nav.group_target_unexpected at the item path, before saving. Move the address into a child item and use a dropdown header. Empty groups remain allowed.",
+        "pull exposes existing linked parents as GROUP_HEADER with the same ID and title. The old destination becomes a same-title first child with a stable ID; existing children keep their IDs and order. A normal nav push persists the migrated draft without a revision conflict on an unchanged tree.",
+        "Published header groups are disclosure buttons without a URL or new-tab cue. Child links keep their own destinations and new-tab behavior. Existing published pages change on regeneration and deployment.",
+        "The app offers a child-add button only under dropdown headers below the depth limit. To add children to a link, change Type to Dropdown header first and move its address into a child item. Save still refuses an invalid parent if it changes while the child editor is open.",
+        "In the published burger drawer, link and disclosure targets fit their text with standard padding, and the dropdown caret sits immediately after its label. Empty space beside an item does not activate it.",
+        "WordPress import help preserves a page or custom-link parent address in a same-title first leaf child, clears the dropdown parent address, and keeps the original children in order.",
+        "Set optional nav.json position to NAV_ITEM_POSITION_HEADER_END on a top-level PAGE or EXTERNAL_URL leaf to show it before the header controls inline. Omit position for Menu; NAV_ITEM_POSITION_MENU and NAV_ITEM_POSITION_UNSPECIFIED are equivalent and pull omits them. Dropdown headers and nested items cannot use Header end. Collapsed menus keep all items in their original order. The app edits this under Show in.",
+        "The help reference version is 55."
+      ],
+      "help": [
+        "nav",
+        "import"
+      ]
+    },
+    {
       "version": "0.34.1",
       "note": "Published pages no longer repeat the page title as the last breadcrumb; the trail ends at the parent, as it did before 0.34.0.",
       "behavior": [

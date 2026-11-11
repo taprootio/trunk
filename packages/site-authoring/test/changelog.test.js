@@ -10,7 +10,7 @@ import {
 } from "../src/changelog.js";
 import { cliOutdatedError, compareCliVersions, parseCliVersion } from "../src/cli-release.js";
 import { changelogCommandSince, CLI_VERSION } from "../src/constants.js";
-import { REFERENCE_TOPICS } from "../src/reference-help.js";
+import { REFERENCE_TOPICS, REFERENCE_VERSION } from "../src/reference-help.js";
 import { runCli } from "../src/cli.js";
 import { failureResult } from "../src/output.js";
 import { ApiError } from "../src/transport.js";
@@ -49,6 +49,7 @@ test("the changelog record is well formed and covers the installed release", () 
   }
   // A release that was bumped without a note fails here: the unreleased entry is stamped with the new version.
   assert.ok(changelogEntryFor(CLI_VERSION), `changelog.json has no entry for ${CLI_VERSION}`);
+  assert.ok(changelogEntryFor(CLI_VERSION).behavior.includes(`The help reference version is ${REFERENCE_VERSION}.`));
 });
 
 test("entries since a version are the released ones after it, up to the installed release", () => {

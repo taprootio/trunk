@@ -463,7 +463,43 @@ description over 160 characters is a warning (`descriptionWarnings`), because
 search results cut it off; over 1000 is refused with
 `pages.description_too_long`, by the CLI and by Taproot.
 
-### Page authors
+#### Columns inside a section
+
+Free-form pages can put two or three editable regions side by side inside a
+section. The regions stack in source order when the section is too narrow.
+`taproot-site help page free-form` describes the JSON vocabulary and limits.
+
+```markdown
+:::section {}
+:::columns {"ratio":"40-60"}
+:::column {}
+## Start a conversation
+
+Tell us about your project.
+:::endcolumn
+:::column {}
+Your ordinary blocks or form component go here.
+:::endcolumn
+:::endcolumns
+:::
+```
+
+The default is two equal columns; omit default `count` and `ratio`. Set
+`count` to `3` for three equal regions. Two columns also accept `40-60` and
+`60-40`. Each `:::column {}` needs at least one ordinary flow block. Layouts
+belong directly in sections and cannot nest. Headers and closers must be
+unindented, standalone lines; close each region and layout before closing the
+section. Code fences keep marker text literal. Prefix a marker with a backslash
+to write it as prose. Existing Markdown parsing budgets still apply across all
+regions.
+
+JSON uses `columns` with `column` children, and preserves component, image and
+form references. `pull` writes JSON; Markdown conversion remains one way. The
+existing 1 MiB response limit and 2 MiB workspace input limit remain in force:
+a large hydrated page can be refused by the CLI even when it is valid on the
+server. A refused response does not partially replace workspace files.
+
+## Page authors
 
 Pages are authorless by default: a page you create with the CLI publishes with
 no byline unless you name an author, and `pages push` lists the pages it created
@@ -990,6 +1026,84 @@ link mark in the same tab, write `target="_self"` after it in Markdown or set
 this. Existing pages change when a publish renders the whole site, such as a
 settings or navigation change; pages an incremental publish copies forward keep
 their old links until then.
+
+### Navigation groups expand in 0.35.0
+
+An item with children is a dropdown header with no address of its own. Its label
+opens and closes the group; put each destination in a child item. `nav push` and
+the app refuse an address on a parent with children and explain how to repair it.
+See `taproot-site help nav` for the file shape.
+
+Pull preserves an old linked parent's address as a first child with the same
+title. The parent keeps its ID and title, and existing children keep their IDs
+and order. Push the pulled tree normally to persist that form. Published pages
+change on regeneration and deployment: the group is a button without a new-tab
+announcement, while its child links retain their destinations and link behavior.
+The workspace accepts up to 2,000 navigation items in a 2 MiB navigation file.
+
+### Header end links in 0.35.0
+
+In Site settings → Header & navigation, edit a top-level page or external link
+and set **Show in** to **Header end** to place it before the header controls.
+For CLI authoring, set `"position": "NAV_ITEM_POSITION_HEADER_END"` on that item
+in `nav.json`. Omit `position` for Menu; explicit `NAV_ITEM_POSITION_MENU` and
+`NAV_ITEM_POSITION_UNSPECIFIED` mean the same thing and disappear on pull.
+Dropdown headers and nested items stay in Menu. An unsupported position is
+refused at its exact item `.position` path before saving.
+
+Auto headers show these links beside their controls while everything fits,
+then put every item in the same collapsed menu in original order on phones.
+Drawer mode always combines them, and the minimal layout uses the drawer.
+The existing auto and drawer display choices stay the same. Destinations
+and external-link behavior stay the same. Pull, edit and `nav push` as usual;
+the next whole-site render applies the change. Help reference version 55 covers
+the new rule and file shape in `taproot-site help nav`.
+
+### Navigation button links in 0.36.0
+
+Set **Display as** to **Button** on a page or external link in the navigation
+item dialog, or add `"appearance": "NAV_ITEM_APPEARANCE_BUTTON"` to that item in
+`nav.json`. Button styling works at any depth, in Menu and wherever Header end
+is available. Dropdown headers cannot use it. Changing a link to a dropdown
+resets Display as to Link.
+
+Omit `appearance` for Link. Explicit `NAV_ITEM_APPEARANCE_UNSPECIFIED` and
+`NAV_ITEM_APPEARANCE_LINK` are equivalent and disappear on pull; Button survives
+pull, validation and `nav push`. Invalid appearance values and Button on a
+dropdown are refused at the exact item `.appearance` path before saving.
+
+Button links retain their destinations, external-link behavior and styling in
+the collapsed menu. The current page keeps Button styling without becoming an
+interactive link. The next whole-site render applies the change. Help reference
+version 56 covers the file shape in `taproot-site help nav`. Upgrade to 0.36.0
+before sign-in or token exchange; older clients cannot safely replace this
+whole tree because they do not preserve appearance.
+
+### Header height and compact logos in 0.36.0
+
+Edit the existing pulled `settings/site-header.json`: set `settings.headerPosition`
+to `"fixed"` and `settings.headerHeightMultiplier` to a string such as `"1.8"`.
+The range is `"1.0"` through `"5.0"` in 0.1 steps. Omitted, empty, `"1"` and
+`"1.0"` mean standard height and disappear on pull; `"2"` normalizes to `"2.0"`.
+JSON numbers, scientific notation, whitespace and off-grid values are refused
+at `site-header.headerHeightMultiplier`. Preserve the file's envelope and other
+settings, then use `validate` and `theme push` as usual.
+
+The multiplier changes the primary bar. Extra menu rows, navigation text and
+header controls retain their size. Fixed headers above 1.0 shrink to standard
+height on scroll and expand near the top. Normal and Sticky retain their
+configured height; Fixed at 1.0 keeps the regular logo.
+
+To use alternate artwork after shrinking, upload it with `media upload` and set
+`settings.lightCompactLogoId` and/or `settings.darkCompactLogoId` in the existing
+`settings/taproot-styles.json`. The app exposes **Compact logo** for Fixed above
+1.0 in **Settings → Header & navigation**. Each compact scheme falls back to the
+other compact scheme, then the regular resolved logo. Without alternate artwork,
+the regular logo resizes. A compact choice needs a regular header logo and cannot
+create a brand by itself. Saved choices survive other header modes; their URLs
+are read-only server projections. Preview light/dark and desktop/390-wide, then
+stage and deploy the settings for the published site. `help appearance` and
+`help settings` describe both files.
 
 ### What changed between releases
 

@@ -11,6 +11,7 @@ import {
   normalizeFreeFormSectionBackground,
   normalizeFreeFormSectionDecoration,
 } from "./free-form-sections.js";
+import { columnsAttributes, isColumnEligibleBlock, normalizeColumnsBody, validateColumnsBody } from "./free-form-columns.js";
 import { normalizeInlineFactsItems } from "./inline-facts.js";
 import { validateDocument } from "./validate-document.js";
 import {
@@ -59,6 +60,7 @@ const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/u;
 const SECTION_HEADER_RE = /^:::section (\{.*\})$/u;
 const SECTION_HEADER_LIKE_RE = /^ *:::section(?=\s|\{|$)/u;
 const SECTION_CLOSE_RE = /^:::$/u;
+const COLUMNS_DIRECTIVE_LIKE_RE = /^ *:::(columns|column|endcolumns|endcolumn)(?=\s|\{|$)/u;
 const BULLET_RE = /^( *)([-*+])( +|$)(.*)$/u;
 const ORDERED_RE = /^( *)(\d{1,9})([.)])( +|$)(.*)$/u;
 const BLOCKQUOTE_RE = /^ {0,3}>/u;
@@ -253,7 +255,8 @@ function isBlockStart(text) {
     || FOOTNOTE_DEFINITION_RE.test(text)
     || REFERENCE_DEFINITION_RE.test(text)
     || SECTION_HEADER_LIKE_RE.test(text)
-    || SECTION_CLOSE_RE.test(text);
+    || SECTION_CLOSE_RE.test(text)
+    || COLUMNS_DIRECTIVE_LIKE_RE.test(text);
 }
 
 function guardBlockConstructs(text, line, nextText) {
@@ -316,7 +319,7 @@ async function parseBlocks(lines, context, depth) {
 
     const table = tablePrelude(lines, index);
     if (table) {
-      if (context.blockPlacement !== "root" && context.blockPlacement !== "section") {
+      if (context.blockPlacement !== "root" && context.blockPlacement !== "section" && context.blockPlacement !== "column") {
         throw fail(
           CODES.tableShape,
           "table",
@@ -325,6 +328,16 @@ async function parseBlocks(lines, context, depth) {
         );
       }
       const consumed = consumeTable(lines, table, context);
+      nodes.push(consumed.node);
+      index = consumed.next;
+      continue;
+    }
+
+    if (COLUMNS_DIRECTIVE_LIKE_RE.test(text)) {
+      if (context.blockPlacement !== "section" || !text.startsWith(":::columns ")) {
+        throw fail(CODES.markdownColumns, "columns layout", "A columns layout belongs directly inside a section; its headers and closing markers must match.", line.number);
+      }
+      const consumed = await consumeColumns(lines, index, context, depth);
       nodes.push(consumed.node);
       index = consumed.next;
       continue;
@@ -780,6 +793,69 @@ async function consumeSection(lines, start, headerText, context, depth) {
   );
 }
 
+function columnsHeader(text, name, line) {
+  const match = new RegExp(`^:::${name} (\\{.*\\})$`, "u").exec(text);
+  if (!match) throw fail(CODES.markdownColumns, "columns layout", `Use exactly ':::${name} {JSON object}' without indentation or trailing text.`, line.number);
+  let attrs;
+  try { attrs = JSON.parse(match[1]); } catch (error) {
+    throw fail(CODES.markdownColumns, "columns layout", "A layout header needs a valid JSON object.", line.number, error);
+  }
+  if (!isPlainObject(attrs) || name === "column" && Object.keys(attrs).length !== 0) {
+    throw fail(CODES.markdownColumns, "columns layout", "A region header accepts only an empty JSON object.", line.number);
+  }
+  return attrs;
+}
+
+async function consumeColumns(lines, start, context, depth) {
+  const attrs = columnsHeader(expandLeadingTabs(lines[start].text), "columns", lines[start]);
+  const layout = columnsAttributes({ type: "columns", attrs });
+  if (!layout) throw fail(CODES.markdownColumns, "columns layout", "Choose two or three columns and Equal, Narrow start or Wide start; three columns must be equal.", lines[start].number);
+  const regions = [];
+  let index = start + 1;
+  while (index < lines.length) {
+    const line = lines[index];
+    const text = expandLeadingTabs(line.text);
+    if (isBlank(text)) { index += 1; continue; }
+    if (text === ":::endcolumns") {
+      if (regions.length !== layout.count) throw fail(CODES.markdownColumns, "columns layout", `This layout needs exactly ${layout.count} non-empty regions.`, line.number);
+      return { node: { type: "columns", attrs, content: regions }, next: index + 1 };
+    }
+    columnsHeader(text, "column", line);
+    const regionLine = line;
+    const body = [];
+    let activeFence;
+    let closed = false;
+    for (index += 1; index < lines.length; index += 1) {
+      const bodyLine = lines[index];
+      const bodyText = expandLeadingTabs(bodyLine.text);
+      if (activeFence) {
+        body.push(bodyLine);
+        if (activeFence.test(bodyText)) activeFence = undefined;
+        continue;
+      }
+      const fence = FENCE_RE.exec(bodyText);
+      if (fence) {
+        activeFence = fenceClosing(fence[2]);
+        body.push(bodyLine);
+        continue;
+      }
+      if (bodyText === ":::endcolumn") { closed = true; index += 1; break; }
+      if (COLUMNS_DIRECTIVE_LIKE_RE.test(bodyText) || SECTION_HEADER_LIKE_RE.test(bodyText) || SECTION_CLOSE_RE.test(bodyText)) {
+        throw fail(CODES.markdownColumns, "columns layout", "Close each region with ':::endcolumn' before another layout marker.", bodyLine.number);
+      }
+      body.push(bodyLine);
+    }
+    if (!closed) throw fail(CODES.markdownColumns, "columns layout", "A region was opened but never closed with ':::endcolumn'.", regionLine.number);
+    const content = await parseBlocks(body, { ...context, blockPlacement: "column" }, depth + 2);
+    if (content.length === 0 || content.some(node => !isColumnEligibleBlock(node))) {
+      throw fail(CODES.markdownColumns, "columns layout", "Each region needs ordinary flow blocks; sections and full-width components belong outside it.", regionLine.number);
+    }
+    regions.push({ type: "column", content });
+    if (regions.length > layout.count) throw fail(CODES.markdownColumns, "columns layout", `This layout accepts only ${layout.count} regions.`, regionLine.number);
+  }
+  throw fail(CODES.markdownColumns, "columns layout", "A layout was opened but never closed with ':::endcolumns'.", lines[start].number);
+}
+
 function stripClosingHashes(title) {
   const trimmed = title.trimEnd();
   const closing = /^(.*?)\s+#+$/u.exec(trimmed);
@@ -825,7 +901,7 @@ async function consumeFence(lines, start, fence, context) {
     };
   }
   if (info === INLINE_FACTS_CONTRACT.markdown.fence) {
-    if (context.blockPlacement !== "root" && context.blockPlacement !== "section") {
+    if (context.blockPlacement !== "root" && context.blockPlacement !== "section" && context.blockPlacement !== "column") {
       throw fail(
         CODES.markdownInlineFacts,
         "inline facts",
@@ -1767,6 +1843,10 @@ export async function markdownToProseMirror(markdown, options = {}) {
       "The Markdown source produced an empty page body. A page needs text, an image, a component block, or inline facts.",
     );
   }
+  const columns = validateColumnsBody(document);
+  if (columns.errors.length > 0) {
+    throw fail(CODES.markdownColumns, columns.errors[0].path, "The columns layout has invalid nesting or exceeds its structural limits.");
+  }
   assertConvertedDocument(document);
-  return { doc: document };
+  return { doc: normalizeColumnsBody(document).body };
 }

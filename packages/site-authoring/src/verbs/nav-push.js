@@ -2,13 +2,22 @@ import {
   getNavigation,
   listSitePages,
   NAV_ITEM_KIND_EXTERNAL_URL,
+  NAV_ITEM_KIND_GROUP_HEADER,
   NAV_ITEM_KIND_PAGE,
   NAV_ITEM_KINDS,
+  NAV_ITEM_POSITION_UNSPECIFIED,
+  NAV_ITEM_POSITION_MENU,
+  NAV_ITEM_POSITION_HEADER_END,
+  NAV_ITEM_POSITIONS,
+  NAV_ITEM_APPEARANCE_UNSPECIFIED,
+  NAV_ITEM_APPEARANCE_LINK,
+  NAV_ITEM_APPEARANCE_BUTTON,
+  NAV_ITEM_APPEARANCES,
   NAVIGATION_MAXIMUM_DEPTH,
   saveNavigation,
   withRefusalGuidance,
 } from "../api.js";
-import { VERB_NAV_PUSH } from "../constants.js";
+import { LIMITS, VERB_NAV_PUSH } from "../constants.js";
 import {
   CONTACT_OR_WEB_URL_MAX_LENGTH,
   CONTACT_OR_WEB_URL_REQUIREMENT,
@@ -34,34 +43,16 @@ import {
 } from "../workspace.js";
 
 /**
- * `nav push` — replace the whole navigation tree.
- *
- * `SaveSiteNavigation` is a whole-tree PUT fenced by a revision (TR01231): the
- * pull records the revision the tree was read at, and the save presents it. A
- * tree edited in the app since is refused with `nav.concurrent_modification`
- * and nothing is written. Two more things follow, and the body does both:
- *
- * 1. The tree is re-read immediately before the write, so a moved tree is
- *    refused before anything is sent, and what the replace is about to remove
- *    is *named* rather than discovered afterwards.
- * 2. Local validation is exhaustive and refuses by item path. The server stores
- *    what it is given; a `PAGE` item carrying `pageId` instead of `resourceId`,
- *    or a fourth level of nesting, is accepted and then renders wrong. And the
- *    one shape it does check — `id` and `resourceId` are parsed as GUIDs — it
- *    refuses with a bare `InvalidArgument` naming no field at all, so a single
- *    `id: "home"` in a hundred-item tree would come back as an unclassified 400
- *    with nothing to grep for. A `resourceId` that is a valid UUID pointing at
- *    no page is the same story with a bare `ResourceId`, so PAGE targets are
- *    checked against the live page list too. Naming `navItems[1].children[0]`
- *    is the difference between a fixable error and a hunt.
+ * Replaces the whole navigation tree, fenced by the revision pull recorded.
+ * Validate locally to name malformed items by their exact workspace path, then
+ * re-read before saving so stale work cannot erase somebody else's changes.
  */
 
 const MAXIMUM_REPORTED = 100;
-const MAXIMUM_ITEMS = 1_000;
 const MAXIMUM_TITLE_LENGTH = 200;
 const MAXIMUM_URL_LENGTH = CONTACT_OR_WEB_URL_MAX_LENGTH;
 // The item keys in the order the workspace file spells them; validation and projection share this list.
-const NAVIGATION_ITEM_KEY_ORDER = Object.freeze(["id", "kind", "title", "resourceId", "externalUrl", "children"]);
+const NAVIGATION_ITEM_KEY_ORDER = Object.freeze(["id", "kind", "title", "resourceId", "externalUrl", "position", "appearance", "children"]);
 const ITEM_KEYS = new Set(NAVIGATION_ITEM_KEY_ORDER);
 
 // `SaveSiteNavigation` maps both `id` and `resourceId` through
@@ -100,8 +91,8 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     );
   }
   counters.items += 1;
-  if (counters.items > MAXIMUM_ITEMS) {
-    throw navError("nav.too_many_items", `the navigation tree holds more than ${MAXIMUM_ITEMS} items.`, itemPath);
+  if (counters.items > LIMITS.navigationItems) {
+    throw navError("nav.too_many_items", `the navigation tree holds more than ${LIMITS.navigationItems} items.`, itemPath);
   }
 
   const unknown = Object.keys(item).filter((key) => !ITEM_KEYS.has(key)).sort();
@@ -139,6 +130,51 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     throw navError("nav.title_invalid", "every navigation item needs a non-empty 'title'.", itemPath);
   }
 
+  const children = item.children ?? [];
+  if (!Array.isArray(children)) {
+    throw navError("nav.children_invalid", "'children' must be a list when it is present.", itemPath);
+  }
+  if (children.length > 0 &&
+    (item.kind !== NAV_ITEM_KIND_GROUP_HEADER || !isEmpty(item.resourceId) || !isEmpty(item.externalUrl))) {
+    throw navError(
+      "nav.group_target_unexpected",
+      "Items with children cannot have an address. Move the address into a child item and use a dropdown header.",
+      itemPath,
+    );
+  }
+
+  if (item.position !== undefined && !NAV_ITEM_POSITIONS.includes(item.position)) {
+    throw navError(
+      "nav.position_invalid",
+      `'position' must be one of ${NAV_ITEM_POSITIONS.join(", ")}.`,
+      `${itemPath}.position`,
+    );
+  }
+  const headerEnd = item.position === NAV_ITEM_POSITION_HEADER_END;
+  if (headerEnd && (depth !== 1 || item.kind === NAV_ITEM_KIND_GROUP_HEADER || children.length > 0)) {
+    throw navError(
+      "nav.position_unavailable",
+      "Header end is available only for top-level page or external links without children. Use Menu for this item.",
+      `${itemPath}.position`,
+    );
+  }
+
+  if (item.appearance !== undefined && !NAV_ITEM_APPEARANCES.includes(item.appearance)) {
+    throw navError(
+      "nav.appearance_invalid",
+      `'appearance' must be one of ${NAV_ITEM_APPEARANCES.join(", ")}.`,
+      `${itemPath}.appearance`,
+    );
+  }
+  const button = item.appearance === NAV_ITEM_APPEARANCE_BUTTON;
+  if (button && item.kind === NAV_ITEM_KIND_GROUP_HEADER) {
+    throw navError(
+      "nav.appearance_unavailable",
+      "Button appearance is available only for page or external links. Use Link for a dropdown header.",
+      `${itemPath}.appearance`,
+    );
+  }
+
   if (item.kind === NAV_ITEM_KIND_PAGE) {
     if (!isUuid(item.resourceId)) {
       throw navError(
@@ -174,10 +210,6 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     );
   }
 
-  const children = item.children ?? [];
-  if (!Array.isArray(children)) {
-    throw navError("nav.children_invalid", "'children' must be a list when it is present.", itemPath);
-  }
   const validated = children.map((child, index) =>
     validateItem(child, `${itemPath}.children[${index}]`, depth + 1, seenIds, counters));
   // Rebuilt field by field so nothing outside the contract can ride along, and
@@ -189,6 +221,8 @@ function validateItem(item, itemPath, depth, seenIds, counters) {
     title: item.title.trim(),
     resourceId: item.kind === NAV_ITEM_KIND_PAGE ? item.resourceId : "",
     externalUrl: item.kind === NAV_ITEM_KIND_EXTERNAL_URL ? item.externalUrl.trim() : "",
+    ...(headerEnd ? { position: NAV_ITEM_POSITION_HEADER_END } : {}),
+    ...(button ? { appearance: NAV_ITEM_APPEARANCE_BUTTON } : {}),
     children: validated,
   };
 }
@@ -213,6 +247,8 @@ export function projectNavigationForWorkspace(items) {
     for (const key of keys) {
       const value = item[key];
       if ((key === "resourceId" || key === "externalUrl") && value === "") continue;
+      if (key === "position" && (value === NAV_ITEM_POSITION_UNSPECIFIED || value === NAV_ITEM_POSITION_MENU)) continue;
+      if (key === "appearance" && (value === NAV_ITEM_APPEARANCE_UNSPECIFIED || value === NAV_ITEM_APPEARANCE_LINK)) continue;
       if (key === "children" && Array.isArray(value)) {
         if (value.length > 0) projected.children = projectNavigationForWorkspace(value);
         continue;

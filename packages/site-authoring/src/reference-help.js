@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 54;
+export const REFERENCE_VERSION = 56;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -545,8 +545,11 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "'pages push --dry-run' then checks the pages against the live site — paths taken, templates, revisions, "
       + "videos — and sends nothing. 'plan' checks the whole workspace against the site and orders what is left "
       + "(media, pages, footer, theme, navigation); 'apply --plan <planHash>' runs exactly that plan.",
-      "Navigation. A site can have several menus (header, footer): ask which is primary and list the rest. Rebuild it as nav.json after 'pages push', at most three levels deep with canonical UUID ids, 1000 items and 200-character titles (help nav); a label-only dropdown heading (a WordPress '#' link) is a GROUP_HEADER, and a child of an item you cannot map is listed, not promoted (page items carry the resourceId from the "
-      + "manifest; a custom link is an EXTERNAL_URL item; a category or tag item has no target, so list it).",
+      `Navigation. A site can have several menus (header, footer): ask which is primary and list the rest. Rebuild it as nav.json after 'pages push', at most three levels deep with canonical UUID ids, ${LIMITS.navigationItems} items and 200-character titles (help nav); a label-only dropdown heading (a WordPress '#' link) is a GROUP_HEADER, and a child of an item you cannot map is listed, not promoted (page items carry the resourceId from the `
+      + "manifest; a custom link is an EXTERNAL_URL item; a category or tag item has no target, so list it). "
+      + "For a page or custom link with children, save its address in a same-title first leaf child with a fresh canonical UUID, "
+      + "change the parent to GROUP_HEADER and clear its address, then append the original children in order. "
+      + "A parent with children has no address of its own; nav push refuses it until the address is moved into a child item.",
       "Redirects. At most 2000 entries; never redirect to a page you did not push. Every imported page's old path (from its <link>) becomes a 301 to its new path, unless the two "
       + "are the same. A category archive redirects to its folder when it became one. Query-string URLs (?p=12), "
       + "feeds, tag archives, author archives and attachment pages cannot be redirect sources or have no "
@@ -631,7 +634,9 @@ const WORKFLOW_REFERENCES = Object.freeze({
       "Prepare media locally: PNG, JPEG, GIF and WebP raster files only, addressed relative to the workspace root. Make "
       + "the variants yourself with any image tool (a transparent logo at the highest resolution you have, a square favicon); there is no "
       + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
-      + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header.",
+      + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header. "
+      + "Optional lightCompactLogoId and darkCompactLogoId in the same styles file provide alternate artwork when a Fixed header above 1.0 shrinks; "
+      + "set headerHeightMultiplier as a string in site-header.json. See help appearance for the range and fallback rules.",
       `See the compiled colors: ${CLI_BINARY_NAME} theme resolve prints, offline, every semantic color Espalier compiles `
       + "from the pair for each scheme and context, whether each is compiled from the roles or pinned, and the contrast "
       + "of every ink-on-surface pair, with a flag for each one under WCAG AA. Run it after each theme edit, in both "
@@ -692,8 +697,29 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "edits, and push again. A manifest with no navigation revision is refused with nav.pull_required; run pull. "
       + "A successful push records the revision it saved, so the next push is fenced against that state.",
       "kind is NAV_ITEM_KIND_PAGE, NAV_ITEM_KIND_EXTERNAL_URL, or NAV_ITEM_KIND_GROUP_HEADER.",
+      "position is optional: omit it for Menu, or use NAV_ITEM_POSITION_HEADER_END for Header end beside the header controls. "
+      + "NAV_ITEM_POSITION_UNSPECIFIED and NAV_ITEM_POSITION_MENU are accepted Menu aliases; pull omits both. "
+      + "Only top-level PAGE or EXTERNAL_URL leaves can use Header end; dropdown headers and nested items stay in Menu. "
+      + "Invalid position is refused at its exact navItems[n].position or nested path before saving. "
+      + "Header end links precede the search and theme controls inline. In auto mode they join the collapsed menu "
+      + "in original navigation order, including phones; drawer mode always combines them. Minimal layout uses the drawer. "
+      + "The existing auto and drawer navigation display choices are unchanged.",
+      "appearance is optional: omit it for Link, or use NAV_ITEM_APPEARANCE_BUTTON for Button styling. "
+      + "NAV_ITEM_APPEARANCE_UNSPECIFIED and NAV_ITEM_APPEARANCE_LINK are accepted Link aliases; pull omits both. "
+      + "PAGE and EXTERNAL_URL leaves can use Button at any depth, in Menu or Header end where that position is available. "
+      + "GROUP_HEADER cannot use Button. An invalid appearance is refused at its exact navItems[n].appearance or nested path before saving. "
+      + "Button links keep their destination and link behavior in inline menus and the drawer; the current page stays noninteractive. "
+      + "In the app, choose Display as in the navigation item dialog.",
+      `The tree allows at most ${LIMITS.navigationItems} items. nav.json is bounded to `
+      + `${LIMITS.navigationWorkspaceBytes / (1024 * 1024)} MiB; navigation GET and PUT replies are bounded to `
+      + `${LIMITS.navigationResponseBytes / (1024 * 1024)} MiB to allow the API's printed defaults.`,
       "PAGE uses resourceId from .taproot-site-manifest.json, never pageId or path.",
-      "EXTERNAL_URL uses externalUrl; GROUP_HEADER has no target; every kind may carry children.",
+      "EXTERNAL_URL uses externalUrl. Only GROUP_HEADER may carry children; it has no destination and may be empty. "
+      + "Items with children cannot have an address. Move the address into a child item and use a dropdown header. "
+      + "nav push refuses PAGE or EXTERNAL_URL items with children locally as nav.group_target_unexpected at the item path, before saving.",
+      "pull preserves an existing linked parent's destination as a same-title first child, followed by its existing "
+      + "children, and exposes the parent as GROUP_HEADER. Its ID and the children's IDs stay stable across pulls. "
+      + "A normal nav push saves this migrated draft; existing published pages change at the next regeneration and deployment.",
       "externalUrl is an absolute credential-free http/https URL, or a mailto:/tel: contact URL such as "
       + "tel:+15555550123, published exactly as authored. An http or https address on another host opens in a new tab, "
       + "and the link says so to a screen reader.",
@@ -705,6 +731,13 @@ const WORKFLOW_REFERENCES = Object.freeze({
         kind: "NAV_ITEM_KIND_PAGE",
         title: "Classes",
         resourceId: "<resourceId-from-manifest>",
+      }), Object.freeze({
+        id: "<another-author-minted-lowercase-uuid>",
+        kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+        title: "Sign in",
+        externalUrl: "https://app.example.com/sign-in",
+        position: "NAV_ITEM_POSITION_HEADER_END",
+        appearance: "NAV_ITEM_APPEARANCE_BUTTON",
       })]),
     }),
   }),
@@ -1865,7 +1898,7 @@ const FREE_FORM_REFERENCE = Object.freeze({
       minimumChildren: FREE_FORM_SECTION_REGISTRY.section.minimumChildren,
       additionalProperties: false,
       attrs: Object.freeze(sectionAttributeReference()),
-      content: "one or more ordinary non-section block nodes; sections may not nest",
+      content: "ordinary flow blocks or columns layouts; sections may not nest",
     }),
     integrationPlacementNode: Object.freeze({
       type: "integrationPlacement",
@@ -1896,6 +1929,17 @@ const FREE_FORM_REFERENCE = Object.freeze({
     background: BACKGROUND_REFERENCE,
     decoration: decorationReference(),
     placementMatrix: placementMatrix(),
+  }),
+  columns: Object.freeze({
+    pageType: "free-form",
+    placement: "Directly inside a top-level section only. Each region contains ordinary flow blocks; no nested layouts or full-width bands.",
+    node: FREE_FORM_SECTION_REGISTRY.columns,
+    region: FREE_FORM_SECTION_REGISTRY.column,
+    markdownSyntax: ':::section {}\n:::columns {"ratio":"40-60"}\n:::column {}\nFirst region\n:::endcolumn\n:::column {}\nSecond region\n:::endcolumn\n:::endcolumns\n:::',
+    defaults: "Two equal columns. Omit default count and ratio. Three columns must be equal.",
+    responsive: "Columns stack in source order when the containing section cannot fit every region.",
+    markers: "Headers require JSON objects and no indentation or trailing text. Region options are {}. Fenced code keeps markers literal; a leading backslash escapes a marker. Close every region and layout explicitly before the section.",
+    transport: "Existing whole-response and workspace input limits still apply. Pull writes JSON and does not convert it back to Markdown.",
   }),
   tables: TABLE_REFERENCE,
   inlineFacts: INLINE_FACTS_REFERENCE,
@@ -2139,7 +2183,7 @@ export function formatReferenceResult(result) {
           .join("\n")
       }\n\nTransparent-mask example:\n${page.sections.decoration.markdownExample}\n\nMask guidance: ${page.sections.decoration.maskGuidance}\nSize guidance: ${page.sections.decoration.sizeGuidance}\nWarning: ${page.sections.decoration.opaqueWarning}\n\nRoot defaults and placement:\n${
         page.sections.placementMatrix.map(formatPlacement).join("\n")
-      }\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${
+      }\n\nColumns inside sections:\n${page.columns.markdownSyntax}\n  placement             ${page.columns.placement}\n  defaults              ${page.columns.defaults}\n  responsive            ${page.columns.responsive}\n  markers               ${page.columns.markers}\n  limits                ${page.columns.node.limits.rowsPerSection} rows per section; ${page.columns.node.limits.blocksPerRegion} blocks per region; ${page.columns.node.limits.nodesPerDocument} nodes and depth ${page.columns.node.limits.nodeDepth}\n  transport             ${page.columns.transport}\n\nSemantic tables:\n  placement             document root or directly inside a top-level section; wide/full-well measure\n  rows                  exactly ${page.tables.structure.headerRows} header row, then ${page.tables.limits.dataRows.min} through ${page.tables.limits.dataRows.max} data rows\n  columns               ${page.tables.limits.columns.min} through ${page.tables.limits.columns.max}; delimiter and every row must match the header width\n  caption               optional non-empty plain text; maximum ${page.tables.limits.captionScalars.max} Unicode scalar values; syntax ${page.tables.markdown.captionSyntax}\n  caption guidance      ${page.tables.captionGuidance}\n  cells                 exactly ${page.tables.structure.paragraphChildrenPerCell} paragraph; headers need non-whitespace text; data cells may be empty; maximum ${page.tables.limits.cellTextScalars.max} text scalars\n  inline                ${
         page.tables.structure.inlineNodes.join(", ")
       }; marks ${
         page.tables.structure.marks.join(", ")

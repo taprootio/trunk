@@ -40,22 +40,19 @@ import {
   validateFooterDocument,
 } from "./footer-contract.js";
 import {
+  describeSettingField,
+  formatSettingsReference,
+  PAGE_BACKGROUND_IMAGE_RENDERING,
+  PAGE_BACKGROUND_VERSUS_CANVAS,
+} from "./setting-reference.js";
+import { SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES, SETTINGS_TYPE_TAPROOT_STYLES } from "./settings-catalog.js";
+import {
   APPEARANCE_COLOR_CONSTRAINT,
   MAXIMUM_THEME_OPEN_MAP_ENTRIES,
   MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS,
   REQUIRED_THEME_PROPERTIES,
   validateAndLintThemePair,
 } from "./theme-validation.js";
-import {
-  describeSettingField,
-  formatSettingsReference,
-  PAGE_BACKGROUND_IMAGE_RENDERING,
-  PAGE_BACKGROUND_VERSUS_CANVAS,
-} from "./setting-reference.js";
-import {
-  SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
-  SETTINGS_TYPE_TAPROOT_STYLES,
-} from "./settings-catalog.js";
 
 let espalierVersion;
 
@@ -281,8 +278,7 @@ const THEME_GROUPS = Object.freeze([
   }),
   Object.freeze({
     name: "surface-assets",
-    summary:
-      "Preserve pulled asset fields; use appearance image ids for the logos, favicon and canvas image. The page "
+    summary: "Preserve pulled asset fields; use appearance image ids for the logos, favicon and canvas image. The page "
       + "background image is a theme field behind the page content, unlike the canvas image, which paints only the "
       + "side margins (help settings has both).",
     fields: Object.freeze([
@@ -392,7 +388,11 @@ function assertExampleContrast(theme, scheme) {
     const surface = themeLightness(properties[surfaceToken]);
     const lightness = themeLightness(properties[token]);
     if (surface === undefined || lightness === undefined || Math.abs(lightness - surface) < 0.4) {
-      throw new Error(`${scheme} theme example: ${token} (${properties[token]}) does not contrast with ${surfaceToken} (${properties[surfaceToken]}).`);
+      throw new Error(
+        `${scheme} theme example: ${token} (${properties[token]}) does not contrast with ${surfaceToken} (${
+          properties[surfaceToken]
+        }).`,
+      );
     }
   }
 }
@@ -458,6 +458,8 @@ export function getAppearanceReference() {
     ...(field.values ? { values: field.values } : {}),
     ...(field.minimum !== undefined ? { minimum: field.minimum, maximum: field.maximum } : {}),
     ...(field.maximumLength !== undefined ? { maximumLength: field.maximumLength } : {}),
+    ...(field.step !== undefined ? { step: field.step } : {}),
+    ...(field.optional ? { optional: true } : {}),
     ...appearanceColorReference(field),
     default: field.default,
   }));
@@ -483,7 +485,9 @@ export function getAppearanceReference() {
         file: field.file,
         path: field.path,
         appLabel: "Footer",
-        description: `The footer's ${footerColorLabel(field.name)} in the ${field.scheme} scheme. footer push owns the rest of the footer.`,
+        description: `The footer's ${
+          footerColorLabel(field.name)
+        } in the ${field.scheme} scheme. footer push owns the rest of the footer.`,
         renders: "The footer, once footerSettings.enabled is true (default false).",
         type: field.type,
         ...appearanceColorReference(field),
@@ -492,11 +496,13 @@ export function getAppearanceReference() {
     ],
     readOnlyProjections: APPEARANCE_READ_ONLY_FIELDS,
     pageBackgroundVersusCanvas: PAGE_BACKGROUND_VERSUS_CANVAS,
-    fieldMap: CLI_BINARY_NAME + " help settings maps every pulled field, including the read-only ones, to its app control.",
+    fieldMap: CLI_BINARY_NAME
+      + " help settings maps every pulled field, including the read-only ones, to its app control.",
     imageReferences:
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
-      "lightLogoId and darkLogoId are the current scheme-specific logo fields; there is no separate compact-logo setting. "
+      "lightLogoId and darkLogoId are the expanded scheme logos; optional lightCompactLogoId and darkCompactLogoId "
+      + "supply compact logos for Fixed headers above 1.0 when a regular logo resolves. Inactive choices are retained. "
       + "Each takes one image id: upload the highest-resolution file you have and assign it. An @2x or @3x suffix is only "
       + "part of a filename, nothing pairs it with another file, and the platform generates the sizes. "
       + "Prefer transparent PNG or WebP artwork with genuine alpha so the header background shows through, including "
@@ -514,8 +520,7 @@ export function getAppearanceReference() {
       + "header at desktop and compact/mobile widths. Transparent pixels provide no contrast: inspect the visible mark, "
       + "not its canvas bounds. When one asset does not remain distinct in both schemes, supply scheme-specific logo "
       + "assets rather than relying on a shadow, outline, or header color that has not been previewed.",
-    headerWidthContract:
-      "headerWidth 'contained' keeps the brand and the header buttons at the page content edges; "
+    headerWidthContract: "headerWidth 'contained' keeps the brand and the header buttons at the page content edges; "
       + "'wide' moves them to the viewport edges. Pages with root-band components (image-banner) span the viewport, "
       + "so full-bleed designs usually pair headerWidth 'wide' with headerLayout 'centered-menu', which keeps the "
       + "brand left, the buttons right, and the navigation centered. validate prints a hint, never a failure, when a "
@@ -549,24 +554,20 @@ export function getAppearanceReference() {
       + "(theme.concurrent_modification) and nothing is written. Footer prose, links and imagery, and the "
       + "publishing scalars are outside the revision, so an unrelated concurrent edit is preserved rather than "
       + "refused. footer push advances the baseline only when its save replaced that same revision.",
-    dryRun:
-      CLI_BINARY_NAME + " theme push --dry-run reads the site, lists the JSON paths at which each settings file "
+    dryRun: CLI_BINARY_NAME + " theme push --dry-run reads the site, lists the JSON paths at which each settings file "
       + "differs from it, and says whether the recorded baseline is still current or a pending save of the same "
       + "change set would be replayed; it writes nothing.",
-    retry:
-      "The save is recorded as pending in the manifest before it is sent. A save whose response was lost is "
+    retry: "The save is recorded as pending in the manifest before it is sent. A save whose response was lost is "
       + "replayed by running theme push again with the same settings files: it goes under the baseline it was "
       + "first sent with, even after the site's revision moved, and the site answers applied=false when it already "
       + "holds the change set, so nothing is applied twice and no partial write is ever reported. Editing the "
       + "files before retrying makes the pending record moot and a moved revision refuses toward pull.",
-    recovery:
-      "On theme.concurrent_modification keep copies of the edited settings files, run " + CLI_BINARY_NAME
+    recovery: "On theme.concurrent_modification keep copies of the edited settings files, run " + CLI_BINARY_NAME
       + " pull to refresh the baseline, re-apply the edits, and push again. A Taproot without the atomic save "
       + "refuses with theme.server_unsupported; theme push never falls back to sequential writes.",
     footerBoundary:
       "theme push changes only five colors per footer scheme. Use footer push for prose, links, layout, and imagery.",
-    footerContentGuard:
-      "theme push refuses while settings.footerSettings carries unpushed content edits: "
+    footerContentGuard: "theme push refuses while settings.footerSettings carries unpushed content edits: "
       + "theme.unpushed_footer_content names " + CLI_BINARY_NAME + " footer push to save them "
       + "(" + CLI_BINARY_NAME + " pull discards them). A workspace pulled before this baseline "
       + "fails theme.pull_required; footer push records it non-destructively, while pull "
@@ -722,12 +723,10 @@ export function getFooterReference() {
     messages: footerMessages(),
     totalGroupMaximum: FOOTER_LIMITS.linkGroups,
     totalRichTextRunsMaximum: FOOTER_LIMITS.richTextRuns,
-    targetRule:
-      "Each link has exactly one target: a tracked pageResourceId, or an externalUrl that is an absolute "
+    targetRule: "Each link has exactly one target: a tracked pageResourceId, or an externalUrl that is an absolute "
       + "credential-free http/https URL, or a mailto:/tel: contact URL such as tel:+15555550123. A contact URL is "
       + "published exactly as authored, so write the number the way it should be dialled.",
-    socialLinkRule:
-      "Each social link names a platform key (" + SOCIAL_PLATFORM_KEYS.join(", ") + ") and a url that "
+    socialLinkRule: "Each social link names a platform key (" + SOCIAL_PLATFORM_KEYS.join(", ") + ") and a url that "
       + SOCIAL_LINK_URL_REQUIREMENT + ". The label is the link's text and what screen readers announce; "
       + "leave it empty to use the platform's name, and give one to every other (Website) link. Domain names "
       + "with accented or non-English letters are not supported here; use a bottom link for that site. "

@@ -22,6 +22,7 @@ import {
   readAuthorsDocument,
 } from "../authors-contract.js";
 import { VERB_PAGES_PUSH } from "../constants.js";
+import { normalizeColumnsBody, validateColumnsBody } from "../content/free-form-columns.js";
 import { autolinkWarnings } from "../content/link-warnings.js";
 import { placedFormKeys, readFormIndex, withFormIds } from "../form-references.js";
 import { workspaceFormKeys } from "../forms-workspace.js";
@@ -780,7 +781,7 @@ export async function convertWorkspacePageSource({ source, mediaManifest, conten
     throw documentError("pages.document_shape", `'${file}' is not valid JSON.`, file);
   }
   if (source.template !== TEMPLATE_FREE_FORM) return typedDocumentFromJson(parsed, file);
-  return unwrapProseMirrorDocument(parsed, file);
+  return normalizeColumnsBody(unwrapProseMirrorDocument(parsed, file)).body;
 }
 
 /**
@@ -836,6 +837,12 @@ export async function validateWorkspacePageDocument({
   }
   for (const { doc, path, mayBeEmpty, restricted } of contentDocuments(document_)) {
     const location = path === "" ? file : `${file}:${path}`;
+    const columns = validateColumnsBody(doc, { allowColumns: documentTemplate(document_) === TEMPLATE_FREE_FORM });
+    if (columns.errors.length > 0) {
+      const first = columns.errors[0];
+      throw documentError("pages.document_invalid", `'${location}' has an invalid columns layout. Columns are available only inside sections of a free-form page.`, `${location}:${first.path}`)
+        .withProblems(columns.errors.map(error => ({ code: error.code, field: `${location}:${error.path}`, message: "Use a valid columns layout in a free-form section." })));
+    }
     assertValid(content, doc, location, { mayBeEmpty });
     const unsupported = restricted ? unsupportedRestrictedNode(doc) : undefined;
     if (unsupported !== undefined) {

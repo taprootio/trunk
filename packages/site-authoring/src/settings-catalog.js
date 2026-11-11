@@ -2,6 +2,7 @@ import { parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { SiteAuthoringError } from "./errors.js";
 import { projectFooterSettingsForWorkspace } from "./footer-contract.js";
+import { parseHeaderHeightMultiplier } from "./header-presentation.js";
 import { projectPulledTheme } from "./theme-projection.js";
 
 /**
@@ -63,6 +64,10 @@ export const SETTINGS_GROUPS = Object.freeze([
         "lightLogoUrl",
         "darkLogoId",
         "darkLogoUrl",
+        "lightCompactLogoId",
+        "lightCompactLogoUrl",
+        "darkCompactLogoId",
+        "darkCompactLogoUrl",
         "lightCanvasImageId",
         "lightCanvasImageUrl",
         "darkCanvasImageId",
@@ -95,6 +100,7 @@ export const SETTINGS_GROUPS = Object.freeze([
         "logoAlt",
         "navMenuDisplay",
         "headerPosition",
+        "headerHeightMultiplier",
         "lightBrandColor",
         "darkBrandColor",
       ),
@@ -203,6 +209,16 @@ export function projectSettingsGroup(group, response) {
   const source = message !== null && typeof message === "object" && !Array.isArray(message) ? message : {};
   const projected = {};
   for (const field of group.fields) {
+    if (field.name === "headerHeightMultiplier") {
+      const height = parseHeaderHeightMultiplier(source[field.name]);
+      if (!height) {
+        throw new SiteAuthoringError("api.setting_contract", "Taproot returned an invalid header height multiplier.", {
+          field: field.name,
+        });
+      }
+      if (height.canonical !== "") projected[field.name] = height.canonical;
+      continue;
+    }
     projected[field.name] = normalizeField(field, source[field.name]);
     if (field.wireType === "theme") {
       // A stored theme is what was written, possibly before a required key

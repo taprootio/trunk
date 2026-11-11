@@ -17,7 +17,9 @@
       "id": "a0000000-0000-4000-8000-000000000032",
       "kind": "NAV_ITEM_KIND_EXTERNAL_URL",
       "title": "Book a class",
-      "externalUrl": "https://schedule.example.test/riverbend"
+      "externalUrl": "https://schedule.example.test/riverbend",
+      "position": "NAV_ITEM_POSITION_HEADER_END",
+      "appearance": "NAV_ITEM_APPEARANCE_BUTTON"
     }
   ]
 }

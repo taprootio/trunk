@@ -1,3 +1,4 @@
+import { validateColumnsBody } from "./free-form-columns.js";
 import { IMAGE_DESCRIPTION_MODES } from "./image-description-validation.js";
 import { validateComponentBlock } from "./components.js";
 import {
@@ -431,11 +432,17 @@ const NODE_RULES = Object.freeze({
   }),
   section: rule({
     attrs: SECTION_ATTRS,
-    children: SECTION_BLOCKS,
+    children: Object.freeze([...SECTION_BLOCKS, FREE_FORM_SECTION_REGISTRY.columns.nodeType]),
     minChildren: FREE_FORM_SECTION_REGISTRY.section.minimumChildren,
     sectionBackground: true,
     sectionDecoration: true,
   }),
+  columns: rule({
+    attrs: Object.freeze({ count: spec(() => null), ratio: spec(() => null) }),
+    children: Object.freeze([FREE_FORM_SECTION_REGISTRY.column.nodeType]),
+    minChildren: FREE_FORM_SECTION_REGISTRY.columns.attrs.count.default,
+  }),
+  column: rule({ children: SECTION_BLOCKS, minChildren: FREE_FORM_SECTION_REGISTRY.column.minimumChildren }),
   [INLINE_FACTS_CONTRACT.nodeType]: rule({
     attrs: Object.freeze({
       items: spec(() => null, {
@@ -1096,6 +1103,12 @@ export function validateDocument(document) {
     report(state, "/content", CODES.docContent, "A page body must carry a 'content' array.");
     return finish(state);
   }
+
+  const structural = validateColumnsBody(document);
+  for (const issue of structural.errors) {
+    report(state, issue.path, issue.code, "This columns layout has invalid structure, placement or size. Use two or three non-empty regions directly inside a section.");
+  }
+  if (structural.errors.length > 0) return finish(state);
 
   checkNodeKeys(document, "", NODE_RULES.doc, false, state);
   checkAttrs(document, "", NODE_RULES.doc, state);

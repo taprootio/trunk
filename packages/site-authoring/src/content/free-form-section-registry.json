@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
 
   "imageDescription": {
     "fields": {
@@ -353,6 +353,49 @@
       }
     }
   },
+  "columns": {
+    "nodeType": "columns",
+    "label": "Columns",
+    "help": "Place two or three ordered editable regions beside one another inside a section; narrow layouts stack in reading order.",
+    "closed": true,
+    "nodeKeys": ["type", "attrs", "content"],
+    "requiredNodeKeys": ["type", "content"],
+    "attrs": {
+      "count": {
+        "type": "integer",
+        "required": false,
+        "default": 2,
+        "values": [2, 3]
+      },
+      "ratio": {
+        "type": "enum",
+        "required": false,
+        "default": "equal",
+        "values": ["equal", "40-60", "60-40"]
+      }
+    },
+    "threeColumnRatio": "equal",
+    "placement": { "parent": "section", "parentAtRoot": true },
+    "children": { "nodeType": "column", "countAttribute": "count" },
+    "limits": {
+      "rowsPerSection": 8,
+      "blocksPerRegion": 64,
+      "nodesPerDocument": 10000,
+      "nodeDepth": 16,
+      "jsonContainerDepth": 36
+    }
+  },
+  "column": {
+    "nodeType": "column",
+    "closed": true,
+    "nodeKeys": ["type", "content"],
+    "requiredNodeKeys": ["type", "content"],
+    "minimumChildren": 1,
+    "placement": { "parent": "columns" },
+    "eligibleRootNodePlacement": "flow",
+    "eligibleComponentRootPlacement": "flow",
+    "excludedNodeTypes": ["section", "columns", "column", "integrationFragment"]
+  },
   "table": {
     "nodeTypes": {
       "table": "table",
@@ -417,6 +460,7 @@
     "placement": {
       "root": true,
       "section": true,
+      "column": true,
       "measure": "wide"
     }
   },
@@ -470,6 +514,7 @@
     "placement": {
       "root": true,
       "section": true,
+      "column": true,
       "measure": "wide"
     }
   },
@@ -674,6 +719,7 @@
     "placement": {
       "root": true,
       "section": true,
+      "column": true,
       "measure": "wide"
     }
   },

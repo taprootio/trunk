@@ -265,6 +265,8 @@ export const HTTP_UNAUTHORIZED = 401;
 export const GRPC_NOT_FOUND = 5;
 export const HTTP_NOT_FOUND = 404;
 
+const NAVIGATION_WORKSPACE_BYTES = 2 * 1024 * 1024;
+
 export const LIMITS = Object.freeze({
   configBytes: 16 * 1024,
   configPathBytes: 4 * 1024,
@@ -272,10 +274,15 @@ export const LIMITS = Object.freeze({
   settingsBytes: 4 * 1024,
   configDiscoveryParents: 32,
   workspacePathBytes: 4 * 1024,
+  // Preserved destination children must fit when a legacy linked tree is pulled.
+  navigationItems: 2_000,
+  navigationWorkspaceBytes: NAVIGATION_WORKSPACE_BYTES,
+  // Navigation replies include proto3 defaults that the workspace leaves out.
+  navigationResponseBytes: 2 * NAVIGATION_WORKSPACE_BYTES,
   apiResponseBytes: 1024 * 1024,
-  // The redirect map is the one read whose valid size exceeds the ordinary
-  // response bound: two thousand entries with long absolute targets. Sized
-  // with the workspace file that holds it (WORKSPACE_LIMITS.redirectsBytes).
+  // A redirect map also exceeds the ordinary response bound: two thousand
+  // entries with long absolute targets. Sized with its workspace file
+  // (WORKSPACE_LIMITS.redirectsBytes).
   redirectMapResponseBytes: 8 * 1024 * 1024,
   requestMilliseconds: 60_000,
   uploadMilliseconds: 5 * 60_000,

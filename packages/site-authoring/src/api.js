@@ -92,6 +92,22 @@ export const NAV_ITEM_KINDS = Object.freeze([
   NAV_ITEM_KIND_EXTERNAL_URL,
   NAV_ITEM_KIND_GROUP_HEADER,
 ]);
+export const NAV_ITEM_POSITION_UNSPECIFIED = "NAV_ITEM_POSITION_UNSPECIFIED";
+export const NAV_ITEM_POSITION_MENU = "NAV_ITEM_POSITION_MENU";
+export const NAV_ITEM_POSITION_HEADER_END = "NAV_ITEM_POSITION_HEADER_END";
+export const NAV_ITEM_POSITIONS = Object.freeze([
+  NAV_ITEM_POSITION_UNSPECIFIED,
+  NAV_ITEM_POSITION_MENU,
+  NAV_ITEM_POSITION_HEADER_END,
+]);
+export const NAV_ITEM_APPEARANCE_UNSPECIFIED = "NAV_ITEM_APPEARANCE_UNSPECIFIED";
+export const NAV_ITEM_APPEARANCE_LINK = "NAV_ITEM_APPEARANCE_LINK";
+export const NAV_ITEM_APPEARANCE_BUTTON = "NAV_ITEM_APPEARANCE_BUTTON";
+export const NAV_ITEM_APPEARANCES = Object.freeze([
+  NAV_ITEM_APPEARANCE_UNSPECIFIED,
+  NAV_ITEM_APPEARANCE_LINK,
+  NAV_ITEM_APPEARANCE_BUTTON,
+]);
 export const NAVIGATION_MAXIMUM_DEPTH = 3;
 
 export const DEPLOYMENT_ENVIRONMENT_STAGING = "DEPLOYMENT_ENVIRONMENT_STAGING";
@@ -686,7 +702,9 @@ export async function publishDrafts(client, pageIds) {
  */
 export async function getNavigation(client, siteId) {
   const search = query([["environment", SITE_ENVIRONMENT_DRAFT]]);
-  return requireNavigation(await client.request(sitePath(siteId, `navigation${search}`)));
+  return requireNavigation(await client.request(sitePath(siteId, `navigation${search}`), {
+    maximumResponseBytes: LIMITS.navigationResponseBytes,
+  }));
 }
 
 /**
@@ -698,6 +716,7 @@ export async function saveNavigation(client, siteId, navItems, expectedRevision)
     await client.request(sitePath(siteId, "navigation"), {
       method: "PUT",
       body: { siteId, navItems, expectedRevision },
+      maximumResponseBytes: LIMITS.navigationResponseBytes,
     }),
   );
 }

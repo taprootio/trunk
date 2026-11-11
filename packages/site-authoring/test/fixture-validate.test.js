@@ -4,12 +4,12 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "no
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
 import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
-import { projectNavigationForWorkspace } from "../src/verbs/nav-push.js";
+import { projectNavigationForWorkspace, validateNavigationWorkspaceDocument } from "../src/verbs/nav-push.js";
 import { convertWorkspacePageSource, readWorkspacePageSource } from "../src/verbs/pages-push.js";
 import { readMediaManifest } from "../src/workspace.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
@@ -41,6 +41,46 @@ const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
 const SHY_IMAGE_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
 // The image-row wordmark the composition fixture carries (TR01322).
 const SHY_WORDMARK_IMAGE_ID = "88888888-9999-4aaa-8bbb-cccccccccccc";
+
+
+test("WordPress menu construction preserves parent destinations in valid navigation", { skip: MONOREPO_ONLY }, async (context) => {
+  const { menuToNavigation } = await import(pathToFileURL(monorepoPath("docs", "playbooks", "wordpress-import", "rehearse.mjs")));
+  const resourceId = "00000000-0000-4000-8000-000000000901";
+  const siteId = "00000000-0000-4000-8000-000000000902";
+  const menu = (parent) => [
+    { wpId: 1, parent: 0, title: "Visit", ...parent },
+    { wpId: 2, parent: 1, title: "Contact", type: "custom", url: "https://example.com/contact" },
+    { wpId: 3, parent: 1, title: "Hours", type: "custom", url: "https://example.com/hours" },
+  ];
+  const pathByWpId = new Map([[10, "visit.json"]]);
+  const pathToResource = new Map([["visit.json", resourceId]]);
+  const headingChildren = menuToNavigation({ pathByWpId, menu: menu({ type: "custom", url: "#" }) }, pathToResource)
+    .navItems[0].children;
+  for (const [name, parent, target] of [
+    ["page", { type: "post_type", objectId: 10 }, { kind: "NAV_ITEM_KIND_PAGE", resourceId }],
+    ["external", { type: "custom", url: "https://example.com/visit" }, { kind: "NAV_ITEM_KIND_EXTERNAL_URL", externalUrl: "https://example.com/visit" }],
+    ["heading", { type: "custom", url: "#" }, undefined],
+  ]) {
+    await context.test(name, () => {
+      const result = menuToNavigation({ pathByWpId, menu: menu(parent) }, pathToResource);
+      assert.deepEqual(result.skipped, []);
+      const group = result.navItems[0];
+      assert.equal(group.kind, "NAV_ITEM_KIND_GROUP_HEADER");
+      assert.equal(group.resourceId, undefined);
+      assert.equal(group.externalUrl, undefined);
+      const offset = target === undefined ? 0 : 1;
+      if (target !== undefined) {
+        const destination = group.children[0];
+        assert.deepEqual(destination, { id: destination.id, title: group.title, ...target, children: [] });
+      }
+      assert.deepEqual(group.children.slice(offset), headingChildren);
+      const ids = [group.id, ...group.children.map((item) => item.id)];
+      assert.equal(new Set(ids).size, ids.length);
+      const validated = validateNavigationWorkspaceDocument({ siteId, navItems: result.navItems }, siteId);
+      assert.equal(validated.items, 3 + offset);
+    });
+  }
+});
 
 function sink() {
   let value = "";
@@ -150,7 +190,7 @@ test("the shipped example fixture validates without credentials, network, or wri
       pages: 6,
       navigationItems: 3,
       themes: 2,
-      appearanceSettings: 24,
+      appearanceSettings: 27,
       footer: true,
     },
   );
@@ -325,7 +365,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       forms: 1,
       navigationItems: 10,
       themes: 2,
-      appearanceSettings: 24,
+      appearanceSettings: 27,
       footer: true,
     },
   );
@@ -465,7 +505,7 @@ test(
     const json = JSON.parse(result.stdout);
     assert.deepEqual(json.hints, []);
     assert.doesNotMatch(result.stderr, /Hint:/u);
-    assert.equal(json.validated.appearanceSettings, 24);
+    assert.equal(json.validated.appearanceSettings, 27);
   },
 );
 

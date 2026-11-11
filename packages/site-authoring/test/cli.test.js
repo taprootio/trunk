@@ -774,7 +774,8 @@ test("serves page and component reference help without configuration, credential
       contains: [
         "lightLogoId",
         "darkLogoId",
-        "no separate compact-logo",
+        "lightCompactLogoId",
+        "headerHeightMultiplier",
         "upload the highest-resolution file you have and assign it",
         "nothing pairs it with another file",
         "Logo contrast: Evaluate lightLogoId against the rendered light-scheme header",

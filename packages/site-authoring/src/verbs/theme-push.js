@@ -2,6 +2,7 @@ import { getSitePresentation, saveSitePresentation, withRefusalGuidance } from "
 import {
   APPEARANCE_FOOTER_COLOR_FIELDS,
   APPEARANCE_SCALAR_FIELDS,
+  appearanceScalarInput,
   buildAppearanceScalarOperations,
   footerColorOverlay,
 } from "../appearance-contract.js";
@@ -149,7 +150,7 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
   // leaves retain their existing empty-color fallback.
   const missing = missingThemeSettings(style);
   for (const definition of APPEARANCE_SCALAR_FIELDS) {
-    if (!Object.hasOwn(documents[definition.settingsType], definition.name)) {
+    if (!definition.optional && !Object.hasOwn(documents[definition.settingsType], definition.name)) {
       missing.push(definition.path);
     }
   }
@@ -246,10 +247,17 @@ function ownedDocuments(validated, presentation) {
   for (const group of SETTINGS_GROUPS) {
     projected[group.settingsType] = projectSettingsGroup(group, presentation);
   }
+  const fieldDefinitions = new Map(
+    APPEARANCE_SCALAR_FIELDS.map(field => [`${field.settingsType}:${field.name}`, field]),
+  );
+  const valueOf = (settingsType, document, name) => {
+    const definition = fieldDefinitions.get(`${settingsType}:${name}`);
+    return definition ? appearanceScalarInput(definition, document[name]) : document[name];
+  };
   const owned = (settingsType, local, remote, names) => ({
     file: `${SETTINGS_DIRECTORY}/${SETTINGS_FILES[settingsType]}`,
-    local: Object.fromEntries(names.map((name) => [name, local[name]])),
-    remote: Object.fromEntries(names.map((name) => [name, remote[name]])),
+    local: Object.fromEntries(names.map((name) => [name, valueOf(settingsType, local, name)])),
+    remote: Object.fromEntries(names.map((name) => [name, valueOf(settingsType, remote, name)])),
   });
   const scalarNames = (settingsType) =>
     APPEARANCE_SCALAR_FIELDS.filter((field) => field.settingsType === settingsType).map((field) => field.name);
@@ -314,7 +322,10 @@ export function presentationMovedRefusal({ baseline, current, differences }) {
       + `${current.revision}), so nothing was written. Keep copies of the edited settings files, run `
       + "'taproot-site pull' to refresh the baseline, re-apply the edits, and push again; the paths below name "
       + "where the workspace and the site now differ.",
-    { field: "revision", alternatives: differences.filter((entry) => entry.paths.length > 0).map((entry) => entry.file) },
+    {
+      field: "revision",
+      alternatives: differences.filter((entry) => entry.paths.length > 0).map((entry) => entry.file),
+    },
   ).withDifferences(differences.flatMap((entry) => entry.paths.map((path) => `${entry.file}:${path}`)));
 }
 
@@ -386,7 +397,9 @@ export async function themePush(invocation) {
   for (const warning of themes.warnings) onProgress(`Espalier warning: ${warning}`);
   if (themes.warningsTruncated) {
     const hidden = themes.warningCount - themes.warnings.length;
-    onProgress(`${hidden} more Espalier warning(s) not shown; resolve the ones above and run theme push --dry-run to see them.`);
+    onProgress(
+      `${hidden} more Espalier warning(s) not shown; resolve the ones above and run theme push --dry-run to see them.`,
+    );
   }
   const warnings = {
     items: themes.warnings,
@@ -397,8 +410,11 @@ export async function themePush(invocation) {
   // The fresh read serves both modes: the dry run compares against it, and
   // the push takes the footer document's draft token from it. Nothing before
   // this point, and nothing in a dry run after it, writes to the site.
-  const comparison = await withRefusalGuidance(onProgress, "theme push", async () =>
-    await comparePresentation(client, siteId, validated, appearanceContext.manifest));
+  const comparison = await withRefusalGuidance(
+    onProgress,
+    "theme push",
+    async () => await comparePresentation(client, siteId, validated, appearanceContext.manifest),
+  );
   const { current, stale, changeSet, changeSetHash, pending, replayable, replaying, differences, changed } = comparison;
 
   if (dryRun) {
@@ -408,7 +424,9 @@ export async function themePush(invocation) {
     }
     if (!changed) onProgress("The workspace's presentation matches the site; a push would change nothing.");
     if (baseline === undefined) {
-      onProgress("The pull manifest records no presentation baseline; a push would refuse until the workspace is re-pulled.");
+      onProgress(
+        "The pull manifest records no presentation baseline; a push would refuse until the workspace is re-pulled.",
+      );
     } else if (replaying) {
       onProgress(
         `The site's presentation revision moved since this workspace was pulled (${baseline.revision} → `
@@ -500,7 +518,9 @@ export async function themePush(invocation) {
     // so an error answered after that commit has moved the revision, and the
     // record is what lets the next run of the same change set be answered as
     // already current instead of refused as someone else's edit.
-    if (error instanceof ApiError && (error.hasField("ExpectedRevision") || error.hasField("ExpectedFooterDraftHash"))) {
+    if (
+      error instanceof ApiError && (error.hasField("ExpectedRevision") || error.hasField("ExpectedFooterDraftHash"))
+    ) {
       await clearPendingPresentationSave(config.workspaceDir, siteId);
     } else {
       onProgress(
