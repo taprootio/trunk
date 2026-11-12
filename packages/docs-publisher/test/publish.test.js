@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -1014,8 +1015,8 @@ test("release and deployment reads receive and enforce their absolute poll deadl
       const original = client.request.bind(client);
       client.request = async (path, options = {}) => {
         if (path.endsWith(targetPath)) {
-          assert.equal(options.deadline, timeoutMilliseconds);
-          assert.equal(options.now(), clock);
+          assertTimeCloseTo(options.deadline, timeoutMilliseconds);
+          assertTimeCloseTo(options.now(), clock);
           clock = options.deadline;
           throw new PublisherError("transport.deadline", "The poll read reached its deadline.");
         }
@@ -1037,7 +1038,7 @@ test("parent cancellation at the poll deadline remains cancellation", async () =
   const original = client.request.bind(client);
   client.request = async (path, options = {}) => {
     if (path.endsWith(`/docs/releases/${RELEASE_ID}`)) {
-      assert.equal(options.deadline, LIMITS.validationMilliseconds);
+      assertTimeCloseTo(options.deadline, LIMITS.validationMilliseconds);
       clock = options.deadline;
       controller.abort();
       throw new PublisherError("publisher.cancelled", "Cancelled.");

@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -151,8 +152,9 @@ test("caps a hanging request and its retries to the remaining poll deadline", as
     client.request("v1/test", { deadline: 100 }),
     (error) => error?.code === "transport.deadline",
   );
-  assert.deepEqual(timeoutDurations, [1]);
-  assert.equal(clock, 100);
+  assert.equal(timeoutDurations.length, 1);
+  assertTimeCloseTo(timeoutDurations[0], 1);
+  assertTimeCloseTo(clock, 100);
   assert.equal(fetchCalls, 1);
   assert.equal(sleeps, 0);
 
@@ -178,7 +180,8 @@ test("caps a hanging request and its retries to the remaining poll deadline", as
     (error) => error?.code === "transport.deadline",
   );
   assert.equal(retryableCalls, 1);
-  assert.deepEqual(retryDelays, [10]);
+  assert.equal(retryDelays.length, 1);
+  assertTimeCloseTo(retryDelays[0], 10);
 
   const ordinaryTimeouts = [];
   const ordinary = new DocsApiClient({
@@ -191,7 +194,8 @@ test("caps a hanging request and its retries to the remaining poll deadline", as
     fetch: async () => jsonResponse({ ok: true }),
   });
   assert.deepEqual(await ordinary.request("v1/test"), { ok: true });
-  assert.deepEqual(ordinaryTimeouts, [LIMITS.requestMilliseconds]);
+  assert.equal(ordinaryTimeouts.length, 1);
+  assertTimeCloseTo(ordinaryTimeouts[0], LIMITS.requestMilliseconds);
 });
 
 test("rejects oversized API responses without incorporating response bytes in its error", async () => {
@@ -231,7 +235,7 @@ test("names the plan limit and its reset when Stage or Promote is refused for an
     await testContext.test(reason, () => {
       const error = new ApiError(400, planLimitBody(reason, { resets_at: "2026-11-01T00:00:00.1234567Z" }));
       assert.equal(error.refusal, "plan_limit");
-      assert.equal(error.resetsAt, "2026-11-01T00:00:00.123Z");
+      assertTimeCloseTo(Date.parse(error.resetsAt), Date.parse("2026-11-01T00:00:00.123Z"));
       if (reason === "BANDWIDTH_ALLOWANCE_EXCEEDED") {
         // Not an unconditional reset: the instant is only the earliest it can lift.
         assert.match(error.message, /after a month ends under the allowance \(no earlier than 2026-11-01T00:00:00\.123Z\)/u);

@@ -16,7 +16,7 @@ export interface DocsPublishSuccess {
   schemaVersion: 2;
   ok: true;
   outcome?: "published";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.1" };
   compatibility: {
     configVersion: 1 | 2;
     artifactPackageVersion: "1.2.0";
@@ -37,7 +37,7 @@ export interface DocsPublishSuperseded {
   schemaVersion: 2;
   ok: true;
   outcome: "superseded";
-  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.0" };
+  publisher: { name: "@taprootio/docs-publisher"; version: "1.5.1" };
   siteId: string;
   mode: DocsPublicationMode;
   release: { id: string; status: string; sourceRevision: string };
