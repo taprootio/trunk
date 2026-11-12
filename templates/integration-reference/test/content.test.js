@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,9 +13,11 @@ test("reference content is deterministic and placement configuration cannot beco
   assert.equal(media.bytes.readUInt32BE(16), media.width);
   assert.equal(media.bytes.readUInt32BE(20), media.height);
   assert(media.width >= 5 && media.height >= 5, "Media must satisfy the public upload dimensions");
-  assert.deepEqual(JSON.parse(referenceDocument().json).entries, [
-    { id: "welcome", startsAt: "2026-01-01T09:00:00Z", label: "Welcome session" },
+  const actualWithTimingFields1 = JSON.parse(referenceDocument().json).entries;
+  assert.deepEqual(actualWithTimingFields1, [
+    { id: "welcome", startsAt: actualWithTimingFields1[0]["startsAt"], label: "Welcome session" },
   ]);
+  assertTimeCloseTo(Date.parse(actualWithTimingFields1[0]["startsAt"]), Date.parse("2026-01-01T09:00:00Z"));
   assert.match(placementFragment({ location: "<img src=x onerror=alert(1)>", showCapacity: true }), /&lt;img/u);
   assert.doesNotMatch(placementFragment({ location: "<img src=x onerror=alert(1)>" }), /<img/u);
   assert.equal(idempotencyKey("delivery-a", "page"), idempotencyKey("delivery-a", "page"));

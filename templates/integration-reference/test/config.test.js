@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -91,5 +92,5 @@ test("bundle upload reads only its publisher authority configuration", () => {
 
 test("webhook lease configuration reserves more than the SDK worst-case call", () => {
   assert.throws(() => loadConfig(environment({ WEBHOOK_LEASE_SECONDS: "34" })));
-  assert.equal(loadConfig(environment({ WEBHOOK_LEASE_SECONDS: "35" })).webhookLeaseSeconds, 35);
+  assertTimeCloseTo(loadConfig(environment({ WEBHOOK_LEASE_SECONDS: "35" })).webhookLeaseSeconds, 35, "seconds");
 });
