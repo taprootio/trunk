@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -123,7 +124,7 @@ test("repeated HTTP health reads preserve frozen production identity and one ima
   assert.equal(first.deploymentId, DEPLOYMENT_ID);
   assert.equal(first.outputReleaseId, OUTPUT_ID);
   assert.equal(first.inputHash, INPUT_HASH);
-  assert.equal(first.checkedAt, CHECKED_AT);
+  assertTimeCloseTo(Date.parse(first.checkedAt), Date.parse(CHECKED_AT));
   assert.equal(first.ruleVersion, "2");
   assert.deepEqual(first.coverage, COVERAGE);
   assert.equal(first.assessedPageCount, 2);

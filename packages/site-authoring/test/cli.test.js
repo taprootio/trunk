@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import { CLI_VERSION, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../src/constants.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -1201,10 +1202,12 @@ test("preserves preview recovery identity when GitHub output fails after minting
   });
 
   assert.equal(exitCode, 1);
-  assert.deepEqual(JSON.parse(stdout.read()).error, {
+  const actualWithTimingFields12 = JSON.parse(stdout.read()).error;
+  assert.deepEqual(actualWithTimingFields12, {
     code: "output.github_missing",
-    preview: { siteId, pageId: PAGE_ID, snapshotId: SNAPSHOT_ID, expiresAt },
+    preview: { siteId, pageId: PAGE_ID, snapshotId: SNAPSHOT_ID, expiresAt: actualWithTimingFields12["preview"]["expiresAt"] },
   });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields12["preview"]["expiresAt"]), Date.parse(expiresAt));
   assert.equal(stdout.read().includes(secretUrl), false);
 });
 

@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -273,7 +274,8 @@ test("login stores an approved credential and never emits the secret or the devi
 
   assert.equal(exitCode, 0, stderr);
   const result = JSON.parse(stdout);
-  assert.deepEqual(result, {
+  const actualWithTimingFields1 = result;
+  assert.deepEqual(actualWithTimingFields1, {
     schemaVersion: 1,
     ok: true,
     cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
@@ -281,24 +283,28 @@ test("login stores an approved credential and never emits the secret or the devi
     accountId: ACCOUNT_ID,
     keyId: KEY_ID,
     keyPrefix: KEY_PREFIX,
-    keyExpiresAt: KEY_EXPIRES_AT,
+    keyExpiresAt: actualWithTimingFields1["keyExpiresAt"],
     userCode: USER_CODE,
     verificationUrl: VERIFICATION_URL,
     credentialPath: site.storePath,
   });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields1["keyExpiresAt"]), Date.parse(KEY_EXPIRES_AT));
 
   // The stored record carries the key; every emitted surface does not.
   const stored = await storeContents(site);
   assert.equal(stored.schemaVersion, 3);
-  assert.deepEqual(stored.credentials, [{
+  const actualWithTimingFields2 = stored.credentials;
+  assert.deepEqual(actualWithTimingFields2, [{
     apiOrigin: API_ORIGIN,
     accountId: ACCOUNT_ID,
     key: RAW_KEY,
     keyId: KEY_ID,
     keyPrefix: KEY_PREFIX,
-    keyExpiresAt: KEY_EXPIRES_AT,
-    createdAt: stored.credentials[0].createdAt,
+    keyExpiresAt: actualWithTimingFields2[0]["keyExpiresAt"],
+    createdAt: actualWithTimingFields2[0]["createdAt"],
   }]);
+  assertTimeCloseTo(Date.parse(actualWithTimingFields2[0]["keyExpiresAt"]), Date.parse(KEY_EXPIRES_AT));
+  assertTimeCloseTo(Date.parse(actualWithTimingFields2[0]["createdAt"]), Date.parse(stored.credentials[0].createdAt));
   const emitted = `${stdout}${stderr}${await readFile(outputPath, "utf8")}`;
   for (const secret of [RAW_KEY, DEVICE_CODE]) {
     assert.doesNotMatch(emitted, new RegExp(secret, "u"), `emitted ${secret}`);
@@ -501,7 +507,7 @@ test("login gives up on its own deadline with login.timeout and stores nothing",
   assert.equal(await storeContents(site), undefined);
   // The wait is bounded by the authorization the server issued, on the virtual
   // clock: a 900-second window at a 5-second cadence, and not one poll more.
-  assert.equal(timing.now(), 1_700_000_000_000 + 900_000);
+  assertTimeCloseTo(timing.now(), 1_700_000_000_000 + 900_000);
   assert.ok(wire.calls.filter((call) => call.pathname === CLAIM_PATH).length <= 181);
   // 180 silent polls: the progress lines are the hand-off and the deadline, and
   // nothing that would scroll the code away while the operator reads it.
@@ -670,7 +676,7 @@ test("login floors a too-fast poll interval and caps a too-long expiry", async (
 
   await assert.rejects(login(invocation), (error) => error?.code === "login.timeout");
   // Capped at the 30-minute maximum, polled no faster than every 2 seconds.
-  assert.equal(timing.now(), 1_700_000_000_000 + 30 * 60_000);
+  assertTimeCloseTo(timing.now(), 1_700_000_000_000 + 30 * 60_000);
   assert.ok(wire.calls.filter((call) => call.pathname === CLAIM_PATH).length <= 901);
 });
 

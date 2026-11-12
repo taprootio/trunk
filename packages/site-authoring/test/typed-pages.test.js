@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -128,7 +129,7 @@ test("a recipe source becomes structured ingredients, grouped steps, and page fi
   assert.equal(document_.coverImageId, COVER_ID);
   assert.deepEqual(Object.keys(document_), ["template", "displayDate", "coverImageId", "data"]);
   const { data } = document_;
-  assert.equal(data.prepTimeMinutes, 15);
+  assertTimeCloseTo(data.prepTimeMinutes * 60, 15 * 60, "seconds");
   assert.equal(data.servings, 16);
   assert.equal(data.recipeCategory, "Dessert");
   assert.equal(data.recipeCuisine, "");

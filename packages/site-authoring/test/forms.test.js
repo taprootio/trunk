@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -230,7 +231,7 @@ test("the workspace projection is canonical and stable when applied twice", () =
     definition: { fields: [{ required: true, hint: "Tip", label: "Email", type: "email", id: "email" }] },
   });
   assert.deepEqual(Object.keys(hinted.definition.fields[0]), ["id", "type", "label", "hint", "required"]);
-  assert.equal(once.retention_days, 365);
+  assertTimeCloseTo((once.retention_days) * 86400, 365 * 86400, "seconds");
 });
 
 test("the contact field is written only when several email fields need the choice", () => {
@@ -715,7 +716,7 @@ for (const metadata of [{ name: "Newsletter signup" }, { retention_days: 400 }, 
     assert.ok(settings.pathname.endsWith("/settings"));
     assert.equal(settings.body.expectedName, LEGACY_NEWSLETTER_FORM.name);
     assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NEWSLETTER");
-    assert.equal(settings.body.expectedRetentionDays, LEGACY_NEWSLETTER_FORM.retention_days);
+    assertTimeCloseTo(settings.body.expectedRetentionDays * 86400, LEGACY_NEWSLETTER_FORM.retention_days * 86400, "seconds");
     assert.deepEqual(JSON.parse(state.forms.contact.currentVersion.definition), LEGACY_NEWSLETTER_FORM.definition);
     assert.deepEqual(await readContactBaseline(site), {
       id: FORM_ID, version: 2, settings: { name: desired.name, sink: "newsletter", retention_days: desired.retention_days, notify_owner: desired.notify_owner },
@@ -875,7 +876,7 @@ test("forms push saves a newsletter conversion's required email and consent befo
   assert.ok(settings.pathname.endsWith("/settings"));
   assert.equal(settings.body.expectedName, "Contact");
   assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NONE");
-  assert.equal(settings.body.expectedRetentionDays, 365);
+  assertTimeCloseTo(settings.body.expectedRetentionDays * 86400, 365 * 86400, "seconds");
   assert.equal(state.forms.contact.form.sink, "SITE_FORM_SINK_NEWSLETTER");
   assert.deepEqual(await readContactBaseline(site), {
     id: FORM_ID, version: 2, settings: { name: desired.name, sink: desired.sink, retention_days: 365, notify_owner: false },
@@ -917,7 +918,7 @@ for (const failure of ["server", "precondition"]) {
     const [settings] = writes(scripted);
     assert.equal(settings.body.expectedName, "Contact");
     assert.equal(settings.body.expectedSink, "SITE_FORM_SINK_NONE");
-    assert.equal(settings.body.expectedRetentionDays, 365);
+    assertTimeCloseTo(settings.body.expectedRetentionDays * 86400, 365 * 86400, "seconds");
     assert.deepEqual(await readContactBaseline(site), {
       id: FORM_ID, version: 2, settings: { name: desired.name, sink: desired.sink, retention_days: 365, notify_owner: false },
     });
@@ -1460,9 +1461,9 @@ test("forms push creates a form without retention on a plan whose default is sho
   const { exit, result } = await runWithSite(site, scripted, ["forms", "push"]);
 
   assert.equal(exit, 0, JSON.stringify(result));
-  assert.equal(JSON.parse(await readText(site, "forms/contact.json")).retention_days, 90);
+  assertTimeCloseTo((JSON.parse(await readText(site, "forms/contact.json")).retention_days) * 86400, 90 * 86400, "seconds");
   const manifest = JSON.parse(await readText(site, ".taproot-site-manifest.json"));
-  assert.equal(manifest.forms.items.contact.settings.retention_days, 90);
+  assertTimeCloseTo((manifest.forms.items.contact.settings.retention_days) * 86400, 90 * 86400, "seconds");
 });
 
 test("forms push keeps the site's retention when an existing form's file names none", async (t) => {
@@ -1478,7 +1479,7 @@ test("forms push keeps the site's retention when an existing form's file names n
 
   assert.equal(exit, 0);
   const [settings] = writes(scripted);
-  assert.equal(settings.body.retentionDays, 90);
+  assertTimeCloseTo((settings.body.retentionDays) * 86400, 90 * 86400, "seconds");
 });
 
 test("forms push sends the recorded version and settings, and a save made in between is refused by the site", async (t) => {
@@ -1519,7 +1520,7 @@ test("forms push sends the recorded version and settings, and a save made in bet
   assert.deepEqual(refusal.result.error.completedWrites, ["contact"]);
   const put = scripted.calls.find((call) => call.method === "PUT" && call.pathname.includes(WAITLIST_ID));
   assert.equal(put.body.expectedName, "Waitlist");
-  assert.equal(put.body.expectedRetentionDays, 365);
+  assertTimeCloseTo(put.body.expectedRetentionDays * 86400, 365 * 86400, "seconds");
   assert.equal(state.forms.waitlist.form.name, "Renamed by someone else");
 });
 

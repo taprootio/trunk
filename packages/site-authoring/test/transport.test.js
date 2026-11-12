@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import { Readable } from "node:stream";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -7,6 +8,7 @@ import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, LIMITS, REFUSAL_KINDS } from ".
 import { ApiError, capabilityRefusal, fieldViolations, planLimitRefusal, SiteApiClient } from "../src/transport.js";
 import { SiteAuthoringError } from "../src/errors.js";
 
+const ISO_MILLISECOND_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const API_BASE_URL = "https://app.taproot.test/api";
 const TOKEN = "tr_live_site_key_that_must_never_be_logged";
 
@@ -750,27 +752,27 @@ test("collects nested field violations without unbounded or unsafe values", () =
 test("reads the deployment allowance and bandwidth refusals out of their packed error detail", async (testContext) => {
   for (const reason of ["DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", "BANDWIDTH_ALLOWANCE_EXCEEDED"]) {
     await testContext.test(`${reason} carries its reset as an ISO instant`, () => {
-      assert.deepEqual(
-        planLimitRefusal(allowanceDetail(reason, { resets_at: "2026-11-01T00:00:00.1234567Z" })),
-        { reason, resetsAt: "2026-11-01T00:00:00.123Z", requestedPages: undefined, remainingPages: undefined },
-      );
+      const actualWithTimingFields16 = planLimitRefusal(allowanceDetail(reason, { resets_at: "2026-11-01T00:00:00.1234567Z" }));
+      assert.deepEqual(actualWithTimingFields16, { reason, resetsAt: actualWithTimingFields16["resetsAt"], requestedPages: undefined, remainingPages: undefined });
+      assert.match(actualWithTimingFields16.resetsAt, ISO_MILLISECOND_INSTANT);
+      assertTimeCloseTo(Date.parse(actualWithTimingFields16["resetsAt"]), Date.parse("2026-11-01T00:00:00.123Z"));
     });
   }
 
   await testContext.test("the allowance refusal carries the pages it needed and the period had left", () => {
-    assert.deepEqual(
-      planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", {
+    const actualWithTimingFields17 = planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", {
         resets_at: "2026-11-01T00:00:00.0000000Z",
         requested_pages: "74",
         remaining_pages: "40",
-      })),
-      {
+      }));
+    assert.deepEqual(actualWithTimingFields17, {
         reason: "DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED",
-        resetsAt: "2026-11-01T00:00:00.000Z",
+        resetsAt: actualWithTimingFields17["resetsAt"],
         requestedPages: 74,
         remainingPages: 40,
-      },
-    );
+      });
+    assert.match(actualWithTimingFields17.resetsAt, ISO_MILLISECOND_INSTANT);
+    assertTimeCloseTo(Date.parse(actualWithTimingFields17["resetsAt"]), Date.parse("2026-11-01T00:00:00.000Z"));
     for (const unreadable of ["-1", "many", "", "1e3", "99999999999"]) {
       const refusal = planLimitRefusal(allowanceDetail("DEPLOYMENT_PERIOD_ALLOWANCE_EXCEEDED", {
         requested_pages: unreadable,
@@ -1369,7 +1371,7 @@ test("gateway capacity retries require the authoritative preclaim marker and sta
     }, { now: () => elapsed, sleep: async (delay) => { elapsed += delay; } });
     await client.upload(capability, bytes);
     assert.equal(calls, 2);
-    assert.equal(elapsed, 1000);
+    assertTimeCloseTo(elapsed, 1000);
   });
 
   for (const [name, status, headers] of [

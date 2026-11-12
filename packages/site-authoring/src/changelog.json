@@ -1,6 +1,15 @@
 {
   "entries": [
     {
+      "version": "0.36.1",
+      "note": "Maintenance release for the authoring CLI.",
+      "behavior": [
+        "This release includes test and verification maintenance.",
+        "The help reference version is 56."
+      ],
+      "help": []
+    },
+    {
       "version": "0.36.0",
       "note": "Navigation links can use Button styling, headers can scale and switch to compact logos, and sections can arrange content in responsive columns.",
       "behavior": [

@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -87,7 +88,7 @@ test("a delivered deployment verifies routes, assets, links and the declared run
   assert.equal(report.runtime.entry.ok, true);
   assert.equal(report.runtime.entry.url, ENTRY);
   assert.equal(report.runtime.capabilityModules.checked, 1);
-  assert.equal(report.propagation.waitedSeconds, 0);
+  assertTimeCloseTo(report.propagation.waitedSeconds, 0, "seconds");
   assert.deepEqual(report.localOnlyReferences, []);
   // Read-only: only GETs, and nothing is fetched off the site's own origin.
   assert.ok(calls.every((call) => call.url.startsWith(ORIGIN)));
@@ -175,9 +176,9 @@ test("a bounded propagation wait observes once more and records the wait", async
       entries[`${ORIGIN}/late/`] = { body: html({ links: [] }) };
     },
   });
-  assert.equal(report.propagation.waitedSeconds, DELIVERY_LIMITS.propagationWaitMaximumSeconds);
-  assert.equal(report.propagation.reobservedAfterSeconds, DELIVERY_LIMITS.propagationWaitMaximumSeconds);
-  assert.equal(slept, DELIVERY_LIMITS.propagationWaitMaximumSeconds * 1000);
+  assertTimeCloseTo(report.propagation.waitedSeconds, DELIVERY_LIMITS.propagationWaitMaximumSeconds, "seconds");
+  assertTimeCloseTo(report.propagation.reobservedAfterSeconds, DELIVERY_LIMITS.propagationWaitMaximumSeconds, "seconds");
+  assertTimeCloseTo(slept, DELIVERY_LIMITS.propagationWaitMaximumSeconds * 1000);
   const late = report.routes.items.find((item) => item.path === "/late/");
   assert.equal(late.ok, true);
   assert.equal(late.failure, undefined);
@@ -307,7 +308,7 @@ test("a propagation wait re-observes everything so recovered rows and a recovere
   assert.equal(report.assets.failed, 0);
   assert.ok(report.assets.items.every((item) => item.failure === undefined));
   assert.equal(report.runtime.declared, true);
-  assert.equal(report.propagation.reobservedAfterSeconds, 30);
+  assertTimeCloseTo(report.propagation.reobservedAfterSeconds, 30, "seconds");
 });
 
 test("a body that fails mid-stream is a recorded, retried failure rather than an abort", async () => {

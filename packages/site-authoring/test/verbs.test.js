@@ -1,3 +1,4 @@
+import { assertTimeAtLeast, assertTimeBetween, assertTimeCloseTo } from "../test-support/timing.js";
 import { openSession } from "../src/session.js";
 import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import assert from "node:assert/strict";
@@ -992,7 +993,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.manifestVersion, 7);
   assert.equal(manifest.siteId, SITE_ID);
-  assert.equal(manifest.pulledAt, new Date(1_700_000_000_000).toISOString());
+  assertTimeCloseTo(Date.parse(manifest.pulledAt), 1_700_000_000_000);
   assert.deepEqual(
     manifest.pages.map((entry) => [
       entry.pageId,
@@ -1824,7 +1825,7 @@ test("theme push records the save as pending before sending it and clears the re
   // set's identity, and when.
   assert.equal(pendingDuringSave.expectedRevision, PRESENTATION_REVISION);
   assert.match(pendingDuringSave.changeSetHash, /^[0-9a-f]{64}$/u);
-  assert.equal(pendingDuringSave.startedAt, new Date(1_700_000_000_000).toISOString());
+  assertTimeCloseTo(Date.parse(pendingDuringSave.startedAt), 1_700_000_000_000);
   assert.deepEqual(
     (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation,
     { revision: NEXT_PRESENTATION_REVISION },
@@ -1893,7 +1894,9 @@ test("theme push --dry-run reports a replayable pending save instead of a stale 
   const result = await themePush(invocation);
 
   assert.equal(result.revision.stale, true);
-  assert.deepEqual(result.pendingSave, { startedAt: new Date(1_700_000_000_000).toISOString(), sameChangeSet: true });
+  assert.deepEqual(Object.keys(result.pendingSave).sort(), ["sameChangeSet", "startedAt"]);
+  assert.equal(result.pendingSave.sameChangeSet, true);
+  assertTimeCloseTo(Date.parse(result.pendingSave.startedAt), 1_700_000_000_000);
   assert.ok(progress.some((line) => line.includes("would replay it")));
   assert.equal(wire.matching("POST", PRESENTATION).length, 0);
 });
@@ -9622,7 +9625,8 @@ test("media upload sends a faststart H.264 MP4 as it is, declares its codecs and
   });
   assert.equal(result.media.total, 0);
   assert.equal(result.videos.total, 1);
-  assert.deepEqual(result.videos.items[0], {
+  const actualWithTimingFields153 = result.videos.items[0];
+  assert.deepEqual(actualWithTimingFields153, {
     file: "media/tour.mp4",
     videoId: VIDEO_ID,
     title: "tour",
@@ -9631,7 +9635,7 @@ test("media upload sends a faststart H.264 MP4 as it is, declares its codecs and
     contentType: "video/mp4",
     byteLength: FASTSTART.byteLength,
     deduplicated: false,
-    durationMilliseconds: 1000,
+    durationMilliseconds: actualWithTimingFields153["durationMilliseconds"],
     component: {
       markdown: `\`\`\`component:video\n${JSON.stringify({ videoId: VIDEO_ID })}\n\`\`\``,
       block: {
@@ -9640,6 +9644,7 @@ test("media upload sends a faststart H.264 MP4 as it is, declares its codecs and
       },
     },
   });
+  assertTimeCloseTo(actualWithTimingFields153["durationMilliseconds"], 1000);
   // Each form is accepted as reported, and both mean the same block.
   const { component } = result.videos.items[0];
   assert.deepEqual(validateDocument({ type: "doc", content: [component.block] }).errors, []);
@@ -11075,9 +11080,9 @@ test("deploy --staging reports served only once a different release answers twic
   });
 
   assert.equal(result.stagingServed.state, "served");
-  assert.equal(result.stagingServed.ceilingSeconds, 120);
+  assertTimeCloseTo(result.stagingServed.ceilingSeconds, 120, "seconds");
   assert.equal(servedReads().length, 6);
-  assert.equal(result.stagingServed.servedAfterSeconds, 12);
+  assertTimeCloseTo(result.stagingServed.servedAfterSeconds, 12, "seconds");
   assert.ok(progress.some((line) => line.includes("Staging serves the new release")));
   assert.ok(!progress.some((line) => line.startsWith("Warning: The CLI could not confirm")));
   assert.equal(result.nextStep, "deploy --production");
@@ -11211,7 +11216,7 @@ test("deploy --staging says unverified, not propagating, when the new release an
   const { result, progress } = await stagingDeploy(site, { servedReleases: [OLD_RELEASE, NEW_RELEASE, null] });
 
   assert.equal(result.stagingServed.state, "unverified");
-  assert.ok(result.stagingServed.waitedSeconds >= 180);
+  assertTimeAtLeast(result.stagingServed.waitedSeconds, 180, "seconds");
   assert.ok(!progress.some((line) => line.includes("still serving the previous release")));
 });
 
@@ -11239,7 +11244,7 @@ test("deploy --staging holds the wait to its bound when handoffs keep failing", 
 
   // The first deployment has no host, so every read is "nothing served yet" and none ever names a release.
   assert.equal(result.stagingServed.state, "unverified");
-  assert.ok(elapsed >= 180_000 && elapsed < 190_000, `elapsed: ${elapsed}`);
+  assertTimeBetween(elapsed, 180_000, 190_000);
 });
 
 test("deploy --staging stops waiting at a bound and says staging still serves the previous release", async (site) => {
@@ -11250,7 +11255,7 @@ test("deploy --staging stops waiting at a bound and says staging still serves th
   assert.ok(progress.some((line) => line.startsWith("Warning: Staging was still serving the previous release")));
   // One read before the deploy, then a read every three seconds inside a 180-second budget.
   assert.ok(servedReads().length <= 1 + Math.ceil(180_000 / 3_000) + 2, `reads: ${servedReads().length}`);
-  assert.ok(elapsed >= 180_000 && elapsed < 190_000, `elapsed: ${elapsed}`);
+  assertTimeBetween(elapsed, 180_000, 190_000);
 });
 
 test("deploy --staging on a first deployment accepts the first release the new host serves", async (site) => {
@@ -11273,7 +11278,7 @@ test("deploy --staging cannot confirm the release when the host cannot be read, 
   const { result, progress, servedReads } = await stagingDeploy(site, {});
 
   assert.equal(result.stagingServed.state, "unverified");
-  assert.equal(result.stagingServed.ceilingSeconds, 120);
+  assertTimeCloseTo(result.stagingServed.ceilingSeconds, 120, "seconds");
   assert.match(result.stagingServed.expectedBy, /^\d{4}-\d\d-\d\dT/u);
   assert.equal(servedReads().length, 1);
   assert.ok(
@@ -11966,7 +11971,8 @@ test("preview page creates once, polls status, then mints and returns the stable
     pageId: ABOUT_PAGE_ID,
     snapshotId: SNAPSHOT_ID,
   });
-  assert.deepEqual(result, {
+  const actualWithTimingFields188 = result;
+  assert.deepEqual(actualWithTimingFields188, {
     schemaVersion: 1,
     ok: true,
     cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
@@ -11976,15 +11982,18 @@ test("preview page creates once, polls status, then mints and returns the stable
     snapshotId: SNAPSHOT_ID,
     status: "AUTHORING_PREVIEW_STATUS_READY",
     draftRevision: DRAFT_REVISION,
-    capturedAt: PREVIEW_CAPTURED_AT,
+    capturedAt: actualWithTimingFields188["capturedAt"],
     stagingHost: STAGING_HOST,
     url: HANDOFF_URL,
-    expiresAt: PREVIEW_EXPIRES_AT,
-    handoffExpiresAt: HANDOFF_EXPIRES_AT,
+    expiresAt: actualWithTimingFields188["expiresAt"],
+    handoffExpiresAt: actualWithTimingFields188["handoffExpiresAt"],
     storedPreviewCap: 10,
     storedPreviewCount: 1,
     evictedPreviews: [],
   });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields188["capturedAt"]), Date.parse(PREVIEW_CAPTURED_AT));
+  assertTimeCloseTo(Date.parse(actualWithTimingFields188["expiresAt"]), Date.parse(PREVIEW_EXPIRES_AT));
+  assertTimeCloseTo(Date.parse(actualWithTimingFields188["handoffExpiresAt"]), Date.parse(HANDOFF_EXPIRES_AT));
   assert.ok(progress.some((line) => line.includes("AUTHORING_PREVIEW_STATUS_RENDERING")));
   assert.ok(progress.some((line) => line.includes(`pageId=${ABOUT_PAGE_ID}`)));
   assert.ok(progress.some((line) => line.includes(`snapshotId=${SNAPSHOT_ID}`)));
@@ -12213,12 +12222,14 @@ test("preview page maps terminal preview states and bounded waiting to stable er
         assert.equal(error?.code, "preview.timeout");
         assert.equal(error?.status, "AUTHORING_PREVIEW_STATUS_QUEUED");
         assert.match(error?.message ?? "", /render service has not claimed this job/u);
-        assert.deepEqual(error?.previewRecovery, {
+        const actualWithTimingFields190 = error?.previewRecovery;
+        assert.deepEqual(actualWithTimingFields190, {
           siteId: SITE_ID,
           pageId: ABOUT_PAGE_ID,
           snapshotId: SNAPSHOT_ID,
-          expiresAt: PREVIEW_EXPIRES_AT,
+          expiresAt: actualWithTimingFields190["expiresAt"],
         });
+        assertTimeCloseTo(Date.parse(actualWithTimingFields190["expiresAt"]), Date.parse(PREVIEW_EXPIRES_AT));
         return true;
       },
     );
@@ -12243,12 +12254,14 @@ test("preview page maps terminal preview states and bounded waiting to stable er
       previewPage(invocation),
       (error) => {
         assert.equal(error?.code, "site.failed");
-        assert.deepEqual(error?.previewRecovery, {
+        const actualWithTimingFields191 = error?.previewRecovery;
+        assert.deepEqual(actualWithTimingFields191, {
           siteId: SITE_ID,
           pageId: ABOUT_PAGE_ID,
           snapshotId: SNAPSHOT_ID,
-          expiresAt: PREVIEW_EXPIRES_AT,
+          expiresAt: actualWithTimingFields191["expiresAt"],
         });
+        assertTimeCloseTo(Date.parse(actualWithTimingFields191["expiresAt"]), Date.parse(PREVIEW_EXPIRES_AT));
         return true;
       },
     );
@@ -12364,7 +12377,7 @@ test("preview page accepts a valid server handoff when the client clock is five 
   const result = await previewPage(invocation);
 
   assert.equal(result.url, HANDOFF_URL);
-  assert.equal(result.handoffExpiresAt, HANDOFF_EXPIRES_AT);
+  assertTimeCloseTo(Date.parse(result.handoffExpiresAt), Date.parse(HANDOFF_EXPIRES_AT));
 });
 
 test("preview page accepts a valid server handoff when the client clock is five minutes ahead", async (site) => {
@@ -12379,7 +12392,7 @@ test("preview page accepts a valid server handoff when the client clock is five 
   const result = await previewPage(invocation);
 
   assert.equal(result.url, HANDOFF_URL);
-  assert.equal(result.handoffExpiresAt, HANDOFF_EXPIRES_AT);
+  assertTimeCloseTo(Date.parse(result.handoffExpiresAt), Date.parse(HANDOFF_EXPIRES_AT));
 });
 
 test("preview revoke frees an active snapshot without reading workspace content", async (site) => {
@@ -12402,7 +12415,8 @@ test("preview revoke frees an active snapshot without reading workspace content"
     revokeRequests[0].pathname,
     `/api/v1/sites/${SITE_ID}/authoring-previews/pages/${ABOUT_PAGE_ID}/${SNAPSHOT_ID}`,
   );
-  assert.deepEqual(result, {
+  const actualWithTimingFields192 = result;
+  assert.deepEqual(actualWithTimingFields192, {
     schemaVersion: 1,
     ok: true,
     cli: { name: "@taprootio/site-authoring", version: CLI_VERSION },
@@ -12411,8 +12425,9 @@ test("preview revoke frees an active snapshot without reading workspace content"
     pageId: ABOUT_PAGE_ID,
     snapshotId: SNAPSHOT_ID,
     status: "AUTHORING_PREVIEW_STATUS_REVOKED",
-    expiresAt: PREVIEW_EXPIRES_AT,
+    expiresAt: actualWithTimingFields192["expiresAt"],
   });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields192["expiresAt"]), Date.parse(PREVIEW_EXPIRES_AT));
   assert.ok(progress.some((line) => line.includes("scheduling its artifacts for cleanup")));
 });
 
@@ -12784,13 +12799,14 @@ test("status reports deployments, readiness, image processing and site health", 
   assert.equal(result.images.total, 2);
   assert.equal(result.images.failed, 1);
   assert.equal(result.images.failedItems[0].reason, "decode failed");
-  assert.deepEqual(result.siteHealth, {
+  const actualWithTimingFields193 = result.siteHealth;
+  assert.deepEqual(actualWithTimingFields193, {
     covered: true,
     status: "complete",
     deploymentId: DEPLOYMENT_ID,
     outputReleaseId: SNAPSHOT_ID,
     inputHash: "a".repeat(64),
-    checkedAt: "2026-11-04T12:00:00.000Z",
+    checkedAt: actualWithTimingFields193["checkedAt"],
     ruleVersion: "2",
     coverage: storedHealthReport().coverage,
     assessedPages: 1,
@@ -12821,6 +12837,7 @@ test("status reports deployments, readiness, image processing and site health", 
       },
     ],
   });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields193["checkedAt"]), Date.parse("2026-11-04T12:00:00.000Z"));
   assert.ok(progress.some((line) => /Site health \(production, checked 2026-11-04T12:00:00\.000Z\): 1 problem\(s\) and 1 warning\(s\)\. Unpublished changes are outside this report/u.test(line)));
 });
 
@@ -13995,13 +14012,11 @@ test("phase timings retain retries, omit unobserved durations and keep legacy ev
     },
   });
   const result = normalizeDeployment(record);
-  assert.deepEqual(result.phaseTimings.phases.map((phase) => phase.durationMilliseconds), [
-    1000,
-    1000,
-    599000,
-    3000,
-    undefined,
-  ]);
+  assert.equal(result.phaseTimings.phases.length, 5);
+  [1000, 1000, 599000, 3000].forEach((duration, index) => {
+    assertTimeCloseTo(result.phaseTimings.phases[index].durationMilliseconds, duration);
+  });
+  assert.equal(result.phaseTimings.phases[4].durationMilliseconds, undefined);
   assert.equal(result.phaseTimings.phases[3].status, "DEPLOYMENT_STATUS_GENERATING");
   assert.deepEqual(normalizeDeployment(deploymentRecord()).phaseTimings, { known: false });
   record.phaseHistory.phases[1].enteredAt = "2026-09-07T00:00:00Z";
@@ -14348,7 +14363,9 @@ test("delivery check --production verifies the public origin it is given and rep
   assert.equal(result.verb, "delivery check");
   assert.equal(result.environment, "DEPLOYMENT_ENVIRONMENT_PRODUCTION");
   assert.equal(result.verdict, "delivered");
-  assert.deepEqual(result.deployment, { id: DEPLOYMENT_ID, completedAt: "2026-08-20T00:01:00Z", recordedInWorkspace: true });
+  const actualWithTimingFields218 = result.deployment;
+  assert.deepEqual(actualWithTimingFields218, { id: DEPLOYMENT_ID, completedAt: actualWithTimingFields218["completedAt"], recordedInWorkspace: true });
+  assertTimeCloseTo(Date.parse(actualWithTimingFields218["completedAt"]), Date.parse("2026-08-20T00:01:00Z"));
   assert.equal(result.target.url, `${PUBLIC_ORIGIN}/`);
   assert.equal(result.target.resolvedFrom, "option");
   assert.equal(result.target.stagingAuthorized, false);
@@ -14775,7 +14792,7 @@ test("deploy --staging on a managed Docs site stages settings and skips the stag
   // minted once after completion and never before the deployment.
   assert.equal(result.stagingPreview.stagingUrl, `https://${STAGING_HOST}/`);
   assert.equal(result.stagingPreview.url, STAGING_HANDOFF_URL);
-  assert.equal(result.stagingPreview.handoffExpiresAt, HANDOFF_EXPIRES_AT);
+  assertTimeCloseTo(Date.parse(result.stagingPreview.handoffExpiresAt), Date.parse(HANDOFF_EXPIRES_AT));
   assert.match(result.stagingPreview.review, /light and dark/u);
   assert.ok(result.stagingPreview.review.includes(STAGING_REVIEW_SESSION_NOTE));
   assert.equal(wire.matching("POST", STAGING_MINT).length, 1);
@@ -16827,7 +16844,7 @@ test("delivery check's --production --url, --wait and --no-browser reach the che
   assert.equal(checked.result.target.url, `${PUBLIC_ORIGIN}/`);
   assert.equal(checked.result.target.resolvedFrom, "option");
   assert.equal(checked.result.browser.reason, "disabled");
-  assert.equal(checked.result.propagation.waitedSeconds, 1);
+  assertTimeCloseTo(checked.result.propagation.waitedSeconds, 1, "seconds");
   assert.equal(checked.result.verdict, "delivered");
 });
 

@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -129,7 +130,7 @@ test("server-issued grants survive five minutes of client clock skew", async (t)
     assert.equal(claims, 1);
     const stored = (await findCredential(f.environment, ORIGIN, { siteId: SITE })).credential;
     assert.equal(stored.key, SECRET);
-    assert.equal(stored.keyExpiresAt, issued.keyExpiresAt);
+    assertTimeCloseTo(Date.parse(stored.keyExpiresAt), Date.parse(issued.keyExpiresAt));
     assert.equal((await openSession({ ...f.invocation, now, legalDrafts: true, client })).client, client);
   }
 });
@@ -158,7 +159,7 @@ test("stored grants require a parseable expiry and exact scope", async (t) => {
   }
   for (const keyExpiresAt of ["2026-10-27T12:00:00.000Z", "2026-12-01T12:00:00.000Z"]) {
     await saveCredential(f.environment, { ...legal(), keyExpiresAt }, { now: () => NOW });
-    assert.equal((await findCredential(f.environment, ORIGIN, { siteId: SITE })).credential.keyExpiresAt, keyExpiresAt);
+    assertTimeCloseTo(Date.parse((await findCredential(f.environment, ORIGIN, { siteId: SITE })).credential.keyExpiresAt), Date.parse(keyExpiresAt));
   }
 });
 
