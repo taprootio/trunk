@@ -1,0 +1,11 @@
+export type TimeUnit = "seconds" | "milliseconds" | "microseconds" | "nanoseconds";
+export type TimeValue = number | bigint;
+export declare const TIME_TOLERANCE_MS: number;
+export declare function isTimeWithinTolerance(actual: TimeValue, expected: TimeValue, unit?: TimeUnit): boolean;
+export declare function assertTimeCloseTo(actual: TimeValue, expected: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeBetween(actual: TimeValue, minimum: TimeValue, maximum: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeAtLeast(actual: TimeValue, minimum: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeAtMost(actual: TimeValue, maximum: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeNotCloseTo(actual: TimeValue, expected: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeAfter(actual: TimeValue, expected: TimeValue, unit?: TimeUnit): void;
+export declare function assertTimeBefore(actual: TimeValue, expected: TimeValue, unit?: TimeUnit): void;

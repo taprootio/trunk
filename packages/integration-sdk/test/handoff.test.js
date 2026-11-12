@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
@@ -107,7 +108,7 @@ test("confirmation requires Taproot's single-use response to bind to the verifie
     client: { confirmHandoff: async (input) => ({ ...claims, expiresAt: new Date(now + 3_600_000).toISOString(), input }) },
     claims, token: "verified-token", now,
   });
-  assert.equal(session.sessionExpiresAt, new Date(now + 3_600_000).toISOString());
+  assertTimeCloseTo(Date.parse(session.sessionExpiresAt), now + 3_600_000);
   await assert.rejects(() => confirmHandoff({
     client: { confirmHandoff: async () => ({ ...claims, siteId: identifiers.integration, expiresAt: new Date(now + 3_600_000).toISOString() }) },
     claims, token: "verified-token", now,

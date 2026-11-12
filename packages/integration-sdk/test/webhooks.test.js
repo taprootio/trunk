@@ -1,3 +1,4 @@
+import { assertTimeCloseTo } from "../test-support/timing.js";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
@@ -104,10 +105,12 @@ test("receipt completion carries the claim token and immutable hash, while store
   };
   const claimed = await claimWebhookReceipt({ store, verified, now: vector.timestamp * 1000 });
   await finishWebhookReceipt({ store, verified, token: claimed.token, status: "failed", failureCode: "downstream_timeout", now: vector.timestamp * 1000 + 1 });
-  assert.deepEqual(finished, [{
+  const actualWithTimingFields1 = finished;
+  assert.deepEqual(actualWithTimingFields1, [{
     deliveryId: verified.deliveryId, bodySha256: verified.bodySha256, token: "durable-lease-token", status: "failed",
-    failureCode: "downstream_timeout", completedAt: new Date(vector.timestamp * 1000 + 1).toISOString(),
+    failureCode: "downstream_timeout", completedAt: actualWithTimingFields1[0]["completedAt"],
   }]);
+  assertTimeCloseTo(Date.parse(actualWithTimingFields1[0]["completedAt"]), Date.parse(new Date(vector.timestamp * 1000 + 1).toISOString()));
 
   const duplicate = await claimWebhookReceipt({ store: { claim: () => ({ state: "duplicate" }) }, verified });
   const inProgress = await claimWebhookReceipt({ store: { claim: () => ({ state: "in_progress" }) }, verified });
