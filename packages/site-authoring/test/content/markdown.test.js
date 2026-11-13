@@ -513,6 +513,22 @@ const GOLDENS = [
     },
   },
   {
+    name: "a Testimonial fence with the Google source, whose kept items stay in the data",
+    markdown: "```component:testimonial\n"
+      + "{\"source\":\"google-reviews\",\"maxItems\":3,\"items\":[{\"quote\":\"Kept\",\"authorName\":\"A\"}],\"columns\":2}\n"
+      + "```",
+    doc: {
+      type: "doc",
+      content: [{
+        type: "componentBlock",
+        attrs: {
+          componentType: "testimonial",
+          componentData: "{\"source\":\"google-reviews\",\"maxItems\":3,\"items\":[{\"quote\":\"Kept\",\"authorName\":\"A\"}],\"columns\":2}",
+        },
+      }],
+    },
+  },
+  {
     name: "a component fence carrying an image",
     markdown: "```component:image-banner\n"
       + `{"overlayText":"Hi","image":"media/banner.webp"}\n`

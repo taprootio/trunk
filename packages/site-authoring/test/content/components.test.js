@@ -624,6 +624,13 @@ test("refuses component values the renderer would silently discard", async (test
     ["zero spacer divider width", "spacer", { dividerWidth: 0 }, "/attrs/componentData/dividerWidth"],
     ["zero testimonial interval", "testimonial", { interval: 0 }, "/attrs/componentData/interval"],
     ["short testimonial interval", "testimonial", { interval: 1999 }, "/attrs/componentData/interval"],
+    ["an unknown testimonial source", "testimonial", { source: "yelp" }, "/attrs/componentData/source"],
+    ["a testimonial source in another case", "testimonial", { source: "Google-Reviews" }, "/attrs/componentData/source"],
+    ["a testimonial source that is not text", "testimonial", { source: true }, "/attrs/componentData/source"],
+    ["no testimonial reviews", "testimonial", { source: "google-reviews", maxItems: 0 }, "/attrs/componentData/maxItems"],
+    ["too many testimonial reviews", "testimonial", { source: "google-reviews", maxItems: 13 }, "/attrs/componentData/maxItems"],
+    ["a fractional review count", "testimonial", { source: "google-reviews", maxItems: 2.5 }, "/attrs/componentData/maxItems"],
+    ["a review count written as text", "testimonial", { source: "google-reviews", maxItems: "6" }, "/attrs/componentData/maxItems"],
     ["unsupported latest-post page type", "latest-posts", { pageTypes: ["blog"] }, "/attrs/componentData/pageTypes/0"],
     ["invalid texture identifier", "image-banner", { texture: "Fine Linen" }, "/attrs/componentData/texture"],
   ];
@@ -647,6 +654,8 @@ test("refuses component values the renderer would silently discard", async (test
     assert.deepEqual(validate("image-banner", { texture: "fine-linen" }), []);
     assert.deepEqual(validate("spacer", { dividerWidth: 1 }), []);
     assert.deepEqual(validate("testimonial", { interval: 2000 }), []);
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", maxItems: 12 }), []);
+    assert.deepEqual(validate("testimonial", { source: "manual", maxItems: 1, items: [{ quote: "Kept" }] }), []);
   });
 
   await testContext.test("URL failures name every enforced character restriction", () => {

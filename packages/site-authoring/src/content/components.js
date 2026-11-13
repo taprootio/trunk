@@ -22,6 +22,7 @@ import {
 } from "./vocabulary.js";
 import { normalizeCssLengthOverride } from "./media-presentation.js";
 import { isVideoEmbedId, parseVideoEmbedUrl, VIDEO_EMBED_REFUSAL } from "./video-embed-url.js";
+import { TESTIMONIAL_MAX_ITEMS, TESTIMONIAL_SOURCES } from "./testimonial-google-reviews.js";
 
 /**
  * The eight canonical `componentBlock` data shapes. Seven remain mirrored
@@ -207,6 +208,16 @@ const FEATURE_GRID = Object.freeze({
 
 /** `TestimonialData` and its `TestimonialItem`. */
 const TESTIMONIAL = Object.freeze({
+  source: described(
+    enumOf(...TESTIMONIAL_SOURCES),
+    "manual shows the items below. google-reviews shows the site's selected Google reviews instead and keeps the items unchanged; the reviews come from the connected Google profile and are chosen in Marketing, Google reviews.",
+  ),
+  maxItems: num({
+    integer: true,
+    minimum: TESTIMONIAL_MAX_ITEMS.minimum,
+    maximum: TESTIMONIAL_MAX_ITEMS.maximum,
+    description: "How many Google reviews to show, newest first. Used only when source is google-reviews.",
+  }),
   items: withOmission(
     list(shape({
       quote: str(),
@@ -653,6 +664,8 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     "Testimonials",
     "Attributed quotations displayed in a grid or timed carousel.",
     {
+      source: "manual",
+      maxItems: TESTIMONIAL_MAX_ITEMS.default,
       items: [{ quote: "", authorName: "", authorTitle: "", authorImage: null }],
       columns: 1,
       carousel: false,
@@ -665,6 +678,7 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Keep carousel intervals long enough for the full quotation to be read.",
       "Set carousel:true for directional previous/next arrows, dot navigation and a play/pause control. Navigation or keyboard focus pauses rotation; reduced-motion users get manual navigation without sliding or automatic rotation.",
       "Use real attributed reviews, or clearly label fictional demo reviews. Never imply invented testimonials are genuine customer endorsements.",
+      "Set source:\"google-reviews\" only for a site with a connected Google profile; the published page shows the selected reviews with their reviewer names and a link to read all reviews on Google, and shows nothing until the profile has reviews it can show.",
     ],
     {
       items: [{

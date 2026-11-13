@@ -135,6 +135,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/content/link-warnings.js",
     "src/content/markdown.js",
     "src/content/media-presentation.js",
+    "src/content/testimonial-google-reviews.js",
     "src/content/tiptap-prosemirror.ts",
     "src/content/validate-document.js",
     // The video embed card's link rules, generated from shared/ (TR01109).

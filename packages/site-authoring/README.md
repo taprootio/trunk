@@ -1259,6 +1259,25 @@ tracked-Markdown conflict, and a stale push is refused. There is no reverse
 Markdown exporter. See `taproot-site help page free-form` for the closed attrs
 reference and examples.
 
+### Testimonial Google reviews in 0.38.0
+
+A Testimonial block can show the site's selected Google reviews instead of
+hand-written quotes. In its component data set `"source": "google-reviews"` and
+optionally `"maxItems"`, a whole number from 1 to 12 (the default is 6). The
+newest selected reviews are shown, each with the reviewer's name and the month
+of the review, followed by a note that they are selected reviews from Google
+with a link to read them all on Google. Omit `source`, or use `"manual"`, for the
+hand-written `items`. The `items` are kept in the data whichever source is set.
+`source` and `maxItems` are refused at their field path when the value is
+unknown or out of range.
+
+Which reviews are selected, and the minimum star rating, are set by someone who
+can manage the site's settings in the app under **Marketing → Google reviews**;
+they are not in the pulled workspace. The site needs a connected Google profile.
+Until it has reviews to show, a Google Testimonial publishes as empty. A release
+takes the reviews as they are when it is published. Help reference version 59
+covers the fields in `taproot-site help component testimonial`.
+
 ### What changed between releases
 
 Taproot accepts only the latest CLI, so an upgrade can be forced at any time.

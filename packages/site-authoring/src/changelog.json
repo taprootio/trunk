@@ -1,6 +1,19 @@
 {
   "entries": [
     {
+      "version": "0.38.0",
+      "note": "The Testimonial component can show the site's selected Google reviews: set source and maxItems in its component data.",
+      "behavior": [
+        "Testimonial component data accepts source (manual or google-reviews) and maxItems (a whole number from 1 to 12, shown newest first). Omitted source is manual, so every existing page is unchanged. Other values are refused at the field path before saving.",
+        "With source google-reviews the published page shows the site's selected Google reviews instead of the items, which stay in the data untouched. It adds Selected reviews from Google and a link to read all reviews on Google, and shows nothing until a connected Google profile has reviews it can show.",
+        "Which reviews are selected, and the minimum star rating, are chosen in the app under Marketing, Google reviews. They are not part of the pulled workspace. A new release picks up the reviews at publish; reviews are not live.",
+        "The help reference version is 59."
+      ],
+      "help": [
+        "component"
+      ]
+    },
+    {
       "version": "0.37.1",
       "note": "Uses Espalier 6.15.0, whose footers keep every paragraph and link in the footer colors.",
       "behavior": [
