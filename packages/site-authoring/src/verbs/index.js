@@ -11,6 +11,7 @@ import {
   VERB_FORMS_PULL,
   VERB_FORMS_PUSH,
   VERB_FORMS_VALIDATE,
+  VERB_HEALTH,
   VERB_LINK_BUILD,
   VERB_LOGIN,
   VERB_LOGOUT,
@@ -55,6 +56,7 @@ import { footerPush } from "./footer-push.js";
 import { formsPull } from "./forms-pull.js";
 import { formsPush } from "./forms-push.js";
 import { formsValidate } from "./forms-validate.js";
+import { health } from "./health.js";
 import { linkBuild } from "./link-build.js";
 import { login } from "./login.js";
 import { logout } from "./logout.js";
@@ -209,4 +211,5 @@ export const VERB_HANDLERS = Object.freeze({
   [VERB_STATUS]: status,
   [VERB_DELIVERY_CHECK]: deliveryCheck,
   [VERB_STAGING_REVIEW]: stagingReview,
+  [VERB_HEALTH]: health,
 });

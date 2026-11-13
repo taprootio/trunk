@@ -219,3 +219,18 @@ export function asSiteAuthoringError(error) {
     ? error
     : new SiteAuthoringError("site.failed", "The Taproot site authoring command failed.");
 }
+
+// A send that ended this way may still have written the page.
+const OUTCOME_UNKNOWN_CODES = new Set([
+  "transport.mutation_ambiguous",
+  "transport.response_read",
+  "transport.response_too_large",
+  "transport.invalid_json",
+  "api.page_contract",
+]);
+
+export function outcomeUnknown(error) {
+  // A cancelled retry of a write, and a server error on a write the transport
+  // does not replay, leave the same question open.
+  return OUTCOME_UNKNOWN_CODES.has(error.code) || error.ambiguousMutation === true || error.httpStatus >= 500;
+}

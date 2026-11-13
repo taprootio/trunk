@@ -23,7 +23,8 @@ import {
   SURFACE_DOCS_PRESENTATION,
   VERB_STATUS,
 } from "../constants.js";
-import { boundedList, openSession, successResult } from "../session.js";
+import { boundedByBytes, boundedList, openSession, successResult } from "../session.js";
+import { readFailureCode } from "./health.js";
 
 /**
  * `status` — the platform authoring switch, CLI release, deployments,
@@ -33,6 +34,8 @@ const MAXIMUM_DEPLOYMENTS = 20;
 const MAXIMUM_FAILED_IMAGES = 50;
 const MAXIMUM_BLOCKERS = 50;
 const MAXIMUM_HEALTH_FINDINGS = 100;
+// Each image finding lists its affected pages, so a full report would pass the result bound without this.
+const MAXIMUM_HEALTH_IMAGE_BYTES = 16 * 1024;
 
 const PLATFORM_UNKNOWN_NOTE =
   "Taproot never reported the platform authoring switch on this run: either no sign-in token exchange happened "
@@ -127,6 +130,38 @@ const DOCS_SITE_NOT_COVERED_NOTE =
   "This is a managed Docs site: its pages come from the Docs artifact, so the image library and site-health "
   + "reads do not apply and were not made.";
 
+/**
+ * The staged release's report as a summary (TR01363); `health --staging` has the findings and their fixes. A
+ * failed read never fails `status`, which still answers from production, so it is reported as unavailable.
+ */
+async function summarizeStagedHealth(client, siteId, stagedDeploymentId, onProgress) {
+  if (stagedDeploymentId === undefined) {
+    return { available: false, reason: "No stored staging report exists yet; deploy --staging creates one." };
+  }
+  onProgress("Reading the stored staging health report.");
+  let staged;
+  try {
+    staged = await getSiteHealth(client, siteId, { deploymentId: stagedDeploymentId });
+  } catch (error) {
+    const reason = `The staged Site Health report could not be read (${readFailureCode(error)}).`;
+    onProgress(`Warning: ${reason}`);
+    return { available: false, reason };
+  }
+  if (!["complete", "incomplete"].includes(staged.status) || !staged.deploymentId) {
+    return { available: false, status: staged.status, reason: "The staged release has no complete supported assessment." };
+  }
+  return {
+    available: true,
+    status: staged.status,
+    deploymentId: staged.deploymentId,
+    checkedAt: staged.checkedAt,
+    errors: staged.errorCount,
+    warnings: staged.warningCount,
+    ...(staged.truncated ? { truncated: true } : {}),
+    details: "Run 'taproot-site health --staging' for the findings, the ones new since production, and their fixes.",
+  };
+}
+
 export async function status(invocation) {
   const { client, siteId, surface, platform, release, onProgress } = await openSession(invocation);
   const presentationOnly = surface === SURFACE_DOCS_PRESENTATION;
@@ -167,6 +202,10 @@ export async function status(invocation) {
       health = await getSiteHealth(client, siteId);
     }
     const reportedFindings = boundedList(health.findings, MAXIMUM_HEALTH_FINDINGS);
+    const reportedImageFindings = boundedByBytes(health.images ?? [], MAXIMUM_HEALTH_IMAGE_BYTES);
+    const stagedSiteHealth = presentationOnly
+      ? { covered: false, reason: DOCS_SITE_NOT_COVERED_NOTE }
+      : await summarizeStagedHealth(client, siteId, health.stagedDeploymentId, onProgress);
 
     const byState = {};
     for (const image of images) {
@@ -244,10 +283,12 @@ export async function status(invocation) {
         warnings: health.warningCount,
         pages: health.pageCount,
         findings: reportedFindings.items,
-        imageFindings: health.images,
+        imageFindings: reportedImageFindings.items,
+        ...(reportedImageFindings.truncated ? { imageFindingsTruncated: true } : {}),
         ...(reportedFindings.truncated || health.truncated ? { findingsTruncated: true } : {}),
         } : { reason: health.status === "not_checked" ? "Not checked yet; deploy the site to create a report." : "A complete supported deployment assessment is unavailable." }),
       },
+      stagedSiteHealth,
     });
   });
 }

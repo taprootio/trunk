@@ -32,6 +32,7 @@ import {
   VERB_FORMS_PULL,
   VERB_FORMS_PUSH,
   VERB_FORMS_VALIDATE,
+  VERB_HEALTH,
   VERB_HELP,
   VERB_LINK_BUILD,
   VERB_LOGIN,
@@ -101,6 +102,7 @@ import { imageDescriptionOptions, imageListOptions, requireImageId } from "./ima
 import { formatThemeResolve } from "./theme-resolve.js";
 import { MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS } from "./theme-validation.js";
 import { VERB_HANDLERS } from "./verbs/index.js";
+import { siteNeedsWorkspaceError } from "./verbs/validate.js";
 
 const LINK_SOURCE_KEYS = LINK_SOURCES.map((source) => source.key);
 
@@ -137,6 +139,10 @@ const VERBS = Object.freeze([
     summary: "Check a whole workspace or offline fixture at once, or initialize a fixture with --init.",
     positionals: "fixturePath",
     offline: true,
+    // Only --site opens a session, to read the images the pages place; a plain validate never does (TR01371).
+    siteOption: true,
+    surface: SURFACE_STANDARD,
+    capabilities: [CAPABILITY_CONTENT],
     note:
       "With no directory, checks the pulled workspace taproot-site.json names; with one, checks that directory, which "
       + "is either an offline fixture (manifest.fixture.json) or a pulled workspace. Every page source, the theme, "
@@ -152,8 +158,13 @@ const VERBS = Object.freeze([
       + "title or hero title is the page's h1, seo.h1_demoted when a # heading is published as an h2 because the "
       + "banner's overlay text, a hero title or an earlier # heading already is the h1 (detail names which), "
       + "seo.heading_renumbered and seo.heading_before_title for headings published at another level, "
-      + "a11y.link_text_empty. Image-default completeness is deferred to the stored deployment report that status reads; "
-      + "placement alt strings do not decide whether an image default is missing. Known author-entered metadata also receives missing, "
+      + "a11y.link_text_empty. Image-default completeness (a11y.image_default_missing) needs the site's own image "
+      + "records, so plain validate lists it in siteChecks.skipped with imageCheckReason; validate --site reads those "
+      + "records and reports each undescribed image the workspace places in imageFindings, with the exact 'media images "
+      + "describe' command for its fix (notInSiteLibrary lists placed ids that are not in the site's library: deleted, another site's, or owned media such as a copied video poster, on which no description can be set). Placement alt strings "
+      + "never decide whether an image default is missing; they only suggest the text. --site needs a workspace and a "
+      + "sign-in, so it is refused with a directory argument or --init (validate.site_needs_workspace), and a managed "
+      + "Docs site is not read. Known author-entered metadata also receives missing, "
       + "short, long and repeated-title description advice (title guidance 15–70 characters; description 50–160). "
       + "These are writing suggestions, never requirements. Generated custom values are checked; generated "
       + "defaults, home-page settings and unknown fields are listed in siteChecks.deferredToDeployment. "
@@ -293,6 +304,14 @@ const VERBS = Object.freeze([
       + "Markdown: pull refuses with pages.pull_conflict before changing anything under 'pages/', preserves the "
       + "site's version under '.taproot-site-state/', and leaves you to either push the local source or delete it "
       + "and pull again. A locally edited '.pm.json' is kept rather than overwritten for the same reason. "
+      + "A tracked Markdown page conflicts when the site moved: its stored-state revision moved, or its display "
+      + "date moved for a page type that has one. A '.pm.json' page is refreshed when the site moved, and "
+      + "conflicts only when it also has unpushed local edits (its body, or its title, path, description or author "
+      + "in the manifest). The revision covers the stored body, title, path, short description and cover image. "
+      + "For an authored page (Markdown or ProseMirror) approve, staging and production publication never move it; "
+      + "a legal page's version stamp is written at publication and does move it; a place review's effective "
+      + "category is applied only to the release, so a category override does not move it. The Differs-at paths of "
+      + "a refusal explain it and never decide it. "
       + "First revisions adopted without a completed body comparison are counted in pages.revisionsRecordedWithoutBodyComparison "
       + "and announced on the human channel. New downloads and compared bodies are excluded. "
       + "A page Taproot generates (the published archive, the map or a folder) is pulled as an update-only '.pm.json' "
@@ -387,6 +406,7 @@ const VERBS = Object.freeze([
     capabilities: [CAPABILITY_CONTENT],
     tokens: ["pages", "push"],
     dryRun: true,
+    describeMissingImages: true,
     summary: "Create and update pages from the local workspace.",
     positionals: "pagePaths",
     note:
@@ -395,6 +415,22 @@ const VERBS = Object.freeze([
       + "refuses a key the site does not have or has archived (pages.form_unknown, pages.form_archived) before writing, and says whether the key's forms/<key>.json is in the workspace. validate refuses the same key offline (rule form.key_unknown) when the workspace has a forms/ directory and no file in it is for that key. "
       + "A link in a page being sent whose address is only http(s):// plus its own text is reported in linkWarnings "
       + "(content.link_autolinked) without refusing. "
+      + "Before anything is sent (and in --dry-run), the push reads the site's records of the images the selected "
+      + "pages place, once, and reports each with no default description in siteHealthPrecheck: status (checked, "
+      + "partial or not_checked, with a reason code when some or all of the read failed), imageFindings with the exact "
+      + "'media images describe' command for each, and notInSiteLibrary for placed ids the site did not return. It covers "
+      + "every selected page, changed or not, never refuses, and is not made by apply. "
+      + "With --describe-missing-images (also with --dry-run, which writes nothing) the push then sets each placed image's missing "
+      + "default description from the one alt text its selected placements agree on, after the pages are saved and "
+      + "never over an existing description, and reports describedImages, present only with the flag: set and skipped "
+      + "each { total, items, truncated? } (set items are { imageId, description }, skipped items { imageId, reason }), "
+      + "and reason when the image read did not complete. Skip reasons: alts_disagree, no_alt, unusable_alt, "
+      + "revision_moved, invalid_description, write_failed, write_unknown (the write may have committed), write_denied, "
+      + "not_read and already_described. Only custom or unset placements count, so a stale inherited alt never restores "
+      + "a default. A rejected credential, an outdated CLI or a paused platform fails the command after the pages were "
+      + "saved, with completedWrites naming what was written; throttling or a denied write stops further writes and "
+      + "exits 0. Once images are set, nextStep is approve while any selected page holds a draft and deploy --staging "
+      + "otherwise. "
       + "A page is created without an author unless its source names one ('author:' in the front matter, or 'pages "
       + "meta set --author'); the pages created that way are listed in pages.authorless with how to credit them. "
       + "The homepage is recorded with an empty path, so address it as '/'. "
@@ -803,7 +839,10 @@ const VERBS = Object.freeze([
       + `serving the previous release for up to ${LIMITS.stagingPropagationCeilingSeconds} seconds after a deployment completes, so a Standard site's `
       + "deploy --staging waits until staging serves the new release and reports stagingServed: state served, "
       + "propagating (still the previous release at the bound) or unverified (the change cannot be attributed to this deployment, or the last read did not name the previous release), "
-      + "with the time to wait or the seconds waited. "
+      + "with the time to wait or the seconds waited. A Standard site's deploy --staging also reads the Site Health report "
+      + "the staged release stored and returns it as siteHealth, the object 'health --staging' returns: each warning, the ones "
+      + "new since production marked newSinceProduction, with a fix. A warning never fails the deploy, and a report that cannot be "
+      + "read is siteHealth with available false; fix every new warning and stage again before handing the release to the owner. "
       + STAGING_REVIEW_SESSION_NOTE,
   },
   {
@@ -880,8 +919,35 @@ const VERBS = Object.freeze([
     tokens: ["status"],
     summary:
       "Report the platform authoring switch, CLI release, deployments, readiness, image processing, and site health.",
-    note: "Site health lists the site checks' findings (a rule id, severity, page, and the value found) for the latest editable body of each page."
-      + " Content permission is required; a refused or failed read fails status rather than reporting a clean site.",
+    note: "siteHealth summarizes the stored Site Health report of the last production release, with its findings (a rule id, severity, page, and the value found); stagedSiteHealth summarizes the staged release's report."
+      + " Both read what a release stored when it was generated, so edits made since are outside them; run 'health --staging' or 'health --production' for each finding's file and fix."
+      + " Content permission is required; a refused or failed production read fails status rather than reporting a clean site, and a failed staged read is reported as unavailable.",
+  },
+  {
+    name: VERB_HEALTH,
+    surface: SURFACE_DOCS_PRESENTATION,
+    // The report and the image reads that build the fixes are Content (site.pages.edit_any, site.media.manage).
+    capabilities: [CAPABILITY_CONTENT],
+    // A managed Docs site holds no Content, and its narrowed set would be empty; it reads nothing here, so it
+    // asks for the capability `status` already narrows to (TR01363).
+    surfaceCapabilities: { [SURFACE_DOCS_PRESENTATION]: [CAPABILITY_DEPLOYMENTS] },
+    tokens: ["health"],
+    summary: "Read the stored Site Health report of the staged or production release, with a fix for each finding.",
+    target: true,
+    readTarget: true,
+    json: true,
+    note: "Site Health is built when a release is generated, so this reads what that release stored and never "
+      + "recomputes it: drafts and approvals made after the release are outside it (unpublishedChangesAssessed is "
+      + "false). A fix needs another deploy --staging (and approve, for a page edit) before the report changes. It "
+      + "exits 0 whenever it reads the report, whatever the findings. The result has status, available, the "
+      + "deployment, release and check identities, errorCount, warningCount and truncated, then findings and "
+      + "imageFindings. Each finding names its file in the workspace and a fix; an image finding carries the exact "
+      + "'media images describe' command with the image's description revision when the workspace's alt text "
+      + "supplies a safe description, and otherwise needsDescription. With --staging each finding says "
+      + "newSinceProduction, and comparison says whether production had a report to compare with; without one "
+      + "every finding is listed as not compared. Both lists are bounded by size, with findingsTotal, "
+      + "imageFindingsTotal and the truncation flags. A site with no stored report says available false and why. "
+      + "A managed Docs site returns covered false. Content permission is required.",
   },
 ]);
 
@@ -949,8 +1015,8 @@ run 'login --legal-drafts' for the selected standard site, then put
 separate site grant that expires within 24 hours. Legal approval and publishing
 remain in the app.
 
-Verbs write one JSON result to stdout and human progress to stderr. validate,
-help, whoami, and env are offline and read-only. login, logout, sites, use,
+Verbs write one JSON result to stdout and human progress to stderr. validate
+(unless --site), help, whoami, and env are offline and read-only. login, logout, sites, use,
 whoami, and env need no configuration and no site. So does changelog, which
 also still runs when this CLI is outdated. The offline help family is
 human-readable by default; add --json for stable reference data. Exit codes: 0
@@ -1035,7 +1101,10 @@ function verbHelp(verb) {
   --wait <seconds> Re-check failures once after this pause (0-120) for edge propagation.
   --no-browser     Skip the browser dimension even when Playwright is installed.`
     : "";
-  const targetOption = verb.target && !verb.deliveryOptions
+  const targetOption = verb.readTarget
+    ? `\n  --staging        Read the stored report of the staged release.
+  --production     Read the stored report of the production release.`
+    : verb.target && !verb.deliveryOptions
     ? `\n  --staging        Deploy the staged site to staging.
   --production     Promote the completed staging deployment to production.
   --allow-failed-preview  Explicitly override the matching candidate's failed preview.`
@@ -1083,6 +1152,10 @@ function verbHelp(verb) {
   const dryRunOption = verb.dryRun
     ? "\n  --dry-run        Read the site and report what a push would change, without writing."
     : "";
+  const describeOption = verb.describeMissingImages
+    ? "\n  --describe-missing-images  Set each placed image's missing default description from the one alt text its selected\n"
+      + "                   placements agree on; never overwrites a description. Works with --dry-run."
+    : "";
   const archiveOption = verb.archiveOption
     ? "\n  --archive        Archive a campaign or placement the file leaves out (never done without this)."
     : "";
@@ -1124,9 +1197,12 @@ function verbHelp(verb) {
       + `nothing to the workspace or the site (GITHUB_OUTPUT, when set, receives the JSON result). With --site it reads the site's presentation with the site-scoped credential from ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} `
       + `or the sign-in '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores.${upgradeGate}`
     : verb.name === VERB_VALIDATE
-    ? "Validation uses no credential, network or write; it reads the configuration only to find the workspace when "
-      + "no directory is given. With --init it reads the pulled workspace or selected configuration and writes a new "
-      + `fixture directory, still without credentials or network.${upgradeGate}`
+    ? "Validation uses no credential, network or write unless --site is given; it reads the configuration only to find "
+      + "the workspace when no directory is given. With --init it reads the pulled workspace or selected configuration "
+      + "and writes a new fixture directory, still without credentials or network. With --site it reads the site's "
+      + "image records with the site-scoped credential from "
+      + `${PUBLISH_KEY_ENVIRONMENT_VARIABLE} or the sign-in '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores, to report images `
+      + `the workspace places that have no default description, and writes nothing.${upgradeGate}`
     : selfContained
     ? "This offline verb uses no credential and reads no configuration, and performs no network request and no "
       + `write.${upgradeGate}`
@@ -1145,6 +1221,8 @@ function verbHelp(verb) {
   const options = verb.name === VERB_VALIDATE
     ? `Options:
   --init           Export a pulled workspace into the new fixture directory.
+  --site           Also read the site's image records, to report placed images with no default
+                   description; needs the workspace (no directory, no --init) and a sign-in.
   --config <path>  Before the verb; the configuration naming the workspace (no
                    directory) or the --init source.
   --quiet          Suppress human progress. The JSON result is unchanged.
@@ -1176,7 +1254,7 @@ function verbHelp(verb) {
 ${verb.summary}
 ${boundary}
 
-${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${imageOptions}${jsonOption}${resolveOptions}${dryRunOption}${archiveOption}${linkOptions}${planOption}${nameOption}${note}
+${options}${targetOption}${handoffOption}${reviewPathOption}${sinceOption}${deliveryTargetOption}${metaOptions}${authorOptions}${imageOptions}${jsonOption}${resolveOptions}${dryRunOption}${describeOption}${archiveOption}${linkOptions}${planOption}${nameOption}${note}
 `;
 }
 
@@ -1584,10 +1662,10 @@ function parseArguments(arguments_) {
   // origin the sign-in belongs to — so they accept it. whoami is offline and
   // reads both the store and the configuration, so it accepts it too: the test
   // is "reads nothing local", not "makes no request".
-  // validate reads the configuration in two cases: --init, and no directory,
-  // which checks the workspace the configuration names.
+  // validate reads the configuration in three cases: --init, --site, and no directory,
+  // which checks the workspace the configuration names. --site with a directory is refused later with its own code.
   const validateReadsConfig = verb.name === VERB_VALIDATE
-    && (rest.includes("--init") || rest.every((argument) => argument.startsWith("-")));
+    && (rest.includes("--init") || rest.includes("--site") || rest.every((argument) => argument.startsWith("-")));
   if (verb.offline && !verb.readsLocalState && configPath !== undefined && !validateReadsConfig) {
     throw usageError("cli.config_option", "--config applies only to verbs that read the site configuration.", {
       field: "configPath",
@@ -1607,6 +1685,7 @@ function parseArguments(arguments_) {
   let reviewPath;
   let since;
   let dryRun = false;
+  let describeMissingImages = false;
   let json = false;
   let themeScheme;
   let themeContext;
@@ -1652,7 +1731,7 @@ function parseArguments(arguments_) {
       if (deployTarget !== undefined) {
         throw usageError(
           "cli.deploy_target",
-          "deploy accepts exactly one of --staging or --production.",
+          `${verb.tokens.join(" ")} accepts exactly one of --staging or --production.`,
         );
       }
       deployTarget = candidate;
@@ -1675,7 +1754,7 @@ function parseArguments(arguments_) {
       browser = false;
       continue;
     }
-    if (verb.target && argument === "--allow-failed-preview") {
+    if (verb.target && !verb.readTarget && argument === "--allow-failed-preview") {
       if (allowFailedPreview) {
         throw usageError("cli.duplicate_option", "--allow-failed-preview may be supplied only once.");
       }
@@ -1738,6 +1817,11 @@ function parseArguments(arguments_) {
       dryRun = true;
       continue;
     }
+    if (verb.describeMissingImages && argument === "--describe-missing-images") {
+      if (describeMissingImages) throw usageError("cli.duplicate_option", "--describe-missing-images may be supplied only once.");
+      describeMissingImages = true;
+      continue;
+    }
     if (verb.json && argument === "--json") {
       if (json) throw usageError("cli.duplicate_option", "--json may be supplied only once.");
       json = true;
@@ -1755,7 +1839,7 @@ function parseArguments(arguments_) {
       index += 1;
       continue;
     }
-    if (verb.resolveOptions && argument === "--site") {
+    if ((verb.resolveOptions || verb.siteOption) && argument === "--site") {
       if (fromSite) throw usageError("cli.duplicate_option", "--site may be supplied only once.");
       fromSite = true;
       continue;
@@ -1857,6 +1941,8 @@ function parseArguments(arguments_) {
   if (handoff === true && verb.target && deployTarget === DEPLOY_TARGET_PRODUCTION) {
     throw usageError("cli.handoff_target", "--handoff applies only to deploy --staging.", { field: "handoff" });
   }
+  // Before the path-arity check: --site with --init is refused for the combination, not for a missing directory.
+  if (verb.siteOption && fromSite && (init || positionals.length > 0)) throw siteNeedsWorkspaceError(init);
   if (verb.positionals === "fixturePath" && (positionals.length > 1 || (init && positionals.length !== 1))) {
     throw usageError(
       "validate.fixture_path_invalid",
@@ -1993,6 +2079,7 @@ function parseArguments(arguments_) {
     ...(browser === undefined ? {} : { browser }),
     init,
     dryRun,
+    ...(describeMissingImages ? { describeMissingImages } : {}),
     json,
     keyName,
     ...(themeScheme === undefined ? {} : { themeScheme }),
@@ -2041,11 +2128,14 @@ export async function runCli({
   // invocation. Detect its only legal command positions without consulting
   // config or environment, so a malformed offline command cannot fall through
   // to the generic GitHub Actions output writer.
+  // `validate --site` reads the site and writes the output as `theme resolve` does, including when its usage is
+  // refused; every other `validate` stays suppressed (TR01371).
   const isValidationInvocation = Array.isArray(arguments_)
     && (
       arguments_[0] === VERB_VALIDATE
       || (arguments_[0] === "--config" && arguments_[2] === VERB_VALIDATE)
-    );
+    )
+    && !arguments_.includes("--site");
   try {
     parsed = parseArguments(arguments_);
     if (parsed.mode === "help") {
@@ -2094,6 +2184,7 @@ export async function runCli({
       init: parsed.init,
       quiet: parsed.quiet,
       dryRun: parsed.dryRun,
+      ...(parsed.describeMissingImages ? { describeMissingImages: true } : {}),
       keyName: parsed.keyName,
       ...(parsed.themeScheme === undefined ? {} : { themeScheme: parsed.themeScheme }),
       ...(parsed.themeContext === undefined ? {} : { themeContext: parsed.themeContext }),

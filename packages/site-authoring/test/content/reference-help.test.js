@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 57);
+  assert.equal(REFERENCE_VERSION, 58);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -319,6 +319,7 @@ test("the free-form reference exposes the production document vocabulary and aut
       "taproot-site pages push",
       "taproot-site approve [page-path...]",
       "taproot-site deploy --staging",
+      "taproot-site health --staging",
       "taproot-site deploy --production",
     ],
   );

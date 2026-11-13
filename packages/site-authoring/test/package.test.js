@@ -179,6 +179,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/output.js",
     "src/page-metadata.js",
     "src/page-structure-checks.js",
+    // The images a page places, over the wire form, held to the API's extractor by a shared corpus (TR01364).
+    "src/placed-image-ids.js",
     "src/presentation-reference.js",
     "src/problems.js",
     "src/progress.js",
@@ -193,6 +195,10 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/site-check-findings.js",
     "src/site-check-rules.json",
     "src/site-checks.js",
+    "src/site-health-findings.js",
+    // Site Health's missing image description rule, shared with the generator (TR01364).
+    "src/site-health-image-checks.js",
+    "src/site-health-precheck.js",
     "src/social-link-url.js",
     "src/social-platforms.json",
     "src/staging-check.js",
@@ -216,6 +222,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/verbs/forms-pull.js",
     "src/verbs/forms-push.js",
     "src/verbs/forms-validate.js",
+    "src/verbs/health.js",
     "src/verbs/index.js",
     "src/verbs/link-build.js",
     "src/verbs/login.js",

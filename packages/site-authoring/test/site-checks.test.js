@@ -133,7 +133,9 @@ test("a truncated page manifest skips the link check rather than calling a link 
   const truncated = evaluateOfflineSiteChecks({ planned, pagePaths: ["a"], pagesComplete: false });
   assert.equal(complete.findings.total, 1);
   assert.equal(truncated.findings.total, 0);
-  assert.deepEqual(truncated.siteChecks.skipped, ["link.page_missing"]);
+  // In catalogue order: the image description rule is skipped too, because nothing read the site's images.
+  assert.deepEqual(truncated.siteChecks.skipped, ["link.page_missing", "a11y.image_default_missing"]);
+  assert.equal(complete.siteChecks.imageCheckReason.code, "not_requested");
 });
 
 
@@ -171,4 +173,17 @@ test("generated custom metadata is checked while effective defaults, homepage se
     assert.ok(result.siteChecks.deferredToDeployment.includes("seo.title_missing"));
     assert.ok(result.siteChecks.deferredToDeployment.includes("seo.description_matches_title"));
   }
+});
+
+test("the image description rule runs offline in the catalogue, so validate no longer defers it to the site", () => {
+  const { siteChecks } = evaluateOfflineSiteChecks({ planned: [], pagePaths: [] });
+  assert.ok(siteChecks.ranOffline.includes("a11y.image_default_missing"));
+  assert.ok(!siteChecks.checkedBySite.includes("a11y.image_default_missing"));
+  // Run offline, but not run: it is listed as skipped with the reason, ahead of the form key rule.
+  assert.deepEqual(siteChecks.skipped, ["a11y.image_default_missing"]);
+  assert.equal(siteChecks.imageCheckReason.code, "not_requested");
+  assert.match(siteChecks.imageCheckReason.message, /validate --site|pages push --dry-run/u);
+  const ran = evaluateOfflineSiteChecks({ planned: [], pagePaths: [], imageCheck: { ran: true } }).siteChecks;
+  assert.equal(Object.hasOwn(ran, "skipped"), false);
+  assert.equal(Object.hasOwn(ran, "imageCheckReason"), false);
 });

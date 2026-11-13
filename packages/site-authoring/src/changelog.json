@@ -1,6 +1,29 @@
 {
   "entries": [
     {
+      "version": "0.37.0",
+      "note": "Read Site Health with the new health command and in deploy --staging. Catch undescribed images before staging with validate --site and pages push, and set them with --describe-missing-images. The pull conflict rule is now documented exactly.",
+      "behavior": [
+        "New taproot-site health --staging | --production [--json] reads the Site Health report a release stored and never recomputes it. It exits 0 whatever the findings. Drafts and approvals made after the release are outside the report.",
+        "Each finding names its workspace file and a fix. An image finding carries the exact media images describe command, with the description revision and the alt text the workspace's pages place, when that text is safe to run; otherwise it says needsDescription. With --staging, newSinceProduction marks what production's report lacks, and comparison says whether production could be compared.",
+        "deploy --staging returns the staged report as siteHealth (the object health --staging returns, with a smaller size bound) and prints each new warning with its fix. A warning never fails the deploy, and a report that cannot be read is available: false.",
+        "status adds stagedSiteHealth, a summary of the staged release's report, and bounds siteHealth.imageFindings by size (imageFindingsTruncated).",
+        "Steps 3, 5 and 8 of the workspace AGENTS.md template changed: validate --site in the authoring loop, pages push --describe-missing-images as the quick fix in the push step, and health --staging after staging. Refresh your site's copy of the template.",
+        "New taproot-site validate --site reads the site's records of the images the workspace places and reports each one with no default description in imageFindings, with its affected pages and the exact media images describe command; notInSiteLibrary lists placed ids that are not in the site's library (deleted, another site's, or owned media such as a copied video poster). It needs the workspace and a sign-in, so it sets offline to false, and a directory argument or --init is refused (validate.site_needs_workspace). A managed Docs workspace, and a workspace placing no images, are not read.",
+        "Plain validate stays offline, but it now lists a11y.image_default_missing under siteChecks.ranOffline instead of checkedBySite, and in siteChecks.skipped with siteChecks.imageCheckReason (not_requested, directory_argument, docs_site, read_failed or read_partly_failed) whenever it did not run.",
+        "pages push and pages push --dry-run add siteHealthPrecheck: the same image check over every selected page, from one read of the site's image records after the push's problems are refused and before anything is written. A failed read never fails the push, and apply makes no check. The check misses images an integration places and a video poster a push copies, which health --staging covers after staging.",
+        "New pages push --describe-missing-images (also with --dry-run, which writes nothing) sets each placed image's missing default description from the one alt text its selected custom or unset placements agree on, after the pages are saved and never over an existing description. The result's describedImages lists what was set and, with a reason code, what was skipped; a rejected credential, outdated CLI or paused platform fails the command after the pages were saved, with completedWrites. With images set, nextStep is approve while a selected page holds a draft, and deploy --staging otherwise.",
+        "The pull conflict rule is now stated exactly. A tracked Markdown page conflicts when the site moved (its revision, or its display date for a page type that has one); a .pm.json page is refreshed when the site moved and conflicts only with unpushed local edits. For an authored page, approve, staging and production publication do not move the revision. A .pm.json page pulled while its published row was still the hydrated render copy and holding unpushed local edits can report pages.pull_conflict once on its next publication, and one pages push settles it.",
+        "The help reference version is 58."
+      ],
+      "help": [
+        "page",
+        "walkthrough",
+        "media",
+        "import"
+      ]
+    },
+    {
       "version": "0.36.2",
       "note": "Tall fixed headers follow scrolling, and themed quotes support optional attribution and sources.",
       "behavior": [

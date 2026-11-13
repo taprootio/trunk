@@ -1222,6 +1222,61 @@ export async function listSiteImageDescriptions(client, siteId, { pageSize, page
   };
 }
 
+const IMAGE_IDS_PER_REQUEST = 100;
+
+/**
+ * Reads this site's own images by id, for the description and revision a Site Health fix needs (TR01363).
+ *
+ * Each batch of 100 succeeds or fails on its own: a failed or denied batch puts its ids in `failedIds` and never
+ * throws, so one bad batch does not hide the rest. `refusalKinds` lists the distinct `ApiError.refusalKind()` values
+ * seen, and `refusalError` is the first `credential_rejected` or `cli_outdated` refusal, for a caller that must
+ * fail with its server description. A cancelled run is rethrown. The server returns only this site's own images,
+ * so an id in a successful batch that is not returned (deleted, owned by another site, or owned media such as a
+ * copied video poster, which `libraryOnly` leaves out because no description can be set on it) is simply absent from
+ * `images`. A default that is empty or `null` on the wire is absent here.
+ */
+export async function listSiteImagesByIds(client, siteId, imageIds) {
+  const ids = [...new Set(imageIds)];
+  const images = [];
+  const failedIds = [];
+  const refusalKinds = [];
+  let refusalError;
+  for (let start = 0; start < ids.length; start += IMAGE_IDS_PER_REQUEST) {
+    const batch = ids.slice(start, start + IMAGE_IDS_PER_REQUEST);
+    try {
+      const response = requireObject(
+        await client.request(sitePath(siteId, `images${query([["imageIds", batch], ["libraryOnly", true]])}`)),
+        "api.image_description_contract",
+        "site images",
+      );
+      if (response.images !== undefined && !Array.isArray(response.images)) {
+        throw new SiteAuthoringError("api.image_description_contract", "Taproot returned an invalid image list.");
+      }
+      const read = (response.images ?? []).map((entry) => normalizeDescriptionImage(entry, siteId));
+      for (const image of read) {
+        if (!batch.includes(image.imageId)) continue;
+        images.push({
+          imageId: image.imageId,
+          name: image.uploadedName,
+          descriptionRevision: image.descriptionRevision,
+          ...(image.defaultDescription === null ? {} : { defaultDescription: image.defaultDescription }),
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof SiteAuthoringError) || error.code === "site.cancelled") throw error;
+      failedIds.push(...batch);
+      if (error instanceof ApiError) {
+        const kind = error.refusalKind();
+        if (!refusalKinds.includes(kind)) refusalKinds.push(kind);
+        if (refusalError === undefined && (kind === REFUSAL_CREDENTIAL_REJECTED || kind === REFUSAL_CLI_OUTDATED)) {
+          refusalError = error;
+        }
+      }
+    }
+  }
+  return { images, failedIds, refusalKinds, ...(refusalError === undefined ? {} : { refusalError }) };
+}
+
 export async function getSiteImageDescription(client, siteId, imageId) {
   return normalizeDescriptionImage(
     await client.request(sitePath(siteId, `images/${encodeURIComponent(imageId)}`)), siteId, imageId);
@@ -1233,10 +1288,18 @@ export async function updateSiteImageDescription(client, siteId, imageId, body) 
   }), siteId, imageId);
 }
 
-/** The site checks' findings over the latest editable page bodies, authorized by Content. */
-export async function getSiteHealth(client, siteId) {
+/**
+ * One release's stored Site Health report, authorized by Content (`site.pages.edit_any`). It reads what the release
+ * stored when it was generated and never recomputes it, so it does not reflect edits made since. With no
+ * `deploymentId` it is the acknowledged production release; with one, that staged release.
+ */
+export async function getSiteHealth(client, siteId, { deploymentId: requestedDeploymentId } = {}) {
   const code = "api.site_health_contract";
-  const response = requireObject(await client.request(sitePath(siteId, "health")), code, "site-health report");
+  const response = requireObject(
+    await client.request(sitePath(siteId, `health${query([["deploymentId", requestedDeploymentId]])}`)),
+    code,
+    "site-health report",
+  );
   // Proto3 omits empty repeated fields and zero counts. A present non-array is a
   // bad report, not evidence that the site is healthy.
   if (response.findings !== undefined && !Array.isArray(response.findings)) {
@@ -1271,6 +1334,10 @@ export async function getSiteHealth(client, siteId) {
       detail: text(finding.detail),
     };
   });
+  // Compared across two reports, so built from the wire values themselves: `subject` above is cut for display, and
+  // two long subjects that differ only after the cut must not compare equal (TR01363).
+  const findingKeys = (response.findings ?? []).map((entry) =>
+    [entry.ruleId, entry.pageId ?? "", typeof entry.subject === "string" ? entry.subject : ""].join("\u0000"));
   const statuses = new Set(["not_checked", "complete", "incomplete", "unsupported"]);
   const status = statuses.has(response.status) ? response.status : "unknown";
   const optionalId = (value, field) => value === undefined || value === "" ? undefined : requireCanonicalUuid(value, code, field);
@@ -1312,7 +1379,7 @@ export async function getSiteHealth(client, siteId) {
     throw new SiteAuthoringError(code, "Taproot returned health totals that disagree with the stored findings.");
   }
   return {
-    findings, images, status, assessmentKnown: status !== "unknown",
+    findings, findingKeys, images, status, assessmentKnown: status !== "unknown",
     ...(deploymentId ? { deploymentId } : {}), ...(outputReleaseId ? { outputReleaseId } : {}),
     inputHash: text(response.inputHash), checkedAt: text(response.checkedAt), ruleVersion: text(response.ruleVersion),
     coverage: response.coverage ?? [], assessedPageCount: count(response.assessedPageCount, "assessedPageCount"),

@@ -29,6 +29,7 @@ import { HANDOFF_NOT_REQUESTED_PROGRESS, handoffNotRequested, inspectStagingPrev
 import { confirmStagingServed, readStagingReleaseBefore, unverifiedStagingServed } from "../staging-served.js";
 import { ApiError } from "../transport.js";
 import { readManifest, writeManifest } from "../workspace.js";
+import { DEPLOY_HEALTH_BUDGETS, DOCS_SITE_HEALTH_NOT_COVERED, readFailureCode, readSiteHealthReport } from "./health.js";
 import { STAGING_REVIEW_GUIDANCE } from "./staging-review.js";
 
 /**
@@ -224,6 +225,26 @@ async function mintPresentationStagingHandoff(client, siteId, onProgress, now, r
     const unavailable = presentationHandoffUnavailable(error);
     onProgress(`Warning: the deployment completed, but a staging review handoff could not be minted (${unavailable.reason}). ${unavailable.recovery}`);
     return { url: "", stagingUrl: "", ...unavailable };
+  }
+}
+
+/**
+ * The Site Health report of the release just staged (TR01363): the same object `health --staging` returns, under
+ * a smaller byte budget. A warning never fails the deploy and a read that fails never reports a completed deploy
+ * as failed, so every error but a cancelled run becomes `{ available: false, reason }`.
+ */
+async function readStagedSiteHealth({ client, config, siteId, onProgress, deploymentId }) {
+  try {
+    const report = await readSiteHealthReport({
+      client, config, siteId, onProgress, environment: DEPLOY_TARGET_STAGING,
+      stagedDeploymentId: deploymentId, budgets: DEPLOY_HEALTH_BUDGETS,
+    });
+    if (!report.available) onProgress(`Site health (staging): ${report.reason}`);
+    return report;
+  } catch (error) {
+    const reason = `The staged Site Health report could not be read (${readFailureCode(error)}). Run 'taproot-site health --staging' to read it.`;
+    onProgress(`Warning: ${reason}`);
+    return { available: false, environment: DEPLOY_TARGET_STAGING, unpublishedChangesAssessed: false, reason };
   }
 }
 
@@ -433,6 +454,10 @@ export async function deploy(invocation) {
         now,
       });
     if (stagingServed.state !== "served") onProgress(`Warning: ${stagingServed.message}`);
+    // The report is stored before a release is served, so no waiting is needed (TR01363).
+    const siteHealth = presentationOnly
+      ? { covered: false, reason: DOCS_SITE_HEALTH_NOT_COVERED }
+      : await readStagedSiteHealth({ client, config, siteId, onProgress, deploymentId: completed.id });
     if (presentationOnly) {
       // The review URL is a live credential, so it is minted only when asked for (TR01233).
       if (invocation.handoff !== true) onProgress(HANDOFF_NOT_REQUESTED_PROGRESS);
@@ -452,6 +477,7 @@ export async function deploy(invocation) {
         outcome: created.outcome,
         readiness: reportReadiness(readiness),
         stagingServed,
+        siteHealth,
         stagingPreview,
         nextStep: stagingPreview.url === "" ? "staging review" : "deploy --production",
       });
@@ -473,6 +499,7 @@ export async function deploy(invocation) {
       outcome: created.outcome,
       readiness: reportReadiness(readiness),
       stagingServed,
+      siteHealth,
       routeCheck,
       redirects,
       stagingPreview,

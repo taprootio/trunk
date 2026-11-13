@@ -33,6 +33,7 @@ import { deliveryCheck } from "../src/verbs/delivery-check.js";
 import { deploy } from "../src/verbs/deploy.js";
 import { parseServedStagingRelease, readServedStagingRelease } from "../src/staging-served.js";
 import { footerPush } from "../src/verbs/footer-push.js";
+import { health } from "../src/verbs/health.js";
 import { VERB_HANDLERS } from "../src/verbs/index.js";
 import { mediaUpload } from "../src/verbs/media-upload.js";
 import { navPush, validateNavigationWorkspaceDocument } from "../src/verbs/nav-push.js";
@@ -260,9 +261,19 @@ function api(routes) {
     : [...routes, { method: "GET", pattern: REDIRECT_MAP, reply: emptyRedirectMap() }];
   // `pull` also reads who a page can be credited to (TR01196), so a test that
   // is not about authors gets the answer of a site with nobody to name.
-  const effectiveRoutes = withRedirects.some((route) => route.method === "GET" && route.pattern === AUTHORS)
+  const withAuthors = withRedirects.some((route) => route.method === "GET" && route.pattern === AUTHORS)
     ? withRedirects
     : [...withRedirects, { method: "GET", pattern: AUTHORS, reply: { authors: [], members: [] } }];
+  // `deploy --staging` reads the staged Site Health report after it serves (TR01363), so a test that is not about
+  // health gets the answer of a release with no stored report.
+  const withHealth = withAuthors.some((route) => route.method === "GET" && route.pattern === SITE_HEALTH)
+    ? withAuthors
+    : [...withAuthors, { method: "GET", pattern: SITE_HEALTH, reply: { status: "not_checked" } }];
+  // `pages push` reads the records of the images its pages place (TR01371), so a test that is not about images
+  // gets the answer of a library holding none of them.
+  const effectiveRoutes = withHealth.some((route) => route.method === "GET" && route.pattern === SITE_IMAGES)
+    ? withHealth
+    : [...withHealth, { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } }];
   // Likewise the presentation snapshot `pull` projects the four settings
   // groups from, with the revision it records as the baseline (TR00807): a
   // test about something else gets a stable baseline, and the snapshot is
@@ -515,6 +526,7 @@ const DEPLOYMENTS = /\/deployments$/u;
 const STAGING_PREVIEW_STATUS = /\/staging-preview\/status$/u;
 const STAGING_PREVIEW_ROOT = /^\/$/u;
 const SITE_IMAGES = /\/sites\/[^/]+\/images$/u;
+const IMAGE_DESCRIPTION = /\/sites\/[^/]+\/images\/[^/]+\/description$/u;
 const PLACES_SEARCH = /^\/api\/v1\/places\/search$/u;
 const PLACES_SELECT = /^\/api\/v1\/places\/select$/u;
 const PLACE_CATEGORY = /^\/api\/v1\/sites\/[^/]+\/places\/[^/]+\/category$/u;
@@ -607,6 +619,7 @@ const ROUTE_PERMISSIONS = Object.freeze([
   { method: "GET", pattern: DEPLOYMENTS, permission: "site.deployments.view_any" },
   { method: "GET", pattern: STAGING_PREVIEW_STATUS, permission: "site.staging.view" },
   { method: "GET", pattern: SITE_IMAGES, permission: "site.media.manage" },
+  { method: "PATCH", pattern: IMAGE_DESCRIPTION, permission: "site.media.manage" },
   { method: "GET", pattern: SITE_VIDEOS, permission: "site.media.manage" },
   // A page names a form by key here and by id on the site, so a push and a pull read the site's forms (TR01216).
   { method: "GET", pattern: SITE_FORMS, permission: "site.forms.manage" },
@@ -12876,6 +12889,1277 @@ test("status says when the deployment log it read is only one page", async (site
 });
 
 // ---------------------------------------------------------------------------
+// The staged Site Health report in deploy --staging and status (TR01363)
+// ---------------------------------------------------------------------------
+
+const HEALTH_PAGE_FILE = "pages/about.md";
+
+function healthWorkspaceFiles() {
+  return {
+    ".taproot-site-manifest.json": manifestFixture([{
+      pageId: ABOUT_PAGE_ID, path: "about", title: "About", file: HEALTH_PAGE_FILE,
+    }]),
+    [HEALTH_PAGE_FILE]: "---\ntitle: About\npath: about\n---\n![Bird in flight](media/bird.png)\n",
+    ".taproot-site-media.json": {
+      mediaManifestVersion: 2, siteId: SITE_ID,
+      media: { "media/bird.png": { imageId: IMAGE_ID, width: 10, height: 10 } },
+    },
+  };
+}
+
+const healthPageFinding = (overrides = {}) => ({
+  ruleId: "seo.description_missing", severity: "SITE_FINDING_SEVERITY_WARNING", pageId: ABOUT_PAGE_ID,
+  pageTitle: "About", pagePath: "about", subject: "", ...overrides,
+});
+const healthImageFinding = (imageId = IMAGE_ID, overrides = {}) => ({
+  imageId, name: "bird.png", previewUrl: "",
+  affectedPages: [{ pageId: ABOUT_PAGE_ID, title: "About", path: "about" }], ...overrides,
+});
+const withHealthTotals = (value) => ({
+  ...value,
+  warningCount: (value.findings ?? []).length + (value.images ?? []).length,
+  pageCount: new Set((value.findings ?? []).map((finding) => finding.pageId)).size,
+});
+const denied = () => jsonResponse({ code: 7, message: "denied" }, 403);
+
+/**
+ * The health read by deployment id (production when none is sent) and the batched image read, so a test says
+ * what each release stored. A reply may be a `Response` for a failure.
+ */
+function healthRoutes({ production, staged, imageRevisions = { [IMAGE_ID]: "2" } }) {
+  return [
+    {
+      method: "GET",
+      pattern: SITE_HEALTH,
+      reply: (call) => {
+        const id = call.query.get("deploymentId");
+        const value = id === null ? production : typeof staged === "function" ? staged(id) : staged;
+        return typeof value === "function" ? value() : value ?? { status: "not_checked" };
+      },
+    },
+    {
+      method: "GET",
+      pattern: SITE_IMAGES,
+      reply: (call) => ({
+        images: call.query.getAll("imageIds").filter((id) => Object.hasOwn(imageRevisions, id)).map((imageId) => ({
+          image: {
+            imageId, siteId: SITE_ID, ownershipScope: "IMAGE_OWNERSHIP_SCOPE_SITE", uploadedName: "bird.png",
+            width: 10, height: 10, defaultDescription: "", descriptionRevision: imageRevisions[imageId],
+            url: "https://static.test/bird.webp", responsiveUrls: [], processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
+          },
+        })),
+      }),
+    },
+  ];
+}
+
+const healthReads = (wire) => wire.matching("GET", SITE_HEALTH).map((call) => call.query.get("deploymentId") ?? "production");
+
+test("deploy --staging reports the report of the release it just staged, and marks what is new", async (context) => {
+  // Production's staged_deployment_id is empty in one case and names another release in the other; the read
+  // always uses the id of the deployment this run created.
+  for (const productionStagedId of [undefined, STAGING_DEPLOYMENT_ID]) {
+    await context.test(`production names ${productionStagedId ?? "no staged release"}`, async (site) => {
+      const workspace = await fixture(site, healthWorkspaceFiles());
+      const wire = api([
+        ...healthRoutes({
+          production: withHealthTotals(storedHealthReport({
+            findings: [healthPageFinding()], images: [healthImageFinding()],
+            ...(productionStagedId === undefined ? {} : { stagedDeploymentId: productionStagedId }),
+            deploymentId: SNAPSHOT_ID,
+          })),
+          staged: withHealthTotals(storedHealthReport({
+            environment: "staging", deploymentId: DEPLOYMENT_ID,
+            // The first is unchanged since production; the second is new.
+            findings: [healthPageFinding(), healthPageFinding({ ruleId: "link.page_missing", subject: "/gone" })],
+            images: [healthImageFinding()],
+          })),
+        }),
+        ...deployRoutes(),
+      ]);
+      const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+      const result = await deploy(invocation);
+
+      assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
+      assert.deepEqual(healthReads(wire), ["production", DEPLOYMENT_ID]);
+      const health = result.siteHealth;
+      assert.equal(health.available, true);
+      assert.equal(health.environment, "staging");
+      assert.equal(health.deploymentId, DEPLOYMENT_ID);
+      assert.equal(health.unpublishedChangesAssessed, false);
+      assert.deepEqual(health.findings.map((finding) => [finding.rule, finding.file, finding.newSinceProduction]), [
+        ["seo.description_missing", HEALTH_PAGE_FILE, false],
+        ["link.page_missing", HEALTH_PAGE_FILE, true],
+      ]);
+      // The unchanged image finding stays listed, with the fix its revision and the page's alt text make.
+      assert.equal(health.imageFindings[0].newSinceProduction, false);
+      assert.equal(health.imageFindings[0].descriptionRevision, "2");
+      assert.equal(health.imageFindings[0].suggestedDescription, "Bird in flight");
+      assert.deepEqual(health.comparison, { comparedTo: "production", compared: true, newFindings: 1, newImageFindings: 0 });
+      // A warning is reported and never fails the deploy; each new one names its fix.
+      const warnings = progress.filter((line) => line.startsWith("Warning:") && line.includes("Fix:"));
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0], /pages\/about\.md/u);
+      assert.equal(result.nextStep, "deploy --production");
+    });
+  }
+});
+
+test("deploy --staging and health --staging return the same siteHealth for an empty staged report", async (site) => {
+  const workspace = await fixture(site, healthWorkspaceFiles());
+  const wire = api([
+    ...healthRoutes({
+      production: storedHealthReport({ deploymentId: SNAPSHOT_ID, stagedDeploymentId: DEPLOYMENT_ID }),
+      staged: storedHealthReport({ environment: "staging", deploymentId: DEPLOYMENT_ID }),
+    }),
+    ...deployRoutes(),
+  ]);
+  const deployed = await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation);
+  const read = await runVerb(health, workspace, wire, { deployTarget: "staging" });
+  const { schemaVersion, ok, cli, verb, siteId, ...body } = read;
+  assert.deepEqual(deployed.siteHealth, body);
+  assert.deepEqual(deployed.siteHealth, {
+    available: true, status: "complete", environment: "staging", deploymentId: DEPLOYMENT_ID,
+    outputReleaseId: SNAPSHOT_ID, checkedAt: "2026-11-04T12:00:00.000Z", ruleVersion: "2",
+    coverage: storedHealthReport().coverage, assessedPageCount: 1, errorCount: 0, warningCount: 0, truncated: false,
+    unpublishedChangesAssessed: false,
+    comparison: { comparedTo: "production", compared: true, newFindings: 0, newImageFindings: 0 },
+    findingsTotal: 0, imageFindingsTotal: 0, findings: [], imageFindings: [],
+  });
+});
+
+async function runVerb(handler, workspace, wire, extra) {
+  const verb = handler === health ? "health" : "status";
+  return await handler(invoke(workspace, wire, { verb, ...extra }).invocation);
+}
+
+test("deploy --staging with no stored report says so, points at health, and reads nothing more", async (site) => {
+  const workspace = await fixture(site, healthWorkspaceFiles());
+  const wire = api(deployRoutes());
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const result = await deploy(invocation);
+  assert.equal(result.siteHealth.available, false);
+  assert.equal(result.siteHealth.status, "not_checked");
+  assert.match(result.siteHealth.reason, /health --staging/u);
+  assert.ok(progress.some((line) => /health --staging/u.test(line)));
+  assert.deepEqual(healthReads(wire), ["production", DEPLOYMENT_ID]);
+  assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
+});
+
+test("a failed, denied or contract-invalid health read never fails a completed deploy --staging", async (context) => {
+  const staged = (value) => withHealthTotals(storedHealthReport({ environment: "staging", deploymentId: DEPLOYMENT_ID, findings: [healthPageFinding()], ...value }));
+  const cases = [
+    ["a denied staged read", { production: storedHealthReport(), staged: () => denied() }],
+    ["a denied production read", { production: () => denied(), staged: staged() }],
+    ["a contract-invalid staged read", { production: storedHealthReport(), staged: () => ({ ...staged(), findings: {} }) }],
+  ];
+  for (const [name, routes] of cases) {
+    await context.test(name, async (site) => {
+      const workspace = await fixture(site, healthWorkspaceFiles());
+      const wire = api([...healthRoutes(routes), ...deployRoutes()]);
+      const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+      const result = await deploy(invocation);
+      assert.equal(result.ok, true);
+      assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
+      assert.equal(result.siteHealth.available, false);
+      assert.equal(typeof result.siteHealth.reason, "string");
+      assert.ok(progress.some((line) => line.startsWith("Warning:") && /health --staging/u.test(line)));
+      assert.equal(result.nextStep, "deploy --production");
+    });
+  }
+});
+
+test("a local source that converts but cannot be walked never fails a completed deploy --staging", async (site) => {
+  const depth = 20_000;
+  const workspace = await fixture(site, {
+    ...healthWorkspaceFiles(),
+    ".taproot-site-manifest.json": manifestFixture([{ pageId: ABOUT_PAGE_ID, path: "about", title: "About", file: "pages/about.pm.json" }]),
+    "pages/about.pm.json": `{"type":"doc","content":[{"type":"paragraph","attrs":{"deep":${"[".repeat(depth)}${"]".repeat(depth)}}}]}`,
+  });
+  const wire = api([
+    ...healthRoutes({
+      production: storedHealthReport({ deploymentId: SNAPSHOT_ID }),
+      staged: withHealthTotals(storedHealthReport({ environment: "staging", deploymentId: DEPLOYMENT_ID, images: [healthImageFinding()] })),
+    }),
+    ...deployRoutes(),
+  ]);
+  const result = await deploy(invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" }).invocation);
+  assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
+  // The page contributes no alt text, and the image is still reported with its fix.
+  assert.equal(result.siteHealth.available, true);
+  assert.equal(result.siteHealth.imageFindings[0].needsDescription, true);
+});
+
+/** The session the verb would open, with its health reads failing in a way that is not the CLI's own error type. */
+async function sessionWithBrokenHealth(workspace, wire, extra) {
+  const { invocation, progress } = invoke(workspace, wire, extra);
+  const session = await openSession(invocation);
+  const client = new Proxy(session.client, {
+    get(target, property) {
+      if (property === "request") {
+        return async (requestPath, options) => {
+          if (/\/health(?:\?|$)/u.test(requestPath)) throw new TypeError("unexpected failure with a private detail");
+          return await target.request(requestPath, options);
+        };
+      }
+      const value = target[property];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { invocation: { ...invocation, resolvedSession: { ...session, client } }, progress };
+}
+
+test("an unexpected error inside the health read never fails a completed deploy --staging", async (site) => {
+  const workspace = await fixture(site, healthWorkspaceFiles());
+  const wire = api(deployRoutes());
+  const { invocation, progress } = await sessionWithBrokenHealth(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const result = await deploy(invocation);
+  assert.equal(result.deployment.status, "DEPLOYMENT_STATUS_COMPLETED");
+  assert.equal(result.siteHealth.available, false);
+  assert.match(result.siteHealth.reason, /unexpected/u);
+  assert.ok(progress.some((line) => line.startsWith("Warning:") && /health --staging/u.test(line)));
+  assert.ok(!JSON.stringify(result).includes("private detail") && !progress.join("\n").includes("private detail"));
+  assert.equal(result.nextStep, "deploy --production");
+});
+
+test("an unexpected error inside the staged health read never fails status", async (site) => {
+  const workspace = await fixture(site);
+  const productionOnly = api([
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, blockers: [] } },
+    { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } },
+    ...healthRoutes({ production: storedHealthReport({ stagedDeploymentId: STAGING_DEPLOYMENT_ID }) }),
+  ]);
+  const { invocation, progress } = invoke(workspace, productionOnly, { verb: "status" });
+  const session = await openSession(invocation);
+  const client = new Proxy(session.client, {
+    get(target, property) {
+      if (property === "request") {
+        return async (requestPath, options) => {
+          if (/\/health\?/u.test(requestPath)) throw new TypeError("unexpected failure");
+          return await target.request(requestPath, options);
+        };
+      }
+      const value = target[property];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const result = await status({ ...invocation, resolvedSession: { ...session, client } });
+  assert.equal(result.stagedSiteHealth.available, false);
+  assert.match(result.stagedSiteHealth.reason, /unexpected/u);
+  assert.equal(result.siteHealth.covered, true);
+  assert.ok(progress.some((line) => line.startsWith("Warning:")));
+});
+
+test("deploy --staging lists every staged warning as not compared when production has no report", async (site) => {
+  const workspace = await fixture(site, healthWorkspaceFiles());
+  const wire = api([
+    ...healthRoutes({
+      production: { status: "not_checked" },
+      staged: withHealthTotals(storedHealthReport({
+        environment: "staging", deploymentId: DEPLOYMENT_ID, findings: [healthPageFinding()], images: [healthImageFinding()],
+      })),
+    }),
+    ...deployRoutes(),
+  ]);
+  // Production has nothing to name, so the staged id comes from the deployment this run created.
+  const { invocation, progress } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const { siteHealth } = await deploy(invocation);
+  assert.equal(siteHealth.comparison.compared, false);
+  assert.ok([...siteHealth.findings, ...siteHealth.imageFindings].every((item) => !Object.hasOwn(item, "newSinceProduction")));
+  assert.ok(progress.some((line) => /not compared/u.test(line)));
+  assert.equal(progress.filter((line) => line.startsWith("Warning:") && line.includes("Fix:")).length, 2);
+});
+
+test("a maximal staged report with a full redirects block keeps the deploy result under the bound", async (site) => {
+  const workspace = await fixture(site, healthWorkspaceFiles());
+  const entries = Array.from({ length: 80 }, (_ignored, index) => ({
+    path: `/r${index}-${"a".repeat(380)}`, target: `/t${index}-${"b".repeat(380)}`, status: 301,
+  }));
+  const findings = Array.from({ length: 200 }, (_ignored, index) => healthPageFinding({ subject: `/missing-${index}-${"x".repeat(150)}`, pageTitle: "T".repeat(150) }));
+  const images = Array.from({ length: 200 }, (_ignored, index) => healthImageFinding(
+    `${String(index + 1).padStart(8, "0")}-0000-4000-8000-000000000000`,
+    { name: "N".repeat(150), affectedPages: Array.from({ length: 12 }, (_page, page) => ({ pageId: `${String(page + 1).padStart(8, "1")}-0000-4000-8000-000000000000`, title: "P", path: `p${page}` })) },
+  ));
+  const wire = api([
+    { method: "GET", pattern: REDIRECT_MAP, reply: { siteId: SITE_ID, revision: REDIRECT_REVISION, entries } },
+    { method: "GET", pattern: /^\/r\d+-a+$/u, reply: () => new Response(null, { status: 301, headers: { location: "/elsewhere" } }) },
+    ...healthRoutes({
+      production: { ...withHealthTotals(storedHealthReport({ deploymentId: SNAPSHOT_ID })), truncated: false },
+      staged: { ...withHealthTotals(storedHealthReport({ environment: "staging", deploymentId: DEPLOYMENT_ID, findings, images })), truncated: true, warningCount: 400 },
+      imageRevisions: Object.fromEntries(images.map((image) => [image.imageId, "1"])),
+    }),
+    ...deployRoutes(),
+  ]);
+  const { invocation } = invoke(workspace, wire, { verb: "deploy", deployTarget: "staging" });
+  const result = await deploy(invocation);
+  assert.equal(result.redirects.itemsTruncated, true);
+  assert.equal(result.siteHealth.findingsTruncated, true);
+  assert.equal(result.siteHealth.imageFindingsTruncated, true);
+  assert.equal(result.siteHealth.findingsTotal, 200);
+  assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") < LIMITS.githubOutputBytes);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.siteHealth.findings), "utf8") <= 12 * 1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.siteHealth.imageFindings), "utf8") <= 8 * 1024);
+});
+
+test("deploy --staging on a managed Docs site reports siteHealth as not covered and reads no report", async (site) => {
+  const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+  const wire = api(deployRoutes());
+  const result = await deploy(
+    invoke(workspace, wire, { verb: "deploy", deployTarget: "staging", surface: "docs-presentation" }).invocation,
+  );
+  assert.equal(result.siteHealth.covered, false);
+  assert.equal(typeof result.siteHealth.reason, "string");
+  assert.equal(wire.matching("GET", SITE_HEALTH).length, 0);
+});
+
+test("status reports the staged release's report as a summary in each of its four forms", async (context) => {
+  const base = (staged) => [
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, blockers: [] } },
+    { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } },
+    ...healthRoutes(staged),
+  ];
+  await context.test("a staged report", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(base({
+      production: storedHealthReport({ stagedDeploymentId: STAGING_DEPLOYMENT_ID }),
+      staged: withHealthTotals(storedHealthReport({
+        environment: "staging", deploymentId: STAGING_DEPLOYMENT_ID, findings: [healthPageFinding()], images: [healthImageFinding()],
+      })),
+    }));
+    const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
+    assert.deepEqual(healthReads(wire), ["production", STAGING_DEPLOYMENT_ID]);
+    assert.equal(result.stagedSiteHealth.available, true);
+    assert.equal(result.stagedSiteHealth.status, "complete");
+    assert.equal(result.stagedSiteHealth.deploymentId, STAGING_DEPLOYMENT_ID);
+    assert.equal(result.stagedSiteHealth.warnings, 2);
+    assert.equal(result.stagedSiteHealth.errors, 0);
+    assert.match(result.stagedSiteHealth.details, /health --staging/u);
+    assert.equal(Object.hasOwn(result.stagedSiteHealth, "findings"), false);
+    // The production summary is the one it always was.
+    assert.equal(result.siteHealth.covered, true);
+  });
+  await context.test("no staged report", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(base({ production: storedHealthReport() }));
+    const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
+    assert.equal(result.stagedSiteHealth.available, false);
+    assert.equal(typeof result.stagedSiteHealth.reason, "string");
+    assert.deepEqual(healthReads(wire), ["production"]);
+  });
+  await context.test("a failed staged read", async (site) => {
+    const workspace = await fixture(site);
+    const wire = api(base({
+      production: storedHealthReport({ stagedDeploymentId: STAGING_DEPLOYMENT_ID }),
+      staged: () => denied(),
+    }));
+    const { invocation, progress } = invoke(workspace, wire, { verb: "status" });
+    const result = await status(invocation);
+    assert.equal(result.stagedSiteHealth.available, false);
+    assert.ok(progress.some((line) => line.startsWith("Warning:")));
+    assert.equal(result.siteHealth.covered, true);
+  });
+  await context.test("a managed Docs site", async (site) => {
+    const workspace = await fixture(site, {}, { config: { authoringSurface: "docs-presentation" } });
+    const wire = api(base({ production: storedHealthReport() }));
+    const result = await status(invoke(workspace, wire, { verb: "status", surface: "docs-presentation" }).invocation);
+    assert.equal(result.stagedSiteHealth.covered, false);
+    assert.equal(wire.matching("GET", SITE_HEALTH).length, 0);
+  });
+});
+
+test("status bounds the image findings it lists and says so", async (site) => {
+  const workspace = await fixture(site);
+  const images = Array.from({ length: 200 }, (_ignored, index) => healthImageFinding(
+    `${String(index + 1).padStart(8, "0")}-0000-4000-8000-000000000000`,
+    { name: "N".repeat(150), affectedPages: Array.from({ length: 12 }, (_page, page) => ({ pageId: `${String(page + 1).padStart(8, "1")}-0000-4000-8000-000000000000`, title: "P".repeat(60), path: `p${page}` })) },
+  ));
+  const wire = api([
+    { method: "POST", pattern: READINESS, reply: { state: "PAGE_PUBLISHING_READINESS_STATE_READY", navigationReadiness: { state: "NAVIGATION_PUBLISHING_READINESS_STATE_READY", blockers: [] }, blockers: [] } },
+    { method: "GET", pattern: DEPLOYMENTS, reply: { deployments: [], nextPageToken: "" } },
+    { method: "GET", pattern: SITE_IMAGES, reply: { images: [], nextPageToken: "", totalImages: 0 } },
+    ...healthRoutes({ production: { ...withHealthTotals(storedHealthReport({ images })), truncated: true, warningCount: 300 } }),
+  ]);
+  const result = await status(invoke(workspace, wire, { verb: "status" }).invocation);
+  assert.equal(result.siteHealth.imageFindingsTruncated, true);
+  assert.ok(result.siteHealth.imageFindings.length > 0 && result.siteHealth.imageFindings.length < 200);
+  assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") < LIMITS.githubOutputBytes);
+});
+
+// ---------------------------------------------------------------------------
+// The pre-staging image description check: validate --site and pages push (TR01371)
+// ---------------------------------------------------------------------------
+
+const crabId = (index) => `${String(index).padStart(8, "0")}-0000-4000-8000-00000000c0de`;
+const IMAGE_RULE = "a11y.image_default_missing";
+
+/** A site library entry the by-ids read returns: `defaultDescription` is "", null, absent, or a text. */
+function libraryImage(imageId, { defaultDescription = "", descriptionRevision = "5" } = {}) {
+  return {
+    image: {
+      imageId, siteId: SITE_ID, ownershipScope: "IMAGE_OWNERSHIP_SCOPE_SITE", uploadedName: `crab-${imageId.slice(0, 8)}.png`,
+      width: 10, height: 10, defaultDescription, descriptionRevision,
+      url: "https://static.test/crab.webp", responsiveUrls: [], processingState: "IMAGE_PROCESSING_STATE_COMPLETE",
+    },
+  };
+}
+
+/** The by-ids image read: images not in `library` are not returned, and `failFirst` refuses that many batches. */
+function imageReadRoute(library, { failFirst = 0, failStatus = 403 } = {}) {
+  let batches = 0;
+  return {
+    method: "GET",
+    pattern: SITE_IMAGES,
+    reply: (call) => {
+      batches += 1;
+      if (batches <= failFirst) return jsonResponse({ code: failStatus === 401 ? 16 : 7, message: "refused" }, failStatus);
+      return {
+        images: call.query.getAll("imageIds").filter((id) => Object.hasOwn(library, id)).map((id) => libraryImage(id, library[id])),
+      };
+    },
+  };
+}
+
+/**
+ * The by-ids read and the description write of one site library, stateful: a write updates the library, so a later
+ * read sees it, and it refuses a moved revision or an existing default the way the server does. `failWrite` may
+ * answer a write itself; `routes.writes` lists every write that reached the server.
+ */
+function imageLibraryRoutes(library, { failWrite, failReads } = {}) {
+  const writes = [];
+  const routes = [
+    imageReadRoute(library, failReads),
+    {
+      method: "PATCH",
+      pattern: IMAGE_DESCRIPTION,
+      reply: (call) => {
+        const imageId = call.pathname.split("/").at(-2);
+        const index = writes.push({ imageId, body: call.body }) - 1;
+        const refusal = failWrite?.(index, imageId, call.body);
+        if (refusal !== undefined) return refusal;
+        const current = library[imageId];
+        if (current === undefined) return jsonResponse({ code: 5, message: "Image not found." }, 404);
+        const revision = current.descriptionRevision ?? "5";
+        if (revision !== call.body.expectedRevision) return jsonResponse(violation("ExpectedRevision"), 400);
+        if (call.body.onlyIfMissing && typeof current.defaultDescription === "string" && current.defaultDescription !== "") {
+          return jsonResponse(violation("OnlyIfMissing"), 400);
+        }
+        library[imageId] = { ...current, defaultDescription: call.body.defaultDescription, descriptionRevision: String(Number(revision) + 1) };
+        return libraryImage(imageId, library[imageId]);
+      },
+    },
+  ];
+  routes.writes = writes;
+  return routes;
+}
+
+function crabMedia(count) {
+  return {
+    mediaManifestVersion: 2,
+    siteId: SITE_ID,
+    media: Object.fromEntries(Array.from({ length: count }, (_, index) => [
+      `media/crab-${index + 1}.png`,
+      { imageId: crabId(index + 1), src: "", urls: [], width: 10, height: 10 },
+    ])),
+  };
+}
+
+const PLAIN_ABOUT = "---\ntitle: About us\npath: about\n---\n\nPlain.\n";
+
+/** A pulled workspace whose Markdown page places `count` crab images with alt text, as the Happy Crab review did. */
+function crabWorkspace(count = 9, { alt = (index) => `Crab dish ${index}`, files = {} } = {}) {
+  const body = Array.from({ length: count }, (_, index) => `![${alt(index + 1)}](media/crab-${index + 1}.png)`).join("\n\n");
+  return wholeWorkspace({
+    files: {
+      ".taproot-site-media.json": crabMedia(count),
+      "pages/about.md": PLAIN_ABOUT,
+      "pages/crab.md": `---\ntitle: Happy Crab\npath: happy-crab\ndescription: A place review of a crab shack with a long and useful description.\n---\n\n# Happy Crab\n\n${body}\n`,
+      ...files,
+    },
+  });
+}
+
+const undescribed = (count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [crabId(index + 1), {}]));
+
+/** runCli over a pulled workspace by configuration, the site answering `routes`, with GITHUB_OUTPUT and the clock injectable. */
+function runSite(site, arguments_, routes, { environment = {}, content = REAL_CONTENT } = {}) {
+  const wire = routes === undefined ? undefined : api(routes);
+  let stdout = "";
+  let stderr = "";
+  return runCli({
+    arguments_,
+    environment: { TAPROOT_SITE_KEY: TOKEN, XDG_CONFIG_HOME: site.configHome, ...environment },
+    cwd: site.project,
+    stdout: { write: (chunk) => (stdout += chunk) },
+    stderr: { write: (chunk) => (stderr += chunk) },
+    handlers: Object.fromEntries(Object.entries(VERB_HANDLERS).map(([name, handler]) => [
+      name,
+      (invocation) => handler({ ...invocation, content }),
+    ])),
+    fetch: wire === undefined
+      ? async () => assert.fail("an offline run made a request")
+      : capabilityGatedFetch(arguments_[0] === "pages" ? "pages push" : arguments_[0], wire.fetch),
+  }).then((exitCode) => ({ exitCode, result: JSON.parse(stdout), stdout, stderr, wire }));
+}
+
+test("site health precheck: plain validate skips the image rule with a reason, makes no request, and stays offline", async (site) => {
+  const workspace = await fixture(site, crabWorkspace());
+  const { exitCode, result, stderr } = await runSite(workspace, ["validate"]);
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(result.offline, true);
+  assert.ok(result.siteChecks.ranOffline.includes(IMAGE_RULE));
+  assert.ok(!result.siteChecks.checkedBySite.includes(IMAGE_RULE));
+  assert.ok(result.siteChecks.skipped.includes(IMAGE_RULE));
+  assert.equal(result.siteChecks.imageCheckReason.code, "not_requested");
+  assert.match(result.siteChecks.imageCheckReason.message, /validate --site|pages push --dry-run/u);
+  assert.equal(Object.hasOwn(result, "imageFindings"), false);
+  assert.equal(Object.hasOwn(result, "notInSiteLibrary"), false);
+});
+
+test("site health precheck: validate of a directory gives the directory_argument reason", async (site) => {
+  const workspace = await fixture(site, crabWorkspace());
+  const { exitCode, result, stderr } = await runSite(workspace, ["validate", workspace.workspaceDir]);
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(result.siteChecks.imageCheckReason.code, "directory_argument");
+  assert.match(result.siteChecks.imageCheckReason.message, /validate --site.*from the workspace|pages push --dry-run/u);
+  assert.ok(result.siteChecks.skipped.includes(IMAGE_RULE));
+});
+
+test("site health precheck: validate --site reports the nine undescribed Happy Crab images with exact fixes", async (context) => {
+  const plain = await runSite(await fixture(context, crabWorkspace()), ["validate"]);
+  // Whatever the wire says for an image with no description: an empty text, null, or the field absent.
+  for (const [name, defaultDescription] of [["an empty default", ""], ["a null default", null], ["no default field", undefined]]) {
+    await context.test(name, async (site) => {
+      const workspace = await fixture(site, crabWorkspace());
+      const library = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [crabId(index + 1), { defaultDescription }]));
+      const { exitCode, result, stderr, wire } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(library)]);
+      assert.equal(exitCode, 0, stderr);
+      assert.equal(result.offline, false);
+      assert.equal(result.imageFindings.total, 9);
+      assert.equal(result.imageFindings.items.length, 9);
+      assert.equal(Object.hasOwn(result.imageFindings, "truncated"), false);
+      assert.deepEqual(result.notInSiteLibrary, { total: 0, items: [] });
+      assert.deepEqual(result.imageFindings.items.map((finding) => finding.imageId), Array.from({ length: 9 }, (_, index) => crabId(index + 1)));
+      const [first] = result.imageFindings.items;
+      assert.deepEqual(first.affectedPages, [{ path: "happy-crab", title: "Happy Crab", file: "pages/crab.md" }]);
+      assert.equal(first.suggestedDescription, "Crab dish 1");
+      assert.equal(first.fix, `taproot-site media images describe ${crabId(1)} --description='Crab dish 1' --expected-revision 5 --if-missing`);
+      // The rule ran, and the findings counts are the offline ones.
+      assert.ok(!(result.siteChecks.skipped ?? []).includes(IMAGE_RULE));
+      assert.equal(Object.hasOwn(result.siteChecks, "imageCheckReason"), false);
+      assert.deepEqual(result.findings, plain.result.findings);
+      assert.equal(wire.matching("GET", SITE_IMAGES).length, 1);
+      assert.equal(wire.calls.length, 1);
+      assert.equal(stderr.split("\n").filter((line) => line.startsWith("Warning: image ")).length, 9);
+      assert.match(stderr, /reading the site's image records without mutation/u);
+    });
+  }
+});
+
+test("site health precheck: validate --site leaves out described images and lists ids the site did not return", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(9));
+  const library = {
+    ...undescribed(9),
+    [crabId(1)]: { defaultDescription: "Already described" },
+    [crabId(2)]: { defaultDescription: "Also described" },
+  };
+  delete library[crabId(9)];
+  const { exitCode, result } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(library)]);
+  assert.equal(exitCode, 0);
+  assert.deepEqual(result.imageFindings.items.map((finding) => finding.imageId), [3, 4, 5, 6, 7, 8].map(crabId));
+  // Not in the library: no finding, and not a failure.
+  assert.deepEqual(result.notInSiteLibrary, { total: 1, items: [crabId(9)] });
+});
+
+test("site health precheck: a copied video poster is not reported, because the read asks for library images only", async (site) => {
+  const posterId = "00000000-0000-4000-8000-0000000000e0";
+  const image = (imageId, alt) => ({ type: "taprootImage", attrs: { imageId, src: "", urls: [], alt } });
+  const workspace = await fixture(site, wholeWorkspace({
+    files: {
+      ".taproot-site-media.json": crabMedia(1),
+      "pages/about.md": PLAIN_ABOUT,
+      // A page pulled after a push copied its video's thumbnail: the poster is an owned image no library lists.
+      "pages/video.pm.json": { type: "doc", content: [image(crabId(1), "A crab"), image(posterId, "")] },
+    },
+  }));
+  const manifest = JSON.parse(await readFile(workspacePath(workspace, ".taproot-site-manifest.json"), "utf8"));
+  manifest.pages.push({ workspaceMode: "editable", pageId: STORY_PAGE_ID, resourceId: resourceIdFor(STORY_PAGE_ID), path: "video", title: "Video", description: "A page with a video.", status: "PAGE_STATUS_PUBLISHED", templateType: "TEMPLATE_TYPE_FREE_FORM", file: "pages/video.pm.json" });
+  await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest)}\n`);
+  // The server's two answers: every purpose by default, the library only when asked.
+  const requests = [];
+  const route = {
+    method: "GET",
+    pattern: SITE_IMAGES,
+    reply: (call) => {
+      requests.push(call.query.get("libraryOnly"));
+      const asked = call.query.getAll("imageIds");
+      const library = call.query.get("libraryOnly") === "true";
+      return {
+        images: asked
+          .filter((id) => id === crabId(1) || (id === posterId && !library))
+          .map((id) => libraryImage(id)),
+      };
+    },
+  };
+  const { exitCode, result, stderr } = await runSite(workspace, ["validate", "--site"], [route]);
+  assert.equal(exitCode, 0, stderr);
+  assert.deepEqual(requests, ["true"]);
+  // No finding, and so no describe command the server would refuse, for the poster; it is not in the library.
+  assert.deepEqual(result.imageFindings.items.map((finding) => finding.imageId), [crabId(1)]);
+  assert.deepEqual(result.notInSiteLibrary, { total: 1, items: [posterId] });
+  const push = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes({ live: [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" }), pageSummary({ pageId: STORY_PAGE_ID, path: "video", title: "Video" })] }), route]);
+  assert.equal(push.exitCode, 0, push.stderr);
+  assert.deepEqual(push.result.siteHealthPrecheck.imageFindings.items.map((finding) => finding.imageId), [crabId(1)]);
+});
+
+test("site health precheck: a failed read skips the rule with read_failed, and partly failed batches report what was read", async (context) => {
+  await context.test("every batch failed", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(9));
+    const { exitCode, result, stderr } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(9), { failFirst: 5 })]);
+    assert.equal(exitCode, 0, stderr);
+    assert.ok(result.siteChecks.skipped.includes(IMAGE_RULE));
+    assert.equal(result.siteChecks.imageCheckReason.code, "read_failed");
+    assert.equal(Object.hasOwn(result, "imageFindings"), false);
+    assert.match(stderr, /^Warning: 9 image\(s\) could not be read/mu);
+  });
+  await context.test("one batch of two failed", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(150));
+    const { exitCode, result, stderr } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(150), { failFirst: 1 })]);
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(result.siteChecks.imageCheckReason.code, "read_partly_failed");
+    assert.ok(result.siteChecks.skipped.includes(IMAGE_RULE));
+    // The 50 images of the batch that was read are reported; the 100 of the failed batch are in neither list.
+    assert.equal(result.imageFindings.total, 50);
+    assert.equal(result.notInSiteLibrary.total, 0);
+  });
+});
+
+test("site health precheck: a rejected key fails validate --site with the server's refusal", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  const { exitCode, result } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(3), { failFirst: 9, failStatus: 401 })]);
+  assert.equal(exitCode, 1);
+  assert.equal(result.error.refusal, "credential_rejected");
+});
+
+test("site health precheck: validate --site refuses a directory or --init before reading anything", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  for (const [arguments_, field] of [[["validate", "--site", workspace.workspaceDir], "fixturePath"], [["validate", "--site", "--init", "exported"], "init"], [["validate", "--site", "--init"], "init"]]) {
+    const { exitCode, result } = await runSite(workspace, arguments_);
+    assert.equal(exitCode, 2, arguments_.join(" "));
+    assert.equal(result.error.code, "validate.site_needs_workspace");
+    assert.equal(result.error.field, field);
+  }
+});
+
+test("site health precheck: an explicit --config reaches the --site refusal for a directory", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  for (const trailing of [["somewhere"], ["--init", "somewhere"], ["--init"]]) {
+    const { exitCode, result } = await runSite(workspace, ["--config", workspace.configPath, "validate", "--site", ...trailing]);
+    assert.equal(exitCode, 2, trailing.join(" "));
+    assert.equal(result.error.code, "validate.site_needs_workspace");
+  }
+});
+
+test("site health precheck: validate --site reads the images of the configuration it validated, not a reread one", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  // The selected site is switched while the pages are being converted, as another terminal's `use` would.
+  let switched = false;
+  const content = {
+    ...REAL_CONTENT,
+    markdownToProseMirror: async (...arguments_) => {
+      if (!switched) {
+        switched = true;
+        await writeFile(workspace.configPath, `${JSON.stringify({ configVersion: 1, siteId: OTHER_SITE_ID, workspaceDir: "site" })}\n`);
+      }
+      return await REAL_CONTENT.markdownToProseMirror(...arguments_);
+    },
+  };
+  const { exitCode, result, wire, stderr } = await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(3))], { content });
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(switched, true);
+  assert.equal(result.siteId, SITE_ID);
+  assert.equal(result.imageFindings.total, 3);
+  const [read] = wire.matching("GET", SITE_IMAGES);
+  assert.ok(read.pathname.includes(SITE_ID), read.pathname);
+  assert.ok(!read.pathname.includes(OTHER_SITE_ID), read.pathname);
+});
+
+test("site health precheck: validate --site fails to open a session with no sign-in, but only after the workspace's own problems", async (site) => {
+  const withImages = await fixture(site, crabWorkspace(3));
+  const noSignIn = await runSite(withImages, ["validate", "--site"], [imageReadRoute(undescribed(3))], { environment: { TAPROOT_SITE_KEY: undefined } });
+  assert.equal(noSignIn.exitCode, 1);
+  assert.match(noSignIn.result.error.code, /^auth\./u);
+  assert.equal(noSignIn.wire.calls.length, 0);
+
+  // Problems in the workspace are reported first, before any credential error.
+  const broken = await fixture(site, wholeWorkspace({ files: { ...BROKEN_PAGES, ".taproot-site-media.json": crabMedia(3) } }));
+  const problems = await runSite(broken, ["validate", "--site"], [imageReadRoute(undescribed(3))], { environment: { TAPROOT_SITE_KEY: undefined } });
+  assert.equal(problems.exitCode, 1);
+  assert.ok(problems.result.error.problems.length > 0);
+  assert.doesNotMatch(problems.result.error.code, /^auth\./u);
+});
+
+test("site health precheck: a workspace placing no images opens no session and reads nothing", async (site) => {
+  const workspace = await fixture(site, wholeWorkspace({ files: { "pages/about.md": PLAIN_ABOUT } }));
+  // No wire at all: any request fails the run, and no key is set, so a session could not open either.
+  const { exitCode, result, stderr } = await runSite(workspace, ["validate", "--site"], undefined, { environment: { TAPROOT_SITE_KEY: undefined } });
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(result.offline, true);
+  assert.ok(!(result.siteChecks.skipped ?? []).includes(IMAGE_RULE));
+  assert.deepEqual(result.imageFindings, { total: 0, items: [] });
+  assert.match(stderr, /places no images, so the site was not read/u);
+});
+
+test("site health precheck: a managed Docs workspace gets the docs_site reason and no read", async (context) => {
+  await context.test("by configuration", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(3), { config: { authoringSurface: "docs-presentation" } });
+    const { exitCode, result } = await runSite(workspace, ["validate", "--site"], undefined);
+    assert.equal(exitCode, 0);
+    assert.equal(result.siteChecks.imageCheckReason.code, "docs_site");
+    assert.equal(result.offline, true);
+  });
+  await context.test("by a settings-only manifest the configuration does not describe", async (site) => {
+    const files = crabWorkspace(3);
+    files[".taproot-site-manifest.json"] = { ...files[".taproot-site-manifest.json"], authoringSurface: "docs-presentation" };
+    const workspace = await fixture(site, files);
+    const { exitCode, result } = await runSite(workspace, ["validate", "--site"], undefined);
+    assert.equal(exitCode, 0);
+    assert.equal(result.imageCheckReason.code, "docs_site");
+    assert.equal(Object.hasOwn(result, "siteChecks"), false);
+    assert.equal(result.offline, true);
+  });
+});
+
+test("site health precheck: only validate --site writes GITHUB_OUTPUT, including when its usage is refused", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  const output = path.join(workspace.root, "github-output.txt");
+  await writeFile(output, "");
+  const plain = await runSite(workspace, ["validate"], undefined, { environment: { GITHUB_OUTPUT: output } });
+  assert.equal(plain.exitCode, 0);
+  assert.equal(await readFile(output, "utf8"), "");
+
+  const live = await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(3))], { environment: { GITHUB_OUTPUT: output } });
+  assert.equal(live.exitCode, 0, live.stderr);
+  const written = await readFile(output, "utf8");
+  assert.match(written, /imageFindings/u);
+  assert.doesNotMatch(written, /previewUrl/u);
+
+  await writeFile(output, "");
+  const refused = await runSite(workspace, ["validate", "--site", "somewhere"], undefined, { environment: { GITHUB_OUTPUT: output } });
+  assert.equal(refused.exitCode, 2);
+  assert.match(await readFile(output, "utf8"), /validate\.site_needs_workspace/u);
+});
+
+test("site health precheck: a result that leaves 2 KiB of headroom still fits with 200 undescribed images, truncated", async (site) => {
+  const target = LIMITS.githubOutputBytes - 2048;
+  const base = (result) => {
+    const copy = structuredClone(result);
+    delete copy.imageFindings;
+    delete copy.notInSiteLibrary;
+    return Buffer.byteLength(JSON.stringify(copy), "utf8");
+  };
+  // 200 pages with long file names fill `validated.pages.items`, which is bounded by count and not by bytes. A name
+  // component is limited by the file system, so the length is spread over two directory names.
+  const build = async (innerLength, extra = 0) => {
+    const files = { ".taproot-site-media.json": crabMedia(200), "pages/about.md": PLAIN_ABOUT };
+    for (let index = 1; index <= 200; index += 1) {
+      // The report keeps the first 200 of the 202 pages in path order, so the tuning page must sort early: its
+      // directory name starts with "a", ahead of the others' "m".
+      const directory = index === 1
+        ? `pages/${"n".repeat(190)}/${"a".repeat(innerLength + extra)}`
+        : `pages/${"n".repeat(190)}/${"m".repeat(innerLength)}`;
+      // The tuning page carries complete metadata, so its file name appears only in `validated.pages.items` and not
+      // in a finding as well.
+      const metadata = index === 1
+        ? `title: The page that tunes the size\npath: p${index}\ndescription: A complete description of the page that tunes the size of the result.`
+        : `title: Page ${index}\npath: p${index}`;
+      files[`${directory}/p-${String(index).padStart(3, "0")}.md`] =
+        `---\n${metadata}\n---\n\n# Heading ${index}\n\n![Alt ${index}](media/crab-${index}.png)\n`;
+    }
+    const workspace = await fixture(site, wholeWorkspace({ files }));
+    return await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(200))]);
+  };
+  // A measuring run, then an inner length that puts the base just under the target (200 entries grow 200 bytes per
+  // character of it).
+  const measuring = await build(1);
+  assert.equal(measuring.exitCode, 0, measuring.stderr);
+  const innerLength = 1 + Math.floor((target - base(measuring.result)) / 200);
+  assert.ok(innerLength > 1 && innerLength < 240, `inner length ${innerLength}`);
+  const near = await build(innerLength);
+  // The remaining deficit is under 200 bytes, so one more page's directory name takes it up exactly.
+  const tuned = await build(innerLength, target - base(near.result));
+  assert.equal(tuned.exitCode, 0, tuned.stderr);
+  assert.equal(base(tuned.result), target);
+  assert.ok(Buffer.byteLength(tuned.stdout, "utf8") <= LIMITS.githubOutputBytes);
+  // 200 images with a 12 KiB budget: the findings are cut to what fits, and every total is intact.
+  assert.equal(tuned.result.imageFindings.total, 200);
+  assert.equal(tuned.result.imageFindings.truncated, true);
+  assert.ok(tuned.result.imageFindings.items.length > 0);
+});
+
+test("site health precheck: pages push --dry-run and pages push report the same nine undescribed images and exit 0", async (context) => {
+  for (const [name, arguments_] of [["dry run", ["pages", "push", "--dry-run"]], ["push", ["pages", "push"]]]) {
+    await context.test(name, async (site) => {
+      const workspace = await fixture(site, crabWorkspace(9));
+      const { exitCode, result, stderr, wire } = await runSite(workspace, arguments_, [...pushRoutes(), imageReadRoute(undescribed(9))]);
+      assert.equal(exitCode, 0, stderr);
+      const block = result.siteHealthPrecheck;
+      assert.equal(block.status, "checked");
+      assert.equal(block.checkedPages, result.pages.total);
+      assert.deepEqual(block.skipped, []);
+      assert.equal(block.imageFindings.total, 9);
+      assert.deepEqual(block.imageFindings.items.map((finding) => finding.imageId), Array.from({ length: 9 }, (_, index) => crabId(index + 1)));
+      assert.equal(block.imageFindings.items[0].fix,
+        `taproot-site media images describe ${crabId(1)} --description='Crab dish 1' --expected-revision 5 --if-missing`);
+      assert.deepEqual(block.imageFindings.items[0].affectedPages, [{ path: "happy-crab", title: "Happy Crab", file: "pages/crab.md" }]);
+      assert.deepEqual(block.notInSiteLibrary, { total: 0, items: [] });
+      // One read for all nine ids, taken once, and a warning is never a refusal.
+      assert.equal(wire.matching("GET", SITE_IMAGES).length, 1);
+      assert.equal(stderr.split("\n").filter((line) => line.startsWith("Warning: image ")).length, 9);
+      if (arguments_.includes("--dry-run")) assert.deepEqual(writes(wire), []);
+      else assert.ok(writes(wire).length > 0);
+    });
+  }
+});
+
+test("site health precheck: a second pages push with every page unchanged still reports the images", async (site) => {
+  const markdown = "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\n![Hero](media/hero.png)\n\nHello.\n";
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    ".taproot-site-media.json": {
+      mediaManifestVersion: 2, siteId: SITE_ID,
+      media: { "media/hero.png": { imageId: IMAGE_ID, width: 10, height: 10, alt: "Hero", src: "", urls: [] } },
+    },
+    "pages/about.md": markdown,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const routes = [...trackedRoutes(state), imageReadRoute({ [IMAGE_ID]: {} })];
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const first = await runSite(workspace, ["pages", "push"], routes);
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.equal(first.result.siteHealthPrecheck.imageFindings.total, 1);
+
+  await pull(invoke(workspace, api(routes), { verb: "pull" }).invocation);
+  const idle = await runSite(workspace, ["pages", "push"], routes);
+  assert.equal(idle.result.pages.unchanged, 1);
+  assert.equal(idle.result.pages.updated + idle.result.pages.created, 0);
+  // The check covers every page the command selected, sent or not.
+  assert.equal(idle.result.siteHealthPrecheck.checkedPages, 1);
+  assert.equal(idle.result.siteHealthPrecheck.imageFindings.total, 1);
+  assert.equal(idle.result.siteHealthPrecheck.imageFindings.items[0].suggestedDescription, "Hero");
+
+  // Under apply the plan already holds the pages, so there is no check and no read.
+  const reads = idle.wire.matching("GET", SITE_IMAGES).length;
+  const wire = api(routes);
+  const { invocation } = invoke(workspace, wire, { verb: "pages push", content: REAL_CONTENT, plannedPages: new Map() });
+  const applied = await pagesPush(invocation);
+  assert.equal(Object.hasOwn(applied, "siteHealthPrecheck"), false);
+  assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
+  assert.equal(reads, 1);
+});
+
+test("site health precheck: described images report none, and a page never pushed gets the same findings", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(9));
+  const described = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [crabId(index + 1), { defaultDescription: "Described" }]));
+  const none = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute(described)]);
+  assert.equal(none.exitCode, 0, none.stderr);
+  assert.equal(none.result.siteHealthPrecheck.imageFindings.total, 0);
+  assert.equal(none.result.siteHealthPrecheck.status, "checked");
+  // pages/crab.md has no manifest entry (it was never pulled or pushed), and still reports.
+  const never = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute(undescribed(9))]);
+  assert.equal(never.result.siteHealthPrecheck.imageFindings.items[0].suggestedDescription, "Crab dish 1");
+});
+
+test("site health precheck: a failed read never fails the push; partial and not_checked say what was read", async (context) => {
+  await context.test("no batch read", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(9));
+    const { exitCode, result } = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute(undescribed(9), { failFirst: 5 })]);
+    assert.equal(exitCode, 0);
+    const block = result.siteHealthPrecheck;
+    assert.equal(block.status, "not_checked");
+    assert.deepEqual(block.skipped, [IMAGE_RULE]);
+    assert.equal(block.reason.code, "read_failed");
+    assert.deepEqual(block.imageFindings, { total: 0, items: [] });
+    assert.deepEqual(block.notInSiteLibrary, { total: 0, items: [] });
+  });
+  await context.test("one batch of two", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(150));
+    const { exitCode, result } = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute(undescribed(150), { failFirst: 1 })]);
+    assert.equal(exitCode, 0);
+    const block = result.siteHealthPrecheck;
+    assert.equal(block.status, "partial");
+    assert.deepEqual(block.skipped, [IMAGE_RULE]);
+    assert.equal(block.reason.code, "read_partly_failed");
+    assert.equal(block.imageFindings.total, 50);
+    assert.equal(block.notInSiteLibrary.total, 0);
+  });
+  await context.test("a rejected key does not fail the push either", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(3));
+    const { exitCode, result } = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute(undescribed(3), { failFirst: 9, failStatus: 401 })]);
+    assert.equal(exitCode, 0);
+    assert.equal(result.siteHealthPrecheck.status, "not_checked");
+  });
+});
+
+test("site health precheck: a refused push or dry run, and a push placing no images, make no image request", async (context) => {
+  await context.test("refused", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(3, { files: BROKEN_PAGES }));
+    for (const arguments_ of [["pages", "push"], ["pages", "push", "--dry-run"]]) {
+      const { exitCode, wire } = await runSite(workspace, arguments_, [...pushRoutes(), imageReadRoute(undescribed(3))]);
+      assert.equal(exitCode, 1, arguments_.join(" "));
+      assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
+    }
+  });
+  await context.test("no placed images", async (site) => {
+    const workspace = await fixture(site, wholeWorkspace({ files: { "pages/about.md": PLAIN_ABOUT } }));
+    const { exitCode, result, wire } = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), imageReadRoute({})]);
+    assert.equal(exitCode, 0);
+    assert.equal(wire.matching("GET", SITE_IMAGES).length, 0);
+    assert.equal(result.siteHealthPrecheck.status, "checked");
+    assert.deepEqual(result.siteHealthPrecheck.imageFindings, { total: 0, items: [] });
+  });
+});
+
+test("describe missing images: consistent alts set each default once, in id order, and the same push reports no finding for them", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(9));
+  const library = undescribed(9);
+  const routes = imageLibraryRoutes(library);
+  const { exitCode, result, stderr } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+  assert.equal(exitCode, 0, stderr);
+  assert.deepEqual(routes.writes.map((write) => write.imageId), Array.from({ length: 9 }, (_, index) => crabId(index + 1)));
+  assert.deepEqual(routes.writes[0].body, { defaultDescription: "Crab dish 1", expectedRevision: "5", onlyIfMissing: true });
+  assert.equal(result.describedImages.set.total, 9);
+  assert.deepEqual(result.describedImages.set.items[0], { imageId: crabId(1), description: "Crab dish 1" });
+  assert.deepEqual(result.describedImages.skipped, { total: 0, items: [] });
+  assert.equal(Object.hasOwn(result.describedImages, "reason"), false);
+  // The records were updated in place, so the check that ran before the writes now sees described images.
+  assert.equal(result.siteHealthPrecheck.imageFindings.total, 0);
+  assert.equal(library[crabId(1)].defaultDescription, "Crab dish 1");
+  assert.match(stderr, /Set the default description of 9 image\(s\)\. Deploy to update published usages\./u);
+  // Pages were sent and wait for approval.
+  assert.equal(result.nextStep, "approve");
+});
+
+test("describe missing images: a flagged push over unchanged pages still sets them, and nextStep follows whether a draft waits", async (site) => {
+  const markdown = "---\ntitle: About us\npath: about\ndescription: Who we are\n---\n\n![Hero](media/hero.png)\n\nHello.\n";
+  const workspace = await fixture(site, {
+    ".taproot-site-manifest.json": manifestFixture([trackedAboutEntry()]),
+    ".taproot-site-media.json": {
+      mediaManifestVersion: 2, siteId: SITE_ID,
+      media: { "media/hero.png": { imageId: IMAGE_ID, width: 10, height: 10, alt: "Hero", src: "", urls: [] } },
+    },
+    "pages/about.md": markdown,
+  });
+  const state = { body: paragraphDocument(BODY_MARKER) };
+  const flagless = imageLibraryRoutes({ [IMAGE_ID]: {} });
+  await pull(invoke(workspace, api([...trackedRoutes(state), ...flagless]), { verb: "pull" }).invocation);
+  const first = await runSite(workspace, ["pages", "push"], [...trackedRoutes(state), ...flagless]);
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.equal(flagless.writes.length, 0);
+  assert.equal(Object.hasOwn(first.result, "describedImages"), false);
+
+  for (const [name, summary, expected] of [["no draft waits", {}, "deploy --staging"], ["a draft waits", { status: "PAGE_STATUS_DRAFT", hasDraft: true }, "approve"]]) {
+    await pull(invoke(workspace, api([...trackedRoutes(state), ...imageLibraryRoutes({ [IMAGE_ID]: {} })]), { verb: "pull" }).invocation);
+    state.summary = summary;
+    const routes = imageLibraryRoutes({ [IMAGE_ID]: {} });
+    const flagged = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...trackedRoutes(state), ...routes]);
+    assert.equal(flagged.exitCode, 0, `${name}: ${flagged.stderr}`);
+    assert.equal(flagged.result.pages.unchanged, 1, name);
+    assert.equal(flagged.result.describedImages.set.total, 1, name);
+    assert.equal(flagged.result.nextStep, expected, name);
+    assert.match(flagged.stderr, /Deploy to update published usages/u);
+  }
+});
+
+test("describe missing images: images with no usable alt are skipped with their reason, and an alt only on an unselected page is no alt", async (site) => {
+  const long = "x".repeat(1001);
+  const media = (count) => crabMedia(count);
+  const workspace = await fixture(site, wholeWorkspace({
+    files: {
+      ".taproot-site-media.json": media(8),
+      "pages/about.md": PLAIN_ABOUT,
+      "pages/crab.md": "---\ntitle: Happy Crab\npath: happy-crab\ndescription: A place review of a crab shack with a long and useful description.\n---\n\n# Happy Crab\n\n"
+        + "![One](media/crab-1.png)\n\n![Other one](media/crab-1.png)\n\n"
+        + "![](media/crab-2.png)\n\n"
+        + `![${long}](media/crab-3.png)\n\n`
+        + "![](media/crab-4.png)\n\n"
+        + "![Same](media/crab-5.png)\n\n![  Same ](media/crab-5.png)\n\n"
+        + "![Described](media/crab-6.png)\n",
+      // Not selected below: its alt for image 4 is nobody's business here.
+      "pages/other.md": "---\ntitle: Other\npath: other\ndescription: Another page that is not part of this selection at all, with a description.\n---\n\n![Only elsewhere](media/crab-4.png)\n",
+    },
+  }));
+  const library = { ...undescribed(8), [crabId(6)]: { defaultDescription: "Already described" } };
+  const routes = imageLibraryRoutes(library);
+  const { exitCode, result, stderr } = await runSite(workspace, ["pages", "push", "--dry-run", "--describe-missing-images", "happy-crab"], [...pushRoutes(), ...routes]);
+  assert.equal(exitCode, 0, stderr);
+  const described = result.describedImages;
+  assert.deepEqual(described.set.items.map((entry) => [entry.imageId, entry.description]), [[crabId(5), "Same"]]);
+  assert.deepEqual(described.skipped.items, [
+    { imageId: crabId(1), reason: "alts_disagree" },
+    { imageId: crabId(2), reason: "no_alt" },
+    { imageId: crabId(3), reason: "unusable_alt" },
+    { imageId: crabId(4), reason: "no_alt" },
+    // Images 7 and 8 are placed by no selected page, so they are not candidates at all.
+  ]);
+  // The described image is not listed at all, and a dry run wrote nothing.
+  assert.ok(!JSON.stringify(described).includes(crabId(6)));
+  assert.equal(routes.writes.length, 0);
+});
+
+test("describe missing images: an inherited placement's stale alt never restores a default", async (site) => {
+  const image = (imageId, extra) => ({ type: "taprootImage", attrs: { imageId, src: "", urls: [], ...extra } });
+  const workspace = await fixture(site, wholeWorkspace({
+    files: {
+      ".taproot-site-media.json": crabMedia(2),
+      "pages/about.md": PLAIN_ABOUT,
+      "pages/mode.pm.json": { type: "doc", content: [image(crabId(1), { alt: "Stale hydrated default", descriptionMode: "inherit" }), image(crabId(2), { alt: "Decorative", descriptionMode: "decorative" })] },
+    },
+  }));
+  const manifest = JSON.parse(await readFile(workspacePath(workspace, ".taproot-site-manifest.json"), "utf8"));
+  manifest.pages.push({ workspaceMode: "editable", pageId: STORY_PAGE_ID, resourceId: resourceIdFor(STORY_PAGE_ID), path: "mode", title: "Mode", description: "A page with inherited placements.", status: "PAGE_STATUS_PUBLISHED", templateType: "TEMPLATE_TYPE_FREE_FORM", file: "pages/mode.pm.json" });
+  await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), `${JSON.stringify(manifest)}\n`);
+  const routes = imageLibraryRoutes(undescribed(2));
+  const live = [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" }), pageSummary({ pageId: STORY_PAGE_ID, path: "mode", title: "Mode" })];
+  const { exitCode, result } = await runSite(workspace, ["pages", "push", "--dry-run", "--describe-missing-images"], [...pushRoutes({ live }), ...routes]);
+  assert.equal(exitCode, 0);
+  assert.deepEqual(result.describedImages.set, { total: 0, items: [] });
+  assert.deepEqual(result.describedImages.skipped.items.map((entry) => entry.reason), ["no_alt", "no_alt"]);
+});
+
+test("describe missing images: a refused write skips only that image with its reason, and an unknown outcome leaves it a finding", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(7));
+  const answers = {
+    [crabId(1)]: () => jsonResponse(violation("ExpectedRevision"), 400),
+    [crabId(2)]: () => jsonResponse({ code: 5, message: "Image not found." }, 404),
+    [crabId(3)]: () => jsonResponse(violation("DefaultDescription"), 400),
+    [crabId(4)]: () => jsonResponse(violation("OnlyIfMissing"), 400),
+    [crabId(5)]: () => jsonResponse({ code: 13, message: "boom" }, 502),
+  };
+  const routes = imageLibraryRoutes(undescribed(7), { failWrite: (index, imageId) => answers[imageId]?.() });
+  const { exitCode, result, stderr } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+  assert.equal(exitCode, 0, stderr);
+  assert.deepEqual(result.describedImages.skipped.items, [
+    { imageId: crabId(1), reason: "revision_moved" }, { imageId: crabId(2), reason: "write_failed" },
+    { imageId: crabId(3), reason: "invalid_description" }, { imageId: crabId(4), reason: "already_described" },
+    { imageId: crabId(5), reason: "write_unknown" },
+  ]);
+  assert.deepEqual(result.describedImages.set.items.map((entry) => entry.imageId), [crabId(6), crabId(7)]);
+  // The images whose write was refused or unclear are still undescribed as far as this run knows.
+  assert.deepEqual(result.siteHealthPrecheck.imageFindings.items.map((finding) => finding.imageId), [1, 2, 3, 4, 5].map(crabId));
+});
+
+test("describe missing images: a failed read skips every image as not_read, writes nothing, and says why", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(9));
+  const routes = imageLibraryRoutes(undescribed(9), { failReads: { failFirst: 5 } });
+  const { exitCode, result, stderr } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(routes.writes.length, 0);
+  assert.equal(result.describedImages.set.total, 0);
+  assert.equal(result.describedImages.skipped.total, 9);
+  assert.ok(result.describedImages.skipped.items.every((entry) => entry.reason === "not_read"));
+  assert.equal(result.describedImages.reason.code, "read_failed");
+  assert.match(stderr, /^Warning: --describe-missing-images could not read every image record \(read_failed\); 9 image\(s\) were skipped as not_read\./mu);
+});
+
+test("describe missing images: a refusal that fails the command leaves the saved pages saved and names what was written", async (context) => {
+  const cases = [
+    ["cli_outdated", () => jsonResponse(violation("CliUpgradeRequired"), 400)],
+    ["platform_paused", () => jsonResponse(violation("SiteAuthoringRollout"), 400)],
+    ["credential_rejected", () => jsonResponse({ code: 16, message: "no" }, 401)],
+  ];
+  for (const [refusal, answer] of cases) {
+    await context.test(refusal, async (site) => {
+      const workspace = await fixture(site, crabWorkspace(3));
+      const routes = imageLibraryRoutes(undescribed(3), { failWrite: (index) => (index === 1 ? answer() : undefined) });
+      const { exitCode, result, wire } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+      assert.equal(exitCode, 1);
+      assert.equal(result.error.refusal, refusal);
+      // The home page was updated and the other two created before the images were written, and the command stopped
+      // at the second write.
+      assert.equal(wire.matching("POST", PAGES_COLLECTION).length, 2);
+      assert.equal(routes.writes.length, 2);
+      assert.deepEqual(result.error.completedWrites.slice(0, 3), ["1 image(s): set", "0 image(s): unknown", "3 page(s): saved"]);
+      assert.equal(result.error.completedWrites[3], `image ${crabId(1)}: set`);
+      assert.ok(result.error.completedWrites.includes("page happy-crab: created"));
+    });
+  }
+  await context.test("an unknown write, then a rejected credential, lists the first as unknown", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(3));
+    const routes = imageLibraryRoutes(undescribed(3), {
+      failWrite: (index) => (index === 0 ? jsonResponse({ code: 13, message: "boom" }, 502) : index === 1 ? jsonResponse({ code: 16, message: "no" }, 401) : undefined),
+    });
+    const { exitCode, result } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+    assert.equal(exitCode, 1);
+    assert.deepEqual(result.error.completedWrites.slice(0, 4), ["0 image(s): set", "1 image(s): unknown", "3 page(s): saved", `image ${crabId(1)}: unknown`]);
+  });
+});
+
+test("describe missing images: a dry run lists what it would set, writes nothing and gives no next step", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(4));
+  const routes = imageLibraryRoutes(undescribed(4));
+  const { exitCode, result, stderr } = await runSite(workspace, ["pages", "push", "--dry-run", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(result.describedImages.set.total, 4);
+  assert.equal(routes.writes.length, 0);
+  assert.equal(Object.hasOwn(result, "nextStep"), false);
+  assert.doesNotMatch(stderr, /Deploy to update published usages/u);
+  // Nothing was set, so the same images are still findings.
+  assert.equal(result.siteHealthPrecheck.imageFindings.total, 4);
+});
+
+test("describe missing images: describedImages is present with zero totals when nothing qualifies, and absent without the flag", async (site) => {
+  const workspace = await fixture(site, crabWorkspace(3));
+  const library = Object.fromEntries([1, 2, 3].map((index) => [crabId(index), { defaultDescription: "Described" }]));
+  const flagged = await runSite(workspace, ["pages", "push", "--dry-run", "--describe-missing-images"], [...pushRoutes(), ...imageLibraryRoutes(library)]);
+  assert.deepEqual(flagged.result.describedImages, { set: { total: 0, items: [] }, skipped: { total: 0, items: [] } });
+  const plain = await runSite(workspace, ["pages", "push", "--dry-run"], [...pushRoutes(), ...imageLibraryRoutes(library)]);
+  assert.equal(Object.hasOwn(plain.result, "describedImages"), false);
+});
+
+test("describe missing images: a refused push writes nothing, and a copied poster is never a candidate", async (context) => {
+  await context.test("refused", async (site) => {
+    const workspace = await fixture(site, crabWorkspace(3, { files: BROKEN_PAGES }));
+    const routes = imageLibraryRoutes(undescribed(3));
+    const { exitCode } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+    assert.equal(exitCode, 1);
+    assert.equal(routes.writes.length, 0);
+  });
+  await context.test("a poster the library read does not return", async (site) => {
+    const posterId = "00000000-0000-4000-8000-0000000000e0";
+    const workspace = await fixture(site, crabWorkspace(1, { files: { "pages/poster.md": "---\ntitle: Poster\npath: poster\ndescription: A page placing an owned poster image of a video it embeds.\n---\n\n![A poster](media/poster.png)\n" } }));
+    const media = JSON.parse(await readFile(workspacePath(workspace, ".taproot-site-media.json"), "utf8"));
+    media.media["media/poster.png"] = { imageId: posterId, src: "", urls: [], width: 10, height: 10 };
+    await writeFile(workspacePath(workspace, ".taproot-site-media.json"), `${JSON.stringify(media)}\n`);
+    // The poster is an owned image no library lists: only an all-purpose read would return it.
+    const library = { ...undescribed(1) };
+    const routes = imageLibraryRoutes(library);
+    const { result } = await runSite(workspace, ["pages", "push", "--describe-missing-images"], [...pushRoutes(), ...routes]);
+    assert.deepEqual(routes.writes.map((write) => write.imageId), [crabId(1)]);
+    assert.ok(!JSON.stringify(result.describedImages).includes(posterId));
+    assert.deepEqual(result.siteHealthPrecheck.notInSiteLibrary, { total: 1, items: [posterId] });
+  });
+});
+
+/**
+ * A whole-workspace real push whose base result is exactly 2 KiB under the output bound, found by measuring (see the
+ * recipe in TR01371's plan). With `describe`, the push also carries --describe-missing-images, so the result holds the
+ * real `describedImages` at its bounds as well as the precheck block.
+ */
+async function pushSizeCase(site, { describe = false } = {}) {
+  const target = LIMITS.githubOutputBytes - 2048;
+  const TUNE_ID = "99999999-1111-4111-8111-999999999999";
+  const withoutBlock = (result) => {
+    const copy = structuredClone(result);
+    delete copy.siteHealthPrecheck;
+    delete copy.describedImages;
+    return Buffer.byteLength(JSON.stringify(copy), "utf8");
+  };
+  // A whole-workspace real push, filling only the lists such a push reports: `pages.items`, the stale generated
+  // sources, the autolink and description warnings, and the created pages with no author. The tuning page is an
+  // updated page outside the warning and author lists, and sorts first (a digit sorts before any letter) so `pages.items` keeps it.
+  const build = async (count, extra = 0) => {
+    const files = { ".taproot-site-media.json": crabMedia(count * 2), "pages/about.md": PLAIN_ABOUT };
+    const tuneFile = `pages/0${"t".repeat(10 + extra)}.md`;
+    files[tuneFile] = "---\ntitle: The page that tunes the size\npath: tune\ndescription: A complete description of the page that tunes the size of the result.\n---\n\n# Tuning\n";
+    for (let index = 1; index <= count; index += 1) {
+      files[`pages/c-${String(index).padStart(3, "0")}-${"x".repeat(60)}.md`] =
+        `---\ntitle: Crab ${index}\npath: c${index}\ndescription: ${"d".repeat(170)}\n---\n\n[example.com](http://example.com)\n\n`
+        + `![Alt a](media/crab-${index * 2 - 1}.png)\n\n![Alt b](media/crab-${index * 2}.png)\n`
+        // With the flag, the second image's placements disagree, so it is skipped and stays an undescribed finding.
+        + (describe ? `\n![Other b](media/crab-${index * 2}.png)\n` : "");
+    }
+    const retired = Array.from({ length: 60 }, (_, index) => ({
+      file: `pages/stale/s-${String(index).padStart(2, "0")}-${"s".repeat(100)}.pm.json`,
+      path: `retired-${String(index).padStart(2, "0")}`,
+    }));
+    for (const entry of retired) files[entry.file] = {};
+    const base = wholeWorkspace({ files });
+    base[".taproot-site-manifest.json"] = {
+      ...base[".taproot-site-manifest.json"],
+      pages: [
+        ...base[".taproot-site-manifest.json"].pages,
+        {
+          workspaceMode: "editable", pageId: TUNE_ID, resourceId: resourceIdFor(TUNE_ID), path: "tune", title: "The page that tunes the size",
+          description: "A complete description of the page that tunes the size of the result.", status: "PAGE_STATUS_PUBLISHED",
+          templateType: "TEMPLATE_TYPE_FREE_FORM", file: tuneFile, sourceFormat: "markdown",
+        },
+      ],
+      retiredGeneratedSources: retired,
+    };
+    const workspace = await fixture(site, base);
+    let created = 0;
+    const routes = [
+      {
+        method: "GET",
+        pattern: PAGES_LIST,
+        reply: () => ({
+          pages: [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home" }), pageSummary({ pageId: TUNE_ID, path: "tune", title: "The page that tunes the size" })],
+          nextPageToken: "",
+        }),
+      },
+      {
+        method: "POST",
+        pattern: PAGES_COLLECTION,
+        reply: (call) => {
+          created += 1;
+          return draftSummary(`${String(created).padStart(8, "0")}-2222-4222-8222-222222222222`, call.body.path);
+        },
+      },
+      { method: "PATCH", pattern: PAGE_BY_ID, reply: (call) => draftSummary(call.body.pageId, call.body.path) },
+      ...(describe ? imageLibraryRoutes(undescribed(count * 2)) : [imageReadRoute(undescribed(count * 2))]),
+    ];
+    return await runSite(workspace, ["pages", "push", ...(describe ? ["--describe-missing-images"] : [])], routes);
+  };
+  // Adjust the page count by what one `pages.items` entry costs until the base is within one entry of the target,
+  // then take up the rest in the tuning page's file name.
+  let count = 70;
+  let run = await build(count);
+  assert.equal(run.exitCode, 0, run.stderr);
+  const entry = Math.ceil(Buffer.byteLength(JSON.stringify(run.result.pages.items), "utf8") / run.result.pages.items.length);
+  for (let attempt = 0; attempt < 14; attempt += 1) {
+    const deficit = target - withoutBlock(run.result);
+    if (deficit >= 0 && deficit < entry) break;
+    // The warning lists are already full, so each page adds one `pages.items` entry. Step by most of the estimate,
+    // so a page count that would overfill the items list is not jumped to.
+    count += deficit > 0 ? Math.max(1, Math.floor((deficit / entry) * 0.8)) : Math.floor(deficit / entry) - 1;
+    run = await build(count);
+    assert.equal(run.exitCode, 0, run.stderr);
+  }
+  assert.equal(Object.hasOwn(run.result.pages, "itemsTruncated"), false, "the items list must keep every entry for the tuning to land");
+  const tuned = await build(count, target - withoutBlock(run.result));
+  assert.equal(tuned.exitCode, 0, tuned.stderr);
+  assert.equal(Object.hasOwn(tuned.result.pages, "itemsTruncated"), false);
+  assert.equal(tuned.result.pages.items[0].action, "updated");
+  assert.equal(withoutBlock(tuned.result), target);
+  assert.ok(Buffer.byteLength(tuned.stdout, "utf8") <= LIMITS.githubOutputBytes);
+  return { result: tuned.result, count };
+}
+
+test("site health precheck: a pages push result with exactly 2 KiB of headroom still fits with undescribed images, truncated", async (site) => {
+  const { result, count } = await pushSizeCase(site);
+  // The 2 KiB left holds a little of the findings: truncated, every total intact.
+  const block = result.siteHealthPrecheck;
+  assert.equal(block.imageFindings.total, count * 2);
+  assert.equal(block.imageFindings.truncated, true);
+  assert.equal(block.notInSiteLibrary.total, 0);
+});
+
+test("describe missing images: a push result with the real describedImages at its bounds still fits, with every total intact", async (site) => {
+  const { result, count } = await pushSizeCase(site, { describe: true });
+  // One image per page was set and one skipped for disagreeing alts; both lists are far past their budgets.
+  assert.equal(result.describedImages.set.total, count);
+  assert.equal(result.describedImages.set.truncated, true);
+  assert.equal(result.describedImages.skipped.total, count);
+  assert.equal(result.describedImages.skipped.truncated, true);
+  // The set images are no longer findings, the skipped ones are.
+  assert.equal(result.siteHealthPrecheck.imageFindings.total, count);
+  assert.equal(result.siteHealthPrecheck.notInSiteLibrary.total, 0);
+  assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") <= LIMITS.githubOutputBytes);
+});
+
+// ---------------------------------------------------------------------------
 // Cross-cutting
 // ---------------------------------------------------------------------------
 
@@ -14970,12 +16254,17 @@ test("every site verb on a prebuilt Docs site is refused offline with surface.no
 
 test("the verb table declares a surface for exactly the site verbs, and pages-side verbs need a standard site", () => {
   assert.deepEqual(new Set(Object.keys(VERB_SURFACES)), new Set(Object.keys(VERB_CAPABILITIES)));
-  for (const verb of ["pages push", "nav push", "redirects check", "redirects pull", "redirects push", "approve", "preview page", "preview revoke"]) {
+  for (const verb of ["pages push", "nav push", "redirects check", "redirects pull", "redirects push", "approve", "preview page", "preview revoke", "validate"]) {
     assert.equal(VERB_SURFACES[verb], "standard", verb);
   }
-  for (const verb of ["pull", "theme push", "footer push", "media upload", "deploy", "status"]) {
+  for (const verb of ["pull", "theme push", "footer push", "media upload", "deploy", "status", "health"]) {
     assert.equal(VERB_SURFACES[verb], "docs-presentation", verb);
   }
+  // `health` reads the report and the images under Content; a Docs site holds no Content and reads nothing, so it
+  // asks for Deployments there, as `status` narrows to (TR01363).
+  assert.deepEqual(VERB_CAPABILITIES["health"], [CAPABILITY_CONTENT]);
+  assert.deepEqual(verbCapabilitiesForSurface("health", "standard"), [CAPABILITY_CONTENT]);
+  assert.deepEqual(verbCapabilitiesForSurface("health", "docs-presentation"), [CAPABILITY_DEPLOYMENTS]);
 });
 
 test("the CLI passes each verb's surface through to its handler", async () => {
@@ -15436,7 +16725,7 @@ test("validate names the form key check as skipped when no form file could be re
   const none = await fixture(site, wholeWorkspace({ uploaded: true, files: { "pages/about.md": aboutPlacingForm("contakt") } }));
   const skipped = await cliRun(none, ["validate"]);
   assert.equal(skipped.exitCode, 0, skipped.stderr);
-  assert.deepEqual(skipped.result.siteChecks.skipped, ["form.key_unknown"]);
+  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown"]);
 
   const broken = await fixture(site, wholeWorkspace({
     uploaded: true,

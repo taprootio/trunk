@@ -14,7 +14,7 @@ import { SiteAuthoringError } from "./errors.js";
  * CLI that is behind the latest published release at sign-in and at token
  * exchange, so every online verb already gets a definitive answer without any
  * of this. What this file is for is the case where there is no request to be
- * refused: `help`, `validate`, and `whoami` run entirely offline, and an agent
+ * refused: `help`, `validate` (unless `--site`), and `whoami` run entirely offline, and an agent
  * that keeps authoring against a contract that has moved will happily spend a
  * whole session validating documents the site can no longer accept.
  *

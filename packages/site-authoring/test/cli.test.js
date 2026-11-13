@@ -483,7 +483,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
   assert.match(stdout.read(), /^Usage: taproot-site \[--config <path>\] <verb>/u);
   assert.match(stdout.read(), /^  help\s+Show offline authoring reference help/mu);
   assert.match(stdout.read(), /^  validate\s+Check a whole workspace or offline fixture at once/mu);
-  assert.match(stdout.read(), /validate,\nhelp, whoami, and env are offline and read-only/u);
+  assert.match(stdout.read(), /validate\n\(unless --site\), help, whoami, and env are offline and read-only/u);
   assert.match(stdout.read(), /^  login\s+Authorize this CLI against a Taproot account/mu);
   assert.match(stdout.read(), /^  logout\s+Discard the stored Taproot sign-in/mu);
   // The three verbs TR00645 added, which are what make a site selectable
@@ -512,7 +512,10 @@ test("exposes help and version at the binary and verb levels", async (testContex
     // input, so the boundary sentence has to state it (TR00703).
     assert.match(verbStdout.read(), /recorded a newer published release/u);
     assert.match(verbStdout.read(), /does not prove authorization, live site ownership, concurrency/u);
-    assert.doesNotMatch(verbStdout.read(), /TAPROOT_SITE_KEY/u);
+    // Only --site uses a credential, and the boundary says so (TR01371).
+    assert.match(verbStdout.read(), /Validation uses no credential, network or write unless --site is given/u);
+    assert.match(verbStdout.read(), /With --site it reads the site's image records with the site-scoped credential from TAPROOT_SITE_KEY/u);
+    assert.match(verbStdout.read(), /--site {11}Also read the site's image records/u);
     assert.match(verbStdout.read(), /the configuration naming the workspace \(no\n\s+directory\) or the --init source/u);
   });
   // What login and logout help must say. They mention TAPROOT_SITE_KEY like
@@ -562,6 +565,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
       "status",
       "delivery check",
       "staging review",
+      "health",
     ]
   ) {
     await testContext.test(verb, async () => {
@@ -584,6 +588,7 @@ test("exposes help and version at the binary and verb levels", async (testContex
         assert.match(verbStdout.read(), /reused, shared, or bookmarked preview URL answers Not found/u);
       }
       if (verb === "pages push") {
+        assert.match(verbStdout.read(), /--describe-missing-images {2}Set each placed image's missing default description/u);
         assert.match(verbStdout.read(), /taproot-site help page free-form/u);
         assert.doesNotMatch(verbStdout.read(), /raw-html|read-only/u);
       }
@@ -600,6 +605,11 @@ test("exposes help and version at the binary and verb levels", async (testContex
         assert.match(verbStdout.read(), /--wait <seconds>/u);
         assert.match(verbStdout.read(), /--no-browser/u);
         assert.match(verbStdout.read(), /reported as unchecked/u);
+      }
+      if (verb === "health") {
+        assert.match(verbStdout.read(), /^Usage: taproot-site \[--config <path>\] health \(--staging \| --production\)/u);
+        assert.match(verbStdout.read(), /--staging {8}Read the stored report/u);
+        assert.doesNotMatch(verbStdout.read(), /--allow-failed-preview|Deploy the staged site/u);
       }
       if (verb === "use") {
         // A site selector, never a page path (TR00806).
@@ -1347,4 +1357,33 @@ test("every verb and topic that hands out a staging review says how long it last
     const text = await helpText(["help", topic]);
     assert.ok(text.includes(STAGING_REVIEW_SESSION_NOTE) || text.includes("help preview"), topic);
   }
+});
+
+test("--describe-missing-images is accepted by pages push alone, with or without --dry-run", async () => {
+  let received;
+  const capture = { "pages push": async (invocation) => { received = invocation; return { ok: true, verb: "pages push" }; } };
+  for (const arguments_ of [["pages", "push", "--describe-missing-images"], ["pages", "push", "--dry-run", "--describe-missing-images"]]) {
+    received = undefined;
+    const out = sink();
+    assert.equal(await runCli({ arguments_, environment: {}, stdout: out, stderr: sink(), handlers: capture }), 0);
+    assert.equal(received.describeMissingImages, true);
+  }
+  received = undefined;
+  assert.equal(await runCli({ arguments_: ["pages", "push"], environment: {}, stdout: sink(), stderr: sink(), handlers: capture }), 0);
+  assert.equal(Object.hasOwn(received, "describeMissingImages"), false);
+
+  // Only the verb that declares it advertises or accepts the flag.
+  for (const verb of [["pages", "delete"], ["plan"], ["apply"], ["pages", "meta", "set"]]) {
+    const help = sink();
+    await runCli({ arguments_: [...verb, "--help"], stdout: help, stderr: sink() });
+    assert.doesNotMatch(help.read(), /--describe-missing-images/u, verb.join(" "));
+  }
+  for (const arguments_ of [["plan", "--describe-missing-images"], ["apply", "--describe-missing-images", "--plan", "x"], ["pages", "delete", "about", "--describe-missing-images"]]) {
+    const out = sink();
+    assert.equal(await runCli({ arguments_, environment: {}, stdout: out, stderr: sink() }), 2, arguments_.join(" "));
+    assert.equal(JSON.parse(out.read()).error.code, "cli.unknown_option");
+  }
+  const twice = sink();
+  assert.equal(await runCli({ arguments_: ["pages", "push", "--describe-missing-images", "--describe-missing-images"], environment: {}, stdout: twice, stderr: sink() }), 2);
+  assert.equal(JSON.parse(twice.read()).error.code, "cli.duplicate_option");
 });

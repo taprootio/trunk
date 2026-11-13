@@ -1,9 +1,9 @@
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { NAVIGATION_MAXIMUM_DEPTH } from "../api.js";
+import { NAVIGATION_MAXIMUM_DEPTH, withRefusalGuidance } from "../api.js";
 import { loadSiteConfig } from "../config.js";
-import { VERB_VALIDATE } from "../constants.js";
+import { SURFACE_DOCS_PRESENTATION, VERB_VALIDATE } from "../constants.js";
 import { freeFormRootPresentation } from "../content/free-form-sections.js";
 import { autolinkWarnings } from "../content/link-warnings.js";
 import { isCanonicalUuid, SiteAuthoringError } from "../errors.js";
@@ -21,8 +21,20 @@ import { FORMS_DIRECTORY } from "../forms-contract.js";
 import { authorWarnings, descriptionWarnings } from "../page-metadata.js";
 import { CHECK_AREA, collectProblems, refuseProblems } from "../problems.js";
 import { isRedirectMapRevision, REDIRECT_KIND_GONE, REDIRECTS_FILE_NAME } from "../redirects-contract.js";
-import { boundedList, successResult } from "../session.js";
-import { evaluateOfflineSiteChecks } from "../site-check-findings.js";
+import { boundedList, openSession, successResult } from "../session.js";
+import {
+  evaluateOfflineSiteChecks,
+  IMAGE_CHECK_DIRECTORY_ARGUMENT,
+  IMAGE_CHECK_DOCS_SITE,
+  IMAGE_CHECK_NOT_REQUESTED,
+  imageCheckSkipped,
+} from "../site-check-findings.js";
+import {
+  evaluateImagePrecheck,
+  fitPrecheckToBudget,
+  placedImageIdsForPages,
+  readImageRecords,
+} from "../site-health-precheck.js";
 import { SETTINGS_GROUPS } from "../settings-catalog.js";
 import { checkWorkspace } from "../workspace-check.js";
 import {
@@ -49,11 +61,28 @@ import {
 import { documentImageIds, isAuthorableTemplateType, placedVideoIds } from "../typed-pages.js";
 
 const MAXIMUM_REPORTED = 200;
+// What no validate run proves about the site checks: the ones the site itself answers, the deploy's and the editor's.
+const SITE_CHECKS_NOT_PROVEN =
+  "image description defaults (unless --site reads the site's image records), and the site checks listed in siteChecks.checkedBySite (missing images, forms), which 'taproot-site status' and "
+  + "'taproot-site health' report from the stored deployment report, siteChecks.checkedAtDeploy, which only a deploy "
+  + "applies, or siteChecks.checkedInEditor, which only the page editor evaluates (a cover, a description field, or a "
+  + "description's length); images an integration places, or a video poster a push copies, which the stored report "
+  + "after staging covers";
 const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
 const FIXTURE_METADATA_KEYS = new Set(FIXTURE_METADATA_FIELDS);
 
 function fail(code, message, field, exitCode) {
   throw new SiteAuthoringError(code, message, { field, exitCode });
+}
+
+/** `validate --site` reads the site for the workspace the configuration names, so a directory or --init has none. */
+export function siteNeedsWorkspaceError(init) {
+  return new SiteAuthoringError(
+    "validate.site_needs_workspace",
+    "validate --site reads the site for the workspace taproot-site.json names, so it takes no directory and no "
+      + "--init: a directory has no configuration to read the site with. Run it from the workspace.",
+    { field: init ? "init" : "fixturePath", exitCode: 2 },
+  );
 }
 
 function isPlainObject(value) {
@@ -653,18 +682,65 @@ function pageHints(checked, onProgress) {
  * The offline site checks (TR01085) over the planned pages: the rules the shared
  * catalogue lists for `validate`, with the rest named as checked by the site.
  */
-function offlineSiteChecks(checked, manifest, onProgress) {
+function offlineSiteChecks(checked, manifest, onProgress, imageCheck) {
   if (checked.settingsOnly) return {};
   return evaluateOfflineSiteChecks({
     planned: checked.pages?.planned,
     pagePaths: manifest.pages.map((entry) => normalizePagePath(entry?.path)).filter((value) => value !== undefined),
     pagesComplete: manifest.pagesTruncated !== true,
     formKeysChecked: checked.formKeysChecked === true,
+    imageCheck,
     onProgress,
   });
 }
 
+/**
+ * `validate --site`: reads the site's records for the images the workspace places and reports the ones with no
+ * default description (TR01371). Runs after the workspace's own problems are refused, so those come before any
+ * credential error. A Docs workspace, and a workspace placing no images, open no session and make no request.
+ */
+async function readSiteImages(checked, invocation, onProgress, config) {
+  if (checked.settingsOnly || config?.authoringSurface === SURFACE_DOCS_PRESENTATION) {
+    return { imageCheck: imageCheckSkipped(IMAGE_CHECK_DOCS_SITE) };
+  }
+  const pages = placedImageIdsForPages(checked.pages.planned);
+  const ids = pages.flatMap((page) => page.imageIds);
+  if (ids.length === 0) return { imageCheck: { ran: true }, pages, block: emptyBlock(pages), opened: false };
+  // The configuration this workspace was validated against, not a reread one: a site switched meanwhile must not be
+  // the one whose images are read.
+  const session = await openSession({ ...invocation, resolvedConfig: config });
+  onProgress("Reading the site's records for the images this workspace places.");
+  const state = await withRefusalGuidance(onProgress, "validate", async () => {
+    const read = await readImageRecords(session.client, session.siteId, ids);
+    // A key the site refused is a failure of this verb, with the server's own description (the read made the
+    // first request, so a revoked key shows up here).
+    if (read.refusalError !== undefined) throw read.refusalError;
+    return read;
+  });
+  const block = evaluateImagePrecheck(state, pages, onProgress);
+  return {
+    imageCheck: state.reason === undefined ? { ran: true } : { ran: false, code: state.reason.code, message: state.reason.message },
+    pages,
+    block: state.status === "not_checked" ? undefined : block,
+    opened: true,
+  };
+}
+
+function emptyBlock(pages) {
+  return {
+    status: "checked",
+    checkedPages: pages.length,
+    imageFindings: { total: 0, items: [] },
+    notInSiteLibrary: { total: 0, items: [] },
+    skipped: [],
+  };
+}
+
 export async function validateFixture(invocation = {}) {
+  // Refused before any file is read: a directory, or a fixture to export, has no site to read.
+  if (invocation.fromSite === true && (invocation.init || invocation.fixturePath !== undefined)) {
+    throw siteNeedsWorkspaceError(Boolean(invocation.init));
+  }
   if (invocation.init) return await initializeFixture(invocation, validateFixture);
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
   const cwd = invocation.cwd ?? process.cwd();
@@ -677,7 +753,7 @@ export async function validateFixture(invocation = {}) {
         "siteId",
       );
     }
-    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress);
+    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress, { config });
   }
   const fixtureRoot = await resolveFixtureRoot(cwd, invocation.fixturePath);
   if (
@@ -688,7 +764,7 @@ export async function validateFixture(invocation = {}) {
     if (!isCanonicalUuid(siteId)) {
       fail("workspace.manifest_invalid", `${MANIFEST_FILE_NAME} does not record a canonical site id.`, "siteId");
     }
-    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress);
+    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress, { directoryArgument: true });
   }
 
   onProgress(`Reading ${FIXTURE_MANIFEST_FILE_NAME}.`);
@@ -752,7 +828,7 @@ export async function validateFixture(invocation = {}) {
     ...autolinkWarnings(checked.pages?.planned, onProgress),
     ...descriptionWarnings(checked.pages?.planned, onProgress),
     ...authorWarnings(checked.pages?.planned, onProgress),
-    ...offlineSiteChecks(checked, manifest, onProgress),
+    ...offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT)),
   };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -782,9 +858,7 @@ export async function validateFixture(invocation = {}) {
       "credential authorization or live site ownership",
       "remote concurrency or current revisions",
       "server normalization and pull round trips",
-      "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
-        + "siteHealth, siteChecks.checkedAtDeploy, which only a deploy applies, or siteChecks.checkedInEditor, "
-        + "which only the page editor evaluates (a cover, a description field, or a description's length)",
+      SITE_CHECKS_NOT_PROVEN,
       "preview or published rendering",
     ],
     nextStep: "Run a real pull and authorized preview before approval or deployment.",
@@ -796,7 +870,7 @@ export async function validateFixture(invocation = {}) {
  * runs before it sends anything, for every page and setting at once, against
  * what the manifests recorded at the pull — no credential and no request.
  */
-async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress) {
+async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress, { config, directoryArgument = false }) {
   onProgress(`Reading ${MANIFEST_FILE_NAME}.`);
   const manifest = await readManifest(workspaceDir, siteId);
   const mediaManifest = await readMediaManifest(workspaceDir, siteId);
@@ -811,6 +885,10 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
   reportThemeWarnings(checked.presentation, onProgress);
   refuseProblems(checked.problems, "validate found problems in the workspace");
 
+  // Only --site reads the site; without it the image rule is skipped with the reason (TR01371).
+  const site = invocation.fromSite === true
+    ? await readSiteImages(checked, invocation, onProgress, config)
+    : { imageCheck: imageCheckSkipped(directoryArgument ? IMAGE_CHECK_DIRECTORY_ARGUMENT : IMAGE_CHECK_NOT_REQUESTED) };
   const pages = checked.settingsOnly
     ? []
     : checked.pages.planned.map((page) => ({ file: page.file, path: displayPagePath(page.pagePath) }));
@@ -821,20 +899,36 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       ...autolinkWarnings(checked.pages.planned, onProgress),
       ...descriptionWarnings(checked.pages.planned, onProgress),
       ...authorWarnings(checked.pages.planned, onProgress),
-      ...offlineSiteChecks(checked, manifest, onProgress),
+      ...offlineSiteChecks(checked, manifest, onProgress, site.imageCheck),
     };
+  // A Docs workspace has no `siteChecks` to carry the reason, so it is said at the top level.
+  const docsReason = checked.settingsOnly && invocation.fromSite === true
+    ? {
+      imageCheckReason: {
+        code: site.imageCheck.code,
+        ...(site.imageCheck.message === undefined ? {} : { message: site.imageCheck.message }),
+      },
+    }
+    : {};
+  const readSite = site.opened === true;
+  const noImages = invocation.fromSite === true && site.opened === false;
   onProgress(
     checked.settingsOnly
       ? "Validated the workspace's two themes, appearance, and footer without credentials or mutation."
       : `Validated ${pages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and `
-        + "footer without credentials or mutation.",
+        + (readSite
+          ? "footer, reading the site's image records without mutation."
+          : noImages
+          ? "footer without credentials or mutation; the workspace places no images, so the site was not read."
+          : "footer without credentials or mutation."),
   );
-  return successResult(VERB_VALIDATE, siteId, {
-    offline: true,
+  const base = successResult(VERB_VALIDATE, siteId, {
+    offline: !readSite,
     workspace: { manifest: MANIFEST_FILE_NAME, settingsOnly: checked.settingsOnly },
     ...validatedSummary(checked, pages),
     hints,
     ...warnings,
+    ...docsReason,
     proves: [
       "every page source: metadata, Markdown conversion, media references, content vocabulary, and section contexts",
       "page paths, templates, and system pages against the pages the pull recorded",
@@ -842,16 +936,26 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       "redirect-map shape, normalization, chains, loops, and workspace page paths",
       "complete theme, appearance, header, brand, and footer semantics",
       "form files against the shared field schema",
+      ...(site.block === undefined ? [] : [
+        site.imageCheck.ran
+          ? "which placed images have no default description, from the site's own image records (imageFindings)"
+          : "which of the placed images that were read have no default description (imageFindings); some records could not be read",
+      ]),
     ],
     doesNotProve: [
       "credential authorization or live site ownership",
       "pages, revisions, or videos that changed on the site since the pull",
       "server normalization and pull round trips",
-      "the site checks listed in siteChecks.checkedBySite (images, forms), which 'taproot-site status' reports under "
-        + "siteHealth, siteChecks.checkedAtDeploy, which only a deploy applies, or siteChecks.checkedInEditor, "
-        + "which only the page editor evaluates (a cover, a description field, or a description's length)",
+      SITE_CHECKS_NOT_PROVEN,
       "preview or published rendering",
     ],
     nextStep: "Run 'taproot-site plan' to check the workspace against the live site and see the ordered apply.",
   });
+  if (site.block === undefined) return base;
+  const fitted = fitPrecheckToBudget(
+    base,
+    { imageFindings: site.block.imageFindings, notInSiteLibrary: site.block.notInSiteLibrary },
+    ["notInSiteLibrary", "imageFindings"],
+  );
+  return { ...base, ...fitted };
 }

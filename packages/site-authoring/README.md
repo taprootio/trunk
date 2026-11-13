@@ -17,7 +17,7 @@ renderer would drop.
 Taproot cannot yet deliver sign-in email to people outside the team, so no
 one outside it can create an account or approve a sign-in today. The package
 is published ahead of that so it is installed and ready when access opens.
-Until then, `help` and `validate` work fully offline, and `login` will print
+Until then, `help` and `validate` (unless `--site`) work fully offline, and `login` will print
 its approval code and URL and then wait for an approval that cannot yet be
 given, giving up when the approval window closes (about fifteen minutes) with
 `login.timeout`. This note is removed when access opens.
@@ -158,9 +158,21 @@ publishes as an `<h2>` because the banner's overlay text, a hero title or an ear
 `#` heading already is the `<h1>` (`detail` says which); `seo.h1_multiple` for a hero
 title after the `<h1>`; `seo.heading_renumbered` and `seo.heading_before_title` for
 headings published at another level; and `a11y.link_text_empty`. Image-default
-completeness (`a11y.image_default_missing`) comes from the stored deployment
-report, using frozen image defaults. Placement alt strings and decorative choices
-do not fill a missing reusable default. Known author-entered metadata receives missing, short and
+completeness (`a11y.image_default_missing`) needs the site's own image records,
+so plain `validate` lists it in `siteChecks.skipped`, with `siteChecks.imageCheckReason`
+(`not_requested`, or `directory_argument` for a directory). `validate --site` reads
+those records and reports each undescribed image the workspace places in
+`imageFindings` (`total`, `items`, `truncated`), with its affected pages and the exact
+`media images describe` command for its fix, and the placed ids that are not in the
+site's library (deleted, another site's, or owned media such as a copied video poster)
+in `notInSiteLibrary`; `siteChecks.imageCheckReason` says `read_failed` or
+`read_partly_failed` when the read did not complete. After staging, the stored
+deployment report (`health --staging`) is the authority, using frozen image defaults.
+Without `--describe-missing-images`, placement alt strings and decorative choices never fill a
+missing reusable default: alt text only suggests the text for the command. Besides `media images describe` and the
+app, `pages push --describe-missing-images` is the only path that fills one, and only when
+the selected custom or unset placements agree on a single text; no other push or validate
+path infers a default from placement alt. Known author-entered metadata receives missing, short and
 long title/description advice, plus `seo.description_matches_title` when the description
 repeats its title. The writing guidance is 15–70 characters for titles and 50–160 for
 descriptions, counted as Unicode characters after outer trimming. These suggestions
@@ -334,8 +346,9 @@ each step names the reference it relies on.
 1. **Select a supported site.** `login`, then `sites` and
    `use <site-name-or-id>`. A standard site takes every verb; a managed Docs
    site takes presentation only (`pull`, `theme push`, `footer push`,
-   `media upload`, `deploy`, `status`) because its pages, navigation and
-   redirects come from the Docs artifact; a prebuilt Docs site takes no verb.
+   `media upload`, `deploy`, `status`, and `health`, which answers
+   `covered: false` there) because its pages, navigation and redirects come
+   from the Docs artifact; a prebuilt Docs site takes no verb.
 2. **Pull and keep the baseline.** `pull` writes both schemes' complete
    effective themes, the appearance files and the footer. Edit that pull;
    never build a theme from memory or an example.
@@ -351,7 +364,9 @@ each step names the reference it relies on.
    with your own tools, upload them with `media upload`, then assign
    `lightLogoId`, `darkLogoId` and `brand.faviconId` from the returned ids. There
    is no recolor, crop or SVG upload command.
-5. **Validate, preview, then push.** `validate` checks the whole workspace offline;
+5. **Validate, preview, then push.** `validate` checks the whole workspace offline
+   (`validate --site` also reads the site's image records, to report placed images with
+   no default description);
    `theme resolve` prints, also offline, the colors Espalier compiles from the
    theme for each scheme and context with the contrast of every ink-on-surface
    pair and a flag for each one under WCAG AA (add `--json` for the stable
@@ -385,12 +400,21 @@ each step names the reference it relies on.
 ```bash
 taproot-site pull
 # edit site/pages/about.md
+taproot-site validate --site
 taproot-site pages push about
 taproot-site preview page about
 taproot-site approve about
 taproot-site deploy --staging
+taproot-site health --staging
 taproot-site deploy --production
 ```
+
+After `deploy --staging`, `health --staging` reads the Site Health warnings the
+staged release stored, and `deploy --staging` returns the same report as
+`siteHealth`. Fix every warning marked `newSinceProduction` before handing the
+release over, then stage again: the report belongs to a release, so a fix
+changes it only after another `deploy --staging` (and `approve`, for a page
+edit). See [Site Health from the CLI in 0.37.0](#site-health-from-the-cli-in-0370).
 
 `pull` snapshots pages, navigation, redirects, and settings into the
 workspace: `pages/`, `nav.json`, `redirects.json`, `settings/`, `media/`, and
@@ -403,9 +427,19 @@ Markdown subset with `title`, `path`, and `description` front matter, or
 `pages/<name>.pm.json` as a ProseMirror document — and pull never writes a
 generated `.pm.json` beside a tracked `.md`. For a page tracked as Markdown
 the site's own document is kept as internal state under
-`.taproot-site-state/`, which is never a page source and never pushed. A page
-edited on the site since the last pull is a `pages.pull_conflict` refusal
-before anything under `pages/` changes, with both recovery paths named.
+`.taproot-site-state/`, which is never a page source and never pushed. A tracked
+Markdown page conflicts, with a `pages.pull_conflict` refusal before anything under
+`pages/` changes and both recovery paths named, when the site moved: its stored-state
+revision moved, or its display date moved for a page type that has one. A `.pm.json`
+page is refreshed when the site moved, and conflicts only when it also has unpushed
+local edits (its body, or its title, path, description or author in the manifest). The
+revision covers the stored body, title, path, short description and cover image. For
+an authored page (Markdown or ProseMirror), approve, staging and production
+publication never move it; a legal page's version stamp is written at publication and
+does move it; a place review's effective category is applied only to the release, so
+a category override does not move it. The `Differs at:` paths of a refusal explain it
+and never decide it (an empty list can mean a change to the title, path, description,
+cover image or display date).
 Pull before creating a new JSON source. Once a new page is declared with a
 file, title or path but has no server page ID, save it with `pages push` before
 pulling again, or back up both the source and its manifest entry and move them
@@ -458,7 +492,8 @@ A `.pm.json` page's title, path, description and author live in the workspace
 manifest rather than the file. `pages meta set <path> --title <text>
 --description <text>` changes the title or description there (a Markdown page
 keeps them in its front matter; `--author` is described under *Page authors*); `pull` keeps that edit until `pages push`
-sends it, and a site edit to the same page is a `pages.pull_conflict`. A
+sends it, and a site edit to the same page conflicts only while that edit is unpushed
+(`pages.pull_conflict`; see the pull rule above). A
 description over 160 characters is a warning (`descriptionWarnings`), because
 search results cut it off; over 1000 is refused with
 `pages.description_too_long`, by the CLI and by Taproot.
@@ -792,16 +827,21 @@ candidate and `deploy --production` promotes that completed staging
 deployment. `status` reports the platform authoring switch, the CLI release,
 deployments, readiness, image processing, and site health under Content
 permission. `siteHealth` reads the last successful production deployment's stored
-report. It includes the deployment and output identities, input hash, checked time,
+report, and `stagedSiteHealth` summarizes the staged release's (its status, counts,
+deployment and check time, or `available: false` with the reason, or `covered: false`
+on a managed Docs site); `health` has the findings and their fixes. `siteHealth`
+includes the deployment and output identities, input hash, checked time,
 rule version, coverage, assessed page count and status. Unpublished edits are
 outside that report. Page findings identify the rule, severity, page and value;
 image findings group each missing default description with its affected pages.
 Known reports include `covered: true`, `errors`, `warnings`, `pages` and `findings`.
 Only a complete report with zero findings establishes that the assessed candidate
 has no warnings. Missing, unsupported and incomplete assessments are explicit.
-Output is bounded to 100 page findings, with an explicit `findingsTruncated` flag.
+Output is bounded to 100 page findings, with an explicit `findingsTruncated` flag, and
+image findings are bounded by size with `imageFindingsTruncated`.
 Preview URLs appear only in normal output and are omitted from GitHub output.
-A denied, malformed or failed read fails `status` instead of implying a clean site.
+A denied, malformed or failed production read fails `status` instead of implying a clean site;
+a failed staged read is reported as unavailable.
 
 ## Output contract
 
@@ -1113,6 +1153,66 @@ create a brand by itself. Saved choices survive other header modes; their URLs
 are read-only server projections. Preview light/dark and desktop/390-wide, then
 stage and deploy the settings for the published site. `help appearance` and
 `help settings` describe both files.
+
+### Site Health from the CLI in 0.37.0
+
+Site Health is compiled when a release is generated, so it can only be read
+after `deploy --staging`. `taproot-site health --staging` (or `--production`)
+reads the report the release stored and never recomputes it; drafts and
+approvals made since are outside it (`unpublishedChangesAssessed: false`). It
+exits 0 whenever it reads the report, whatever the findings.
+
+- `findings` are page findings: `rule`, `severity`, `path`, `title`, `file` (the
+  workspace source, when the workspace tracks the page), `subject`, `detail` and
+  a `fix` for the rule. `imageFindings` are one for each image with no default
+  description: `imageId`, `name`, up to ten `affectedPages` (with
+  `affectedPageCount` for the total), and a `fix`.
+- An image `fix` is the exact command, with the description revision read from
+  the site and the alt text the workspace's own pages place:
+  `taproot-site media images describe <id> --description='<alt>' --expected-revision <n> --if-missing`.
+  The text is single-quoted for a POSIX shell. When no placement gives a usable
+  description (none, over 1000 characters, or with control characters), the
+  finding says `needsDescription: true` and its `fix` is a sentence; write the
+  description yourself. An image the site has since described says
+  `currentlyDescribed: true`, and one the site no longer has says
+  `imageAvailable: false`.
+- With `--staging`, each finding says `newSinceProduction`, and `comparison`
+  says whether production had a complete, untruncated report to compare with.
+  Without one, every finding is listed as not compared.
+- Findings are bounded by size (`findingsTotal`, `imageFindingsTotal`,
+  `findingsTruncated`, `imageFindingsTruncated`). A site with no stored report
+  returns `available: false` with the reason. A managed Docs site returns
+  `covered: false`.
+
+The same image check runs before staging, from what the workspace places.
+`validate --site` (run from the workspace; it needs a sign-in, so it is no longer
+offline) and `pages push`, with or without `--dry-run`, read the site's records of
+the images the pages place, in one read, and report each one with no default
+description with the same `fix`. `validate --site` adds `imageFindings` and
+`notInSiteLibrary` (each `total`, `items`, `truncated`) and sets `offline: false`;
+`pages push` adds `siteHealthPrecheck` with `status` (`checked`, `partial` or
+`not_checked`), `checkedPages`, `imageFindings`, `notInSiteLibrary`, `skipped`
+and, when the read did not complete, a `reason` code. A warning never refuses, a
+failed read never fails the push, and `apply` makes no check. The check misses images
+an integration places and a video poster a push copies; the stored report after
+staging covers them.
+
+`pages push --describe-missing-images` (also with `--dry-run`, which writes nothing)
+goes one step further for the images in that check: after the pages are saved it sets
+each image's missing default description from the one alt text its selected placements
+agree on, with the revision the read returned and a condition that it never overwrites a
+description. Only custom or unset placements count, so a stale inherited alt never
+restores a default, and alts differing only by surrounding whitespace are one text. The
+result gains `describedImages`, present only with the flag: `set` and `skipped`, each
+`{ total, items, truncated }` (a set item is `{ imageId, description }`, a skipped one
+`{ imageId, reason }`), and `reason` (the read's code) when the image read did not
+complete. The skip reasons are `alts_disagree`, `no_alt`, `unusable_alt`,
+`revision_moved`, `invalid_description`, `write_failed`, `write_unknown` (the write may
+have committed), `write_denied`, `not_read` and `already_described`. A rejected credential,
+an outdated CLI or a paused platform fails the command after the pages were saved, with
+`completedWrites` naming what was written; throttling or a denied write stops further
+writes and exits 0. After images are set, `nextStep` is `approve` while any selected page
+holds a draft, and `deploy --staging` otherwise.
 
 ### Attributed quotes in 0.36.2
 

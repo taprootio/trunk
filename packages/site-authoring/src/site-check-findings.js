@@ -2,7 +2,7 @@ import { sanitizeDiagnostic } from "./errors.js";
 import { boundedByBytes } from "./session.js";
 import rules from "./site-check-rules.json" with { type: "json" };
 import { isFormKey } from "./forms-contract.js";
-import { DESCRIPTION_MINIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, localAuthoringMetadata, METADATA_RULE_IDS, pageStructureFindings, TITLE_MINIMUM_LENGTH, TITLE_WARN_LENGTH } from "./page-structure-checks.js";
+import { DESCRIPTION_MINIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, localAuthoringMetadata, METADATA_RULE_IDS, pageStructureFindings, RULE_IMAGE_DEFAULT_MISSING, TITLE_MINIMUM_LENGTH, TITLE_WARN_LENGTH } from "./page-structure-checks.js";
 import { missingPageLinkFindings, normalizedPathSet } from "./site-checks.js";
 import { documentTemplate, TEMPLATE_FREE_FORM, TEMPLATE_GENERATED } from "./typed-pages.js";
 import { displayPagePath } from "./workspace.js";
@@ -15,6 +15,25 @@ import { displayPagePath } from "./workspace.js";
  * words below are this surface's own.
  */
 export const SITE_CHECK_RULES = Object.freeze(rules.rules);
+
+/** Why `validate` did not run the image description rule, which needs the site's image records (TR01371). */
+export const IMAGE_CHECK_NOT_REQUESTED = "not_requested";
+export const IMAGE_CHECK_DIRECTORY_ARGUMENT = "directory_argument";
+export const IMAGE_CHECK_DOCS_SITE = "docs_site";
+export const IMAGE_CHECK_READ_FAILED = "read_failed";
+export const IMAGE_CHECK_READ_PARTLY_FAILED = "read_partly_failed";
+
+/** The reason an image check was skipped, with the message the codes that have a remedy carry. */
+export function imageCheckSkipped(code) {
+  const messages = {
+    [IMAGE_CHECK_NOT_REQUESTED]:
+      "Image descriptions need the site's image records. Run 'taproot-site validate --site' or 'taproot-site pages push --dry-run' to check them.",
+    [IMAGE_CHECK_DIRECTORY_ARGUMENT]:
+      "Image descriptions need the site's image records. Run 'taproot-site validate --site' from the workspace, or 'taproot-site pages push --dry-run'.",
+    [IMAGE_CHECK_DOCS_SITE]: "This is a managed Docs site, so the rule does not apply.",
+  };
+  return { ran: false, code, ...(messages[code] === undefined ? {} : { message: messages[code] }) };
+}
 
 /** The CLI's sentence for each rule, keyed by rule id. A rule without an entry falls back to its id. */
 export const SITE_CHECK_WORDING = Object.freeze({
@@ -66,6 +85,41 @@ export const SITE_CHECK_WORDING = Object.freeze({
       : "has no cover image and no images, so link previews show no picture",
 });
 
+/**
+ * What to do about each rule the stored Site Health report can raise (TR01363). The report belongs to a release,
+ * so a page fix reaches it only after the page is pushed, approved and staged again.
+ */
+export const AFTER_PAGE_FIX =
+  "then, for a page edit, run taproot-site pages push and taproot-site approve, and run taproot-site deploy --staging to refresh the report";
+export const SITE_CHECK_REMEDIES = Object.freeze({
+  "link.page_missing": `Change the link to a page this site has, or create that page, ${AFTER_PAGE_FIX}.`,
+  "image.missing": `Remove the image from the page or replace it with one from the site's library, ${AFTER_PAGE_FIX}.`,
+  // Built for each image, because the command carries the image's own revision and text.
+  "a11y.image_default_missing": "Use the fix on the image finding, which names the exact command for that image.",
+  "form.none_chosen": `Choose a form in the Form block, or remove the block, ${AFTER_PAGE_FIX}.`,
+  "form.unreadable": `Place the form by its key (forms pull lists the site's forms), ${AFTER_PAGE_FIX}.`,
+  "form.missing": `Place a form the site has: run forms push if its file is new, or correct the key, ${AFTER_PAGE_FIX}.`,
+  "form.archived": `Place a form that is not archived, or restore this one in the app, ${AFTER_PAGE_FIX}.`,
+  "form.not_supported_on_site_type": `Remove the Form block, because forms are available on standard sites only, ${AFTER_PAGE_FIX}.`,
+  "seo.title_missing": `Give the page a title (front matter title:, or pages meta set), ${AFTER_PAGE_FIX}.`,
+  "seo.title_short": `Write a more specific title of ${TITLE_MINIMUM_LENGTH}–${TITLE_WARN_LENGTH} characters, ${AFTER_PAGE_FIX}.`,
+  "seo.title_long": `Shorten the title to ${TITLE_MINIMUM_LENGTH}–${TITLE_WARN_LENGTH} characters, ${AFTER_PAGE_FIX}.`,
+  "seo.description_missing": `Add a short description of what the page offers, ${AFTER_PAGE_FIX}.`,
+  "seo.description_short": `Add useful detail so the description runs ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH} characters, ${AFTER_PAGE_FIX}.`,
+  "seo.description_long": `Shorten the description to ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH} characters, ${AFTER_PAGE_FIX}.`,
+  "seo.description_matches_title": `Rewrite the description to say what readers will find, not repeat the title, ${AFTER_PAGE_FIX}.`,
+});
+
+/** An unknown rule id, cleaned and cut so every sentence that names it stays well inside the printed limit. */
+const displayRuleId = (ruleId) => [...sanitizeDiagnostic(ruleId, "unknown")].slice(0, 200).join("");
+
+/** The remedy for a rule, or one sentence naming the rule when this release has none for it. */
+export function remedyForRule(ruleId) {
+  return Object.hasOwn(SITE_CHECK_REMEDIES, ruleId)
+    ? SITE_CHECK_REMEDIES[ruleId]
+    : `The report flagged the rule '${displayRuleId(ruleId)}', which this release has no remedy for; read its detail on the app's Site Health page.`;
+}
+
 /** What a finding's `detail` names as the element that already claims the page's h1. */
 const H1_CLAIMANT = Object.freeze({
   heading: "the first level 1 heading",
@@ -75,12 +129,12 @@ const H1_CLAIMANT = Object.freeze({
 
 /** The sentence for a finding, falling back to the rule id for a rule this release has no words for. */
 export function describeSiteFinding(finding) {
-  const words = SITE_CHECK_WORDING[finding.ruleId];
-  return words === undefined ? `was flagged by the site check '${finding.ruleId}'` : words(finding);
+  const words = Object.hasOwn(SITE_CHECK_WORDING, finding.ruleId) ? SITE_CHECK_WORDING[finding.ruleId] : undefined;
+  return words === undefined ? `was flagged by the site check '${displayRuleId(finding.ruleId)}'` : words(finding);
 }
 
 // Progress names this many; the JSON list is bounded by bytes instead.
-const MAXIMUM_PROGRESS_LINES = 20;
+export const MAXIMUM_PROGRESS_LINES = 20;
 
 const rulesRunningAt = (point) => SITE_CHECK_RULES.filter((rule) => rule.runsAt.includes(point)).map((rule) => rule.id);
 
@@ -119,6 +173,8 @@ export function evaluateOfflineSiteChecks({
   pagePaths,
   pagesComplete = true,
   formKeysChecked = true,
+  // Whether `validate --site` ran the image description rule (TR01371), or why it did not.
+  imageCheck = imageCheckSkipped(IMAGE_CHECK_NOT_REQUESTED),
   onProgress = () => {},
 }) {
   const known = normalizedPathSet([...pagePaths, ...(planned ?? []).map((page) => page.pagePath)]);
@@ -184,10 +240,20 @@ export function evaluateOfflineSiteChecks({
         !rule.runsAt.includes("validate") && !rule.runsAt.includes("health") && !rule.runsAt.includes("deploy")
         && rule.runsAt.includes("edit")
       ).map((rule) => rule.id),
-      // A rule that had nothing to read: a truncated page manifest, or a workspace with no form files.
-      ...(pagesComplete && formKeysChecked
+      // A rule that had nothing to read: a truncated page manifest, no site read for the images, or a workspace
+      // with no form files. In catalogue order.
+      ...(pagesComplete && formKeysChecked && imageCheck.ran
         ? {}
-        : { skipped: [...(pagesComplete ? [] : ["link.page_missing"]), ...(formKeysChecked ? [] : ["form.key_unknown"])] }),
+        : {
+          skipped: [
+            ...(pagesComplete ? [] : ["link.page_missing"]),
+            ...(imageCheck.ran ? [] : [RULE_IMAGE_DEFAULT_MISSING]),
+            ...(formKeysChecked ? [] : ["form.key_unknown"]),
+          ],
+        }),
+      ...(imageCheck.ran
+        ? {}
+        : { imageCheckReason: { code: imageCheck.code, ...(imageCheck.message === undefined ? {} : { message: imageCheck.message }) } }),
     },
   };
 }

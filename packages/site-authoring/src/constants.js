@@ -111,6 +111,7 @@ export const VERB_PREVIEW_REVOKE = "preview revoke";
 export const VERB_STATUS = "status";
 export const VERB_DELIVERY_CHECK = "delivery check";
 export const VERB_STAGING_REVIEW = "staging review";
+export const VERB_HEALTH = "health";
 export const VERB_SITES = "sites";
 export const VERB_USE = "use";
 export const VERB_WHOAMI = "whoami";

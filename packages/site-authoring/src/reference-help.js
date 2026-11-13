@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 57;
+export const REFERENCE_VERSION = 58;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -540,8 +540,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "the -300x200 thumbnail WordPress also stores), then run 'media upload' once for the whole media/ directory (at most 500 "
       + "files a run). It records every file in .taproot-site-media.json and reports counts and a bounded item list; "
       + "a run that stopped partway is safe to repeat, because identical files deduplicate.",
-      "Check before sending. 'validate' (no credential, no request) checks every page source, media reference and "
+      "Check before sending. 'validate' (no credential, no request, unless --site) checks every page source, media reference and "
       + "setting in the workspace at once and lists every problem in error.problems with its file, code and field. "
+      + "'validate --site' also reads the site's image records and reports each placed image with no default description "
+      + "in imageFindings, with the 'media images describe' command to fix it. "
       + "'pages push --dry-run' then checks the pages against the live site — paths taken, templates, revisions, "
       + "videos — and sends nothing. 'plan' checks the whole workspace against the site and orders what is left "
       + "(media, pages, footer, theme, navigation); 'apply --plan <planHash>' runs exactly that plan.",
@@ -617,7 +619,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "release. --version prints what is running; status reports the latest known release as cliRelease.",
       `Select the site: ${CLI_BINARY_NAME} login, then ${CLI_BINARY_NAME} sites and ${CLI_BINARY_NAME} use <site-name-or-id>. `
       + "sites reports each site's kind and authoring surface. A standard site takes every verb. A managed Docs site "
-      + "takes presentation only — pull, theme push, footer push, media upload, deploy, status — because its pages, "
+      + "takes presentation only — pull, theme push, footer push, media upload, deploy, status, and health, which "
+      + "returns covered: false there — because its pages, "
       + "navigation and redirects come from the Docs artifact; a prebuilt Docs site takes no verb at all.",
       `Pull the baseline: ${CLI_BINARY_NAME} pull writes settings/taproot-styles.json with both schemes' complete effective `
       + "themes (the stored theme resolved over the same defaults every consumer renders) beside brand.json, "
@@ -646,7 +649,8 @@ const WORKFLOW_REFERENCES = Object.freeze({
       `Validate offline: ${CLI_BINARY_NAME} validate checks the whole workspace at once — the complete pair, the `
       + "appearance files, the footer, every page, navigation and redirects — against the contracts the site enforces, "
       + "lists every problem in error.problems, and warns when a semanticMappings pin repeats the default on a token "
-      + "your roles would have moved (the pin would keep the role from rendering).",
+      + "your roles would have moved (the pin would keep the role from rendering). validate stays offline unless you add "
+      + "--site, which also reads the site's image records to report placed images that have no default description.",
       `Plan a combined change: when pages, the footer, the theme and navigation all changed, ${CLI_BINARY_NAME} plan `
       + "checks them against the live site and lists the steps in the order they must run, each ready, blocked or "
       + `nothing to do; ${CLI_BINARY_NAME} apply --plan <planHash> runs them through the ordinary push verbs and refuses `
@@ -666,7 +670,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "favicon. When a requested handoff could not be minted, stagingPreview.reason says why and staging review mints "
       + "another (add --path <page> to open it on the page under review). The review session lasts five minutes: "
       + "see 'help preview' for what ends it. A page draft is "
-      + "not needed to review a presentation change; preview page renders one persisted draft and is a different tool.",
+      + "not needed to review a presentation change; preview page renders one persisted draft and is a different tool. "
+      + `On a standard site ${CLI_BINARY_NAME} health --staging then reads the staged release's stored Site Health report: `
+      + "every finding with its workspace file and a fix, the ones new since production marked newSinceProduction. deploy "
+      + "--staging returns the same report as siteHealth. A fix reaches the report only after another deploy --staging.",
       `Promote only after review: ${CLI_BINARY_NAME} deploy --production promotes the completed staging deployment. `
       + "Never use production to discover what staging should have shown.",
     ]),
@@ -1058,7 +1065,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
     summary: "Read and change site-owned image defaults by ID, or upload workspace-root-relative raster files and videos.",
     usage: `${CLI_BINARY_NAME} media images list|get|describe | media upload [path...]`,
     details: Object.freeze([
-      "media images list returns one page in images.items and images.nextPageToken; pass --page-size 1–100 (default 25) and --page-token with that exact cursor for the next page. --missing-description is a server-side filter for a null image-owned default, independent of placement alt text, captions or decorative mode. No per-result reads or page-body scans run. The authoritative default-completeness findings are in the frozen deployment report that status reads; local validate does not infer them from placement strings.",
+      "media images list returns one page in images.items and images.nextPageToken; pass --page-size 1–100 (default 25) and --page-token with that exact cursor for the next page. --missing-description is a server-side filter for a null image-owned default, independent of placement alt text, captions or decorative mode. No per-result reads or page-body scans run. The authoritative default-completeness findings are in the stored deployment report that health --staging reads after staging. Before staging, validate --site and pages push report the images the workspace places whose default is missing (imageFindings, with the exact media images describe command), reading the site's image records; without --describe-missing-images they never infer a default from placement strings, and a placement's alt text only suggests the text for that command. pages push --describe-missing-images (also with --dry-run) is the one push path that fills a missing default: it sets each such image's default from the one alt text its selected custom or unset placements agree on, never over an existing description, and reports describedImages (set and skipped, each with its total, and the skip reason of every image it left).",
       "media images get <image-id> reads one library image in the selected site. Both reads expose imageId, uploadedName, defaultDescription (null when missing), descriptionRevision as a decimal string, width, height, processingState, previewUrl and responsivePreviewUrls. Preview URLs are for inspection, may expire, and are omitted from GITHUB_OUTPUT. They are not descriptions and these verbs write no workspace file.",
       "media images describe <image-id> --description <text> --expected-revision <n> saves the default; --clear replaces --description to remove it. Supply the exact revision from list/get, including 0. --if-missing is an atomic server condition, requires nonblank text, and refuses an existing default. Conflicts report media.image_description_conflict or media.image_description_exists with exit 1; read the current image and reconcile, never retry by overwriting it blindly. Input/option errors use exit 2.",
       "The server owns the 1000-Unicode-scalar limit: outer whitespace is trimmed, blank text becomes null, and oversized text is rejected without truncation. Descriptions may contain Unicode and newlines. The CLI preserves their text in JSON and never copies preview URLs or resolved defaults into page bodies. Site media management is required for all three verbs; profile/account/installation media are excluded. A default edit affects inherited usages at the next selected deployment; current published and in-flight snapshots keep their frozen text, while contextual overrides and decorative placements keep their choices.",
@@ -1729,9 +1736,15 @@ const FREE_FORM_REFERENCE = Object.freeze({
         + "written. Rename or remove it, then pull again.",
       renamedSourceError: "pages.source_conflict",
       conflict:
-        "Markdown is one-way, so a page edited on the site since the last pull cannot be rewritten as Markdown. pull "
-        + "refuses before changing anything under pages/ and preserves the site's version as internal state. A "
-        + "locally edited .pm.json is kept rather than overwritten, and only collides when the site changed too.",
+        "Markdown is one-way, so a tracked Markdown page whose site state moved since the last pull cannot be "
+        + "rewritten as Markdown: pull refuses before changing anything under pages/ and preserves the site's version "
+        + "as internal state. The site moved when the page's stored-state revision moved, or its display date moved for "
+        + "a page type that has one. A .pm.json page is refreshed when the site moved, and conflicts only when it also "
+        + "has unpushed local edits (its body, or its title, path, description or author in the manifest). The revision "
+        + "covers the stored body, title, path, short description and cover image. For an authored page (Markdown or "
+        + "ProseMirror) approve, staging and production publication never move it; a legal page's version stamp is "
+        + "written at publication and does move it; a place review's effective category is applied only to the "
+        + "release, so a category override does not move it.",
       conflictError: "pages.pull_conflict",
       metadata:
         "A .pm.json page's title, path and description live in the manifest, not the file. Change the title or "
@@ -1762,8 +1775,9 @@ const FREE_FORM_REFERENCE = Object.freeze({
         "A reported conflict names the JSON paths at which the site's document differs from the copy this workspace "
         + "last reconciled with, in error.differences, which carries three states. Absent: the two documents were "
         + "never compared, because this workspace kept no copy of the site's previous version. Empty: they were "
-        + "compared and the body is identical, so the change was to the page's title, path, or description. "
-        + "Non-empty: the JSON paths at which the body differs.",
+        + "compared and the body is identical, so the change was to the page's title, path, description, cover image "
+        + "or display date, none of which is part of the body. Non-empty: the JSON paths at which the body differs. "
+        + "These paths explain a refusal; they never decide whether it happens.",
       pushConflict:
         "pages push fails closed on a concurrent remote edit: the site reports each page's stored-state revision, the "
         + "workspace records the revision of what it last wrote or pulled, and a push whose target now carries a "
@@ -1778,7 +1792,9 @@ const FREE_FORM_REFERENCE = Object.freeze({
         + "update responses. It is opaque: compare it, never derive or parse it.",
       conflictRecovery:
         "Either push the local source to make the site match it, or delete the local source and pull again to adopt "
-        + "the site's document as that page's source.",
+        + "the site's document as that page's source. A page whose conflict names no body difference (an empty "
+        + "differences list) changed only its title, path, description, cover image or display date, so the "
+        + "same two choices apply.",
       pushSelection:
         "pages push <path> validates the selected page exactly as a whole push would, including every cross-page "
         + "guard that can affect it. It does not convert or validate pages it is not sending; pages push with no "
@@ -1971,7 +1987,11 @@ const FREE_FORM_REFERENCE = Object.freeze({
     }),
     Object.freeze({
       command: `${CLI_BINARY_NAME} deploy --staging`,
-      result: "Deploy the staged build to the staging site.",
+      result: "Deploy the staged build to the staging site; the result's siteHealth reports its stored Site Health warnings.",
+    }),
+    Object.freeze({
+      command: `${CLI_BINARY_NAME} health --staging`,
+      result: "Read the staged release's Site Health findings with a fix for each, and fix every new one (stage again to refresh the report).",
     }),
     Object.freeze({
       command: `${CLI_BINARY_NAME} deploy --production`,

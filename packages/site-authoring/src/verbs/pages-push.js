@@ -1,4 +1,14 @@
 import {
+  completedWritesForDescribe,
+  describedImagesBlock,
+  describeMissingImages,
+  evaluateImagePrecheck,
+  fitPrecheckToBudget,
+  placedImageIdsForPages,
+  planImageDescriptions,
+  readImageRecords,
+} from "../site-health-precheck.js";
+import {
   createPage,
   getPage,
   PAGE_STATUS_DRAFT,
@@ -28,7 +38,7 @@ import { placedFormKeys, readFormIndex, withFormIds } from "../form-references.j
 import { workspaceFormKeys } from "../forms-workspace.js";
 import { ApiError } from "../transport.js";
 import { waitForProcessing } from "./media-upload.js";
-import { SiteAuthoringError } from "../errors.js";
+import { outcomeUnknown, SiteAuthoringError } from "../errors.js";
 import { DESCRIPTION_MAXIMUM_LENGTH, DESCRIPTION_WARN_LENGTH, descriptionWarnings } from "../page-metadata.js";
 import { stableJson } from "../footer-draft-hash.js";
 import { CHECK_AREA, collectProblems, planStale, problemsOf, refuseProblems } from "../problems.js";
@@ -145,20 +155,7 @@ import {
 // of any length.
 const ITEMS_BYTES = 32 * 1024;
 const LIST_BYTES = 8 * 1024;
-// A send that ended this way may still have written the page.
-const OUTCOME_UNKNOWN_CODES = new Set([
-  "transport.mutation_ambiguous",
-  "transport.response_read",
-  "transport.response_too_large",
-  "transport.invalid_json",
-  "api.page_contract",
-]);
-
-export function outcomeUnknown(error) {
-  // A cancelled retry of a write, and a server error on a write the transport
-  // does not replay, leave the same question open.
-  return OUTCOME_UNKNOWN_CODES.has(error.code) || error.ambiguousMutation === true || error.httpStatus >= 500;
-}
+export { outcomeUnknown } from "../errors.js";
 
 /** The creates this workspace sent without hearing back, by page path. */
 function pendingCreates(manifest) {
@@ -1603,6 +1600,59 @@ export function plannedPageItem(page) {
   return { file: page.file, path: displayPagePath(page.pagePath), action: page.unchanged ? "unchanged" : page.action };
 }
 
+/**
+ * The pre-staging image check (TR01371): one read of the site's records for every image the selected pages place,
+ * taken once after the push's problems are refused and before anything is written. A failed read never fails the
+ * push. `apply` already holds the plan, so it carries no check.
+ */
+async function startImagePrecheck(invocation, client, siteId, planned) {
+  if (invocation.plannedPages !== undefined) return undefined;
+  const pages = placedImageIdsForPages(planned);
+  return { pages, state: await readImageRecords(client, siteId, pages.flatMap((page) => page.imageIds)) };
+}
+
+/**
+ * The flagged push's report of what it would set (a dry run) or did set, with the skip reason of every other
+ * candidate, plus the warning that a failed read left images unchecked. Absent without the flag, and under apply.
+ */
+function describedImagesFor(precheck, plan, outcome, onProgress) {
+  if (outcome === undefined) {
+    outcome = {
+      set: plan.filter((item) => item.description !== undefined).map((item) => ({ imageId: item.imageId, description: item.description })),
+      skipped: plan.filter((item) => item.description === undefined).map((item) => ({ imageId: item.imageId, reason: item.reason })),
+    };
+  }
+  const unread = outcome.skipped.filter((item) => item.reason === "not_read").length;
+  if (precheck.state.reason !== undefined) {
+    onProgress(
+      `Warning: --describe-missing-images could not read every image record (${precheck.state.reason.code}); `
+        + `${unread} image(s) were skipped as not_read.`,
+    );
+  }
+  return describedImagesBlock(outcome, precheck.state);
+}
+
+/**
+ * Adds `siteHealthPrecheck` to the result, built from the records as they are now (so a later step that updates
+ * them in place is reflected), printing its progress lines, and fitted to the output bound.
+ */
+export function withImagePrecheck(result, precheck, onProgress) {
+  if (precheck === undefined) return result;
+  const block = evaluateImagePrecheck(precheck.state, precheck.pages, onProgress);
+  // A block the result already carries (the describe flag's `describedImages`) shrinks with the new one, after it.
+  const { describedImages, ...base } = result;
+  const blocks = { siteHealthPrecheck: block, ...(describedImages === undefined ? {} : { describedImages }) };
+  return {
+    ...base,
+    ...fitPrecheckToBudget(base, blocks, [
+      "siteHealthPrecheck.notInSiteLibrary",
+      "siteHealthPrecheck.imageFindings",
+      "describedImages.set",
+      "describedImages.skipped",
+    ]),
+  };
+}
+
 export async function pagesPush(invocation) {
   const session = await openSession(invocation);
   const { client, config, siteId, now, onProgress } = session;
@@ -1725,8 +1775,12 @@ export async function pagesPush(invocation) {
     const warnings = { ...autolinkWarnings(sending, onProgress), ...descriptionWarnings(sending, onProgress) };
     if (dryRun) {
       refuseProblems(plan.problems, "pages push --dry-run found problems and sent nothing");
+      const precheck = await startImagePrecheck(invocation, client, siteId, planned);
+      const describedImages = invocation.describeMissingImages === true && precheck !== undefined
+        ? describedImagesFor(precheck, planImageDescriptions(precheck.state, precheck.pages), undefined, onProgress)
+        : undefined;
       onProgress("Dry run: nothing was sent.");
-      return successResult(VERB_PAGES_PUSH, siteId, {
+      return withImagePrecheck(successResult(VERB_PAGES_PUSH, siteId, {
         dryRun: true,
         pages: {
           total: planned.length,
@@ -1739,9 +1793,13 @@ export async function pagesPush(invocation) {
           ...reportedList("items", planned.map(plannedPageItem), ITEMS_BYTES),
         },
         ...warnings,
-      });
+        ...(describedImages === undefined ? {} : { describedImages }),
+      }), precheck, onProgress);
     }
     refuseProblems(plan.problems, "pages push sent nothing");
+    // Before the video posters are copied, so a poster this push places is outside the check; the stored report
+    // after staging covers it.
+    const precheck = await startImagePrecheck(invocation, client, siteId, planned);
     await copyVideoEmbedPosters(client, siteId, planned, { onProgress, now });
 
     // Phase two: send. The manifest is written back even if a later page fails,
@@ -1899,6 +1957,35 @@ export async function pagesPush(invocation) {
       if (manifestDirty) await writeManifest(config.workspaceDir, manifest);
     }
 
+    // The flag sets missing image defaults only now, after the pages are saved, so a refused push sets nothing. A
+    // failure here fails the command, and the pages saved above stay saved.
+    let describedImages;
+    if (invocation.describeMissingImages === true && precheck !== undefined) {
+      const plan = planImageDescriptions(precheck.state, precheck.pages);
+      let outcome;
+      try {
+        outcome = await describeMissingImages({ client, siteId, state: precheck.state, plan });
+      } catch (error) {
+        if (error?.describeOutcome !== undefined && typeof error.withCompletedWrites === "function") {
+          error.withCompletedWrites(completedWritesForDescribe({
+            outcome: error.describeOutcome,
+            savedPages: applied.map((entry) => `page ${entry.path || "/"}: ${entry.action}`),
+          }));
+        }
+        throw error;
+      }
+      describedImages = describedImagesFor(precheck, plan, outcome, onProgress);
+      if (outcome.set.length > 0) {
+        onProgress(`Set the default description of ${outcome.set.length} image(s). Deploy to update published usages.`);
+      }
+    }
+    // With nothing set the next step is what it always was. After images were set, a page still holding a draft
+    // (sent now, or sent earlier and not approved) is approved first: deploying would stage the older approved content.
+    const imagesSet = describedImages !== undefined && describedImages.set.total > 0;
+    const awaitingApproval = applied.length > 0 || (imagesSet && planned.some((page) =>
+      page.unchanged && livePages.find((live) => live.pageId === page.pageId)?.hasDraft === true));
+    const nextStep = awaitingApproval ? "approve" : imagesSet ? "deploy --staging" : undefined;
+
     // Pages are authorless unless a source names an author, and an owner
     // otherwise finds the missing byline only after publishing (TR01196).
     const authorless = applied.filter((entry) => entry.action === "created" && entry.author === undefined);
@@ -1909,7 +1996,7 @@ export async function pagesPush(invocation) {
           + "<handle or email>', then push again; 'taproot-site authors list' shows who can be named.",
       );
     }
-    return successResult(VERB_PAGES_PUSH, siteId, {
+    return withImagePrecheck(successResult(VERB_PAGES_PUSH, siteId, {
       pages: {
         total: planned.length,
         unchanged: planned.filter((page) => page.unchanged).length,
@@ -1935,7 +2022,8 @@ export async function pagesPush(invocation) {
       // `pages push` writes drafts. Nothing reaches an audience until `approve`
       // stages them and `deploy` publishes the site.
       // Nothing to approve when every page was unchanged and nothing was sent.
-      ...(applied.length > 0 ? { nextStep: "approve" } : {}),
-    });
+      ...(nextStep === undefined ? {} : { nextStep }),
+      ...(describedImages === undefined ? {} : { describedImages }),
+    }), precheck, onProgress);
   });
 }

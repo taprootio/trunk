@@ -1,0 +1,2870 @@
+[
+  {
+    "name": "article: a body image",
+    "templateType": "article",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph"
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph"
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "place": null
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "article: an uppercase id comes back lowercase",
+    "templateType": "article",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "place": null
+    },
+    "ids": [
+      "abcdefab-cdef-4abc-8def-abcdefabcdef"
+    ]
+  },
+  {
+    "name": "article: repeated and unsorted ids are sorted and de-duplicated",
+    "templateType": "article",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "22222222-2222-4222-8222-222222222222",
+              "alt": "A photo"
+            }
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "22222222-2222-4222-8222-222222222222",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "22222222-2222-4222-8222-222222222222",
+              "alt": "A photo"
+            }
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "22222222-2222-4222-8222-222222222222",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "place": null
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]
+  },
+  {
+    "name": "album: the album images and an introduction image",
+    "templateType": "album",
+    "wire": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "33333333-3333-4333-8333-333333333333",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "images": [
+        {
+          "imageId": "11111111-1111-4111-8111-111111111111",
+          "caption": "A photo",
+          "height": 600,
+          "width": 800
+        },
+        {
+          "imageId": "22222222-2222-4222-8222-222222222222",
+          "caption": "A photo",
+          "height": 600,
+          "width": 800
+        }
+      ]
+    },
+    "stored": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "33333333-3333-4333-8333-333333333333",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "seamless": null,
+      "borderWidth": null,
+      "images": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "caption": "A photo",
+          "height": 600,
+          "width": 800,
+          "urls": [],
+          "altText": null,
+          "descriptionMode": null,
+          "defaultDescription": null,
+          "descriptionRevision": 0
+        },
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "caption": "A photo",
+          "height": 600,
+          "width": 800,
+          "urls": [],
+          "altText": null,
+          "descriptionMode": null,
+          "defaultDescription": null,
+          "descriptionRevision": 0
+        }
+      ],
+      "place": null
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333"
+    ]
+  },
+  {
+    "name": "album: an album with no images",
+    "templateType": "album",
+    "wire": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "33333333-3333-4333-8333-333333333333",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "33333333-3333-4333-8333-333333333333",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "seamless": null,
+      "borderWidth": null,
+      "images": [],
+      "place": null
+    },
+    "ids": [
+      "33333333-3333-4333-8333-333333333333"
+    ]
+  },
+  {
+    "name": "recipe: introduction and step bodies",
+    "templateType": "recipe",
+    "wire": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "instructionSections": [
+        {
+          "name": "Method",
+          "stepBodies": [
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph"
+                }
+              ]
+            },
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "33333333-3333-4333-8333-333333333333",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "servings": 4
+    },
+    "stored": {
+      "IntroductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "IngredientGroups": [],
+      "InstructionSections": [
+        {
+          "Name": "Method",
+          "StepBodies": [
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph"
+                }
+              ]
+            },
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "33333333-3333-4333-8333-333333333333",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "PrepTimeMinutes": 0,
+      "CookTimeMinutes": 0,
+      "Servings": 4,
+      "RecipeCategory": "",
+      "RecipeCuisine": "",
+      "CookingMethod": ""
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333"
+    ]
+  },
+  {
+    "name": "place review: a body image",
+    "templateType": "place-review",
+    "wire": {
+      "placeId": "place-1",
+      "rating": "PLACE_REVIEW_RATING_WILL_RETURN",
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "placeName": "Happy Crab"
+    },
+    "stored": {
+      "PlaceId": "place-1",
+      "Rating": 3,
+      "Body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "PlaceName": "Happy Crab",
+      "PlaceCategory": "",
+      "PlaceAddress": "",
+      "PlaceCity": "",
+      "PlaceRegion": "",
+      "PlaceRegionCode": "",
+      "PlaceCountry": "",
+      "PlaceCountryCode": "",
+      "PlacePostalCode": "",
+      "PlaceLatitude": 0,
+      "PlaceLongitude": 0
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "legal: a body image",
+    "templateType": "legal",
+    "wire": {
+      "documentKey": "privacy",
+      "effectiveDate": "2026-01-01T00:00:00Z",
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "documentRole": "privacy_notice"
+    },
+    "stored": {
+      "documentKey": "privacy",
+      "version": "",
+      "effectiveDate": "2026-01-01T00:00:00Z",
+      "summaryOfChanges": "",
+      "supersedesVersion": "",
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "material": false,
+      "documentRole": "privacy_notice"
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "generated: an introduction image",
+    "templateType": "generated",
+    "wire": {
+      "kind": "GENERATED_PAGE_KIND_FOLDER_INDEX",
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "Kind": 11,
+      "IntroductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "CustomTitle": "",
+      "BreadcrumbTitle": "",
+      "SourceContentFingerprint": "",
+      "CustomDescription": "",
+      "GeneratedTitle": "",
+      "GeneratedDescription": ""
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "free-form: no images",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph"
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph"
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "section: background, portrait and decoration images",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "section",
+            "attrs": {
+              "background": {
+                "image": {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                },
+                "portraitImage": {
+                  "imageId": "22222222-2222-4222-8222-222222222222"
+                }
+              },
+              "decoration": {
+                "image": {
+                  "imageId": "33333333-3333-4333-8333-333333333333"
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "section",
+            "attrs": {
+              "background": {
+                "image": {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                },
+                "portraitImage": {
+                  "imageId": "22222222-2222-4222-8222-222222222222"
+                }
+              },
+              "decoration": {
+                "image": {
+                  "imageId": "33333333-3333-4333-8333-333333333333"
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333"
+    ]
+  },
+  {
+    "name": "section: a background that is not an object reads nothing",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "section",
+            "attrs": {
+              "background": "none",
+              "decoration": {
+                "image": "none"
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "section",
+            "attrs": {
+              "background": "none",
+              "decoration": {
+                "image": "none"
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "integration fragment: the ids it declares",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "integrationFragment",
+            "attrs": {
+              "imageIds": [
+                "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222",
+                7,
+                "not-a-guid"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "integrationFragment",
+            "attrs": {
+              "imageIds": [
+                "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222",
+                7,
+                "not-a-guid"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]
+  },
+  {
+    "name": "integration fragment: imageIds that is not an array",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "integrationFragment",
+            "attrs": {
+              "imageIds": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "integrationFragment",
+            "attrs": {
+              "imageIds": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "component: a nested image id in a string",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"backgroundImage\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"backgroundImage\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "component: an image banner with a nested image.imageId",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"title\":\"Banner\",\"image\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\",\"alt\":\"x\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"title\":\"Banner\",\"image\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\",\"alt\":\"x\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "component: component data as an object",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "image": {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "image": {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "component: component data as an array",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": [
+                {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                },
+                {
+                  "image": {
+                    "imageId": "22222222-2222-4222-8222-222222222222"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": [
+                {
+                  "imageId": "11111111-1111-4111-8111-111111111111"
+                },
+                {
+                  "image": {
+                    "imageId": "22222222-2222-4222-8222-222222222222"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]
+  },
+  {
+    "name": "component: imageIds arrays are not read",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageIds\":[\"11111111-1111-4111-8111-111111111111\"],\"gallery\":[{\"imageId\":\"22222222-2222-4222-8222-222222222222\"}]}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageIds\":[\"11111111-1111-4111-8111-111111111111\"],\"gallery\":[{\"imageId\":\"22222222-2222-4222-8222-222222222222\"}]}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "22222222-2222-4222-8222-222222222222"
+    ]
+  },
+  {
+    "name": "component: a non-string imageId is not an id",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":7,\"nested\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":7,\"nested\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "component: component data that is a number",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": 5
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": 5
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "component: malformed component data",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "not json {\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "not json {\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "component: empty component data",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": ""
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": ""
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "encoded: named quote entities",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&quot;title&quot;:&quot;Banner&quot;,&quot;image&quot;:{&quot;imageId&quot;:&quot;11111111-1111-4111-8111-111111111111&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&quot;title&quot;:&quot;Banner&quot;,&quot;image&quot;:{&quot;imageId&quot;:&quot;11111111-1111-4111-8111-111111111111&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: decimal numeric entities",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34;title&#34;:&#34;Banner&#34;,&#34;image&#34;:{&#34;imageId&#34;:&#34;11111111-1111-4111-8111-111111111111&#34;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34;title&#34;:&#34;Banner&#34;,&#34;image&#34;:{&#34;imageId&#34;:&#34;11111111-1111-4111-8111-111111111111&#34;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: hex numeric entities, either case",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#x22;&#X74;itle&#x22;:&#x22;Banner&#x22;,&#x22;image&#x22;:{&#x22;imageId&#x22;:&#x22;11111111-1111-4111-8111-111111111111&#x22;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#x22;&#X74;itle&#x22;:&#x22;Banner&#x22;,&#x22;image&#x22;:{&#x22;imageId&#x22;:&#x22;11111111-1111-4111-8111-111111111111&#x22;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: apos, lt, gt and amp are decoded",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"a &amp;lt;b&amp;gt; &amp;amp; &amp;apos;c&amp;apos;\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"a &amp;lt;b&amp;gt; &amp;amp; &amp;apos;c&amp;apos;\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: an unknown named entity stays text",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"title\":\"a &bogus; b\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"title\":\"a &bogus; b\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: names are case sensitive",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&QUOT;title&QUOT;:&QUOT;Banner&QUOT;,&QUOT;image&QUOT;:{&QUOT;imageId&QUOT;:&QUOT;11111111-1111-4111-8111-111111111111&QUOT;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&QUOT;title&QUOT;:&QUOT;Banner&QUOT;,&QUOT;image&QUOT;:{&QUOT;imageId&QUOT;:&QUOT;11111111-1111-4111-8111-111111111111&QUOT;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "encoded: an invalid numeric entity in a value stays text",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"&#1114112; &#xD800; &#55357; &#99999999999; &#34\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"&#1114112; &#xD800; &#55357; &#99999999999; &#34\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: an invalid numeric entity breaks the JSON",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "encoded: a numeric entity without a semicolon is not decoded",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34title&#34:&#34Banner&#34,&#34image&#34:{&#34imageId&#34:&#3411111111-1111-4111-8111-111111111111&#34}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&#34title&#34:&#34Banner&#34,&#34image&#34:{&#34imageId&#34:&#3411111111-1111-4111-8111-111111111111&#34}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "encoded: a supplementary code point decodes",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"&#128512; &#x1F600;\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"note\":\"&#128512; &#x1F600;\",\"imageId\":\"11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "encoded: an entity cannot contain an ampersand",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&&quot;title&&quot;:&&quot;Banner&&quot;,&&quot;image&&quot;:{&&quot;imageId&&quot;:&&quot;11111111-1111-4111-8111-111111111111&&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&&quot;title&&quot;:&&quot;Banner&&quot;,&&quot;image&&quot;:{&&quot;imageId&&quot;:&&quot;11111111-1111-4111-8111-111111111111&&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "rounds: encoded once",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&quot;title&quot;:&quot;Banner&quot;,&quot;image&quot;:{&quot;imageId&quot;:&quot;11111111-1111-4111-8111-111111111111&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&quot;title&quot;:&quot;Banner&quot;,&quot;image&quot;:{&quot;imageId&quot;:&quot;11111111-1111-4111-8111-111111111111&quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "rounds: encoded twice, with nested &amp;quot;",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;quot;title&amp;quot;:&amp;quot;Banner&amp;quot;,&amp;quot;image&amp;quot;:{&amp;quot;imageId&amp;quot;:&amp;quot;11111111-1111-4111-8111-111111111111&amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;quot;title&amp;quot;:&amp;quot;Banner&amp;quot;,&amp;quot;image&amp;quot;:{&amp;quot;imageId&amp;quot;:&amp;quot;11111111-1111-4111-8111-111111111111&amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "rounds: encoded three times",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;amp;quot;title&amp;amp;quot;:&amp;amp;quot;Banner&amp;amp;quot;,&amp;amp;quot;image&amp;amp;quot;:{&amp;amp;quot;imageId&amp;amp;quot;:&amp;amp;quot;11111111-1111-4111-8111-111111111111&amp;amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;amp;quot;title&amp;amp;quot;:&amp;amp;quot;Banner&amp;amp;quot;,&amp;amp;quot;image&amp;amp;quot;:{&amp;amp;quot;imageId&amp;amp;quot;:&amp;amp;quot;11111111-1111-4111-8111-111111111111&amp;amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "rounds: encoded four times is read as text",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;amp;amp;quot;title&amp;amp;amp;quot;:&amp;amp;amp;quot;Banner&amp;amp;amp;quot;,&amp;amp;amp;quot;image&amp;amp;amp;quot;:{&amp;amp;amp;quot;imageId&amp;amp;amp;quot;:&amp;amp;amp;quot;11111111-1111-4111-8111-111111111111&amp;amp;amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{&amp;amp;amp;quot;title&amp;amp;amp;quot;:&amp;amp;amp;quot;Banner&amp;amp;amp;quot;,&amp;amp;amp;quot;image&amp;amp;amp;quot;:{&amp;amp;amp;quot;imageId&amp;amp;amp;quot;:&amp;amp;amp;quot;11111111-1111-4111-8111-111111111111&amp;amp;amp;quot;}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "rounds: nested &amp;#x20; decodes in the second round",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&amp;#x20;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&amp;#x20;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "rounds: a fourth level of &amp; is left as text",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&amp;amp;amp;#x20;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&amp;amp;amp;#x20;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: N format",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111111141118111111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111111141118111111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: B format",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111-1111-4111-8111-111111111111}",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111-1111-4111-8111-111111111111}",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: P format",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "(11111111-1111-4111-8111-111111111111)",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "(11111111-1111-4111-8111-111111111111)",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: mixed brackets are rejected",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111-1111-4111-8111-111111111111)",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111-1111-4111-8111-111111111111)",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: braces around the N format are rejected",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111111141118111111111111111}",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{11111111111141118111111111111111}",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: wrapped in ASCII spaces, tabs and newlines",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": " \t\n11111111-1111-4111-8111-111111111111\r\n ",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": " \t\n11111111-1111-4111-8111-111111111111\r\n ",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: wrapped in U+0085",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\u008511111111-1111-4111-8111-111111111111\u0085",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\u008511111111-1111-4111-8111-111111111111\u0085",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: wrapped in U+00A0 and U+3000",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\u00a011111111-1111-4111-8111-111111111111\u3000",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\u00a011111111-1111-4111-8111-111111111111\u3000",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: a leading U+FEFF is not trimmed",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\ufeff11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "\ufeff11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: whitespace inside the brackets is rejected",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{ 11111111-1111-4111-8111-111111111111 }",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "{ 11111111-1111-4111-8111-111111111111 }",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: a wrong group length is rejected",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-111-14111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-111-14111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: not a guid",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "not-a-guid",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "not-a-guid",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "guid: wrapped in &nbsp; inside component data",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&nbsp;11111111-1111-4111-8111-111111111111&nbsp;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&nbsp;11111111-1111-4111-8111-111111111111&nbsp;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: wrapped in &ensp; inside component data",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&ensp;11111111-1111-4111-8111-111111111111&emsp;&thinsp;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&ensp;11111111-1111-4111-8111-111111111111&emsp;&thinsp;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: wrapped in a numeric whitespace entity inside component data",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&#133;11111111-1111-4111-8111-111111111111&#x3000;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&#133;11111111-1111-4111-8111-111111111111&#x3000;\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "guid: a numeric entity for U+FEFF is not trimmed",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&#xFEFF;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"imageId\":\"&#xFEFF;11111111-1111-4111-8111-111111111111\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "fragment inside a decoded component data string is not read",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"type\":\"integrationFragment\",\"attrs\":{\"imageIds\":[\"11111111-1111-4111-8111-111111111111\"]}}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"type\":\"integrationFragment\",\"attrs\":{\"imageIds\":[\"11111111-1111-4111-8111-111111111111\"]}}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "fragment inside object component data is read",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "type": "integrationFragment",
+                "attrs": {
+                  "imageIds": [
+                    "11111111-1111-4111-8111-111111111111"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "type": "integrationFragment",
+                "attrs": {
+                  "imageIds": [
+                    "11111111-1111-4111-8111-111111111111"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "image node inside object component data is read",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "type": "taprootImage",
+                "attrs": {
+                  "imageId": "11111111-1111-4111-8111-111111111111",
+                  "alt": "A photo"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": {
+                "type": "taprootImage",
+                "attrs": {
+                  "imageId": "11111111-1111-4111-8111-111111111111",
+                  "alt": "A photo"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "section image inside a decoded string is read only by the generic rule",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"type\":\"section\",\"attrs\":{\"background\":{\"image\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}},\"decoration\":{\"image\":{\"id\":\"22222222-2222-4222-8222-222222222222\"}}},\"content\":[]}"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "componentBlock",
+            "attrs": {
+              "componentType": "image-banner",
+              "componentData": "{\"type\":\"section\",\"attrs\":{\"background\":{\"image\":{\"imageId\":\"11111111-1111-4111-8111-111111111111\"}},\"decoration\":{\"image\":{\"id\":\"22222222-2222-4222-8222-222222222222\"}}},\"content\":[]}"
+            }
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  },
+  {
+    "name": "negative: an imageId in a non-placement attribute",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "negative: an imageIds key outside a placement",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "imageIds": [
+                "11111111-1111-4111-8111-111111111111"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "imageIds": [
+                "11111111-1111-4111-8111-111111111111"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "negative: an image node with a non-string id",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": 7
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": 7
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "negative: an id in a node type that places nothing",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 2,
+              "imageId": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 2,
+              "imageId": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "ids": []
+  },
+  {
+    "name": "rejected body: columns on an article",
+    "templateType": "article",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "columns",
+            "content": []
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "columns",
+            "content": []
+          },
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "place": null
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ],
+    "csharpThrows": true
+  },
+  {
+    "name": "rejected body: columns in a recipe step",
+    "templateType": "recipe",
+    "wire": {
+      "introductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "instructionSections": [
+        {
+          "name": "Method",
+          "stepBodies": [
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "columns",
+                  "content": []
+                },
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "servings": 4
+    },
+    "stored": {
+      "IntroductionBody": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "taprootImage",
+            "attrs": {
+              "imageId": "11111111-1111-4111-8111-111111111111",
+              "alt": "A photo"
+            }
+          }
+        ]
+      },
+      "IngredientGroups": [],
+      "InstructionSections": [
+        {
+          "Name": "Method",
+          "StepBodies": [
+            {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "columns",
+                  "content": []
+                },
+                {
+                  "type": "taprootImage",
+                  "attrs": {
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "alt": "A photo"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "PrepTimeMinutes": 0,
+      "CookTimeMinutes": 0,
+      "Servings": 4,
+      "RecipeCategory": "",
+      "RecipeCuisine": "",
+      "CookingMethod": ""
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ],
+    "csharpThrows": true
+  },
+  {
+    "name": "nesting: an image 20 levels deep",
+    "templateType": "free-form",
+    "wire": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "blockquote",
+            "content": [
+              {
+                "type": "blockquote",
+                "content": [
+                  {
+                    "type": "blockquote",
+                    "content": [
+                      {
+                        "type": "blockquote",
+                        "content": [
+                          {
+                            "type": "blockquote",
+                            "content": [
+                              {
+                                "type": "blockquote",
+                                "content": [
+                                  {
+                                    "type": "blockquote",
+                                    "content": [
+                                      {
+                                        "type": "blockquote",
+                                        "content": [
+                                          {
+                                            "type": "blockquote",
+                                            "content": [
+                                              {
+                                                "type": "blockquote",
+                                                "content": [
+                                                  {
+                                                    "type": "blockquote",
+                                                    "content": [
+                                                      {
+                                                        "type": "blockquote",
+                                                        "content": [
+                                                          {
+                                                            "type": "blockquote",
+                                                            "content": [
+                                                              {
+                                                                "type": "blockquote",
+                                                                "content": [
+                                                                  {
+                                                                    "type": "blockquote",
+                                                                    "content": [
+                                                                      {
+                                                                        "type": "blockquote",
+                                                                        "content": [
+                                                                          {
+                                                                            "type": "blockquote",
+                                                                            "content": [
+                                                                              {
+                                                                                "type": "blockquote",
+                                                                                "content": [
+                                                                                  {
+                                                                                    "type": "blockquote",
+                                                                                    "content": [
+                                                                                      {
+                                                                                        "type": "blockquote",
+                                                                                        "content": [
+                                                                                          {
+                                                                                            "type": "taprootImage",
+                                                                                            "attrs": {
+                                                                                              "imageId": "11111111-1111-4111-8111-111111111111",
+                                                                                              "alt": "A photo"
+                                                                                            }
+                                                                                          }
+                                                                                        ]
+                                                                                      }
+                                                                                    ]
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            ]
+                                                                          }
+                                                                        ]
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "stored": {
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "blockquote",
+            "content": [
+              {
+                "type": "blockquote",
+                "content": [
+                  {
+                    "type": "blockquote",
+                    "content": [
+                      {
+                        "type": "blockquote",
+                        "content": [
+                          {
+                            "type": "blockquote",
+                            "content": [
+                              {
+                                "type": "blockquote",
+                                "content": [
+                                  {
+                                    "type": "blockquote",
+                                    "content": [
+                                      {
+                                        "type": "blockquote",
+                                        "content": [
+                                          {
+                                            "type": "blockquote",
+                                            "content": [
+                                              {
+                                                "type": "blockquote",
+                                                "content": [
+                                                  {
+                                                    "type": "blockquote",
+                                                    "content": [
+                                                      {
+                                                        "type": "blockquote",
+                                                        "content": [
+                                                          {
+                                                            "type": "blockquote",
+                                                            "content": [
+                                                              {
+                                                                "type": "blockquote",
+                                                                "content": [
+                                                                  {
+                                                                    "type": "blockquote",
+                                                                    "content": [
+                                                                      {
+                                                                        "type": "blockquote",
+                                                                        "content": [
+                                                                          {
+                                                                            "type": "blockquote",
+                                                                            "content": [
+                                                                              {
+                                                                                "type": "blockquote",
+                                                                                "content": [
+                                                                                  {
+                                                                                    "type": "blockquote",
+                                                                                    "content": [
+                                                                                      {
+                                                                                        "type": "blockquote",
+                                                                                        "content": [
+                                                                                          {
+                                                                                            "type": "taprootImage",
+                                                                                            "attrs": {
+                                                                                              "imageId": "11111111-1111-4111-8111-111111111111",
+                                                                                              "alt": "A photo"
+                                                                                            }
+                                                                                          }
+                                                                                        ]
+                                                                                      }
+                                                                                    ]
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            ]
+                                                                          }
+                                                                        ]
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ids": [
+      "11111111-1111-4111-8111-111111111111"
+    ]
+  }
+]
