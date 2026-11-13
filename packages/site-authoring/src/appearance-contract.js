@@ -131,15 +131,15 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     values: Object.freeze(["normal", "sticky", "fixed"]),
     default: "normal",
   }),
-  Object.freeze({
+  ...["headerHeightMultiplier", "headerMinHeightMultiplier"].map(name => Object.freeze({
     settingsType: SETTINGS_TYPE_SITE_HEADER,
-    name: "headerHeightMultiplier",
-    path: "site-header.headerHeightMultiplier",
+    name,
+    path: `site-header.${name}`,
     type: "header-height-multiplier",
     ...HEADER_HEIGHT_MULTIPLIER_LIMITS,
     optional: true,
     default: "",
-  }),
+  })),
   Object.freeze({
     settingsType: SETTINGS_TYPE_SITE_HEADER,
     name: "showThemeToggle",

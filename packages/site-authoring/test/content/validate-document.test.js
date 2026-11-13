@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { validateDocument } from "../../src/content/validate-document.js";
+import blockquoteCorpus from "../fixtures/blockquote-metadata-corpus.json" with { type: "json" };
 
 // Every rejection below is something the published-site renderer accepts and
 // then silently mangles: an unknown node rendered as its children, a clamped
@@ -971,9 +972,9 @@ test("rejects attributes no extension declares", async (testContext) => {
       "content.attr_unknown",
     ],
     [
-      "attribute on a blockquote",
-      doc({ type: "blockquote", attrs: { cite: "x" }, content: [paragraph("x")] }),
-      "content.attr_unknown",
+      "unknown attribute on a blockquote",
+      doc({ type: "blockquote", attrs: { author: "x" }, content: [paragraph("x")] }),
+      "blockquote.unknown_attribute",
     ],
     [
       "unknown mark attribute",
@@ -1354,4 +1355,19 @@ test("inline image description modes preserve authored contextual text and rejec
     const result = validateDocument(doc(image({ descriptionMode: mode })));
     assert.ok(result.errors.some(error => error.path === "/content/0/attrs/descriptionMode" && error.code === "content.attr_invalid"));
   }
+});
+
+test("blockquote document admission applies the shared metadata corpus at nested JSON paths", async context => {
+  for (const entry of blockquoteCorpus.cases) {
+    await context.test(entry.name, () => {
+      const quote = { type: "blockquote", attrs: structuredClone(entry.attrs), content: [paragraph("Keep the complete quote.")] };
+      const body = doc({ type: "section", content: [quote] });
+      const before = structuredClone(body);
+      const result = validateDocument(body);
+      assert.equal(result.errors.length === 0, entry.valid, JSON.stringify(result));
+      assert.ok(result.errors.every(error => error.path.startsWith("/content/0/content/0/attrs")));
+      assert.deepEqual(body, before);
+    });
+  }
+  assert.equal(validateDocument(doc({ type: "blockquote", attrs: { "a/b~c": true }, content: [paragraph("Words.")] })).errors[0].path, "/content/0/attrs/a~1b~0c");
 });

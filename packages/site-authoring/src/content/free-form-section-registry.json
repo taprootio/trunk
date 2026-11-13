@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
 
   "imageDescription": {
     "fields": {
@@ -396,6 +396,48 @@
     "eligibleComponentRootPlacement": "flow",
     "excludedNodeTypes": ["section", "columns", "column", "integrationFragment"]
   },
+  "blockquote": {
+    "nodeType": "blockquote",
+    "closed": true,
+    "attrs": {
+      "attribution": {
+        "label": "Attribution",
+        "help": "Optional name or organization. Leave out introductory punctuation.",
+        "type": "plain-text",
+        "required": false,
+        "default": null,
+        "minScalars": 1,
+        "maxScalars": 200
+      },
+      "sourceTitle": {
+        "label": "Source title",
+        "help": "Optional title of the work being quoted.",
+        "type": "plain-text",
+        "required": false,
+        "default": null,
+        "minScalars": 1,
+        "maxScalars": 200
+      },
+      "cite": {
+        "label": "Source URL",
+        "help": "Optional HTTP or HTTPS source address or a path on this site.",
+        "type": "safe-url",
+        "required": false,
+        "default": null,
+        "minScalars": 1,
+        "maxScalars": 2048,
+        "schemes": [
+          "http",
+          "https"
+        ],
+        "rootRelative": true
+      }
+    },
+    "markdown": {
+      "open": ":::blockquote",
+      "close": ":::endblockquote"
+    }
+  },
   "table": {
     "nodeTypes": {
       "table": "table",
@@ -541,7 +583,7 @@
     },
     "blockquote": {
       "label": "Blockquote",
-      "measure": "prose",
+      "measure": "wide",
       "placement": "flow"
     },
     "codeBlock": {

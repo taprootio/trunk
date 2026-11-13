@@ -59,7 +59,7 @@ function componentDocument(componentType, data) {
 }
 
 test("the free-form and component indexes are derived from the executable registries", () => {
-  assert.equal(REFERENCE_VERSION, 56);
+  assert.equal(REFERENCE_VERSION, 57);
   assert.deepEqual(PAGE_TYPES, ["free-form", "article", "recipe", "album", "place-review", "generated", "legal"]);
   assert.deepEqual(listPageTypeReferences().map((page) => page.type), PAGE_TYPES);
 
@@ -230,6 +230,7 @@ test("the free-form reference exposes the production document vocabulary and aut
   );
   assert.equal(page.sections.placementMatrix.find((row) => row.type === "paragraph").measure, "prose");
   assert.equal(page.sections.placementMatrix.find((row) => row.type === "table").measure, "wide");
+  assert.equal(page.sections.placementMatrix.find((row) => row.type === "blockquote").measure, "wide");
   assert.equal(page.sections.placementMatrix.find((row) => row.type === "inlineFacts").measure, "wide");
   assert.equal(page.sections.background.additionalProperties, false);
   assert.deepEqual(
@@ -1023,4 +1024,47 @@ test("columns help is an executable free-form layout with registry-owned limits"
   const text = formatReferenceResult({ topic: "page", page });
   assert.match(text, /Columns inside sections/);
   assert.match(text, /:::endcolumns/);
+});
+
+test("free-form quote help preserves ordinary multi-paragraph Markdown attribution", async () => {
+  const page = getPageTypeReference("free-form");
+  const output = formatReferenceResult({ topic: "page", page });
+  assert.match(output, /visible themed start border, padding and lead typography/u);
+  assert.match(output, /separate final quoted paragraph/u);
+  assert.match(output, /emphasis or a leading dash is optional/u);
+  assert.match(output, /does not infer it from the last paragraph or the following paragraph/u);
+  assert.match(output, /person's name does not belong in cite/u);
+  const { doc } = await markdownToProseMirror(page.document.blockquotes.example, { resolveImage: async () => { throw new Error("No media in this example"); } });
+  const quote = doc.content.find(node => node.type === "blockquote");
+  assert.deepEqual(quote.content.map(node => node.content.map(text => text.text).join("")), [
+    "Only the outside portion of the double-pane glass was broken, so that's what he fixed!",
+    "Jeana Baca, Google review",
+  ]);
+  assert.match(output, /> Jeana Baca, Google review/u);
+});
+
+test("free-form quote help provides the closed metadata schema and executable Markdown and JSON examples", async () => {
+  const page = getPageTypeReference("free-form");
+  const reference = page.document.blockquotes;
+  assert.deepEqual(reference.attrs.map(({ name, ...definition }) => [name, definition]), Object.entries(registry.blockquote.attrs));
+  const { doc } = await markdownToProseMirror(reference.metadataExample, { resolveImage: async () => { throw new Error("No media in this example"); } });
+  assert.deepEqual(doc.content, [reference.pmJsonExample]);
+  assert.deepEqual(validateDocument({ type: "doc", content: [reference.pmJsonExample] }).errors, []);
+  const output = formatReferenceResult({ topic: "page", page });
+  assert.match(output, /:::blockquote /u);
+  assert.match(output, /:::endblockquote/u);
+  for (const attr of reference.attrs) {
+    assert.ok(output.includes(`${attr.name}: ${attr.type} | null; optional; maximum ${attr.maxScalars}`));
+  }
+  assert.match(output, /tracked .md stays byte-identical/u);
+  assert.match(output, /refuses a stale push/u);
+  assert.match(output, /Fenced-code markers stay code/u);
+  assert.match(output, /Unknown settings are refused at their attribute path/u);
+});
+
+test("site workflow help explains scroll-linked tall fixed headers and first-shrink logos", () => {
+  const reference = getWorkflowReference("walkthrough");
+  const output = formatReferenceResult({ topic: "workflow", reference });
+  assert.match(output, /visible height follows scroll distance down to the minimum height/u);
+  assert.match(output, /compact logo switches at the first actual shrink/u);
 });

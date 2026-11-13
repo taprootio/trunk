@@ -175,6 +175,7 @@ export const CONTENT_ERROR_CODES = Object.freeze({
   markdownUnclosedFence: "content.markdown_unclosed_fence",
   markdownCodeLanguage: "content.markdown_code_language",
   markdownColumns: "content.markdown_columns",
+  markdownBlockquote: "content.markdown_blockquote",
   markdownSectionHeader: "content.markdown_section_header",
   markdownSectionUnclosed: "content.markdown_section_unclosed",
   markdownSectionNested: "content.markdown_section_nested",

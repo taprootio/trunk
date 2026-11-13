@@ -22,10 +22,17 @@ export function parseHeaderHeightMultiplier(value) {
 export function resolveHeaderHeightMultiplier(value) {
     return parseHeaderHeightMultiplier(value) ?? STANDARD_HEIGHT;
 }
+/** Clamp only the rendered endpoint, retaining the author's saved minimum. */
+export function resolveHeaderMinHeightMultiplier(minimum, expanded) {
+    const height = resolveHeaderHeightMultiplier(expanded);
+    const floor = resolveHeaderHeightMultiplier(minimum);
+    return floor.tenths < height.tenths ? floor : height;
+}
 /** Stored compact assets are delivered only when an expanded brand already exists. */
-export function canUseCompactHeaderLogo(position, multiplier, hasRegularLogo) {
+export function canUseCompactHeaderLogo(position, multiplier, hasRegularLogo, minimum) {
     const height = parseHeaderHeightMultiplier(multiplier);
-    return position === "fixed" && hasRegularLogo && height !== null && height.tenths > 10;
+    return position === "fixed" && hasRegularLogo && height !== null
+        && height.tenths > resolveHeaderMinHeightMultiplier(minimum, multiplier).tenths;
 }
 /** Keep each scheme's selected source and reserved ratio together through fallback. */
 export function resolveHeaderLogoPairs(input) {

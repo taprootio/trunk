@@ -149,3 +149,25 @@ test("optional omitted footer colors and valid empty scalar values still validat
   assert.equal(result.footerColors.light.backgroundColor, "");
   assert.equal(result.footerColors.dark.linkColor, "");
 });
+
+test("workspace minimum heights use the same canonical strings and preserve taller saved intent", async context => {
+  for (const [input, expected] of [["1.9", "1.9"], ["1.0", ""], [undefined, ""], ["5.0", "5.0"]]) {
+    const root = await workspace(context, documents => {
+      const header = documents["site-header.json"];
+      header.headerPosition = "fixed";
+      header.headerHeightMultiplier = "3.8";
+      if (input === undefined) delete header.headerMinHeightMultiplier;
+      else header.headerMinHeightMultiplier = input;
+    });
+    const result = await validateThemeWorkspace(root, SITE_ID, new Set());
+    assert.equal(result.scalarOperations.find(operation => operation.setting === "headerMinHeightMultiplier").value, expected);
+  }
+});
+
+test("workspace minimum height errors identify the authored field", async context => {
+  for (const value of [1.9, "1.95"]) {
+    const root = await workspace(context, documents => documents["site-header.json"].headerMinHeightMultiplier = value);
+    await assert.rejects(() => validateThemeWorkspace(root, SITE_ID, new Set()), error =>
+      error?.code === "theme.setting_invalid" && error?.field === "site-header.headerMinHeightMultiplier");
+  }
+});

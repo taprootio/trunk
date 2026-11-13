@@ -502,7 +502,7 @@ export function getAppearanceReference() {
       "Use site-owned image ids retained from pull or returned by media upload. URLs are server projections, never authored inputs.",
     logoContract:
       "lightLogoId and darkLogoId are the expanded scheme logos; optional lightCompactLogoId and darkCompactLogoId "
-      + "supply compact logos for Fixed headers above 1.0 when a regular logo resolves. Inactive choices are retained. "
+      + "supply compact logos for Fixed headers above 1.0 when a regular logo resolves. A ready compact logo appears when shrinking starts; pending or failed artwork keeps the regular logo. Inactive choices are retained. "
       + "Each takes one image id: upload the highest-resolution file you have and assign it. An @2x or @3x suffix is only "
       + "part of a filename, nothing pairs it with another file, and the platform generates the sizes. "
       + "Prefer transparent PNG or WebP artwork with genuine alpha so the header background shows through, including "

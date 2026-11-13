@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { APPEARANCE_SCALAR_FIELDS } from "../src/appearance-contract.js";
 import { normalizeImage, normalizeStagingReviewPath } from "../src/api.js";
 import {
   CAPABILITY_CONTENT,
@@ -1486,7 +1487,7 @@ function presentationSaveReply(call, { footerSettings = {}, revision = NEXT_PRES
 
 test("theme push saves the complete change set in one request fenced by the pull baseline", async (site) => {
   const workspace = await fixture(site, {
-    ...themeWorkspace({ style: { lightLogoId: IMAGE_ID, lightCompactLogoId: IMAGE_ID }, header: { headerPosition: "fixed", headerHeightMultiplier: "2" } }),
+    ...themeWorkspace({ style: { lightLogoId: IMAGE_ID, lightCompactLogoId: IMAGE_ID }, header: { headerPosition: "fixed", headerHeightMultiplier: "2", headerMinHeightMultiplier: "1.5" } }),
     ".taproot-site-media.json": {
       mediaManifestVersion: 2,
       siteId: SITE_ID,
@@ -1516,7 +1517,6 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal(result.verb, "theme push");
   assert.equal(result.applied, true);
   assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
-  assert.equal(result.written.items.length, 30);
   // One read, one write: nothing else touches the site.
   assert.deepEqual(wire.calls.map((call) => call.method), ["GET", "POST"]);
   const save = wire.matching("POST", PRESENTATION)[0];
@@ -1528,7 +1528,14 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal("footerSettings" in save.body, false);
   assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
   assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
-  assert.equal(save.body.settings.length, 29);
+  assert.deepEqual(
+    save.body.settings.map(write => write.setting),
+    [...APPEARANCE_SCALAR_FIELDS.map(field => field.name), "lightTheme", "darkTheme"],
+  );
+  assert.deepEqual(result.written.items, [
+    "footerSettings.light/dark colors",
+    ...save.body.settings.map(write => `${write.settingsType}.${write.setting}`),
+  ]);
   assert.equal(
     save.body.settings.find((write) => write.setting === "lightLogoId")?.value,
     IMAGE_ID,
@@ -1538,6 +1545,7 @@ test("theme push saves the complete change set in one request fenced by the pull
     "SETTING_TYPE_TAPROOT_STYLES",
   );
   assert.equal(save.body.settings.find(write => write.setting === "headerHeightMultiplier")?.value, "2.0");
+  assert.equal(save.body.settings.find(write => write.setting === "headerMinHeightMultiplier")?.value, "1.5");
   assert.equal(save.body.settings.find(write => write.setting === "headerPosition")?.value, "fixed");
   assert.equal(save.body.settings.find(write => write.setting === "lightCompactLogoId")?.value, IMAGE_ID);
   assert.equal(save.body.settings.some(write => write.setting.endsWith("CompactLogoUrl")), false);

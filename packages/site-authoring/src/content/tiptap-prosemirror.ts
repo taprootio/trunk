@@ -7,6 +7,7 @@
  * Keep those publishing copies in sync and covered by parity tests.
  */
 
+import { blockquoteCaptionParts, readBlockquoteMetadata } from "./blockquote-metadata.js";
 import { columnsAttributes, isColumnEligibleBlock } from "./free-form-columns.js";
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 import { imageDescriptionIssues } from "./image-description-validation.js";
@@ -292,11 +293,7 @@ function renderNode(
     case "listItem":
       return renderElement("li", {}, renderNodes(node.content ?? [], options, "nested"));
     case "blockquote":
-      return renderElement(
-        "blockquote",
-        withProseMeasure({}, node.type, options),
-        renderNodes(node.content ?? [], options, "nested"),
-      );
+      return renderBlockquote(node, options);
     case "codeBlock":
       return renderCodeBlock(node, options);
     case "horizontalRule":
@@ -398,6 +395,27 @@ function renderHeading(node: ProseMirrorNode, options: RenderProseMirrorOptions)
     withProseMeasure(textBlockAttrs(node.attrs), node.type, options),
     renderNodes(node.content ?? [], options, "nested"),
   );
+}
+
+function renderBlockquote(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {
+  const metadata = readBlockquoteMetadata(node.attrs) ?? {};
+  const quote = renderElement(
+    "blockquote",
+    withProseMeasure({ ...(metadata.cite ? { cite: metadata.cite } : {}) }, node.type, options),
+    renderNodes(node.content ?? [], { ...options, freeFormSections: false }, "nested"),
+  );
+  const parts = blockquoteCaptionParts(metadata);
+  if (parts.length === 0) return quote;
+  const caption = parts.map(part => {
+    const text = escapeHtml(part.text);
+    const content = part.href ? renderLink(part.href, undefined, text, options) : text;
+    return part.kind === "title" ? renderElement("cite", {}, content) : content;
+  }).join("");
+  return renderElement("figure", {
+    "data-taproot-quote": "",
+    "data-attribution": metadata.attribution,
+    "data-source-title": metadata.sourceTitle,
+  }, quote + renderElement("figcaption", {}, caption));
 }
 
 function renderCodeBlock(node: ProseMirrorNode, options: RenderProseMirrorOptions): string {

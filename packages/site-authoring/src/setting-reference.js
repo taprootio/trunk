@@ -108,13 +108,13 @@ const TAPROOT_STYLES_ENTRIES = {
   lightCompactLogoId: entry(
     `${HEADER} > Compact logo`,
     "Optional site-owned light-scheme logo for a Fixed header above 1.0. Hidden controls retain saved choices.",
-    "Only while the header is compact: this scheme's compact logo, then the other compact scheme, then the regular logo.",
+    "When the header starts shrinking: this scheme's ready compact logo, then the other compact scheme, then the regular logo. Pending or failed compact artwork keeps the regular logo.",
   ),
   lightCompactLogoUrl: entry(`${HEADER} > Compact logo`, "Read-only: the delivery URL of lightCompactLogoId."),
   darkCompactLogoId: entry(
     `${HEADER} > Compact logo`,
     "Optional site-owned dark-scheme logo for a Fixed header above 1.0. Hidden controls retain saved choices.",
-    "Only while the header is compact: this scheme's compact logo, then the other compact scheme, then the regular logo.",
+    "When the header starts shrinking: this scheme's ready compact logo, then the other compact scheme, then the regular logo. Pending or failed compact artwork keeps the regular logo.",
   ),
   darkCompactLogoUrl: entry(`${HEADER} > Compact logo`, "Read-only: the delivery URL of darkCompactLogoId."),
   lightCanvasImageId: entry(
@@ -226,7 +226,12 @@ const HEADER_ENTRIES = {
   headerHeightMultiplier: entry(
     `${HEADER} > Header height`,
     "A string such as \"1.8\", from \"1.0\" through \"5.0\" in 0.1 steps. Omit it for standard 1.0; integers normalize to one decimal digit.",
-    "The primary header bar; extra menu rows and controls keep their size. Fixed headers above 1.0 shrink to standard on scroll; Normal and Sticky retain their height.",
+    "The primary header bar; extra menu rows and controls keep their size. Fixed headers above 1.0 shrink with scroll distance from the first scroll movement until reaching the minimum header height (1.0 by default); Normal and Sticky retain their height.",
+  ),
+  headerMinHeightMultiplier: entry(
+    `${HEADER} > Minimum header height`,
+    "An optional string from \"1.0\" through \"5.0\" in 0.1 steps, using the same units as headerHeightMultiplier. Omit it for 1.0.",
+    "The final Fixed header height. For example, expanded 3.8 and minimum 1.9 shrink from 3.8× to 1.9×. The effective minimum is capped at the expanded height; the saved value is retained. Normal and Sticky ignore it.",
   ),
   showThemeToggle: entry(
     `${HEADER} > Theme toggle`,

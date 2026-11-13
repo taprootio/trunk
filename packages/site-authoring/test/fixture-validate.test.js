@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { APPEARANCE_SCALAR_FIELDS } from "../src/appearance-contract.js";
 import { runCli } from "../src/cli.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
 import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
@@ -190,7 +191,7 @@ test("the shipped example fixture validates without credentials, network, or wri
       pages: 6,
       navigationItems: 3,
       themes: 2,
-      appearanceSettings: 27,
+      appearanceSettings: APPEARANCE_SCALAR_FIELDS.length,
       footer: true,
     },
   );
@@ -365,7 +366,7 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
       forms: 1,
       navigationItems: 10,
       themes: 2,
-      appearanceSettings: 27,
+      appearanceSettings: APPEARANCE_SCALAR_FIELDS.length,
       footer: true,
     },
   );
@@ -505,7 +506,7 @@ test(
     const json = JSON.parse(result.stdout);
     assert.deepEqual(json.hints, []);
     assert.doesNotMatch(result.stderr, /Hint:/u);
-    assert.equal(json.validated.appearanceSettings, 27);
+    assert.equal(json.validated.appearanceSettings, APPEARANCE_SCALAR_FIELDS.length);
   },
 );
 

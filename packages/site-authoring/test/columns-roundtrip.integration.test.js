@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { runCli } from "../src/cli.js";
 import { LIMITS } from "../src/constants.js";
-import { MEDIA_MANIFEST_VERSION } from "../src/workspace.js";
+import { canonicalDocumentHash, internalPageBaselineFile, MEDIA_MANIFEST_VERSION } from "../src/workspace.js";
 
 const SITE_ID = "aaaa1111-bbbb-4111-8111-cccc11111111";
 const PAGE_ID = "bbbb2222-cccc-4222-8222-dddd22222222";
@@ -272,3 +272,92 @@ test("ordinary and columns oversized responses use the unchanged reader and writ
     });
   }
 });
+
+const QUOTE_METADATA = { attribution: "Aldous Huxley", sourceTitle: "Brave New World", cite: "https://www.huxley.net/bnw/four.html" };
+const quoteBody = () => document({ type: "blockquote", attrs: { ...QUOTE_METADATA }, content: [paragraph("Words can be like X-rays.")] });
+
+test("a fresh attributed quote pulls to normal JSON and an unchanged push makes no write", async context => {
+  const body = quoteBody();
+  const { state, run, workspaceDir, readJson } = await fixture(context, [record({ data: { body } })]);
+  assertSuccess(await run(["pull"]));
+  const firstManifest = await readJson(MANIFEST_FILE);
+  const entry = firstManifest.pages[0];
+  assert.match(entry.file, /\.pm\.json$/u);
+  assert.deepEqual(await readJson(entry.file), body);
+  assert.equal(entry.baseline.remoteHash, canonicalDocumentHash(body));
+  assert.equal(entry.baseline.revision, `sha256:${"a".repeat(64)}`);
+  const bytes = await readFile(path.join(workspaceDir, entry.file), "utf8");
+
+  assertSuccess(await run(["pages", "push", "story"]));
+  assert.equal(state.writes.length, 0);
+  assert.deepEqual(state.pages[0].data.body, body);
+  assert.equal(await readFile(path.join(workspaceDir, entry.file), "utf8"), bytes);
+  assertSuccess(await run(["pull"]));
+  assert.equal(await readFile(path.join(workspaceDir, entry.file), "utf8"), bytes);
+  assert.deepEqual((await readJson(MANIFEST_FILE)).pages[0].baseline, entry.baseline);
+});
+
+test("tracked Markdown retains quote metadata in remote JSON and baseline without changing its bytes", async context => {
+  const { state, run, workspaceDir, readJson } = await fixture(context);
+  assertSuccess(await run(["pull"]));
+  const sourceFile = "pages/new-quote.md";
+  const markdown = [
+    "---", "title: A quotation", "path: new-quote", "---", "",
+    `:::blockquote ${JSON.stringify(QUOTE_METADATA)}`, "Words can be like X-rays.", ":::endblockquote", "",
+  ].join("\n");
+  await writeFile(path.join(workspaceDir, sourceFile), markdown);
+  assertSuccess(await run(["pages", "push", "new-quote"]));
+  const write = assertOneWrite(state, "POST");
+  assert.deepEqual(write.body.template.freeFormData.body, quoteBody());
+  const entry = (await readJson(MANIFEST_FILE)).pages.find(page => page.path === "new-quote");
+  assert.equal(entry.file, sourceFile);
+  assert.match(entry.baseline.contentKey, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(await readFile(path.join(workspaceDir, sourceFile), "utf8"), markdown);
+
+  assertSuccess(await run(["pull"]));
+  assertSuccess(await run(["pages", "push", "new-quote"]));
+  assert.equal(state.writes.length, 1);
+  assert.equal(await readFile(path.join(workspaceDir, sourceFile), "utf8"), markdown);
+  assert.deepEqual(await readJson(internalPageBaselineFile(entry.pageId)), quoteBody());
+  assert.equal((await readdir(path.join(workspaceDir, "pages"))).includes("new-quote.pm.json"), false);
+
+  const remote = state.pages.find(page => page.id === entry.pageId);
+  remote.data.body.content[0].attrs.sourceTitle = "Changed in the browser";
+  remote.revision = "c";
+  const stale = await run(["pages", "push", "new-quote"]);
+  assert.notEqual(stale.exit, 0);
+  assert.equal(stale.result.error.code, "pages.push_conflict");
+  assert.equal(state.writes.length, 1);
+  const conflicted = await run(["pull"]);
+  assert.notEqual(conflicted.exit, 0);
+  assert.equal(conflicted.result.error.code, "pages.pull_conflict");
+  assert.equal(await readFile(path.join(workspaceDir, sourceFile), "utf8"), markdown);
+  assert.deepEqual(await readJson(internalPageBaselineFile(entry.pageId)), remote.data.body);
+  assert.deepEqual(remote.data.body.content[0].content, quoteBody().content[0].content);
+  assert.equal((await readJson(MANIFEST_FILE)).pages.find(page => page.pageId === entry.pageId).baseline.revision, entry.baseline.revision);
+  assert.equal(state.writes.length, 1);
+});
+
+for (const template of ["article", "recipe"]) {
+  test(`${template} accepts attributed quotes in its owned body and retains them on edits`, async context => {
+    const body = quoteBody();
+    const data = template === "article" ? { body } : {
+      introductionBody: body,
+      ingredientGroups: [{ name: "", ingredients: [{ rawText: "1 cup rice", quantity: "", unit: "", name: "", parsed: false }] }],
+      instructionSections: [{ name: "First", stepBodies: [document(paragraph("Cook the rice."))] }],
+      prepTimeMinutes: 0, cookTimeMinutes: 0, servings: 1, recipeCategory: "", recipeCuisine: "", cookingMethod: "",
+    };
+    const { state, run, workspaceDir, readJson } = await fixture(context, [record({ template, data })]);
+    assertSuccess(await run(["pull"]));
+    const sourceFile = (await readJson(MANIFEST_FILE)).pages[0].file;
+    const authored = await readJson(sourceFile);
+    const authoredBody = template === "article" ? authored.data.body : authored.data.introductionBody;
+    authoredBody.content[0].content[0].content[0].text = "Edited quotation.";
+    await writeFile(path.join(workspaceDir, sourceFile), `${JSON.stringify(authored, null, 2)}\n`);
+    assertSuccess(await run(["pages", "push", "story"]));
+    const sentData = assertOneWrite(state, "PATCH").body.template[TEMPLATES[template].member];
+    const sentBody = template === "article" ? sentData.body : sentData.introductionBody;
+    assert.deepEqual(sentBody.content[0].attrs, QUOTE_METADATA);
+    assert.equal(sentBody.content[0].content[0].content[0].text, "Edited quotation.");
+  });
+}

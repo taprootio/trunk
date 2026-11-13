@@ -101,6 +101,7 @@ export const SETTINGS_GROUPS = Object.freeze([
         "navMenuDisplay",
         "headerPosition",
         "headerHeightMultiplier",
+        "headerMinHeightMultiplier",
         "lightBrandColor",
         "darkBrandColor",
       ),
@@ -209,7 +210,7 @@ export function projectSettingsGroup(group, response) {
   const source = message !== null && typeof message === "object" && !Array.isArray(message) ? message : {};
   const projected = {};
   for (const field of group.fields) {
-    if (field.name === "headerHeightMultiplier") {
+    if (field.name === "headerHeightMultiplier" || field.name === "headerMinHeightMultiplier") {
       const height = parseHeaderHeightMultiplier(source[field.name]);
       if (!height) {
         throw new SiteAuthoringError("api.setting_contract", "Taproot returned an invalid header height multiplier.", {

@@ -6,6 +6,7 @@ import representativeSectionDocument from "../fixtures/free-form-section-composi
 
 import { assertConvertedDocument, markdownToProseMirror } from "../../src/content/markdown.js";
 import { validateDocument } from "../../src/content/validate-document.js";
+import { CONTENT_LIMITS } from "../../src/content/vocabulary.js";
 
 // The converter's contract is exactness in both directions: a construct in the
 // subset produces one specific document, and a construct outside it produces a
@@ -1356,4 +1357,73 @@ test("a pulled video embed fence, already a provider and id, converts unchanged"
   const data = "{\"provider\":\"vimeo\",\"videoId\":\"76979871\",\"title\":\"Opening night\"}";
   const { doc } = await convert(`\`\`\`component:video-embed\n${data}\n\`\`\``);
   assert.equal(doc.content[0].attrs.componentData, data);
+});
+
+test("blockquote envelopes retain metadata and ordinary Markdown without a quote prefix", async () => {
+  const attrs = { attribution: "Aldous Huxley", sourceTitle: "Brave New World", cite: "https://www.huxley.net/bnw/four.html" };
+  const { doc } = await convert([
+    "Before.", `:::blockquote ${JSON.stringify(attrs)}`, "Words can be **like X-rays**.", "", "> An ordinary nested quote.",
+    "", ':::blockquote {"sourceTitle":"Another work"}', "Nested envelope.", ":::endblockquote", ":::endblockquote", "After.",
+  ].join("\n"));
+  assert.deepEqual(doc.content, [paragraph(text("Before.")), {
+    type: "blockquote", attrs, content: [
+      paragraph(text("Words can be "), text("like X-rays", bold), text(".")),
+      { type: "blockquote", content: [paragraph(text("An ordinary nested quote."))] },
+      { type: "blockquote", attrs: { sourceTitle: "Another work" }, content: [paragraph(text("Nested envelope."))] },
+    ],
+  }, paragraph(text("After."))]);
+});
+
+test("blockquote envelopes retain ordinary placement and omit null defaults", async () => {
+  const quote = { type: "blockquote", content: [paragraph(text("Words."))] };
+  for (const attrs of [{}, { attribution: null, sourceTitle: null, cite: null }]) {
+    const envelope = `:::blockquote ${JSON.stringify(attrs)}\nWords.\n:::endblockquote`;
+    assert.deepEqual((await convert(envelope)).doc.content, [quote]);
+    assert.deepEqual((await convert(`> ${envelope.replaceAll("\n", "\n> ")}`)).doc.content[0].content, [quote]);
+    assert.deepEqual((await convert(`- Lead.\n\n  ${envelope.replaceAll("\n", "\n  ")}`)).doc.content[0].content[0].content, [paragraph(text("Lead.")), quote]);
+    assert.deepEqual((await convert(`:::section {}\n${envelope}\n:::`)).doc.content[0].content, [quote]);
+    const columns = `:::section {}\n:::columns {}\n:::column {}\n${envelope}\n:::endcolumn\n:::column {}\nOther.\n:::endcolumn\n:::endcolumns\n:::`;
+    assert.deepEqual((await convert(columns)).doc.content[0].content[0].content[0].content, [quote]);
+  }
+});
+
+test("blockquote markers inside fenced code stay code, including inside an envelope", async () => {
+  const code = ':::blockquote {"cite":"javascript:alert(1)"}\n:::endblockquote';
+  const fenced = `\`\`\`text\n${code}\n\`\`\``;
+  const expected = { type: "codeBlock", attrs: { language: "text" }, content: [text(code)] };
+  assert.deepEqual((await convert(fenced)).doc.content, [expected]);
+  assert.deepEqual((await convert(`:::blockquote {}\n${fenced}\n:::endblockquote`)).doc.content[0].content, [expected]);
+});
+
+test("blockquote envelopes refuse malformed markers and invalid attributes at their source line", async context => {
+  const cases = [
+    [":::endblockquote", "content.markdown_blockquote", "blockquote"],
+    [":::blockquote {}\nWords.", "content.markdown_blockquote", "blockquote"],
+    [":::blockquote\nWords.\n:::endblockquote", "content.markdown_blockquote", "blockquote"],
+    [':::blockquote {"cite":}\nWords.\n:::endblockquote', "content.markdown_blockquote", "blockquote"],
+    [':::blockquote {"cite":"//example.test"}\nWords.\n:::endblockquote', "blockquote.url", "/attrs/cite"],
+    [':::blockquote {"attribution":" "}\nWords.\n:::endblockquote', "blockquote.value", "/attrs/attribution"],
+    [':::blockquote {"a/b~c":true}\nWords.\n:::endblockquote', "blockquote.unknown_attribute", "/attrs/a~1b~0c"],
+    [" :::blockquote {}\nWords.\n:::endblockquote", "content.markdown_blockquote", "blockquote"],
+    [":::endblockquote trailing", "content.markdown_blockquote", "blockquote"],
+    [":::blockquote {}\n:::endblockquote", "content.markdown_empty", "blockquote"],
+  ];
+  for (const [source, code, field] of cases) {
+    await context.test(source.split("\n")[0], async () => {
+      await assert.rejects(convert(`Before.\n\n${source}`), error => {
+        assert.equal(error.code, code);
+        assert.equal(error.field, field);
+        assert.match(error.message, /line 3/u);
+        return true;
+      });
+    });
+  }
+});
+
+test("blockquote envelopes preserve nested placement and depth refusals", async () => {
+  await assert.rejects(convert(":::blockquote {}\n:::section {}\nWords.\n:::\n:::endblockquote"), { code: "content.markdown_section_nested" });
+  await assert.rejects(convert(":::blockquote {}\nA | B\n--- | ---\n1 | 2\n\n:::endblockquote"), { code: "content.table_shape" });
+  const tooDeep = ":::blockquote {}\n".repeat(CONTENT_LIMITS.markdownNesting + 2)
+    + "Words.\n" + ":::endblockquote\n".repeat(CONTENT_LIMITS.markdownNesting + 2);
+  await assert.rejects(convert(tooDeep), { code: "content.markdown_nesting" });
 });

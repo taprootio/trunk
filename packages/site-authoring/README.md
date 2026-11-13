@@ -1090,9 +1090,18 @@ at `site-header.headerHeightMultiplier`. Preserve the file's envelope and other
 settings, then use `validate` and `theme push` as usual.
 
 The multiplier changes the primary bar. Extra menu rows, navigation text and
-header controls retain their size. Fixed headers above 1.0 shrink to standard
-height on scroll and expand near the top. Normal and Sticky retain their
+header controls retain their size. Fixed headers above 1.0 shrink with scroll
+distance to their minimum height and expand back at the top. Normal and Sticky retain their
 configured height; Fixed at 1.0 keeps the regular logo.
+
+From 0.36.2, `settings.headerMinHeightMultiplier` uses the same string range and
+0.1 steps, with omitted/empty/`"1"`/`"1.0"` meaning 1.0. For example, set the
+expanded height to `"3.8"` and the minimum to `"1.9"` to stop shrinking at 1.9×.
+The effective minimum is capped at expanded height, while pull retains the saved
+minimum if the expanded height is temporarily lower. Normal and Sticky ignore
+the minimum. Equal or oversized minima keep the regular logo and avoid unused
+compact imagery. A final minimum above 1.0 keeps the tall header's quiet icon
+controls and active-item treatment.
 
 To use alternate artwork after shrinking, upload it with `media upload` and set
 `settings.lightCompactLogoId` and/or `settings.darkCompactLogoId` in the existing
@@ -1104,6 +1113,51 @@ create a brand by itself. Saved choices survive other header modes; their URLs
 are read-only server projections. Preview light/dark and desktop/390-wide, then
 stage and deploy the settings for the published site. `help appearance` and
 `help settings` describe both files.
+
+### Attributed quotes in 0.36.2
+
+Ordinary `>` Markdown stays unchanged, including a final quoted paragraph used
+for attribution. To put attribution and a source in a caption outside the quote
+panel, use this envelope with ordinary Markdown inside:
+
+```markdown
+:::blockquote {"attribution":"Aldous Huxley","sourceTitle":"Brave New World","cite":"https://www.huxley.net/bnw/four.html"}
+Words can be like X-rays.
+:::endblockquote
+```
+
+The same ProseMirror node is:
+
+```json
+{
+  "type": "blockquote",
+  "attrs": {
+    "attribution": "Aldous Huxley",
+    "sourceTitle": "Brave New World",
+    "cite": "https://www.huxley.net/bnw/four.html"
+  },
+  "content": [
+    { "type": "paragraph", "content": [{ "type": "text", "text": "Words can be like X-rays." }] }
+  ]
+}
+```
+
+All three attrs are optional; absent or null means omitted. Attribution is the
+person or organization, without introductory punctuation. Source title names the
+work. Each accepts nonblank single-line plain text up to 200 Unicode characters.
+The source URL accepts an explicit HTTP(S) address or a root-relative path up to
+2048 characters. Protocol-relative, mailto, tel, script/data URLs, control
+characters and backslashes are refused. Unknown attrs and malformed, orphan or
+unclosed markers produce path or line diagnostics. Fenced-code markers stay
+code. The envelope keeps ordinary quote nesting and placement limits, including
+inside sections and columns; tables and sections cannot be nested inside quotes.
+
+Pull writes `.pm.json` with the metadata. An unchanged push makes no write.
+A tracked `.md` stays byte-identical on push and pull, with metadata retained in
+remote JSON and the internal baseline. A browser metadata edit raises the usual
+tracked-Markdown conflict, and a stale push is refused. There is no reverse
+Markdown exporter. See `taproot-site help page free-form` for the closed attrs
+reference and examples.
 
 ### What changed between releases
 

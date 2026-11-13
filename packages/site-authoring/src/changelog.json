@@ -1,6 +1,23 @@
 {
   "entries": [
     {
+      "version": "0.36.2",
+      "note": "Tall fixed headers follow scrolling, and themed quotes support optional attribution and sources.",
+      "behavior": [
+        "Above standard height, a Fixed header shrinks with scroll distance until it reaches the configured minimum height (1.0 by default). A ready compact logo appears when shrinking starts; page spacing stays stable.",
+        "Set optional headerMinHeightMultiplier in site-header.json from \"1.0\" through \"5.0\" in tenths. A 3.8 expanded header can shrink to 1.9. Minimums above expanded height are capped for rendering while preserving saved intent. Normal and Sticky keep their configured height.",
+        "Markdown > quotations now have a themed start border, padding and lead typography in published pages and the editor, including named theme contexts and section columns. Quote panels fill their containing section or column; ordinary prose keeps its reading width. Republish existing pages to apply the new presentation.",
+        "Write attribution as an ordinary final quoted paragraph, optionally with existing emphasis or a leading dash. Paragraph order does not create a citation or change the saved content.",
+        "For a caption outside the quote panel, author :::blockquote {JSON attrs} / :::endblockquote with ordinary Markdown inside. Optional attribution and sourceTitle are nonblank single-line text up to 200 Unicode characters; cite is an HTTP(S) URL or root-relative path up to 2048. JSON uses the same closed attrs. Invalid settings and malformed markers are refused with their path or line.",
+        "Pull preserves quote metadata in .pm.json. A tracked .md stays byte-identical through push/pull, with metadata in remote JSON and the internal baseline. An unchanged push makes no write; a remote browser metadata change raises the existing conflict and refuses a stale push.",
+        "The help reference version is 57."
+      ],
+      "help": [
+        "page",
+        "settings"
+      ]
+    },
+    {
       "version": "0.36.1",
       "note": "Maintenance release for the authoring CLI.",
       "behavior": [

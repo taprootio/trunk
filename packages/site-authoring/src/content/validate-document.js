@@ -1,4 +1,5 @@
 import { validateColumnsBody } from "./free-form-columns.js";
+import { validateBlockquoteMetadata } from "./blockquote-metadata.js";
 import { IMAGE_DESCRIPTION_MODES } from "./image-description-validation.js";
 import { validateComponentBlock } from "./components.js";
 import {
@@ -378,7 +379,11 @@ const NODE_RULES = Object.freeze({
   }),
   // ListItem's content expression is `paragraph block*`.
   listItem: rule({ children: BLOCKS, minChildren: 1, firstChild: "paragraph" }),
-  blockquote: rule({ children: BLOCKS, minChildren: 1 }),
+  blockquote: rule({
+    blockquote: true,
+    children: BLOCKS,
+    minChildren: 1,
+  }),
   codeBlock: rule({
     attrs: Object.freeze({
       language: spec((value) => {
@@ -599,6 +604,12 @@ function checkMarkKeys(mark, markPath, state) {
 function checkAttrs(node, path, nodeRule, state) {
   const attrsPath = `${path}/attrs`;
   const attrs = node.attrs;
+  if (nodeRule.blockquote) {
+    for (const issue of validateBlockquoteMetadata(attrs)) {
+      report(state, issue.code === "blockquote.attrs" ? attrsPath : `${attrsPath}/${pointerSegment(issue.field)}`, issue.code, issue.message);
+    }
+    return;
+  }
   const present = isPlainObject(attrs);
 
   if (!isAbsent(attrs) && !present) {

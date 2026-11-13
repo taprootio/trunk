@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 56;
+export const REFERENCE_VERSION = 57;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -635,8 +635,10 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "the variants yourself with any image tool (a transparent logo at the highest resolution you have, a square favicon); there is no "
       + "recolor, crop or SVG upload command. Upload each with media upload, then assign lightLogoId and darkLogoId "
       + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header. "
-      + "Optional lightCompactLogoId and darkCompactLogoId in the same styles file provide alternate artwork when a Fixed header above 1.0 shrinks; "
-      + "set headerHeightMultiplier as a string in site-header.json. See help appearance for the range and fallback rules.",
+      + "Optional lightCompactLogoId and darkCompactLogoId in the same styles file provide alternate artwork when a Fixed header above 1.0 starts shrinking. "
+      + "Its visible height follows scroll distance down to the minimum height (1.0 by default) and expands again when scrolling back to the top; "
+      + "the compact logo switches at the first actual shrink. "
+      + "Set headerHeightMultiplier and optional headerMinHeightMultiplier as strings in site-header.json; for example, 3.8 expanded and 1.9 minimum. See help appearance for the range and fallback rules.",
       `See the compiled colors: ${CLI_BINARY_NAME} theme resolve prints, offline, every semantic color Espalier compiles `
       + "from the pair for each scheme and context, whether each is compiled from the roles or pinned, and the contrast "
       + "of every ink-on-surface pair, with a flag for each one under WCAG AA. Run it after each theme edit, in both "
@@ -1863,6 +1865,24 @@ const FREE_FORM_REFERENCE = Object.freeze({
         `Any other rel token, opener included, is refused (${CONTENT_ERROR_CODES.linkRel}); so is another target `
         + `(${CONTENT_ERROR_CODES.linkTarget}). The editor's old default, "noopener noreferrer nofollow", reads as no choice.`,
     }),
+    blockquotes: Object.freeze({
+      appearance: "Native blockquotes fill their containing section or column, with a visible themed start border, padding and lead typography in the page's current theme context.",
+      attribution: "Keep an attribution as a separate final quoted paragraph. Existing emphasis or a leading dash is optional. Attribution is ordinary quote content; the renderer does not infer it from the last paragraph or the following paragraph, and a person's name does not belong in cite.",
+      example: "> Only the outside portion of the double-pane glass was broken, so that's what he fixed!\n>\n> Jeana Baca, Google review",
+      metadata: "For a caption outside the quote panel, use optional attribution (a name or organization without introductory punctuation), sourceTitle (the work title) and cite (the source URL). Ordinary > Markdown is unchanged. Existing final quoted paragraphs stay body content; no attribution is inferred or moved.",
+      attrs: Object.freeze(Object.entries(FREE_FORM_SECTION_REGISTRY.blockquote.attrs).map(([name, definition]) => Object.freeze({ name, ...definition }))),
+      valuePolicy: "All fields are optional; absent or null means omitted. Supplied values must be nonblank single-line plain text, with no control characters. Values are retained exactly, never truncated or rewritten. Unknown settings are refused at their attribute path.",
+      urlPolicy: "cite accepts only an explicit HTTP or HTTPS address or a root-relative path beginning with one slash. Protocol-relative, mailto, tel, script/data URLs and backslashes are refused. The URL is never fetched. Root-relative and same-site sources stay in the same tab; off-site HTTP(S) sources open in a new tab with the usual accessible cue.",
+      markdownSyntax: `${FREE_FORM_SECTION_REGISTRY.blockquote.markdown.open} {JSON attrs}\nordinary Markdown without an extra > prefix\n${FREE_FORM_SECTION_REGISTRY.blockquote.markdown.close}`,
+      metadataExample: `${FREE_FORM_SECTION_REGISTRY.blockquote.markdown.open} {"attribution":"Aldous Huxley","sourceTitle":"Brave New World","cite":"https://www.huxley.net/bnw/four.html"}\nWords can be like X-rays.\n${FREE_FORM_SECTION_REGISTRY.blockquote.markdown.close}`,
+      pmJsonExample: Object.freeze({
+        type: FREE_FORM_SECTION_REGISTRY.blockquote.nodeType,
+        attrs: Object.freeze({ attribution: "Aldous Huxley", sourceTitle: "Brave New World", cite: "https://www.huxley.net/bnw/four.html" }),
+        content: Object.freeze([{ type: "paragraph", content: [{ type: "text", text: "Words can be like X-rays." }] }]),
+      }),
+      placement: "The envelope has the same nesting and placement limits as ordinary quotes. Sections and tables cannot be placed inside it. Fenced-code markers stay code; malformed, orphan and unclosed quote markers are refused with the source line.",
+      roundTrip: "Fresh pull writes .pm.json with these attrs. An unchanged push sends no write. A tracked .md stays byte-identical on push and pull; remote JSON and the internal baseline retain metadata. A browser metadata change raises the existing tracked-Markdown conflict and refuses a stale push. There is no reverse Markdown exporter.",
+    }),
     // TR01220: a free-form page prints no title, so its first level-1 heading is the h1.
     headings: Object.freeze({
       rule:
@@ -2166,7 +2186,7 @@ export function formatReferenceResult(result) {
         page.document.marks.join(", ")
       }\n\nLinks:\n  markdown              ${page.document.links.markdown}\n  rel                   ${
         page.document.links.rel.join(", ")
-      }\n  default               ${page.document.links.default}\n  in Markdown           ${page.document.links.markdownRule}\n  in .pm.json           ${page.document.links.pmJson}\n  refusals              ${page.document.links.refusals}\n\nHeadings and the h1:\n  rule                  ${page.document.headings.rule}\n  banner and hero       ${page.document.headings.claimedFirst}\n  later headings        ${page.document.headings.laterHeadings}\n  depth                 ${page.document.headings.depth}\n  example\n${
+      }\n  default               ${page.document.links.default}\n  in Markdown           ${page.document.links.markdownRule}\n  in .pm.json           ${page.document.links.pmJson}\n  refusals              ${page.document.links.refusals}\n\nBlockquotes:\n  appearance            ${page.document.blockquotes.appearance}\n  attribution           ${page.document.blockquotes.attribution}\n  example\n${page.document.blockquotes.example.split("\n").map(line => `    ${line}`).join("\n")}\n  optional caption      ${page.document.blockquotes.metadata}\n  values                ${page.document.blockquotes.valuePolicy}\n  source URL            ${page.document.blockquotes.urlPolicy}\n  placement             ${page.document.blockquotes.placement}\n  round trip            ${page.document.blockquotes.roundTrip}\n\nBlockquote attributes (closed object):\n${page.document.blockquotes.attrs.map(attr => `  ${attr.name}: ${attr.type} | null; optional; maximum ${attr.maxScalars} Unicode characters. ${attr.help}`).join("\n")}\n\nAttributed Markdown quote:\n${page.document.blockquotes.metadataExample}\n\nDirect ProseMirror blockquote:\n${JSON.stringify(page.document.blockquotes.pmJsonExample, null, 2)}\n\nHeadings and the h1:\n  rule                  ${page.document.headings.rule}\n  banner and hero       ${page.document.headings.claimedFirst}\n  later headings        ${page.document.headings.laterHeadings}\n  depth                 ${page.document.headings.depth}\n  example\n${
         page.document.headings.example.split("\n").map((line) => `    ${line}`).join("\n")
       }\n\nLegal and privacy pages:\n  linking Taproot       ${page.document.legalAndPrivacyPages.rule}\n  example               ${page.document.legalAndPrivacyPages.example}\n  versioned policies    ${page.document.legalAndPrivacyPages.choosing}\n\nTop-level section container:\n${page.sections.example}\n\nSection attributes:\n${
         page.document.sectionNode.attrs.map(formatSectionAttr).join("\n")

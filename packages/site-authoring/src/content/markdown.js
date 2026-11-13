@@ -1,4 +1,5 @@
 import { SiteAuthoringError } from "../errors.js";
+import { readBlockquoteMetadata, validateBlockquoteMetadata } from "./blockquote-metadata.js";
 import {
   canonicalizeComponentData,
   expandComponentAuthoringShorthand,
@@ -25,6 +26,7 @@ import {
   LINK_REL_TOKENS,
   LINK_TARGETS,
   MARK_TYPES,
+  pointerSegment,
 } from "./vocabulary.js";
 
 /**
@@ -32,7 +34,8 @@ import {
  * dependencies.
  *
  * The subset is exactly the renderer's vocabulary: paragraphs, ATX headings
- * 1-4, hard breaks, bullet and ordered lists, blockquotes, fenced code with a
+ * 1-4, hard breaks, bullet and ordered lists, blockquotes (including the
+ * metadata envelope), fenced code with a
  * language, thematic breaks, images, bounded GFM pipe tables,
  * `component:<type>` fences, and `inline-facts` JSON-array fences; and the
  * bold, italic, strike, code, and link marks. **Anything outside it is a hard
@@ -75,6 +78,12 @@ const TABLE_CONTRACT = FREE_FORM_SECTION_REGISTRY.table;
 const TABLE_NODE_TYPES = TABLE_CONTRACT.nodeTypes;
 const TABLE_CAPTION_STEM = TABLE_CONTRACT.markdown.captionPrefix.trimEnd();
 const INLINE_FACTS_CONTRACT = FREE_FORM_SECTION_REGISTRY.inlineFacts;
+const BLOCKQUOTE_CONTRACT = FREE_FORM_SECTION_REGISTRY.blockquote;
+const BLOCKQUOTE_HEADER_RE = new RegExp(`^${BLOCKQUOTE_CONTRACT.markdown.open} (\\{.*\\})$`, "u");
+const BLOCKQUOTE_DIRECTIVE_LIKE_RE = new RegExp(
+  `^ *(?:${BLOCKQUOTE_CONTRACT.markdown.open}|${BLOCKQUOTE_CONTRACT.markdown.close})(?=\\s|\\{|$)`,
+  "u",
+);
 const TABLE_DELIMITER_TOKEN_RE = new RegExp(
   `^:?-{${TABLE_CONTRACT.markdown.delimiterMinHyphens},}:?$`,
   "u",
@@ -256,7 +265,8 @@ function isBlockStart(text) {
     || REFERENCE_DEFINITION_RE.test(text)
     || SECTION_HEADER_LIKE_RE.test(text)
     || SECTION_CLOSE_RE.test(text)
-    || COLUMNS_DIRECTIVE_LIKE_RE.test(text);
+    || COLUMNS_DIRECTIVE_LIKE_RE.test(text)
+    || BLOCKQUOTE_DIRECTIVE_LIKE_RE.test(text);
 }
 
 function guardBlockConstructs(text, line, nextText) {
@@ -328,6 +338,13 @@ async function parseBlocks(lines, context, depth) {
         );
       }
       const consumed = consumeTable(lines, table, context);
+      nodes.push(consumed.node);
+      index = consumed.next;
+      continue;
+    }
+
+    if (BLOCKQUOTE_DIRECTIVE_LIKE_RE.test(text)) {
+      const consumed = await consumeBlockquoteEnvelope(lines, index, context, depth);
       nodes.push(consumed.node);
       index = consumed.next;
       continue;
@@ -1008,6 +1025,68 @@ async function componentNode(componentType, body, line, context) {
 // ---------------------------------------------------------------------------
 // Blockquotes
 // ---------------------------------------------------------------------------
+
+async function consumeBlockquoteEnvelope(lines, start, context, depth) {
+  const line = lines[start];
+  const header = expandLeadingTabs(line.text);
+  const match = BLOCKQUOTE_HEADER_RE.exec(header);
+  if (!match) {
+    throw fail(
+      CODES.markdownBlockquote,
+      "blockquote",
+      `Use '${BLOCKQUOTE_CONTRACT.markdown.open} {JSON object}' and a matching '${BLOCKQUOTE_CONTRACT.markdown.close}' without indentation or trailing text. A closing marker needs an open blockquote.`,
+      line.number,
+    );
+  }
+  let parsed;
+  try { parsed = JSON.parse(match[1]); } catch (error) {
+    throw fail(CODES.markdownBlockquote, "blockquote", "A blockquote header needs a valid JSON object.", line.number, error);
+  }
+  const [issue] = validateBlockquoteMetadata(parsed);
+  if (issue) {
+    throw fail(issue.code, issue.code === "blockquote.attrs" ? "/attrs" : `/attrs/${pointerSegment(issue.field)}`, issue.message, line.number);
+  }
+  const attrs = readBlockquoteMetadata(parsed);
+  const body = [];
+  let nested = 0;
+  let activeFence;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const bodyLine = lines[index];
+    const text = expandLeadingTabs(bodyLine.text);
+    if (activeFence) {
+      body.push(bodyLine);
+      if (activeFence.test(text)) activeFence = undefined;
+      continue;
+    }
+    const fence = FENCE_RE.exec(text);
+    if (fence) {
+      activeFence = fenceClosing(fence[2]);
+      body.push(bodyLine);
+      continue;
+    }
+    if (BLOCKQUOTE_HEADER_RE.test(text)) {
+      nested += 1;
+      if (depth + nested > CONTENT_LIMITS.markdownNesting) {
+        throw fail(CODES.markdownNesting, "nesting", `Markdown may not nest more than ${CONTENT_LIMITS.markdownNesting} levels deep.`, bodyLine.number);
+      }
+    }
+    if (text === BLOCKQUOTE_CONTRACT.markdown.close) {
+      if (nested === 0) {
+        const content = await parseBlocks(body, { ...context, blockPlacement: "nested" }, depth + 1);
+        if (content.length === 0) {
+          throw fail(CODES.markdownEmpty, "blockquote", "A blockquote must contain content.", line.number);
+        }
+        return {
+          node: { type: BLOCKQUOTE_CONTRACT.nodeType, ...(Object.keys(attrs).length > 0 ? { attrs } : {}), content },
+          next: index + 1,
+        };
+      }
+      nested -= 1;
+    }
+    body.push(bodyLine);
+  }
+  throw fail(CODES.markdownBlockquote, "blockquote", `A blockquote was opened but never closed with '${BLOCKQUOTE_CONTRACT.markdown.close}'.`, line.number);
+}
 
 async function consumeBlockquote(lines, start, context, depth) {
   const inner = [];

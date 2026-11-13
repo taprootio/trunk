@@ -1,0 +1,550 @@
+{
+  "cases": [
+    {
+      "name": "absent defaults",
+      "attrs": null,
+      "valid": true
+    },
+    {
+      "name": "ordinary quote",
+      "attrs": {},
+      "valid": true
+    },
+    {
+      "name": "null defaults",
+      "attrs": {
+        "attribution": null,
+        "sourceTitle": null,
+        "cite": null
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 1",
+      "attrs": {
+        "attribution": "Aldous Huxley"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 2",
+      "attrs": {
+        "sourceTitle": "Brave New World"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 3",
+      "attrs": {
+        "attribution": "Aldous Huxley",
+        "sourceTitle": "Brave New World"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 4",
+      "attrs": {
+        "cite": "https://www.huxley.net/bnw/four.html"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 5",
+      "attrs": {
+        "attribution": "Aldous Huxley",
+        "cite": "https://www.huxley.net/bnw/four.html"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 6",
+      "attrs": {
+        "sourceTitle": "Brave New World",
+        "cite": "https://www.huxley.net/bnw/four.html"
+      },
+      "valid": true
+    },
+    {
+      "name": "metadata combination 7",
+      "attrs": {
+        "attribution": "Aldous Huxley",
+        "sourceTitle": "Brave New World",
+        "cite": "https://www.huxley.net/bnw/four.html"
+      },
+      "valid": true
+    },
+    {
+      "name": "attribution blank",
+      "attrs": {
+        "attribution": " "
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution number",
+      "attrs": {
+        "attribution": 42
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution array",
+      "attrs": {
+        "attribution": []
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution object",
+      "attrs": {
+        "attribution": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution newline",
+      "attrs": {
+        "attribution": "x\ny"
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution tab",
+      "attrs": {
+        "attribution": "x\ty"
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution control",
+      "attrs": {
+        "attribution": "xy"
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution line separator",
+      "attrs": {
+        "attribution": "x y"
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution bom",
+      "attrs": {
+        "attribution": "x﻿y"
+      },
+      "valid": false
+    },
+    {
+      "name": "attribution scalar boundary",
+      "attrs": {
+        "attribution": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "valid": true
+    },
+    {
+      "name": "attribution over scalar boundary",
+      "attrs": {
+        "attribution": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle blank",
+      "attrs": {
+        "sourceTitle": " "
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle number",
+      "attrs": {
+        "sourceTitle": 42
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle array",
+      "attrs": {
+        "sourceTitle": []
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle object",
+      "attrs": {
+        "sourceTitle": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle newline",
+      "attrs": {
+        "sourceTitle": "x\ny"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle tab",
+      "attrs": {
+        "sourceTitle": "x\ty"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle control",
+      "attrs": {
+        "sourceTitle": "xy"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle line separator",
+      "attrs": {
+        "sourceTitle": "x y"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle bom",
+      "attrs": {
+        "sourceTitle": "x﻿y"
+      },
+      "valid": false
+    },
+    {
+      "name": "sourceTitle scalar boundary",
+      "attrs": {
+        "sourceTitle": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "valid": true
+    },
+    {
+      "name": "sourceTitle over scalar boundary",
+      "attrs": {
+        "sourceTitle": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "valid": false
+    },
+    {
+      "name": "cite blank",
+      "attrs": {
+        "cite": " "
+      },
+      "valid": false
+    },
+    {
+      "name": "cite number",
+      "attrs": {
+        "cite": 42
+      },
+      "valid": false
+    },
+    {
+      "name": "cite array",
+      "attrs": {
+        "cite": []
+      },
+      "valid": false
+    },
+    {
+      "name": "cite object",
+      "attrs": {
+        "cite": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "cite newline",
+      "attrs": {
+        "cite": "x\ny"
+      },
+      "valid": false
+    },
+    {
+      "name": "cite tab",
+      "attrs": {
+        "cite": "x\ty"
+      },
+      "valid": false
+    },
+    {
+      "name": "cite control",
+      "attrs": {
+        "cite": "xy"
+      },
+      "valid": false
+    },
+    {
+      "name": "cite line separator",
+      "attrs": {
+        "cite": "x y"
+      },
+      "valid": false
+    },
+    {
+      "name": "cite bom",
+      "attrs": {
+        "cite": "x﻿y"
+      },
+      "valid": false
+    },
+    {
+      "name": "safe source /reviews/jeana",
+      "attrs": {
+        "cite": "/reviews/jeana"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe source /",
+      "attrs": {
+        "cite": "/"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe source https://example.test/review?q=a&b=c#quote",
+      "attrs": {
+        "cite": "https://example.test/review?q=a&b=c#quote"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe source HTTP://example.test/quote",
+      "attrs": {
+        "cite": "HTTP://example.test/quote"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe source https://例え.test/quote",
+      "attrs": {
+        "cite": "https://例え.test/quote"
+      },
+      "valid": true
+    },
+    {
+      "name": "unsafe source //example.test/quote",
+      "attrs": {
+        "cite": "//example.test/quote"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source javascript:alert(1)",
+      "attrs": {
+        "cite": "javascript:alert(1)"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source data:text/html,quote",
+      "attrs": {
+        "cite": "data:text/html,quote"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source mailto:a@example.test",
+      "attrs": {
+        "cite": "mailto:a@example.test"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source tel:123",
+      "attrs": {
+        "cite": "tel:123"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source quote",
+      "attrs": {
+        "cite": "quote"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source https://",
+      "attrs": {
+        "cite": "https://"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source http://?bad",
+      "attrs": {
+        "cite": "http://?bad"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source https://exa mple.test",
+      "attrs": {
+        "cite": "https://exa mple.test"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source /\\example.test",
+      "attrs": {
+        "cite": "/\\example.test"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source https://example.test/\\x",
+      "attrs": {
+        "cite": "https://example.test/\\x"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source  https://example.test/",
+      "attrs": {
+        "cite": " https://example.test/"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe source https://example.test/ ",
+      "attrs": {
+        "cite": "https://example.test/ "
+      },
+      "valid": false
+    },
+    {
+      "name": "source length boundary",
+      "attrs": {
+        "cite": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "valid": true
+    },
+    {
+      "name": "source over length boundary",
+      "attrs": {
+        "cite": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown field",
+      "attrs": {
+        "author": "Person"
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown null field",
+      "attrs": {
+        "author": null
+      },
+      "valid": false
+    },
+    {
+      "name": "attrs array",
+      "attrs": [],
+      "valid": false
+    },
+    {
+      "name": "attrs string",
+      "attrs": "quote",
+      "valid": false
+    },
+    {
+      "name": "plain text escaping",
+      "attrs": {
+        "attribution": "<Person> & \"name\"",
+        "sourceTitle": "<Work> & title"
+      },
+      "valid": true
+    },
+    {
+      "name": "malformed authority http:///path",
+      "attrs": {
+        "cite": "http:///path"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https:////example.test/",
+      "attrs": {
+        "cite": "https:////example.test/"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https://exa%09mple.test/",
+      "attrs": {
+        "cite": "https://exa%09mple.test/"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https://exa%0ample.test/",
+      "attrs": {
+        "cite": "https://exa%0ample.test/"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https://example.test:65536/",
+      "attrs": {
+        "cite": "https://example.test:65536/"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https://[not-an-address]/",
+      "attrs": {
+        "cite": "https://[not-an-address]/"
+      },
+      "valid": false
+    },
+    {
+      "name": "malformed authority https://[::1/",
+      "attrs": {
+        "cite": "https://[::1/"
+      },
+      "valid": false
+    },
+    {
+      "name": "safe address edge https://[::1]/review",
+      "attrs": {
+        "cite": "https://[::1]/review"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe address edge https://example.test:443/review",
+      "attrs": {
+        "cite": "https://example.test:443/review"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe address edge https://example.test/review%20one",
+      "attrs": {
+        "cite": "https://example.test/review%20one"
+      },
+      "valid": true
+    },
+    {
+      "name": "safe address edge /reviews/review one",
+      "attrs": {
+        "cite": "/reviews/review one"
+      },
+      "valid": true
+    },
+    {
+      "name": "prototype field is not an allowed attribute",
+      "attrs": {
+        "__proto__": null
+      },
+      "valid": false
+    }
+  ]
+}
