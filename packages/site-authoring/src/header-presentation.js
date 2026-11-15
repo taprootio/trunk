@@ -1,22 +1,11 @@
 // Generated from shared/header-presentation.ts by scripts/sync-field-validation.mjs. Do not edit.
-export const HEADER_HEIGHT_MULTIPLIER_LIMITS = Object.freeze({ minimum: 1, maximum: 5, step: 0.1 });
+import { DISPLAY_SCALE_LIMITS, parseDisplayScale } from "./display-scale.js";
+export const HEADER_HEIGHT_MULTIPLIER_LIMITS = DISPLAY_SCALE_LIMITS;
 const STANDARD_HEIGHT = Object.freeze({ tenths: 10, scale: 1, canonical: "" });
-const HEIGHT_MULTIPLIER = /^(?:[1-4](?:\.[0-9])?|5(?:\.0)?)$/u;
 /** Parse the authored string without floating-point remainder or whitespace normalization. */
 export function parseHeaderHeightMultiplier(value) {
-    if (value === undefined || value === "")
-        return STANDARD_HEIGHT;
-    if (typeof value !== "string")
-        return null;
-    // JavaScript's end anchor also matches before a final newline; require the entire value.
-    if (HEIGHT_MULTIPLIER.exec(value)?.[0] !== value)
-        return null;
-    const whole = value.charCodeAt(0) - 48;
-    const fraction = value.length === 3 ? value.charCodeAt(2) - 48 : 0;
-    const tenths = whole * 10 + fraction;
-    return tenths === 10
-        ? STANDARD_HEIGHT
-        : Object.freeze({ tenths, scale: tenths / 10, canonical: `${whole}.${fraction}` });
+    const parsed = parseDisplayScale(value);
+    return parsed?.tenths === 10 ? STANDARD_HEIGHT : parsed;
 }
 /** Read old or omitted settings as standard height; writes use the strict parser. */
 export function resolveHeaderHeightMultiplier(value) {

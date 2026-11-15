@@ -1,6 +1,25 @@
 {
   "entries": [
     {
+      "version": "0.39.0",
+      "note": "Set footer widths, responsive alignment and artwork space, choose independent logos and scale, and check whether words fit before saving.",
+      "behavior": [
+        "The bundled Espalier is 7.1.0, with independent footer logos, logo-only scaling and responsive footer alignment.",
+        "Footer settings accept brandSpan (1–3), asideSpan (1–2), brandSize (standard or large) for text, and span (1–2) on each link column. Omitted spans are 1 and an omitted or empty brandSize is standard. There is no total track limit.",
+        "logoScale independently sizes the footer logo from \"1.0\" through \"5.0\" in 0.1 steps. It must be a string; empty and \"1\" normalize to \"1.0\". Old absent or null values migrate to \"1.5\" for large text, otherwise \"1.0\"; pull and footer push materialize the scale, so later text-size edits keep the logo size.",
+        "Each footer scheme accepts a site-owned PNG/WebP logoId. Empty independently inherits that scheme's site logo. logoUrl is read-only metadata, excluded from requests and concurrency hashing. Footer push owns logo ids and scale; theme push still owns only the ten footer colors and preserves all other footer content.",
+        "Sparse alignment, brandAlignment, asideAlignment and column alignment profiles accept wide, wrapped (Brand row) and stacked horizontal/vertical/textAlign choices. bottomAlignment omits vertical. Empty axes inherit; start/center/end retain intent. Text also accepts auto to follow horizontal placement and justify for prose only. The active layout tries the region then footer default before searching wider layouts; invalid, padded, non-string and wrong-axis choices are refused.",
+        "logoBox natural fits constrained artwork dimensions and its reservation without cropping transparent padding. Fixed preserves scaled height, including spare image-box space; omitted, null or empty means fixed. Footer push owns every profile and logoBox. Theme push preserves them, explicit auto and all logo content, and refuses unsaved local content under the unchanged footer-content-v2 baseline.",
+        "validate and footer push report footer.word_breaks warnings at five widths, including Small phone (320px) and settings-only managed Docs workspaces. At most 12 footer findings are shown, with their true count; warnings never block a push. Generated default-font metrics and bounded break opportunities guide the estimate; custom fonts or scale may differ, and Han, Kana or Thai fragments are skipped. Logo proportions are unknown to the CLI, so a narrow logo can lead to extra brand warnings. Deployment checks cover standard and profile sites.",
+        "The footer concurrency hash is now footer-draft-v7, including logoBox and sparse profiles without expanding inherited choices. Upgrade to the latest CLI and pull again before pushing an existing workspace.",
+        "Pull can write a page whose source filename reaches the filesystem's filename limit; atomic temporary names no longer grow with the page slug.",
+        "The help reference version is 60."
+      ],
+      "help": [
+        "footer"
+      ]
+    },
+    {
       "version": "0.38.1",
       "note": "Uses Espalier 6.15.1, whose header controls stay in place during pointer activation.",
       "behavior": [

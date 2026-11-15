@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import corpus from "./fixtures/site-check-corpus.json" with { type: "json" };
+import { buildFooterFitInput, FOOTER_FIT_WIDTH_LABELS, FOOTER_WIDTHS, MAX_FOOTER_FIT_FINDINGS } from "../src/footer-fit.js";
+import { validateFooterDocument } from "../src/footer-contract.js";
 import { pageStructureFindings } from "../src/page-structure-checks.js";
 import {
   checkRedirectSource,
@@ -186,4 +188,62 @@ test("the image description rule runs offline in the catalogue, so validate no l
   const ran = evaluateOfflineSiteChecks({ planned: [], pagePaths: [], imageCheck: { ran: true } }).siteChecks;
   assert.equal(Object.hasOwn(ran, "skipped"), false);
   assert.equal(Object.hasOwn(ran, "imageCheckReason"), false);
+});
+
+test("footer findings keep their file and true warning count beyond the twelve-item cap", () => {
+  // Wide glyphs overflow Desktop while the whole paragraph stays within the footer body limit.
+  const words = Array.from({ length: MAX_FOOTER_FIT_FINDINGS + 3 }, (_, index) => `${"W".repeat(60)}${index}`);
+  const footerSettings = validateFooterDocument({ enabled: true, asideBodyContent: { paragraphs: [{ runs: [{ text: words.join(" ") }] }] } });
+  const footerInput = buildFooterFitInput(footerSettings);
+  const lines = [];
+  const result = evaluateOfflineSiteChecks({ pagePaths: [], footerInput, footerOnly: true, onProgress: line => lines.push(line) });
+  assert.equal(result.findings.total, words.length);
+  assert.equal(result.findings.warnings, words.length);
+  assert.equal(result.findings.errors, 0);
+  assert.equal(result.findings.items.length, MAX_FOOTER_FIT_FINDINGS);
+  assert.equal(result.findings.truncated, true);
+  assert.deepEqual(result.findings.items.map(item => item.subject), words.slice(0, MAX_FOOTER_FIT_FINDINGS));
+  assert.ok(result.findings.items.every(item => item.file === "settings/site-publishing-preferences.json" && !Object.hasOwn(item, "path")));
+  assert.ok(result.findings.items.every(item => item.detail === "desktop:aside"));
+  assert.deepEqual(result.siteChecks, { ranOffline: ["footer.word_breaks"] });
+  assert.ok(lines.some(line => line.includes("and 3 more footer fit")));
+});
+
+test("disabled footer skips only when supplied, and settings-only checks claim no page rules", () => {
+  const disabled = buildFooterFitInput({ enabled: false });
+  const full = evaluateOfflineSiteChecks({ planned: [], pagePaths: [], footerInput: disabled, imageCheck: { ran: true } });
+  assert.deepEqual(full.siteChecks.skipped, ["footer.word_breaks"]);
+  assert.equal(full.findings.total, 0);
+  const settings = evaluateOfflineSiteChecks({ planned: [{ document: { href: "/missing" } }], pagePaths: [], footerInput: disabled, footerOnly: true });
+  assert.deepEqual(settings.siteChecks, { ranOffline: ["footer.word_breaks"], skipped: ["footer.word_breaks"] });
+  assert.equal(settings.findings.total, 0);
+  const absent = evaluateOfflineSiteChecks({ planned: [], pagePaths: [], pagesComplete: false, imageCheck: { ran: true } });
+  assert.deepEqual(absent.siteChecks.skipped, ["link.page_missing"]);
+});
+
+test("footer warnings join page findings without losing their true totals", () => {
+  const footerInput = buildFooterFitInput({ enabled: true, asideBodyContent: { paragraphs: [{ runs: [{ text: "x".repeat(120) }] }] } });
+  const result = evaluateOfflineSiteChecks({
+    planned: [{ file: "pages/a.pm.json", pagePath: "a", document: { href: "/missing" } }],
+    pagePaths: [], footerInput,
+  });
+  assert.equal(result.findings.total, 2);
+  assert.equal(result.findings.warnings, 2);
+  assert.deepEqual(result.findings.items.map(item => item.rule), ["link.page_missing", "footer.word_breaks"]);
+  assert.ok(result.siteChecks.ranOffline.includes("footer.word_breaks"));
+});
+
+test("footer finding copy names known widths and remedies and tolerates unknown detail", () => {
+  for (const [region, advice] of [["column", "Widen its column or shorten the label"], ["brand", "Widen the brand or shorten its text"], ["aside", "Widen the aside or shorten the text"]]) {
+    const sentence = describeSiteFinding({ ruleId: "footer.word_breaks", subject: "Documentation", detail: `small_desktop:${region}` });
+    assert.ok(sentence.includes("at small desktop width"));
+    assert.ok(sentence.includes(advice));
+  }
+  assert.match(describeSiteFinding({ ruleId: "footer.word_breaks", subject: "Word", detail: "future:unknown" }), /at this width.*Widen the region/u);
+  for (const width of FOOTER_WIDTHS) {
+    const sentence = describeSiteFinding({ ruleId: "footer.word_breaks", subject: "Documentation", detail: `${width}:column` });
+    assert.ok(sentence.includes(`at ${FOOTER_FIT_WIDTH_LABELS[width].toLowerCase()} width`));
+    assert.ok(!sentence.includes("small_desktop") && !sentence.includes("small_phone"));
+    if (width === "small_phone") assert.match(sentence, /small phone \(320px\)/u);
+  }
 });

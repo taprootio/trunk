@@ -447,10 +447,18 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
   const publishing = JSON.parse(
     await readFile(path.join(TAPROOT_FIXTURE, "settings/site-publishing-preferences.json"), "utf8"),
   );
-  const footerCta = publishing.settings.footerSettings.asideCta;
-  assert.equal(footerCta.label, "Stay informed");
-  assert.equal(footerCta.pageResourceId, stayInformed.resourceId);
-  assert.equal(Object.hasOwn(footerCta, "externalUrl"), false);
+  const footer = publishing.settings.footerSettings;
+  assert.equal(footer.asideCta, null);
+  assert.deepEqual(footer.asideHeadingContent.paragraphs, [{ runs: [{ text: "Draft. Stage. Publish." }] }]);
+  assert.deepEqual(footer.asideBodyContent.paragraphs, []);
+  assert.deepEqual([footer.brandSpan, footer.brandSize, footer.asideSpan], [2, "large", 1]);
+  assert.deepEqual(footer.linkColumns.map(column => ({ span: column.span, headings: column.groups.map(group => group.heading) })), [
+    { span: 1, headings: ["Product"] },
+  ]);
+  assert.deepEqual(footer.bottomLinks.map(({ label, externalUrl }) => ({ label, externalUrl })), [
+    { label: "Privacy", externalUrl: "https://www.taproot.io/privacy-notice" },
+    { label: "Terms", externalUrl: "https://www.taproot.io/terms-of-service" },
+  ]);
   // The www fixture declares roles beside the seeded default mappings, and
   // its marker claims none of them — so the resolver recompiles those tokens
   // and the cached values are never applied (TR00801, TR00852). The CLI says

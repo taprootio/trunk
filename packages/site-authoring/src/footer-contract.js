@@ -4,12 +4,24 @@ import {
   isContactOrWebUrl,
 } from "./contact-url.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
+import { parseFooterLogoScale, resolveFooterLogoScale } from "./footer-branding.js";
+import {
+  FOOTER_ALIGNMENT_LAYOUTS,
+  FOOTER_POSITION_VALUES,
+  FOOTER_TEXT_ALIGN_VALUES,
+  normalizeFooterLogoBox,
+  normalizeFooterResponsiveAlignment,
+  normalizeFooterResponsiveInlineAlignment,
+} from "./footer-alignment.js";
 import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "./social-link-url.js";
 import socialPlatforms from "./social-platforms.json" with { type: "json" };
 import { FOOTER_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
 
 export const FOOTER_LIMITS = Object.freeze({
   linkColumns: 6,
+  brandSpanMax: 3,
+  asideSpanMax: 2,
+  columnSpanMax: 2,
   linkGroups: 12,
   groupsPerColumn: 6,
   linksPerGroup: 12,
@@ -42,7 +54,7 @@ export const FOOTER_FADE_MODES = Object.freeze([
 ]);
 
 // One ordered inventory drives the local closed-object checks, the request
-// mapper (validation returns this exact shape), and reference help. The three
+// mapper (validation returns this exact shape), and reference help. The
 // response-only delivery fields remain in the inventory as read-only so a
 // future proto edit cannot quietly become authorable.
 export const FOOTER_FIELD_INVENTORY = Object.freeze({
@@ -60,8 +72,21 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
     "featureImage",
     "showBrandText",
     "socialLinks",
+    "brandSpan",
+    "asideSpan",
+    "brandSize",
+    "logoScale",
+    "alignment",
+    "brandAlignment",
+    "asideAlignment",
+    "bottomAlignment",
+    "logoBox",
   ]),
-  FooterLinkColumn: Object.freeze(["id", "groups"]),
+  FooterLinkColumn: Object.freeze(["id", "groups", "span", "alignment"]),
+  FooterAlignment: Object.freeze(["horizontal", "vertical", "textAlign"]),
+  FooterResponsiveAlignment: FOOTER_ALIGNMENT_LAYOUTS,
+  FooterInlineAlignment: Object.freeze(["horizontal", "textAlign"]),
+  FooterResponsiveInlineAlignment: FOOTER_ALIGNMENT_LAYOUTS,
   FooterLinkGroup: Object.freeze(["id", "heading", "links"]),
   FooterLink: Object.freeze(["id", "label", "pageResourceId", "externalUrl"]),
   FooterSocialLink: Object.freeze(["id", "platform", "url", "label"]),
@@ -82,6 +107,8 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
     "backgroundFade",
     "backgroundRepeatHeightPx",
     "additionalTopPaddingRem",
+    "logoId",
+    "logoUrl",
   ]),
   FooterFeatureImageSettings: Object.freeze(["imageId", "imageUrl", "alt", "responsiveUrls"]),
   FooterFeatureResponsiveImageUrl: Object.freeze(["minWidth", "url"]),
@@ -95,6 +122,8 @@ export const SOCIAL_LINK_URL_REQUIREMENT =
   + "to a domain name of unaccented letters, digits and hyphens, like https://www.instagram.com/yourname";
 
 export const FOOTER_READ_ONLY_FIELDS = Object.freeze([
+  "light.logoUrl",
+  "dark.logoUrl",
   "light.backgroundImageUrl",
   "dark.backgroundImageUrl",
   "featureImage.imageUrl",
@@ -147,12 +176,44 @@ function number(value, defaultValue, path, minimum, maximum) {
   return value;
 }
 
+function span(value, maximum, path) {
+  if (value === undefined) return 1;
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    fail("footer.field_invalid", `${path} must be a whole number from 1 through ${maximum}.`, path);
+  }
+  return value;
+}
+
 function choice(value, defaultValue, choices, path) {
   if (value === undefined) return defaultValue;
   if (typeof value !== "string" || !choices.includes(value)) {
     fail("footer.field_invalid", `${path} must be one of ${choices.join(", ")}.`, path);
   }
   return value;
+}
+
+function alignmentProfile(value, path, tolerateStoredValues, inlineOnly = false) {
+  if (!tolerateStoredValues && value !== undefined && value !== null) {
+    value = object(value, path);
+    closed(value, inlineOnly ? "FooterResponsiveInlineAlignment" : "FooterResponsiveAlignment", path);
+    for (const layout of FOOTER_ALIGNMENT_LAYOUTS) {
+      const alignmentPath = `${path}.${layout}`;
+      const alignment = value[layout];
+      if (alignment === undefined || alignment === null) continue;
+      object(alignment, alignmentPath);
+      const type = inlineOnly ? "FooterInlineAlignment" : "FooterAlignment";
+      closed(alignment, type, alignmentPath);
+      for (const axis of FOOTER_FIELD_INVENTORY[type]) {
+        choice(alignment[axis], "", ["", ...(axis === "textAlign" ? FOOTER_TEXT_ALIGN_VALUES : FOOTER_POSITION_VALUES)], `${alignmentPath}.${axis}`);
+      }
+    }
+  }
+  return inlineOnly ? normalizeFooterResponsiveInlineAlignment(value) : normalizeFooterResponsiveAlignment(value);
+}
+
+function authoredAlignment(owner, key, path, tolerateStoredValues, inlineOnly = false) {
+  const alignment = alignmentProfile(owner[key], `${path}.${key}`, tolerateStoredValues, inlineOnly);
+  return alignment === undefined ? {} : { [key]: alignment };
 }
 
 function isDotNetWhiteSpace(character) {
@@ -395,6 +456,7 @@ function scheme(value, path, knownImageIds) {
   value = value === undefined || value === null ? {} : object(value, path);
   closed(value, "FooterSchemeSettings", path);
   rejectReadOnly(value, "backgroundImageUrl", path);
+  rejectReadOnly(value, "logoUrl", path);
   const repeatHeight = value.backgroundRepeatHeightPx ?? FOOTER_LIMITS.backgroundRepeatHeightDefault;
   if (
     !Number.isInteger(repeatHeight)
@@ -426,6 +488,7 @@ function scheme(value, path, knownImageIds) {
       FOOTER_COLOR_TOKENS.linkHoverColor,
       `${path}.linkHoverColor`,
     ),
+    logoId: imageId(value.logoId, `${path}.logoId`, knownImageIds),
     backgroundImageId: imageId(value.backgroundImageId, `${path}.backgroundImageId`, knownImageIds),
     backgroundImageOpacity: number(value.backgroundImageOpacity, 1, `${path}.backgroundImageOpacity`, 0, 1),
     backgroundPresentation: choice(
@@ -489,6 +552,7 @@ export function footerDefaults() {
     headingColor: "",
     linkColor: "",
     linkHoverColor: "",
+    logoId: "",
     backgroundImageId: "",
     backgroundImageOpacity: 1,
     backgroundPresentation: FOOTER_BACKGROUND_PRESENTATIONS[0],
@@ -499,6 +563,11 @@ export function footerDefaults() {
   return {
     enabled: false,
     showBrand: true,
+    brandSpan: 1,
+    brandSize: "standard",
+    logoScale: "1.0",
+    logoBox: "fixed",
+    asideSpan: 1,
     asideCta: undefined,
     bottomLinks: [],
     light: defaults(),
@@ -556,6 +625,8 @@ function normalizeFooterDocument(
       return {
         id: stableId(column.id, `${columnPath}.id`, seenColumnIds, "column"),
         groups,
+        span: span(column.span, FOOTER_LIMITS.columnSpanMax, `${columnPath}.span`),
+        ...authoredAlignment(column, "alignment", columnPath, tolerateStoredValues),
       };
     });
   if (groupCount > FOOTER_LIMITS.linkGroups) {
@@ -567,9 +638,27 @@ function normalizeFooterDocument(
   }
 
   const normalizedFeatureImage = featureImage(value.featureImage, knownImageIds, tolerateStoredValues);
+  const brandSize = choice(value.brandSize === "" ? undefined : value.brandSize, "standard", ["standard", "large"], "footerSettings.brandSize");
+  const logoScale = tolerateStoredValues
+    ? resolveFooterLogoScale(value.logoScale, brandSize)
+    : parseFooterLogoScale(value.logoScale, brandSize);
+  if (logoScale === null) {
+    fail("footer.field_invalid", "footerSettings.logoScale must be a string from 1.0 through 5.0 in 0.1 steps.", "footerSettings.logoScale");
+  }
   return {
     enabled: boolean(value.enabled, false, "footerSettings.enabled"),
     showBrand: boolean(value.showBrand, true, "footerSettings.showBrand"),
+    brandSpan: span(value.brandSpan, FOOTER_LIMITS.brandSpanMax, "footerSettings.brandSpan"),
+    brandSize,
+    logoScale: logoScale.canonical,
+    logoBox: tolerateStoredValues
+      ? normalizeFooterLogoBox(value.logoBox)
+      : choice(value.logoBox === "" || value.logoBox === null ? undefined : value.logoBox, "fixed", ["fixed", "natural"], "footerSettings.logoBox"),
+    ...authoredAlignment(value, "alignment", "footerSettings", tolerateStoredValues),
+    ...authoredAlignment(value, "brandAlignment", "footerSettings", tolerateStoredValues),
+    ...authoredAlignment(value, "asideAlignment", "footerSettings", tolerateStoredValues),
+    ...authoredAlignment(value, "bottomAlignment", "footerSettings", tolerateStoredValues, true),
+    asideSpan: span(value.asideSpan, FOOTER_LIMITS.asideSpanMax, "footerSettings.asideSpan"),
     ...(value.asideCta === undefined || value.asideCta === null
       ? {}
       : {
@@ -631,7 +720,10 @@ export function validateFooterDocument(value, options = {}) {
 function withoutServerProjections(value) {
   const projected = structuredClone(isPlainObject(value) ? value : {});
   for (const schemeName of ["light", "dark"]) {
-    if (isPlainObject(projected[schemeName])) delete projected[schemeName].backgroundImageUrl;
+    if (isPlainObject(projected[schemeName])) {
+      delete projected[schemeName].backgroundImageUrl;
+      delete projected[schemeName].logoUrl;
+    }
   }
   if (isPlainObject(projected.featureImage)) {
     delete projected.featureImage.imageUrl;
@@ -648,7 +740,13 @@ export function projectFooterSettingsForWorkspace(value) {
 export function footerImageIds(value) {
   const ids = new Set();
   for (
-    const candidate of [value?.light?.backgroundImageId, value?.dark?.backgroundImageId, value?.featureImage?.imageId]
+    const candidate of [
+      value?.light?.logoId,
+      value?.dark?.logoId,
+      value?.light?.backgroundImageId,
+      value?.dark?.backgroundImageId,
+      value?.featureImage?.imageId,
+    ]
   ) {
     if (isCanonicalUuid(candidate)) ids.add(candidate);
   }
@@ -658,6 +756,18 @@ export function footerImageIds(value) {
 export const FOOTER_EXAMPLE = Object.freeze({
   enabled: true,
   showBrand: true,
+  brandSpan: 2,
+  brandSize: "large",
+  logoScale: "1.5",
+  logoBox: "natural",
+  alignment: Object.freeze({ stacked: Object.freeze({ horizontal: "center" }) }),
+  brandAlignment: Object.freeze({
+    wide: Object.freeze({ vertical: "start" }),
+    wrapped: Object.freeze({ horizontal: "center" }),
+  }),
+  asideAlignment: Object.freeze({ wide: Object.freeze({ textAlign: "justify" }) }),
+  bottomAlignment: Object.freeze({ stacked: Object.freeze({ textAlign: "auto" }) }),
+  asideSpan: 1,
   // The aside CTA is where a local business puts the thing a visitor came for.
   // A phone number is a `tel:` target, emitted verbatim so it stays dialable.
   asideCta: Object.freeze({
@@ -683,6 +793,7 @@ export const FOOTER_EXAMPLE = Object.freeze({
     headingColor: "--esp-color-headings",
     linkColor: "--esp-color-link",
     linkHoverColor: "--esp-color-link-hover",
+    logoId: "",
     backgroundImageId: "d461035a-74b6-4528-a4f5-e5a96fb50037",
     backgroundImageOpacity: 0.18,
     backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_COVER",
@@ -696,6 +807,7 @@ export const FOOTER_EXAMPLE = Object.freeze({
     headingColor: "--esp-color-headings",
     linkColor: "--esp-color-link",
     linkHoverColor: "--esp-color-link-hover",
+    logoId: "",
     backgroundImageId: "",
     backgroundImageOpacity: 1,
     backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_TILE",
@@ -705,6 +817,8 @@ export const FOOTER_EXAMPLE = Object.freeze({
   }),
   linkColumns: Object.freeze([Object.freeze({
     id: "84bf7531-dfc8-453e-a78d-a5fa3348d56b",
+    span: 1,
+    alignment: Object.freeze({ stacked: Object.freeze({ horizontal: "start", textAlign: "start" }) }),
     groups: Object.freeze([Object.freeze({
       id: "64789fae-8862-43ab-85ca-f3b41819bddb",
       heading: "Explore",

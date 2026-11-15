@@ -129,7 +129,7 @@ easy to confuse:
 | --- | --- | --- |
 | Brand & style > Page style > Background image | `lightTheme` / `darkTheme` `pageBackgroundImage` (with `pageBackgroundImageOpacity`) | One layer across the page box behind the content; the opaque header and footer cover it, so it shows behind the main content. |
 | Brand & style > Page canvas > Canvas image | `lightCanvasImageId` / `darkCanvasImageId` in `taproot-styles.json` (with the two `...CanvasImageOpacity` fields) | Only the empty side margins of a page. Not on a standard site today, whose margins are 0 px wide. |
-| Brand & style > Brand > Logo | `lightLogoId` / `darkLogoId` | The header brand, and the footer's brand once the footer is enabled. |
+| Brand & style > Brand > Logo | `lightLogoId` / `darkLogoId` | The header brand and the enabled footer's inherited logo. Each footer scheme may override it with `logoId`. |
 | Brand & style > Brand > Favicon | `brand.json` `faviconId` | The icon set in every page's head and `/favicon.ico`. |
 
 Both background layers tile at the image's natural pixel size from the top-left;
@@ -146,6 +146,49 @@ against the pages the pull recorded. It reports every problem at once in
 Warnings never refuse: `linkWarnings` names a link whose address is only
 `http(s)://` plus its own text (`content.link_autolinked`, left by older editor
 autolinking), and `pages push` reports the same for the pages it sends.
+
+Footer regions have individual widths: `brandSpan` is 1–3, a link column's
+`span` and `asideSpan` are 1–2, and `brandSize` is `standard` or `large`.
+Omitted spans are 1; omitted or empty size is `standard`. `brandSize` changes
+only brand text. `logoScale` independently sets logo size as a string from
+`"1.0"` through `"5.0"` in 0.1 steps. Empty and `"1"` normalize to `"1.0"`;
+whitespace, exponents, numeric JSON values and extra decimal places are refused.
+Old absent or null scales migrate to `"1.5"` for Large text and `"1.0"`
+otherwise; pull and footer push write the explicit value, so later text-size
+edits do not change the logo. Each scheme's `logoId` accepts a site-owned PNG
+or WebP; empty inherits that scheme's site logo independently. `logoUrl` is
+read-only metadata and stays out of workspace requests. There is no total
+track limit. Set `logoBox` to `natural` to fit constrained artwork dimensions;
+`fixed` keeps the scaled image height, including spare space. Missing, null or
+empty means `fixed`. Positioning the brand at Top moves spare space below the
+artwork; natural mode removes the unused envelope without cropping alpha padding.
+
+`alignment` sets whole-footer defaults. `brandAlignment`, `asideAlignment` and
+each link column's `alignment` override individual regions. Each is a sparse
+object with optional `wide`, `wrapped` (Brand row) and `stacked` layouts, whose
+`horizontal` and `vertical` choices are `start`, `center` or `end`. Logical
+start/end follow writing direction. `textAlign` also accepts `auto` and `justify`.
+`bottomAlignment` uses the same layouts with only `horizontal` and `textAlign`.
+For each axis, the active layout tries the region then whole-footer choice,
+then repeats toward wider layouts. Empty or omitted axes inherit; null or empty
+profiles disappear on pull. Explicit `start` stays authored intent. Text `auto`
+follows current horizontal placement and resets inherited justification.
+Justification affects prose with a normal last line; headings, brand text,
+menus and CTA labels follow horizontal placement. Save only authored choices,
+for example `"alignment": { "stacked": { "horizontal": "center" } }`.
+
+`validate` and `footer push` estimate `footer.word_breaks` at five widths:
+Desktop, Small desktop, Tablet, Phone and Small phone (320px). They show at most
+12 footer warnings, with the true count and any remainder. Generated default-font
+metrics, type scale and gaps are assumed; custom fonts or scale may differ.
+Supported whitespace, hyphen and zero-width breaks are estimated, with bounded
+contextual shaping; fragments containing Han, Kana or Thai are skipped.
+Unknown logo proportions
+use the 4:1 maximum, so a narrow logo can produce extra brand warnings.
+Warnings allow the push. Managed Docs workspaces get the same check; deployment
+checks cover standard and profile sites. Footer overrides count as logos even without
+a site logo. After upgrading to this v7 footer hash
+contract, pull again before pushing.
 
 `validate` also runs the site checks that need nothing but the workspace, from
 the same rule catalogue the editor and the site-health page read. `findings`

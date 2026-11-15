@@ -37,7 +37,8 @@
         "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",
         "backgroundFade": "FOOTER_FADE_MODE_NONE",
         "backgroundRepeatHeightPx": 160,
-        "additionalTopPaddingRem": 1
+        "additionalTopPaddingRem": 1,
+        "logoId": "a0000000-0000-4000-8000-0000000000a0"
       },
       "dark": {
         "backgroundColor": "--esp-color-layer-1",
@@ -50,7 +51,8 @@
         "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",
         "backgroundFade": "FOOTER_FADE_MODE_NONE",
         "backgroundRepeatHeightPx": 160,
-        "additionalTopPaddingRem": 1
+        "additionalTopPaddingRem": 1,
+        "logoId": ""
       },
       "linkColumns": [
         {
@@ -72,7 +74,11 @@
                 }
               ]
             }
-          ]
+          ],
+          "span": 1,
+          "alignment": {
+            "stacked": { "horizontal": "start", "textAlign": "start" }
+          }
         }
       ],
       "asideHeadingContent": {
@@ -109,7 +115,26 @@
           }
         ]
       },
-      "featureImage": null
+      "featureImage": null,
+      "brandSpan": 1,
+      "asideSpan": 1,
+      "brandSize": "standard",
+      "logoScale": "1.0",
+      "logoBox": "natural",
+      "alignment": {
+        "stacked": { "horizontal": "center" }
+      },
+      "brandAlignment": {
+        "wide": { "vertical": "start" },
+        "wrapped": { "horizontal": "center" }
+      },
+      "asideAlignment": {
+        "wide": { "textAlign": "justify" },
+        "stacked": { "textAlign": "auto" }
+      },
+      "bottomAlignment": {
+        "stacked": { "textAlign": "auto" }
+      }
     }
   }
 }

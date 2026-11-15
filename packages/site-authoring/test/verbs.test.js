@@ -907,7 +907,12 @@ function footerWorkspace(footer = authorableFooter()) {
 
 test("pull snapshots pages, navigation, and settings with a manifest that maps identity", async (site) => {
   const workspace = await fixture(site);
-  const pulledFooterResponse = authorableFooter();
+  const pulledFooterResponse = authorableFooter({ brandSpan: 3, asideSpan: 2, brandSize: "large", logoScale: "2.1" });
+  pulledFooterResponse.linkColumns[0].span = 2;
+  pulledFooterResponse.light.logoId = IMAGE_ID;
+  pulledFooterResponse.dark.logoId = NEW_PAGE_ID;
+  pulledFooterResponse.light.logoUrl = "https://cdn.example/footer-light.webp";
+  pulledFooterResponse.dark.logoUrl = "https://cdn.example/footer-dark.webp";
   pulledFooterResponse.light.backgroundImageUrl = "https://cdn.example/light.webp";
   pulledFooterResponse.featureImage.imageUrl = "https://cdn.example/feature.webp";
   pulledFooterResponse.featureImage.responsiveUrls = [{
@@ -1055,6 +1060,13 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
     projectFooterSettingsForWorkspace(pulledFooterResponse),
   );
   assert.equal("backgroundImageUrl" in publishing.settings.footerSettings.light, false);
+  assert.equal("logoUrl" in publishing.settings.footerSettings.light, false);
+  assert.equal("logoUrl" in publishing.settings.footerSettings.dark, false);
+  assert.equal(publishing.settings.footerSettings.logoScale, "2.1");
+  assert.equal(publishing.settings.footerSettings.logoBox, "natural");
+  assert.deepEqual(publishing.settings.footerSettings.alignment, { stacked: { horizontal: "center" } });
+  assert.deepEqual(publishing.settings.footerSettings.brandAlignment, { wide: { vertical: "start" }, wrapped: { horizontal: "center" } });
+  assert.deepEqual(publishing.settings.footerSettings.linkColumns[0].alignment, { stacked: { horizontal: "start", textAlign: "start" } });
   assert.equal("imageUrl" in publishing.settings.footerSettings.featureImage, false);
   assert.equal("responsiveUrls" in publishing.settings.footerSettings.featureImage, false);
   assert.equal(manifest.footer.file, "settings/site-publishing-preferences.json");
@@ -1069,6 +1081,8 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.deepEqual(
     manifest.footer.imageIds,
     [
+      IMAGE_ID,
+      NEW_PAGE_ID,
       publishing.settings.footerSettings.light.backgroundImageId,
       publishing.settings.footerSettings.featureImage.imageId,
     ].sort(),
@@ -1510,9 +1524,16 @@ test("theme push saves the complete change set in one request fenced by the pull
   const currentFooter = {
     enabled: true,
     showBrand: false,
+    logoScale: "3.1",
+    logoBox: "natural",
+    alignment: { stacked: { horizontal: "center" } },
+    brandAlignment: { wide: { vertical: "start" }, wrapped: { horizontal: "center" } },
+    asideAlignment: { wide: { textAlign: "justify" }, stacked: { textAlign: "auto" } },
+    bottomAlignment: { stacked: { horizontal: "end", textAlign: "auto" } },
+    linkColumns: [{ id: navId(8), span: 2, groups: [], alignment: { stacked: { horizontal: "start" } } }],
     bottomLinks: [{ id: navId(9), label: "Privacy", externalUrl: "https://example.test/privacy" }],
-    light: { backgroundImageOpacity: 0.4, backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_COVER" },
-    dark: { backgroundFade: "FOOTER_FADE_MODE_BOTTOM", additionalTopPaddingRem: 2 },
+    light: { logoId: IMAGE_ID, logoUrl: "https://cdn.example/footer-light.webp", backgroundImageOpacity: 0.4, backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_COVER" },
+    dark: { logoId: NEW_PAGE_ID, logoUrl: "https://cdn.example/footer-dark.webp", backgroundFade: "FOOTER_FADE_MODE_BOTTOM", additionalTopPaddingRem: 2 },
   };
   const wire = api([
     { method: "GET", pattern: PRESENTATION, reply: presentationReply({ footerSettings: currentFooter }) },
@@ -1541,6 +1562,7 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal("footerSettings" in save.body, false);
   assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
   assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
+  for (const scheme of ["light", "dark"]) assert.deepEqual(Object.keys(save.body.footerColors[scheme]).sort(), ["backgroundColor", "headingColor", "linkColor", "linkHoverColor", "textColor"]);
   assert.deepEqual(
     save.body.settings.map(write => write.setting),
     [...APPEARANCE_SCALAR_FIELDS.map(field => field.name), "lightTheme", "darkTheme"],
@@ -1577,6 +1599,14 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.deepEqual(publishing.settings.footerSettings.bottomLinks, currentFooter.bottomLinks);
   assert.equal(publishing.settings.footerSettings.light.backgroundColor, "--esp-color-layer-1");
   assert.equal(publishing.settings.footerSettings.light.backgroundImageOpacity, 0.4);
+  assert.equal(publishing.settings.footerSettings.logoScale, "3.1");
+  for (const key of ["logoBox", "alignment", "brandAlignment", "asideAlignment", "bottomAlignment", "linkColumns"]) {
+    assert.deepEqual(publishing.settings.footerSettings[key], currentFooter[key], key);
+  }
+  assert.equal(publishing.settings.footerSettings.light.logoId, IMAGE_ID);
+  assert.equal(publishing.settings.footerSettings.dark.logoId, NEW_PAGE_ID);
+  assert.equal("logoUrl" in publishing.settings.footerSettings.light, false);
+  assert.equal("logoUrl" in publishing.settings.footerSettings.dark, false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(manifest.presentation.revision, NEXT_PRESENTATION_REVISION);
   assert.equal(
@@ -2255,6 +2285,36 @@ test("theme push refuses a type-shifted footer edit the canonical form would nor
   assert.equal(wire.calls.length, 0);
 });
 
+test("theme push refuses unsaved logo and alignment content, including raw shape edits, before any request", async context => {
+  for (const [name, edit] of [
+    ["scale", footer => { footer.logoScale = "2.0"; }],
+    ["numeric scale", footer => { footer.logoScale = 1.5; }],
+    ["light logo", footer => { footer.light.logoId = IMAGE_ID; }],
+    ["dark logo", footer => { footer.dark.logoId = IMAGE_ID; }],
+    ["logo space", footer => { footer.logoBox = "natural"; }],
+    ["footer alignment", footer => { footer.alignment = { stacked: { horizontal: "center" } }; }],
+    ["brand alignment", footer => { footer.brandAlignment = { wrapped: { vertical: "start" } }; }],
+    ["aside justification", footer => { footer.asideAlignment = { wide: { textAlign: "justify" } }; }],
+    ["bottom auto", footer => { footer.bottomAlignment = { stacked: { textAlign: "auto" } }; }],
+    ["column alignment", footer => { footer.linkColumns = [{ id: navId(34), alignment: { stacked: { horizontal: "end" } } }]; }],
+    ["invalid alignment axis", footer => { footer.alignment = { wide: { horizontal: 1 } }; }],
+    ["empty profile", footer => { footer.alignment = {}; }],
+    ["null profile", footer => { footer.brandAlignment = null; }],
+  ]) {
+    await context.test(name, async site => {
+      const workspace = await fixture(site, themeWorkspace());
+      const document = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+      edit(document.settings.footerSettings);
+      const edited = `${JSON.stringify(document, undefined, 2)}\n`;
+      await writeFile(workspacePath(workspace, "settings/site-publishing-preferences.json"), edited);
+      const wire = api([]);
+      await assert.rejects(themePush(invoke(workspace, wire, { verb: "theme push" }).invocation), error => error?.code === "theme.unpushed_footer_content");
+      assert.equal(wire.calls.length, 0);
+      assert.equal(await readWorkspaceText(workspace, "settings/site-publishing-preferences.json"), edited);
+    });
+  }
+});
+
 test("theme push proceeds when only the ten overlay colors differ from the pull baseline", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const document_ = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
@@ -2314,13 +2374,18 @@ test("theme push refuses a workspace pulled before the footer-content baseline",
 // ---------------------------------------------------------------------------
 
 test("footer push replaces the complete validated document and advances its local token", async (site) => {
-  const footer = authorableFooter();
+  const footer = authorableFooter({ brandSpan: 3, asideSpan: 2, brandSize: "large", logoScale: "2.1" });
+  footer.linkColumns[0].span = 2;
+  footer.light.logoId = IMAGE_ID;
+  footer.dark.logoId = NEW_PAGE_ID;
   const workspace = await fixture(site, footerWorkspace(footer));
   const wire = api([{
     method: "POST",
     pattern: FOOTER_SETTINGS,
     reply: (call) => {
       const response = structuredClone(call.body.footerSettings);
+      response.light.logoUrl = "https://cdn.example/footer-light.webp";
+      response.dark.logoUrl = "https://cdn.example/footer-dark.webp";
       response.light.backgroundImageUrl = "https://cdn.example/light.webp";
       response.featureImage.imageUrl = "https://cdn.example/feature.webp";
       response.featureImage.responsiveUrls = [{ minWidth: 640, url: "https://cdn.example/feature-640.webp" }];
@@ -2336,11 +2401,25 @@ test("footer push replaces the complete validated document and advances its loca
   const save = wire.matching("POST", FOOTER_SETTINGS)[0];
   assert.equal(save.body.expectedFooterDraftHash, footerManifestEntry(footer).expectedDraftHash);
   assert.equal(save.body.footerSettings.light.backgroundImageId, footer.light.backgroundImageId);
+  assert.equal(save.body.footerSettings.logoScale, "2.1");
+  assert.equal(save.body.footerSettings.logoBox, "natural");
+  assert.deepEqual(save.body.footerSettings.alignment, { stacked: { horizontal: "center" } });
+  assert.deepEqual(save.body.footerSettings.brandAlignment, { wide: { vertical: "start" }, wrapped: { horizontal: "center" } });
+  assert.deepEqual(save.body.footerSettings.asideAlignment, { wide: { textAlign: "justify" } });
+  assert.deepEqual(save.body.footerSettings.bottomAlignment, { stacked: { textAlign: "auto" } });
+  assert.deepEqual(save.body.footerSettings.linkColumns[0].alignment, { stacked: { horizontal: "start", textAlign: "start" } });
+  assert.equal(save.body.footerSettings.light.logoId, IMAGE_ID);
+  assert.equal(save.body.footerSettings.dark.logoId, NEW_PAGE_ID);
+  assert.deepEqual([save.body.footerSettings.brandSpan, save.body.footerSettings.brandSize, save.body.footerSettings.asideSpan, save.body.footerSettings.linkColumns[0].span], [3, "large", 2, 2]);
   assert.equal("backgroundImageUrl" in save.body.footerSettings.light, false);
+  assert.equal("logoUrl" in save.body.footerSettings.light, false);
+  assert.equal("logoUrl" in save.body.footerSettings.dark, false);
   assert.equal("imageUrl" in save.body.footerSettings.featureImage, false);
 
   const written = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   assert.equal("backgroundImageUrl" in written.settings.footerSettings.light, false);
+  assert.equal("logoUrl" in written.settings.footerSettings.light, false);
+  assert.equal("logoUrl" in written.settings.footerSettings.dark, false);
   assert.equal("imageUrl" in written.settings.footerSettings.featureImage, false);
   assert.equal("responsiveUrls" in written.settings.footerSettings.featureImage, false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
@@ -2352,10 +2431,63 @@ test("footer push replaces the complete validated document and advances its loca
   assert.deepEqual(
     manifest.footer.imageIds,
     [
+      IMAGE_ID,
+      NEW_PAGE_ID,
       footer.light.backgroundImageId,
       footer.featureImage.imageId,
     ].sort(),
   );
+});
+
+test("footer push migrates old Large scale before sending and records the explicit scale", async context => {
+  for (const [name, setLegacy] of [
+    ["absent", footer => { delete footer.logoScale; }],
+    ["null", footer => { footer.logoScale = null; }],
+  ]) {
+    await context.test(name, async site => {
+      const footer = authorableFooter({ brandSize: "large" });
+      setLegacy(footer);
+      const workspace = await fixture(site, footerWorkspace(footer));
+      const wire = api([{ method: "POST", pattern: FOOTER_SETTINGS, reply: call => ({ footerSettings: call.body.footerSettings }) }]);
+      await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
+      assert.equal(wire.matching("POST", FOOTER_SETTINGS)[0].body.footerSettings.logoScale, "1.5");
+      const written = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+      assert.equal(written.settings.footerSettings.logoScale, "1.5");
+      assert.equal((await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).footer.expectedContentHash, computeFooterContentHash(written.settings.footerSettings));
+    });
+  }
+});
+
+test("footer push warns before sending with either optional brand file missing or both absent", async context => {
+  for (const [name, header, styles] of [
+    ["both available", true, true],
+    ["header missing", false, true],
+    ["styles missing", true, false],
+    ["both missing", false, false],
+  ]) {
+    await context.test(name, async site => {
+      const footer = authorableFooter({ brandSpan: 1 });
+      footer.linkColumns[0].groups[0].links[0].label = "Documentation" + "x".repeat(90);
+      const files = footerWorkspace(footer);
+      if (header) files["settings/site-header.json"] = settingsDocument("SETTING_TYPE_SITE_HEADER", { brandText: "Brand" + "x".repeat(90) });
+      if (styles) files["settings/taproot-styles.json"] = settingsDocument("SETTING_TYPE_TAPROOT_STYLES", { lightLogoId: IMAGE_ID });
+      const workspace = await fixture(site, files);
+      const wire = api([{
+        method: "POST", pattern: FOOTER_SETTINGS,
+        reply: call => {
+          assert.ok(progress.some(line => line.includes("may break mid-word")), "warnings precede the save");
+          return { footerSettings: call.body.footerSettings };
+        },
+      }]);
+      const { invocation, progress } = invoke(workspace, wire, { verb: "footer push" });
+      const result = await footerPush(invocation);
+      assert.equal(result.ok, true);
+      assert.equal(wire.matching("POST", FOOTER_SETTINGS).length, 1);
+      assert.ok(result.findings.items.some(item => item.rule === "footer.word_breaks" && item.detail.endsWith(":column")));
+      assert.equal(result.findings.items.some(item => item.detail.endsWith(":brand")), header);
+      assert.deepEqual(result.siteChecks.ranOffline, ["footer.word_breaks"]);
+    });
+  }
 });
 
 test("footer push advances the presentation baseline only when the save replaced the revision it was pulled at", async (site) => {
@@ -2585,6 +2717,19 @@ test("an interrupted workspace rewrite leaves the prior file intact and no tempo
     (await readdir(workspacePath(workspace, "settings"))).filter((file) => file.endsWith(".tmp")),
     [],
   );
+});
+
+test("workspace writes can create and replace a maximum-length page filename", async (site) => {
+  const workspace = await fixture(site, {});
+  const filename = `${"a".repeat(247)}.pm.json`;
+  const relativePath = `pages/${filename}`;
+
+  await writeWorkspaceFile(workspace.workspaceDir, relativePath, "original\n");
+  assert.equal(await readWorkspaceText(workspace, relativePath), "original\n");
+
+  await writeWorkspaceFile(workspace.workspaceDir, relativePath, "replacement\n");
+  assert.equal(await readWorkspaceText(workspace, relativePath), "replacement\n");
+  assert.deepEqual(await readdir(workspacePath(workspace, "pages")), [filename]);
 });
 
 test("an unsupported parent-directory sync does not report the committed replacement as failed", async (site) => {
@@ -13626,7 +13771,8 @@ test("site health precheck: a managed Docs workspace gets the docs_site reason a
     const { exitCode, result } = await runSite(workspace, ["validate", "--site"], undefined);
     assert.equal(exitCode, 0);
     assert.equal(result.imageCheckReason.code, "docs_site");
-    assert.equal(Object.hasOwn(result, "siteChecks"), false);
+    assert.deepEqual(result.siteChecks, { ranOffline: ["footer.word_breaks"], skipped: ["footer.word_breaks"] });
+    assert.equal(result.findings.total, 0);
     assert.equal(result.offline, true);
   });
 });
@@ -13661,34 +13807,34 @@ test("site health precheck: a result that leaves 2 KiB of headroom still fits wi
   };
   // 200 pages with long file names fill `validated.pages.items`, which is bounded by count and not by bytes. A name
   // component is limited by the file system, so the length is spread over two directory names.
+  const directoryPrefix = `pages/${"n".repeat(190)}/`;
   const build = async (innerLength, extra = 0) => {
     const files = { ".taproot-site-media.json": crabMedia(200), "pages/about.md": PLAIN_ABOUT };
     for (let index = 1; index <= 200; index += 1) {
-      // The report keeps the first 200 of the 202 pages in path order, so the tuning page must sort early: its
-      // directory name starts with "a", ahead of the others' "m".
-      const directory = index === 1
-        ? `pages/${"n".repeat(190)}/${"a".repeat(innerLength + extra)}`
-        : `pages/${"n".repeat(190)}/${"m".repeat(innerLength)}`;
-      // The tuning page carries complete metadata, so its file name appears only in `validated.pages.items` and not
-      // in a finding as well.
-      const metadata = index === 1
-        ? `title: The page that tunes the size\npath: p${index}\ndescription: A complete description of the page that tunes the size of the result.`
-        : `title: Page ${index}\npath: p${index}`;
+      // Numeric prefixes keep the order stable. Spread the remainder across the first reported directories so
+      // tuning cannot push one file-system path component over its length limit.
+      const directory = `${directoryPrefix}${String(index).padStart(3, "0")}${"m".repeat(innerLength + (index <= extra ? 1 : 0))}`;
+      // Every generated page has complete metadata, so these long paths appear only in `validated.pages.items`.
+      // Otherwise the byte-capped findings change size as paths grow and invalidate the linear tuning below.
+      const metadata = `title: The image gallery page number ${index}\npath: p${index}\n`
+        + "description: A complete description of this image gallery page, with enough detail for a useful search preview.";
       files[`${directory}/p-${String(index).padStart(3, "0")}.md`] =
         `---\n${metadata}\n---\n\n# Heading ${index}\n\n![Alt ${index}](media/crab-${index}.png)\n`;
     }
     const workspace = await fixture(site, wholeWorkspace({ files }));
     return await runSite(workspace, ["validate", "--site"], [imageReadRoute(undescribed(200))]);
   };
-  // A measuring run, then an inner length that puts the base just under the target (200 entries grow 200 bytes per
-  // character of it).
+  // Count the growing entries actually kept by the report; its first 200 include pre-existing workspace pages.
   const measuring = await build(1);
   assert.equal(measuring.exitCode, 0, measuring.stderr);
-  const innerLength = 1 + Math.floor((target - base(measuring.result)) / 200);
+  const growingEntries = measuring.result.validated.pages.items.filter(item => item.file.startsWith(directoryPrefix)).length;
+  assert.ok(growingEntries > 0);
+  const innerLength = 1 + Math.floor((target - base(measuring.result)) / growingEntries);
   assert.ok(innerLength > 1 && innerLength < 240, `inner length ${innerLength}`);
   const near = await build(innerLength);
-  // The remaining deficit is under 200 bytes, so one more page's directory name takes it up exactly.
-  const tuned = await build(innerLength, target - base(near.result));
+  const remainder = target - base(near.result);
+  assert.ok(remainder >= 0 && remainder < growingEntries, `remaining bytes ${remainder}`);
+  const tuned = await build(innerLength, remainder);
   assert.equal(tuned.exitCode, 0, tuned.stderr);
   assert.equal(base(tuned.result), target);
   assert.ok(Buffer.byteLength(tuned.stdout, "utf8") <= LIMITS.githubOutputBytes);
@@ -16456,6 +16602,43 @@ test("validate checks a pulled workspace with no credential or request and repor
   for (const [, file] of found) assert.ok(failed.stderr.includes(file), `stderr names ${file}`);
 });
 
+test("validate reports footer fit for a full workspace with a logo and long brand text", async site => {
+  const files = wholeWorkspace({ uploaded: true });
+  files["settings/site-header.json"].settings.brandText = "Brand" + "x".repeat(90);
+  files["settings/taproot-styles.json"].settings.lightLogoId = IMAGE_ID;
+  files["settings/site-publishing-preferences.json"].settings.footerSettings.enabled = true;
+  const workspace = await fixture(site, files);
+  const checked = await cliRun(workspace, ["validate"]);
+  assert.equal(checked.exitCode, 0, checked.stderr);
+  assert.equal(checked.result.offline, true);
+  const finding = checked.result.findings.items.find(item => item.rule === "footer.word_breaks");
+  assert.equal(finding.detail, "desktop:brand");
+  assert.equal(finding.file, "settings/site-publishing-preferences.json");
+  assert.equal(Object.hasOwn(finding, "path"), false);
+  assert.match(checked.stderr, /Widen the brand or shorten its text/u);
+});
+
+test("validate checks a settings-only workspace footer without claiming page rules ran", async site => {
+  const words = Array.from({ length: 15 }, (_, index) => `Word${index}${"x".repeat(48)}`);
+  const files = themeWorkspace({ footerSettings: {
+    enabled: true,
+    showBrand: false,
+    asideBodyContent: { paragraphs: [{ runs: [{ text: words.join(" ") }] }] },
+  } });
+  files[".taproot-site-manifest.json"].authoringSurface = "docs-presentation";
+  const workspace = await fixture(site, files, { config: { authoringSurface: "docs-presentation" } });
+  const checked = await cliRun(workspace, ["validate"]);
+  assert.equal(checked.exitCode, 0, checked.stderr);
+  assert.equal(checked.result.offline, true);
+  assert.equal(checked.result.workspace.settingsOnly, true);
+  assert.equal(checked.result.findings.total, words.length);
+  assert.equal(checked.result.findings.warnings, words.length);
+  assert.equal(checked.result.findings.items.length, 12);
+  assert.deepEqual(checked.result.siteChecks, { ranOffline: ["footer.word_breaks"] });
+  assert.match(checked.stderr, /and 3 more footer fit/u);
+  assert.equal(Object.hasOwn(checked.result.validated, "pages"), false);
+});
+
 test("pages push --dry-run checks every page against the site, lists what it would send, and sends nothing", async (site) => {
   const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
   const wire = api(siteRoutes());
@@ -16725,7 +16908,7 @@ test("validate names the form key check as skipped when no form file could be re
   const none = await fixture(site, wholeWorkspace({ uploaded: true, files: { "pages/about.md": aboutPlacingForm("contakt") } }));
   const skipped = await cliRun(none, ["validate"]);
   assert.equal(skipped.exitCode, 0, skipped.stderr);
-  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown"]);
+  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown", "footer.word_breaks"]);
 
   const broken = await fixture(site, wholeWorkspace({
     uploaded: true,

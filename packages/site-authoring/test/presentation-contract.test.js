@@ -10,9 +10,11 @@ import {
 } from "../src/appearance-contract.js";
 import {
   FOOTER_EXAMPLE,
+  footerDefaults,
   FOOTER_FIELD_INVENTORY,
   FOOTER_LIMITS,
   FOOTER_READ_ONLY_FIELDS,
+  footerImageIds,
   projectFooterSettingsForWorkspace,
   validateFooterDocument,
 } from "../src/footer-contract.js";
@@ -91,7 +93,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", async () => {
   await assert.doesNotReject(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "6.15.1");
+  assert.equal(getThemeReference().espalierVersion, "7.1.0");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -284,6 +286,9 @@ test("footer limits stay aligned with the server and shared image-processing sou
   const handler = readFileSync(HANDLER_PATH, "utf8");
   const constants = {
     linkColumns: "MaxLinkColumns",
+    brandSpanMax: "MaxBrandSpan",
+    asideSpanMax: "MaxAsideSpan",
+    columnSpanMax: "MaxColumnSpan",
     linkGroups: "MaxLinkGroups",
     groupsPerColumn: "MaxGroupsPerColumn",
     linksPerGroup: "MaxLinksPerGroup",
@@ -317,6 +322,186 @@ test("footer limits stay aligned with the server and shared image-processing sou
     readFileSync(SITE_SETTINGS_PATH, "utf8"),
     new RegExp(`MaxAdditionalTopPaddingRem = ${FOOTER_LIMITS.additionalTopPaddingRemMaximum};`, "u"),
   );
+});
+
+test("footer spans validate independently as integers and have no total track cap", async (context) => {
+  for (const [field, maximum] of [["brandSpan", FOOTER_LIMITS.brandSpanMax], ["asideSpan", FOOTER_LIMITS.asideSpanMax], ["span", FOOTER_LIMITS.columnSpanMax]]) {
+    for (const invalid of [0, maximum + 1, -1, 1.5, null, "1"]) {
+      await context.test(`${field} refuses ${JSON.stringify(invalid)}`, () => {
+        const footer = structuredClone(FOOTER_EXAMPLE);
+        const target = field === "span" ? footer.linkColumns[0] : footer;
+        target[field] = invalid;
+        const path = field === "span" ? "footerSettings.linkColumns[0].span" : `footerSettings.${field}`;
+        assert.throws(() => validateFooterDocument(footer), error => error?.code === "footer.field_invalid" && error?.field === path);
+      });
+    }
+  }
+  const footer = validateFooterDocument({
+    enabled: true,
+    brandSpan: FOOTER_LIMITS.brandSpanMax,
+    asideSpan: FOOTER_LIMITS.asideSpanMax,
+    brandSize: "large",
+    linkColumns: Array.from({ length: FOOTER_LIMITS.linkColumns }, (_, index) => ({
+      id: `33333333-3333-4333-8333-${String(index).padStart(12, "0")}`, span: FOOTER_LIMITS.columnSpanMax,
+    })),
+  });
+  assert.equal(footer.brandSpan + footer.asideSpan + footer.linkColumns.reduce((sum, column) => sum + column.span, 0), 17);
+});
+
+test("footer defaults, pull projection and closed brand sizes agree", () => {
+  const defaults = footerDefaults();
+  const old = validateFooterDocument({ linkColumns: [{ id: "33333333-3333-4333-8333-333333333333" }] });
+  assert.equal(old.brandSpan, defaults.brandSpan);
+  assert.equal(old.asideSpan, defaults.asideSpan);
+  assert.equal(old.brandSize, defaults.brandSize);
+  assert.equal(old.logoScale, "1.0");
+  assert.equal(defaults.logoScale, "1.0");
+  assert.equal(old.linkColumns[0].span, 1);
+  assert.equal(validateFooterDocument({ brandSize: "" }).brandSize, "standard");
+  for (const brandSize of [null, "Large", "full", 1]) {
+    assert.throws(() => validateFooterDocument({ brandSize }), error => error?.field === "footerSettings.brandSize");
+  }
+  const footer = structuredClone(FOOTER_EXAMPLE);
+  footer.brandSpan = 3;
+  footer.asideSpan = 2;
+  footer.linkColumns[0].span = 2;
+  const projected = projectFooterSettingsForWorkspace(footer);
+  assert.deepEqual([projected.brandSpan, projected.brandSize, projected.asideSpan, projected.linkColumns[0].span], [3, "large", 2, 2]);
+  const reference = getFooterReference();
+  assert.match(reference.fitCheck, /footer\.word_breaks/u);
+  assert.match(reference.fitCheck, /standard and profile sites/u);
+  assert.match(reference.fitCheck, /over-report/u);
+  assert.equal(reference.example.brandSize, "large");
+});
+
+test("footer logo scale materializes legacy values and stays independent of brand text size", async context => {
+  for (const [name, footer, expected] of [
+    ["default", {}, "1.0"],
+    ["legacy standard", { brandSize: "standard" }, "1.0"],
+    ["legacy large", { brandSize: "large" }, "1.5"],
+    ["legacy null large", { brandSize: "large", logoScale: null }, "1.5"],
+    ["empty", { brandSize: "large", logoScale: "" }, "1.0"],
+    ["whole number string", { logoScale: "1" }, "1.0"],
+    ["explicit normal with large text", { brandSize: "large", logoScale: "1.0" }, "1.0"],
+    ["fraction", { logoScale: "1.1" }, "1.1"],
+    ["maximum", { logoScale: "5" }, "5.0"],
+  ]) {
+    await context.test(name, () => {
+      const normalized = validateFooterDocument(footer);
+      assert.equal(normalized.logoScale, expected);
+      assert.equal(projectFooterSettingsForWorkspace(footer).logoScale, expected);
+      assert.equal(computeFooterDraftHash(footer), computeFooterDraftHash(normalized));
+      assert.equal(validateFooterDocument({ ...normalized, brandSize: "large" }).logoScale, expected);
+    });
+  }
+  for (const logoScale of ["0", "0.9", "5.1", "1.05", "1.", ".5", " 1.0", "1.0 ", "1.0\n", "1e0", 1, 1.5, true, {}]) {
+    await context.test(`refuses ${JSON.stringify(logoScale)}`, () => {
+      assert.throws(
+        () => validateFooterDocument({ logoScale }),
+        error => error?.code === "footer.field_invalid" && error?.field === "footerSettings.logoScale",
+      );
+      assert.equal(projectFooterSettingsForWorkspace({ brandSize: "large", logoScale }).logoScale, "1.0");
+    });
+  }
+});
+
+test("footer logo ids are owned content and logo URLs are response-only metadata", async context => {
+  const lightId = "11111111-1111-4111-8111-111111111111";
+  const darkId = "22222222-2222-4222-8222-222222222222";
+  const response = { logoScale: "2", light: { logoId: lightId, logoUrl: "https://cdn.example/light.webp" }, dark: { logoId: darkId, logoUrl: "https://cdn.example/dark.webp" } };
+  const projected = projectFooterSettingsForWorkspace(response);
+  assert.equal(projected.logoScale, "2.0");
+  assert.equal(projected.light.logoId, lightId);
+  assert.equal(projected.dark.logoId, darkId);
+  assert.equal("logoUrl" in projected.light, false);
+  assert.equal("logoUrl" in projected.dark, false);
+  assert.equal(computeFooterDraftHash(response), computeFooterDraftHash(projected));
+  assert.deepEqual(footerImageIds(projected), [lightId, darkId]);
+  assert.deepEqual(footerImageIds({ light: { logoId: lightId }, dark: { logoId: lightId } }), [lightId]);
+  assert.equal(validateFooterDocument({ light: { logoId: "" } }).light.logoId, "");
+  assert.deepEqual(validateFooterDocument(projected, { knownImageIds: new Set([lightId, darkId]) }), projected);
+  for (const scheme of ["light", "dark"]) {
+    await context.test(scheme, () => {
+      assert.throws(() => validateFooterDocument({ [scheme]: response[scheme] }), error => error?.code === "footer.field_read_only" && error?.field === `footerSettings.${scheme}.logoUrl`);
+      assert.throws(() => validateFooterDocument({ [scheme]: { logoId: lightId } }, { knownImageIds: new Set() }), error => error?.code === "footer.image_reference_unknown" && error?.field === `footerSettings.${scheme}.logoId`);
+      assert.throws(() => validateFooterDocument({ [scheme]: { logoId: "unknown" } }), error => error?.code === "footer.id_invalid" && error?.field === `footerSettings.${scheme}.logoId`);
+    });
+  }
+  const reference = getFooterReference();
+  assert.match(formatPresentationReference(reference), /Old v6 baselines are refused/u);
+  const logoScale = reference.messages.find(message => message.name === "FooterSettings").fields.find(field => field.name === "logoScale");
+  assert.deepEqual([logoScale.type, logoScale.minimum, logoScale.maximum, logoScale.step, logoScale.default], ["decimal-string", 1, 5, 0.1, "1.0"]);
+});
+
+test("footer profiles normalize empty layouts sparsely and retain explicit start and auto", () => {
+  const footer = validateFooterDocument({
+    logoBox: "natural",
+    alignment: { wide: { horizontal: "start", vertical: "", textAlign: "justify" }, wrapped: null, stacked: {} },
+    brandAlignment: null,
+    asideAlignment: { stacked: { textAlign: "auto" } },
+    bottomAlignment: { wide: { horizontal: "end" }, stacked: { textAlign: "auto" } },
+    linkColumns: [{ id: "33333333-3333-4333-8333-333333333333", alignment: { wrapped: { vertical: "end" } } }],
+  });
+  assert.equal(footer.logoBox, "natural");
+  assert.deepEqual(footer.alignment, { wide: { horizontal: "start", textAlign: "justify" } });
+  assert.equal("brandAlignment" in footer, false);
+  assert.deepEqual(footer.asideAlignment, { stacked: { textAlign: "auto" } });
+  assert.deepEqual(footer.bottomAlignment, { wide: { horizontal: "end" }, stacked: { textAlign: "auto" } });
+  assert.deepEqual(footer.linkColumns[0].alignment, { wrapped: { vertical: "end" } });
+  assert.deepEqual(projectFooterSettingsForWorkspace(footer), footer);
+  assert.equal(footerDefaults().logoBox, "fixed");
+  for (const logoBox of [undefined, null, "", "fixed"]) assert.equal(validateFooterDocument({ logoBox }).logoBox, "fixed");
+  for (const profile of [undefined, null, {}, { wide: null, wrapped: {}, stacked: { horizontal: "", textAlign: "" } }]) {
+    const normalized = validateFooterDocument({ alignment: profile, bottomAlignment: profile });
+    assert.equal("alignment" in normalized, false);
+    assert.equal("bottomAlignment" in normalized, false);
+  }
+  const projected = projectFooterSettingsForWorkspace({
+    logoBox: "unknown",
+    alignment: { wide: { horizontal: "center", vertical: "auto", textAlign: " justify" }, stacked: null },
+    brandAlignment: [],
+    bottomAlignment: { stacked: { vertical: "end", textAlign: "auto" } },
+  });
+  assert.equal(projected.logoBox, "fixed");
+  assert.deepEqual(projected.alignment, { wide: { horizontal: "center" } });
+  assert.equal("brandAlignment" in projected, false);
+  assert.deepEqual(projected.bottomAlignment, { stacked: { textAlign: "auto" } });
+});
+
+test("footer profile validation closes every nested object and refuses invalid choices on owning fields", async context => {
+  const cases = [
+    ["alignment", [], "footer.document_invalid", "footerSettings.alignment"],
+    ["alignment", { compact: {} }, "footer.field_unknown", "footerSettings.alignment.compact"],
+    ["brandAlignment", { wide: [] }, "footer.document_invalid", "footerSettings.brandAlignment.wide"],
+    ["asideAlignment", { wrapped: { unknown: "center" } }, "footer.field_unknown", "footerSettings.asideAlignment.wrapped.unknown"],
+    ["bottomAlignment", { stacked: { vertical: "start" } }, "footer.field_unknown", "footerSettings.bottomAlignment.stacked.vertical"],
+  ];
+  for (const [key, value, code, field] of cases) {
+    await context.test(field, () => {
+      assert.throws(() => validateFooterDocument({ [key]: value }), error => error?.code === code && error?.field === field);
+    });
+  }
+  for (const axis of ["horizontal", "vertical", "textAlign"]) {
+    for (const value of [" start", "end ", "unknown", 1, false, null, {}, ...(axis === "textAlign" ? [] : ["auto", "justify"])]) {
+      await context.test(`${axis}: ${JSON.stringify(value)}`, () => {
+        assert.throws(() => validateFooterDocument({ alignment: { stacked: { [axis]: value } } }),
+          error => error?.code === "footer.field_invalid" && error?.field === `footerSettings.alignment.stacked.${axis}`);
+      });
+    }
+  }
+  for (const value of ["Fixed", " natural", "natural ", 1, true, {}]) {
+    assert.throws(() => validateFooterDocument({ logoBox: value }), error => error?.field === "footerSettings.logoBox");
+  }
+  assert.throws(() => validateFooterDocument({ linkColumns: [{ id: "33333333-3333-4333-8333-333333333333", alignment: { wide: { horizontal: "auto" } } }] }),
+    error => error?.field === "footerSettings.linkColumns[0].alignment.wide.horizontal");
+  const reference = getFooterReference();
+  assert.match(reference.fitCheck, /five widths.*Small phone \(320px\)/u);
+  assert.match(reference.fitCheck, /custom fonts or scale may differ/u);
+  assert.match(formatPresentationReference(reference), /Alignment:.*sparse/u);
+  assert.match(formatPresentationReference(reference), /Logo space:.*logoBox/u);
+  for (const message of reference.messages) {
+    for (const field of message.fields) assert.equal(typeof field.type, "string", `${message.name}.${field.name}`);
+  }
 });
 
 test("footer validation rejects closed-shape, target, identity, media, text, and bound failures by field", async (context) => {

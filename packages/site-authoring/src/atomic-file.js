@@ -90,7 +90,8 @@ export async function atomicWriteFile(filePath, contents, {
     throw failures.notRegular();
   }
 
-  const temporaryPath = path.join(directory, `.${path.basename(filePath)}.${randomUUID()}.tmp`);
+  // A valid destination filename can already use the filesystem's full limit.
+  const temporaryPath = path.join(directory, `.taproot-site-${randomUUID()}.tmp`);
   let handle;
   let renamed = false;
   try {

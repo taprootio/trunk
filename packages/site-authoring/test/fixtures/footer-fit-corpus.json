@@ -1,0 +1,2004 @@
+{
+  "cases": [
+    {
+      "name": "unsupported glyphs use the maximum supported advance and punctuation stays measurable",
+      "input": { "enabled": true, "columns": [{ "groups": [{ "labels": [
+        "WWWWWWWWWWWWWWWWWW\udbff\udfff",
+        "!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?"
+      ] }] }] },
+      "expected": { "findings": [
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?", "detail": "desktop:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWWWWWWWWWWW\udbff\udfff", "detail": "phone:column" }
+      ], "total": 2 }
+    },
+    {
+      "name": "wide capitals and digits fit Phone but need Small phone warnings",
+      "input": { "enabled": true, "columns": [{ "groups": [{ "labels": ["WWWWWWWWWWWWWWWWWW", "01234567890123456789012345678901"] }] }] },
+      "expected": { "findings": [
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWWWWWWWWWWW", "detail": "small_phone:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "01234567890123456789012345678901", "detail": "small_phone:column" }
+      ], "total": 2 }
+    },
+    {
+      "name": "hyphens dashes zero-width space and discretionary hyphens supply real breaks",
+      "input": { "enabled": true, "columns": [{ "groups": [{ "labels": [
+        "WWWWWWWWWW-WWWWWWWWWW", "WWWWWWWWWW‐WWWWWWWWWW", "WWWWWWWWWW–WWWWWWWWWW",
+        "WWWWWWWWWW—WWWWWWWWWW", "WWWWWWWWWW\u200bWWWWWWWWWW", "WWWWWWWWWW\u00adWWWWWWWWWW"
+      ] }] }] },
+      "expected": { "findings": [], "total": 0 }
+    },
+    {
+      "name": "joined spaces and zero-advance controls retain Small phone pressure",
+      "input": { "enabled": true, "columns": [{ "groups": [{ "labels": [
+        "WWWWWWWWW\u00a0WWWWWWWWW", "WWWWWWWWW\u202fWWWWWWWWW", "WWWWWWWWW\u2007WWWWWWWWW",
+        "WWWWWWWWW\u2060WWWWWWWWW", "WWWWWWWWW\ufeffWWWWWWWWW"
+      ] }] }] },
+      "expected": { "findings": [
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW\u00a0WWWWWWWWW", "detail": "small_phone:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW\u202fWWWWWWWWW", "detail": "small_phone:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW\u2007WWWWWWWWW", "detail": "small_phone:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW\u2060WWWWWWWWW", "detail": "small_phone:column" },
+        { "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW\ufeffWWWWWWWWW", "detail": "small_phone:column" }
+      ], "total": 5 }
+    },
+    {
+      "name": "word joiner suppresses a pending break across rich runs",
+      "input": { "enabled": true, "columns": [], "aside": { "body": [{ "runs": [
+        { "text": "WWWWWWWWW " }, { "text": "\u2060", "bold": true }, { "text": "WWWWWWWWW", "link": true }
+      ] }] } },
+      "expected": { "findings": [{ "ruleId": "footer.word_breaks", "severity": "warning", "subject": "WWWWWWWWW \u2060WWWWWWWWW", "detail": "small_phone:aside" }], "total": 1 }
+    },
+    {
+      "name": "Han Kana and Thai fragments are outside the bounded word-break estimate",
+      "input": { "enabled": true, "columns": [{ "groups": [{ "labels": [
+        "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW漢",
+        "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWカ",
+        "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWก"
+      ] }] }] },
+      "expected": { "findings": [], "total": 0 }
+    },
+    {
+      "name": "calibration: Documentation fits at 1152px with four tracks",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "assumptions": "calibration",
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "calibration: Documentation breaks in eight tracks including 769px",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "assumptions": "calibration",
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "small_desktop:column"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "www large brand with wider known logo ratio: all four widths including phone",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "disabled footer contributes no words or tracks",
+      "input": {
+        "enabled": false,
+        "brand": {
+          "text": "Extraordinarilylongbrandname",
+          "hasLogo": true,
+          "span": 1,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "empty columns and groups take no tracks",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 2,
+            "groups": [
+              {
+                "heading": "Unrenderedextraordinarilylongheading",
+                "labels": []
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "unknown ratio beside a span-one logo conservatively warns at desktop",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 1,
+          "size": "standard"
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Taproot",
+            "detail": "desktop:brand"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "known square logo avoids that desktop brand warning",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 1,
+          "size": "standard",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "same word in column and aside stays in separate regions",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "Documentation"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "desktop:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 2
+      }
+    },
+    {
+      "name": "more than twelve findings keep widest-first order and true count",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "ExtraordinarilylongunbreakablefooterwordA",
+                  "ExtraordinarilylongunbreakablefooterwordB",
+                  "ExtraordinarilylongunbreakablefooterwordC",
+                  "ExtraordinarilylongunbreakablefooterwordD",
+                  "ExtraordinarilylongunbreakablefooterwordE",
+                  "ExtraordinarilylongunbreakablefooterwordF",
+                  "ExtraordinarilylongunbreakablefooterwordG",
+                  "ExtraordinarilylongunbreakablefooterwordH",
+                  "ExtraordinarilylongunbreakablefooterwordI",
+                  "ExtraordinarilylongunbreakablefooterwordJ",
+                  "ExtraordinarilylongunbreakablefooterwordK",
+                  "ExtraordinarilylongunbreakablefooterwordL",
+                  "ExtraordinarilylongunbreakablefooterwordM",
+                  "ExtraordinarilylongunbreakablefooterwordN",
+                  "ExtraordinarilylongunbreakablefooterwordO"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordA",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordB",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordC",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordD",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordE",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordF",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordG",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordH",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordI",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordJ",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordK",
+            "detail": "phone:column"
+          },
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "ExtraordinarilylongunbreakablefooterwordL",
+            "detail": "phone:column"
+          }
+        ],
+        "total": 15
+      }
+    },
+    {
+      "name": "aside heading uses large type",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "Documentation"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "bold aside heading uses its actual wider y advance at the near edge",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "yyyyyyyyyy",
+                "bold": true
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "yyyyyyyyyy",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "regular y advances fit desktop at the same heading edge",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "yyyyyyyyyy"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "yyyyyyyyyy",
+            "detail": "small_desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "linked aside heading uses the actual bold y advance at the near edge",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "yyyyyyyyyy",
+                "link": true
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "yyyyyyyyyy",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "NBSP joins fragments across runs",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "Mon"
+              },
+              {
+                "text": " Morning",
+                "bold": true
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Mon Morning",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "narrow NBSP and figure space also join",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "Week Morning Evening"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Week Morning Evening",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "heading words cross regular and bold runs",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "heading": {
+            "runs": [
+              {
+                "text": "Docu"
+              },
+              {
+                "text": "mentation",
+                "bold": true
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "body words cross regular and bold runs",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "body": [
+            {
+              "runs": [
+                {
+                  "text": "Docu"
+                },
+                {
+                  "text": "mentation",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Documentation",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "brand gap is subtracted from available width",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "aaaaaaa",
+          "hasLogo": true,
+          "span": 1,
+          "size": "standard",
+          "logoAspectRatio": 3.25
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "aaaaaaa",
+            "detail": "desktop:brand"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "linked aside body uses bold advance at the near edge",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "body": [
+            {
+              "runs": [
+                {
+                  "text": "DocumentationManual",
+                  "link": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "DocumentationManual",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "regular aside body fits desktop at that edge",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "body": [
+            {
+              "runs": [
+                {
+                  "text": "DocumentationManual"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "DocumentationManual",
+            "detail": "small_desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "unknown wide large logo can warn only on phone",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large"
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Taproot",
+            "detail": "phone:brand"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "word breaking at tablet and phone is reported once at tablet",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "AAAAAAAAAAAAAAAAAAAAAAAAAA"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "detail": "tablet:column"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "hidden brand has no text and contributes no track",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Documentation"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "large brand estimates larger text",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Amplified",
+          "hasLogo": true,
+          "span": 1,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Amplified",
+            "detail": "small_desktop:brand"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "standard brand at the same geometry",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Amplified",
+          "hasLogo": true,
+          "span": 1,
+          "size": "standard",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Help"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "span": 1,
+          "heading": {
+            "runs": [
+              {
+                "text": "Draft. Stage. Publish."
+              }
+            ]
+          },
+          "body": []
+        }
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "CTA is regular normal type",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Taproot",
+          "hasLogo": true,
+          "span": 2,
+          "size": "large",
+          "logoAspectRatio": 1
+        },
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "For creators",
+                  "For communities",
+                  "For businesses",
+                  "For families"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "ctaLabel": "DocumentationManual"
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "DocumentationManual",
+            "detail": "small_desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "stored heading-only aside renders",
+      "settings": {
+        "enabled": true,
+        "asideHeadingContent": {
+          "paragraphs": [
+            {
+              "runs": [
+                {
+                  "text": "News"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": true,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored body-only aside renders",
+      "settings": {
+        "enabled": true,
+        "asideBodyContent": {
+          "paragraphs": [
+            {
+              "runs": [
+                {
+                  "text": "News"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": true,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored target-bearing CTA-only aside renders",
+      "settings": {
+        "enabled": true,
+        "asideCta": {
+          "label": "Contact",
+          "externalUrl": "https://example.test"
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": true,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored empty paragraphs do not render an aside",
+      "settings": {
+        "enabled": true,
+        "asideHeadingContent": {
+          "paragraphs": [
+            {
+              "runs": []
+            }
+          ]
+        },
+        "asideBodyContent": {
+          "paragraphs": [
+            {
+              "runs": []
+            }
+          ]
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored later heading paragraphs do not render",
+      "settings": {
+        "enabled": true,
+        "asideHeadingContent": {
+          "paragraphs": [
+            {
+              "runs": []
+            },
+            {
+              "runs": [
+                {
+                  "text": "Hidden"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored CTA without a target does not render",
+      "settings": {
+        "enabled": true,
+        "asideCta": {
+          "label": "Unset"
+        }
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored hidden brand has no words or track",
+      "settings": {
+        "enabled": true,
+        "showBrand": false
+      },
+      "brand": {
+        "brandText": "Taproot",
+        "hasLogo": true
+      },
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored logo-only brand keeps its track",
+      "settings": {
+        "enabled": true,
+        "showBrandText": false
+      },
+      "brand": {
+        "brandText": "Hidden",
+        "hasLogo": true,
+        "logoAspectRatio": 1
+      },
+      "presence": {
+        "brand": true,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored empty groups and targetless columns take no tracks",
+      "settings": {
+        "enabled": true,
+        "linkColumns": [
+          {
+            "span": 2,
+            "groups": [
+              {
+                "heading": "Hidden",
+                "links": []
+              }
+            ]
+          },
+          {
+            "groups": [
+              {
+                "heading": "Unset",
+                "links": [
+                  {
+                    "label": "No target"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "brand": {},
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored hidden brand text without a logo takes no track",
+      "settings": {
+        "enabled": true,
+        "showBrandText": false
+      },
+      "brand": {
+        "brandText": "Hidden"
+      },
+      "presence": {
+        "brand": false,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "stored visible brand text alone takes a track",
+      "settings": {
+        "enabled": true
+      },
+      "brand": {
+        "brandText": "Studio"
+      },
+      "presence": {
+        "brand": true,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "zero-width no-break space keeps a styled word joined",
+      "input": {
+        "enabled": true,
+        "columns": [
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          },
+          {
+            "span": 1,
+            "groups": [
+              {
+                "heading": "Help",
+                "labels": [
+                  "Home"
+                ]
+              }
+            ]
+          }
+        ],
+        "aside": {
+          "body": [
+            {
+              "runs": [
+                {
+                  "text": "Docume﻿ntation",
+                  "bold": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Docume﻿ntation",
+            "detail": "desktop:aside"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "normal-logo-with-large-text-at-every-width",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Community",
+          "hasLogo": true,
+          "logoAspectRatio": 1,
+          "span": 2,
+          "size": "large",
+          "logoScale": "1.0"
+        },
+        "columns": []
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "five-times-logo-with-normal-text-warns-on-phone",
+      "input": {
+        "enabled": true,
+        "brand": {
+          "text": "Community",
+          "hasLogo": true,
+          "logoAspectRatio": 1,
+          "span": 2,
+          "size": "standard",
+          "logoScale": "5.0"
+        },
+        "columns": []
+      },
+      "expected": {
+        "findings": [
+          {
+            "ruleId": "footer.word_breaks",
+            "severity": "warning",
+            "subject": "Community",
+            "detail": "phone:brand"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "custom-footer-logo-only-retains-brand-track",
+      "settings": {
+        "enabled": true,
+        "showBrand": true,
+        "showBrandText": false,
+        "logoScale": "1.1"
+      },
+      "brand": {
+        "brandText": "",
+        "hasLogo": true,
+        "logoAspectRatio": 2
+      },
+      "presence": {
+        "brand": true,
+        "aside": false,
+        "columns": 0
+      },
+      "expected": {
+        "findings": [],
+        "total": 0
+      }
+    }
+  ],
+  "about": "Rendered-input cases check estimation. Stored-settings cases also check projection and region presence before estimation in every generated port."
+}

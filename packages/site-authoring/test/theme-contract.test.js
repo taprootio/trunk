@@ -6,6 +6,7 @@ import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 import { APPEARANCE_FOOTER_COLOR_FIELDS } from "../src/appearance-contract.js";
 import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
+import footerDraftVectors from "./fixtures/footer-draft-vectors.json" with { type: "json" };
 import {
   isSupportedAppearanceColor,
   MAXIMUM_THEME_OPEN_MAP_ENTRIES,
@@ -286,34 +287,41 @@ test("Espalier warnings are terminal-safe and bounded before callers receive the
   }
 });
 
-test("the footer draft hash stays byte-compatible with the server default", () => {
-  assert.equal(
-    computeFooterDraftHash({}),
-    "b2afba6ee8f2cefd02b138657391e5f3778944e1f8205cff168f920b9b623032",
-  );
+test("footer v7 agrees with all six shared cross-port vectors", async context => {
+  assert.equal(footerDraftVectors.version, "footer-draft-v7");
+  assert.deepEqual(footerDraftVectors.vectors.map(vector => vector.name), ["default", "social", "spanLegacy", "customLogo", "allAxes", "stackedOnly"]);
+  for (const vector of footerDraftVectors.vectors) {
+    await context.test(vector.name, () => {
+      assert.match(vector.expected, /^[0-9a-f]{64}$/u);
+      assert.equal(computeFooterDraftHash(vector.settings), vector.expected);
+      assert.equal(computeFooterDraftHash(projectFooterSettingsForWorkspace(vector.settings)), vector.expected);
+    });
+  }
 });
 
-// The same two links are pinned by the server and the editor, so a port that
-// appends the social-link fields in another order fails here.
-test("the footer draft hash stays byte-compatible with the server over two social links", () => {
-  assert.equal(
-    computeFooterDraftHash({
-      socialLinks: [
-        {
-          id: "11111111-1111-4111-8111-111111111111",
-          platform: "instagram",
-          url: "https://www.instagram.com/shywellness",
-        },
-        {
-          id: "22222222-2222-4222-8222-222222222222",
-          platform: "other",
-          url: "https://shywellness.example/book",
-          label: "Book online",
-        },
-      ],
-    }),
-    "a4eb0ff35d3c408bdd35be9e03ace92dde6dfac9b7a0e4ec1624825bbfa50d9b",
-  );
+test("footer v7 normalizes omitted defaults and retains span intent", () => {
+  assert.equal(computeFooterDraftHash({}), computeFooterDraftHash({ brandSpan: 1, asideSpan: 1, brandSize: "standard" }));
+  assert.equal(computeFooterDraftHash({ brandSize: "" }), computeFooterDraftHash({}));
+  const column = { id: "33333333-3333-4333-8333-333333333333", groups: [] };
+  assert.equal(computeFooterDraftHash({ linkColumns: [column] }), computeFooterDraftHash({ linkColumns: [{ ...column, span: 1 }] }));
+  assert.notEqual(computeFooterDraftHash({ linkColumns: [column] }), computeFooterDraftHash({ linkColumns: [{ ...column, span: 2 }] }));
+  assert.equal(computeFooterDraftHash({ logoBox: null, alignment: { wide: {} } }), computeFooterDraftHash({}));
+  assert.notEqual(computeFooterDraftHash({ logoBox: "natural" }), computeFooterDraftHash({}));
+  assert.notEqual(computeFooterDraftHash({ alignment: { wide: { horizontal: "start" } } }), computeFooterDraftHash({}));
+  assert.notEqual(computeFooterDraftHash({ bottomAlignment: { stacked: { textAlign: "auto" } } }), computeFooterDraftHash({}));
+});
+
+test("footer v7 hashes migrated scale and independent per-scheme logo ids, excluding delivery URLs", () => {
+  assert.equal(computeFooterDraftHash({}), computeFooterDraftHash({ logoScale: "1.0" }));
+  assert.equal(computeFooterDraftHash({ brandSize: "large" }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }));
+  assert.equal(computeFooterDraftHash({ brandSize: "large", logoScale: null }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }));
+  assert.notEqual(computeFooterDraftHash({ brandSize: "large" }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.0" }));
+  const custom = { brandSize: "large", logoScale: "2.4", light: { logoId: "44444444-4444-4444-8444-444444444444" }, dark: { logoId: "55555555-5555-4555-8555-555555555555" } };
+  const hash = computeFooterDraftHash(custom);
+  assert.notEqual(hash, computeFooterDraftHash({ ...custom, logoScale: "2.3" }));
+  assert.notEqual(hash, computeFooterDraftHash({ ...custom, dark: {} }));
+  assert.notEqual(hash, computeFooterDraftHash({ ...custom, light: custom.dark, dark: custom.light }));
+  assert.equal(hash, computeFooterDraftHash({ ...custom, light: { ...custom.light, logoUrl: "https://cdn.example/light.webp" }, dark: { ...custom.dark, logoUrl: "https://cdn.example/dark.webp" } }));
 });
 
 test("the footer content baseline ignores exactly the ten theme-owned colors", () => {
@@ -342,6 +350,19 @@ test("the footer content baseline ignores exactly the ten theme-owned colors", (
   const contentEdit = structuredClone(content);
   contentEdit.bottomLinks[0].label = "Imprint";
   assert.notEqual(computeFooterContentHash(contentEdit), computeFooterContentHash(content));
+
+  for (const edit of [
+    { ...content, logoScale: "1.0" },
+    { ...content, logoScale: 1 },
+    { ...content, logoBox: "natural" },
+    { ...content, alignment: { stacked: { horizontal: "start" } } },
+    { ...content, brandAlignment: { wide: { vertical: "start" } } },
+    { ...content, asideAlignment: { wrapped: { textAlign: "justify" } } },
+    { ...content, bottomAlignment: { stacked: { textAlign: "auto" } } },
+    { ...content, alignment: { stacked: { horizontal: 1 } } },
+    { ...content, light: { ...content.light, logoId: "11111111-1111-4111-8111-111111111111" } },
+    { ...content, dark: { ...content.dark, logoId: "22222222-2222-4222-8222-222222222222" } },
+  ]) assert.notEqual(computeFooterContentHash(edit), computeFooterContentHash(content));
 
   // The baseline hashes the raw workspace document, so hand-edited null link
   // entries must hash (as empty links), not throw.

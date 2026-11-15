@@ -16,6 +16,8 @@ import {
   FIXTURE_ROOT_FIELDS,
 } from "../fixture-contract.js";
 import { initializeFixture } from "../fixture-init.js";
+import { readFooterBrandInputs } from "../footer-brand-inputs.js";
+import { buildFooterFitInput } from "../footer-fit.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
 import { FORMS_DIRECTORY } from "../forms-contract.js";
 import { authorWarnings, descriptionWarnings } from "../page-metadata.js";
@@ -682,11 +684,15 @@ function pageHints(checked, onProgress) {
  * The offline site checks (TR01085) over the planned pages: the rules the shared
  * catalogue lists for `validate`, with the rest named as checked by the site.
  */
-function offlineSiteChecks(checked, manifest, onProgress, imageCheck) {
-  if (checked.settingsOnly) return {};
+async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, workspaceDir) {
+  const footerInput = checked.footer === undefined
+    ? undefined
+    : buildFooterFitInput(checked.footer.footerSettings, await readFooterBrandInputs(workspaceDir, checked.footer.footerSettings));
   return evaluateOfflineSiteChecks({
-    planned: checked.pages?.planned,
-    pagePaths: manifest.pages.map((entry) => normalizePagePath(entry?.path)).filter((value) => value !== undefined),
+    planned: checked.settingsOnly ? [] : checked.pages?.planned,
+    footerInput,
+    footerOnly: checked.settingsOnly,
+    pagePaths: checked.settingsOnly ? [] : manifest.pages.map((entry) => normalizePagePath(entry?.path)).filter((value) => value !== undefined),
     pagesComplete: manifest.pagesTruncated !== true,
     formKeysChecked: checked.formKeysChecked === true,
     imageCheck,
@@ -828,7 +834,7 @@ export async function validateFixture(invocation = {}) {
     ...autolinkWarnings(checked.pages?.planned, onProgress),
     ...descriptionWarnings(checked.pages?.planned, onProgress),
     ...authorWarnings(checked.pages?.planned, onProgress),
-    ...offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT)),
+    ...await offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT), fixtureRoot),
   };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -893,15 +899,15 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
     ? []
     : checked.pages.planned.map((page) => ({ file: page.file, path: displayPagePath(page.pagePath) }));
   const hints = pageHints(checked, onProgress);
-  const warnings = checked.settingsOnly
-    ? {}
-    : {
+  const warnings = {
+    ...(checked.settingsOnly ? {} : {
       ...autolinkWarnings(checked.pages.planned, onProgress),
       ...descriptionWarnings(checked.pages.planned, onProgress),
       ...authorWarnings(checked.pages.planned, onProgress),
-      ...offlineSiteChecks(checked, manifest, onProgress, site.imageCheck),
-    };
-  // A Docs workspace has no `siteChecks` to carry the reason, so it is said at the top level.
+    }),
+    ...await offlineSiteChecks(checked, manifest, onProgress, site.imageCheck, workspaceDir),
+  };
+  // Docs runs only the footer rule; its skipped image check belongs outside that footer-only report.
   const docsReason = checked.settingsOnly && invocation.fromSite === true
     ? {
       imageCheckReason: {

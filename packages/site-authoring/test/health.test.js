@@ -38,9 +38,11 @@ test("every rule the stored report can raise has a remedy, and an unknown rule g
     assert.ok(SITE_CHECK_REMEDIES[ruleId].length > 0);
   }
   // A page fix reaches the release's report only through a push, an approval and another staging.
-  for (const ruleId of healthRules.filter((id) => id !== "a11y.image_default_missing")) {
+  for (const ruleId of healthRules.filter((id) => !["a11y.image_default_missing", "footer.word_breaks"].includes(id))) {
     assert.match(SITE_CHECK_REMEDIES[ruleId], /taproot-site pages push.*taproot-site approve.*taproot-site deploy --staging/u, ruleId);
   }
+  assert.match(SITE_CHECK_REMEDIES["footer.word_breaks"], /taproot-site footer push.*taproot-site deploy --staging/u);
+  assert.doesNotMatch(SITE_CHECK_REMEDIES["footer.word_breaks"], /taproot-site pages push|taproot-site approve/u);
   const unknown = remedyForRule("future.rule_id");
   assert.match(unknown, /future\.rule_id/u);
   assert.match(unknown, /Site Health page/u);

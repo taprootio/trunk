@@ -28,6 +28,8 @@ import {
   APPEARANCE_SCALAR_FIELDS,
 } from "./appearance-contract.js";
 import { CLI_BINARY_NAME } from "./constants.js";
+import { FOOTER_LOGO_BOX, FOOTER_LOGO_SCALE_LIMITS } from "./footer-branding.js";
+import { FOOTER_ALIGNMENT_LAYOUTS, FOOTER_POSITION_VALUES, FOOTER_TEXT_ALIGN_VALUES } from "./footer-alignment.js";
 import {
   FOOTER_BACKGROUND_PRESENTATIONS,
   FOOTER_EXAMPLE,
@@ -579,6 +581,32 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
   "FooterSettings.enabled": { type: "boolean", default: false },
   "FooterSettings.showBrand": { type: "boolean", default: true },
   "FooterSettings.showBrandText": { type: "boolean", default: true },
+  "FooterSettings.brandSpan": { type: "integer", default: 1, minimum: 1, maximum: FOOTER_LIMITS.brandSpanMax },
+  "FooterSettings.asideSpan": { type: "integer", default: 1, minimum: 1, maximum: FOOTER_LIMITS.asideSpanMax },
+  "FooterSettings.brandSize": { type: "enum", default: "standard", values: ["standard", "large"], description: "Brand text size; logoScale independently sets the logo size." },
+  "FooterSettings.logoScale": {
+    type: "decimal-string",
+    default: "1.0",
+    ...FOOTER_LOGO_SCALE_LIMITS,
+    description: "Logo size from 1.0 through 5.0 in 0.1 steps. Empty and 1 normalize to 1.0. An old absent or null value migrates to 1.5 for large brand text, otherwise 1.0; pull and footer push materialize it. Whitespace, exponents, numeric JSON values and extra decimal places are refused.",
+  },
+  "FooterSettings.logoBox": {
+    type: "enum", default: "fixed", values: ["fixed", "natural"],
+    description: "Fixed keeps scaled logo height, including unused image-box space. Natural fits the constrained artwork dimensions without cropping alpha padding. Omitted, null or empty is fixed.",
+  },
+  ...Object.fromEntries(["alignment", "brandAlignment", "asideAlignment"].map(name => [
+    `FooterSettings.${name}`, { type: "FooterResponsiveAlignment|null", inheritedWhenOmitted: true },
+  ])),
+  "FooterSettings.bottomAlignment": { type: "FooterResponsiveInlineAlignment|null", inheritedWhenOmitted: true },
+  ...Object.fromEntries(["FooterResponsiveAlignment", "FooterResponsiveInlineAlignment"].flatMap(type =>
+    FOOTER_ALIGNMENT_LAYOUTS.map(layout => [
+      `${type}.${layout}`, { type: type === "FooterResponsiveAlignment" ? "FooterAlignment|null" : "FooterInlineAlignment|null", inheritedWhenOmitted: true },
+    ]))),
+  ...Object.fromEntries(["FooterAlignment", "FooterInlineAlignment"].flatMap(type => [
+    [`${type}.horizontal`, { type: "enum", values: ["", ...FOOTER_POSITION_VALUES], inheritedWhenOmitted: true }],
+    [`${type}.textAlign`, { type: "enum", values: ["", ...FOOTER_TEXT_ALIGN_VALUES], inheritedWhenOmitted: true }],
+  ])),
+  "FooterAlignment.vertical": { type: "enum", values: ["", ...FOOTER_POSITION_VALUES], inheritedWhenOmitted: true },
   "FooterSettings.linkColumns": { type: "FooterLinkColumn[]", default: [], maximumItems: FOOTER_LIMITS.linkColumns },
   "FooterSettings.asideHeadingContent": {
     type: "FooterRichText",
@@ -609,6 +637,8 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
   "FooterSettings.dark": { type: "FooterSchemeSettings", default: "scheme defaults" },
   "FooterSettings.featureImage": { type: "FooterFeatureImageSettings|null", default: null },
   "FooterLinkColumn.id": { type: "canonical-lowercase-uuid", required: true },
+  "FooterLinkColumn.span": { type: "integer", default: 1, minimum: 1, maximum: FOOTER_LIMITS.columnSpanMax },
+  "FooterLinkColumn.alignment": { type: "FooterResponsiveAlignment|null", inheritedWhenOmitted: true },
   "FooterLinkColumn.groups": { type: "FooterLinkGroup[]", default: [], maximumItems: FOOTER_LIMITS.groupsPerColumn },
   "FooterLinkGroup.id": { type: "canonical-lowercase-uuid", required: true },
   "FooterLinkGroup.heading": {
@@ -671,6 +701,12 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
     ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "linkHoverColor")),
     default: "",
   },
+  "FooterSchemeSettings.logoId": {
+    type: "site-owned-png-or-webp-image-uuid",
+    default: "",
+    description: "An optional footer logo override for this scheme. Empty inherits that scheme's site logo; clearing an override leaves the site logo and media unchanged.",
+  },
+  "FooterSchemeSettings.logoUrl": { type: "url", readOnly: true },
   "FooterSchemeSettings.backgroundImageId": { type: "site-owned-image-uuid", default: "" },
   "FooterSchemeSettings.backgroundImageUrl": { type: "url", readOnly: true },
   "FooterSchemeSettings.backgroundImageOpacity": { type: "number", default: 1, minimum: 0, maximum: 1 },
@@ -732,10 +768,36 @@ export function getFooterReference() {
       + "with accented or non-English letters are not supported here; use a bottom link for that site. "
       + "The row renders between the bottom content and the bottom links.",
     imageRule:
-      "Image ids come from pull or media upload. Feature images require alt text; background art is decorative.",
+      "Image ids come from pull or media upload. Each scheme's logoId is an optional site-owned PNG/WebP override; "
+      + "an empty id inherits the site's logo for that scheme independently. logoUrl is response-only metadata. "
+      + "Feature images require alt text; background art is decorative.",
+    layoutRule: "Brand, link columns and aside share equal tracks; each span adds tracks, with no total limit. "
+      + "The brand gets its own row at tablet width, and all regions stack on phones. brandSize changes only brand text; "
+      + `logoScale independently scales the logo's normal ${FOOTER_LOGO_BOX.heightRem}rem height and ${FOOTER_LOGO_BOX.maxWidthRem}rem maximum width at every width. `
+      + "The available width still constrains it.",
+    alignmentRule: "Save sparse wide, wrapped (Brand row) and stacked profiles on alignment (whole-footer default), "
+      + "brandAlignment, asideAlignment and each column's alignment. bottomAlignment has horizontal and textAlign only. "
+      + "For each axis, search from the active layout toward wider layouts, trying the region then whole-footer choice "
+      + "at each layout. Empty or omitted axes inherit; null or empty profiles disappear on pull. Explicit start stays "
+      + "authored intent. Horizontal and vertical accept start, center and end; start/end are logical and reverse "
+      + "physical sides in RTL. Text also accepts auto and justify. Auto follows current horizontal alignment and can "
+      + "reset inherited justification. Justify affects prose with a normal last line; headings, brand, menus and CTA "
+      + "labels follow horizontal placement. Invalid, whitespace-padded, non-string and wrong-axis values are refused.",
+    logoSpaceRule: "logoBox fixed preserves scaled image height; start moves spare height below the artwork. "
+      + "Natural fits the width-constrained artwork, including its loading reservation, without changing scale or "
+      + "cropping transparent padding. Absent, null or empty logoBox is fixed. Header geometry is unchanged.",
+    fitCheck: "validate reports footer.word_breaks at five widths: desktop, small desktop, tablet, phone and Small phone (320px); footer push "
+      + "prints the same warnings before saving. At most 12 are shown, with the true count and any remainder. "
+      + "Estimates use generated default-font advances, the default type scale and gaps; custom fonts or scale may differ. "
+      + "Supported whitespace, hyphen and zero-width break opportunities are estimated; contextual shaping is bounded, "
+      + "and Han, Kana or Thai fragments are skipped. The CLI cannot measure logos and assumes their maximum "
+      + "4:1 ratio, so it can over-report brand words beside a narrow logo. Warnings never refuse a save. "
+      + "The deployment check covers standard and profile sites; managed Docs sites use validate and the Footer tab.",
     readOnlyProjections: FOOTER_READ_ONLY_FIELDS,
     concurrency:
-      "pull records expectedDraftHash. A conflict returns footer.concurrent_modification; pull, reconcile, and retry.",
+      "pull records the footer-draft-v7 expectedDraftHash, including effective logoScale, logoBox, all sparse profiles "
+      + "and both logo ids, but no response URLs or effective inherited choices. Old v6 baselines are refused; upgrade and pull again. A conflict returns "
+      + "footer.concurrent_modification; pull, reconcile, and retry.",
     themeInteraction:
       "theme push overlays its ten scheme colors onto the site's current footer document inside its atomic save and "
       + "rewrites this file from the saved result. It refuses while unpushed footer-content edits exist "
@@ -862,12 +924,15 @@ export function formatPresentationReference(reference) {
   if (reference.referenceKind === "footer") {
     const messages = reference.messages.map((message) =>
       message.name + " (unlisted fields rejected)\n"
-      + message.fields.map((field) => "  " + field.name.padEnd(30) + fieldConstraint(field)).join("\n")
+      + message.fields.map((field) => "  " + field.name.padEnd(30) + fieldConstraint(field)
+        + (field.description ? "; " + field.description : "")).join("\n")
     ).join("\n\n");
     return reference.title + "\nUsage: " + reference.usage + "\nWorkspace: "
       + reference.workspaceFile + " :: " + reference.workspacePath + "\n\nClosed schema:\n"
       + messages + "\n\nTargets: " + reference.targetRule + "\nSocial links: " + reference.socialLinkRule
       + "\nImages: " + reference.imageRule
+      + "\nLayout: " + reference.layoutRule + "\nAlignment: " + reference.alignmentRule
+      + "\nLogo space: " + reference.logoSpaceRule + "\nFit check: " + reference.fitCheck
       + "\nConcurrency: " + reference.concurrency
       + "\nTheme interaction: " + reference.themeInteraction + "\nRead-only projections: "
       + reference.readOnlyProjections.join(", ") + "\n\nWorkflow:\n"

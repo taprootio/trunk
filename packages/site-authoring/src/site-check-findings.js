@@ -1,3 +1,5 @@
+import { FOOTER_FIT_WIDTH_LABELS, footerFitFindings } from "./footer-fit.js";
+import { FOOTER_SETTINGS_FILE } from "./footer-workspace.js";
 import { sanitizeDiagnostic } from "./errors.js";
 import { boundedByBytes } from "./session.js";
 import rules from "./site-check-rules.json" with { type: "json" };
@@ -79,6 +81,7 @@ export const SITE_CHECK_WORDING = Object.freeze({
   "seo.description_short": (finding) => `has a description of ${finding.detail} characters; consider adding useful detail (guidance: ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH})`,
   "seo.description_long": (finding) => `has a description of ${finding.detail} characters; consider shortening it (guidance: ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH})`,
   "seo.description_matches_title": () => "has a description that repeats its title; explain what readers will find",
+  "footer.word_breaks": (finding) => footerFindingWords(finding),
   "seo.social_image_fallback": (finding) =>
     finding.detail === "first_image"
       ? "has no cover image; link previews use the page's first image only when it is public and at least 1200 pixels wide"
@@ -92,6 +95,7 @@ export const SITE_CHECK_WORDING = Object.freeze({
 export const AFTER_PAGE_FIX =
   "then, for a page edit, run taproot-site pages push and taproot-site approve, and run taproot-site deploy --staging to refresh the report";
 export const SITE_CHECK_REMEDIES = Object.freeze({
+  "footer.word_breaks": "Widen the named footer region or shorten its text in settings/site-publishing-preferences.json, run taproot-site footer push, then taproot-site deploy --staging to refresh the report.",
   "link.page_missing": `Change the link to a page this site has, or create that page, ${AFTER_PAGE_FIX}.`,
   "image.missing": `Remove the image from the page or replace it with one from the site's library, ${AFTER_PAGE_FIX}.`,
   // Built for each image, because the command carries the image's own revision and text.
@@ -126,6 +130,21 @@ const H1_CLAIMANT = Object.freeze({
   banner: "the banner at the top",
   hero: "the hero title",
 });
+
+const FOOTER_REGION_ADVICE = Object.freeze({
+  column: "Widen its column or shorten the label",
+  aside: "Widen the aside or shorten the text",
+  brand: "Widen the brand or shorten its text",
+});
+
+function footerFindingWords(finding) {
+  const [width, region] = String(finding.detail ?? "").split(":");
+  const widthName = Object.hasOwn(FOOTER_FIT_WIDTH_LABELS, width)
+    ? FOOTER_FIT_WIDTH_LABELS[width].toLowerCase()
+    : undefined;
+  const advice = FOOTER_REGION_ADVICE[region] ?? "Widen the region or shorten the text";
+  return `'${finding.subject}' may break mid-word ${widthName === undefined ? "at this width" : `at ${widthName} width`}. ${advice}`;
+}
 
 /** The sentence for a finding, falling back to the rule id for a rule this release has no words for. */
 export function describeSiteFinding(finding) {
@@ -164,7 +183,8 @@ function structureFindingsFor(page) {
 }
 
 /**
- * Evaluates the offline page rules over the planned pages. `pagePaths` is every
+ * Evaluates offline page and footer rules. `footerOnly` checks settings workspaces without claiming page coverage.
+ * `pagePaths` is every
  * page path the workspace knows, and `pagesComplete` says whether that list is
  * the whole site: a truncated manifest cannot say a link is broken.
  */
@@ -173,19 +193,24 @@ export function evaluateOfflineSiteChecks({
   pagePaths,
   pagesComplete = true,
   formKeysChecked = true,
+  footerInput,
+  footerOnly = false,
   // Whether `validate --site` ran the image description rule (TR01371), or why it did not.
   imageCheck = imageCheckSkipped(IMAGE_CHECK_NOT_REQUESTED),
   onProgress = () => {},
 }) {
   const known = normalizedPathSet([...pagePaths, ...(planned ?? []).map((page) => page.pagePath)]);
+  const footer = footerInput === undefined ? { findings: [], total: 0 } : footerFitFindings(footerInput);
+  const hiddenFooter = footer.total - footer.findings.length;
 
   const found = [];
-  for (const page of planned ?? []) {
+  for (const page of footerOnly ? [] : planned ?? []) {
     if (page.document === null || typeof page.document !== "object") continue;
     // The link rule needs every page path; the structure rules read only the page itself.
     const linkFindings = pagesComplete ? missingPageLinkFindings(page.document, page.pagePath ?? "", known) : [];
     for (const finding of [...linkFindings, ...structureFindingsFor(page)]) found.push({ page, finding });
   }
+  for (const finding of footer.findings) found.push({ finding });
   // Errors first, then in catalogue order, so the bounded list and the progress lines keep the rules that
   // matter most when a large site raises a frequent one (a missing description) on every page.
   const catalogueOrder = (ruleId) => SITE_CHECK_RULES.findIndex((rule) => rule.id === ruleId);
@@ -201,8 +226,8 @@ export function evaluateOfflineSiteChecks({
     const item = {
       rule: finding.ruleId,
       severity: finding.severity,
-      file: page.file,
-      path: displayPagePath(page.pagePath),
+      file: page === undefined ? FOOTER_SETTINGS_FILE : page.file,
+      ...(page === undefined ? {} : { path: displayPagePath(page.pagePath) }),
       subject,
       ...(finding.detail === "" ? {} : { detail: finding.detail }),
     };
@@ -214,17 +239,23 @@ export function evaluateOfflineSiteChecks({
   if (items.length > MAXIMUM_PROGRESS_LINES) {
     onProgress(`Warning: ${items.length - MAXIMUM_PROGRESS_LINES} more site check finding(s); see findings.`);
   }
+  if (hiddenFooter > 0) onProgress(`Warning: and ${hiddenFooter} more footer fit finding(s); widen or shorten the footer text and run validate again.`);
   const reported = boundedByBytes(items, 8 * 1024);
+  const total = items.length + hiddenFooter;
+  const footerSkipped = footerInput !== undefined && footerInput.enabled !== true ? ["footer.word_breaks"] : [];
   const errors = items.filter((item) => item.severity === "error").length;
   return {
     findings: {
-      total: items.length,
+      total,
       errors,
-      warnings: items.length - errors,
+      warnings: total - errors,
       items: reported.items,
-      ...(reported.truncated ? { truncated: true } : {}),
+      ...(reported.truncated || hiddenFooter > 0 ? { truncated: true } : {}),
     },
-    siteChecks: {
+    siteChecks: footerOnly ? {
+      ranOffline: footerInput === undefined ? [] : ["footer.word_breaks"],
+      ...(footerSkipped.length === 0 ? {} : { skipped: footerSkipped }),
+    } : {
       ranOffline: rulesRunningAt("validate"),
       // Local values are checked above; only a deployment knows every effective fallback.
       deferredToDeployment: [...METADATA_RULE_IDS],
@@ -241,14 +272,15 @@ export function evaluateOfflineSiteChecks({
         && rule.runsAt.includes("edit")
       ).map((rule) => rule.id),
       // A rule that had nothing to read: a truncated page manifest, no site read for the images, or a workspace
-      // with no form files. In catalogue order.
-      ...(pagesComplete && formKeysChecked && imageCheck.ran
+      // with no form files, or a disabled footer. In catalogue order.
+      ...(pagesComplete && formKeysChecked && imageCheck.ran && footerSkipped.length === 0
         ? {}
         : {
           skipped: [
             ...(pagesComplete ? [] : ["link.page_missing"]),
             ...(imageCheck.ran ? [] : [RULE_IMAGE_DEFAULT_MISSING]),
             ...(formKeysChecked ? [] : ["form.key_unknown"]),
+            ...footerSkipped,
           ],
         }),
       ...(imageCheck.ran

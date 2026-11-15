@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { SiteAuthoringError } from "./errors.js";
+import { resolveFooterLogoScale } from "./footer-branding.js";
+import { footerAlignmentProfileValues, normalizeFooterLogoBox } from "./footer-alignment.js";
 import { FOOTER_COLOR_TOKENS } from "./theme-validation.js";
 
 // The ten scheme colors theme push owns — light/dark times the color-token
@@ -88,15 +90,25 @@ export function stableJson(value) {
 // the canonical form.
 export function computeFooterDraftHash(settings = {}) {
   const canonical = [];
-  append(canonical, "footer-draft-v4");
+  append(canonical, "footer-draft-v7");
   append(canonical, settings.enabled === true);
   append(canonical, settings.showBrand ?? true);
   append(canonical, settings.showBrandText ?? true);
+  append(canonical, settings.brandSpan ?? 1);
+  append(canonical, settings.brandSize || "standard");
+  append(canonical, resolveFooterLogoScale(settings.logoScale, settings.brandSize).canonical);
+  append(canonical, normalizeFooterLogoBox(settings.logoBox));
+  appendAlignment(canonical, settings.alignment);
+  appendAlignment(canonical, settings.brandAlignment);
+  appendAlignment(canonical, settings.asideAlignment);
+  appendAlignment(canonical, settings.bottomAlignment, true);
 
   const columns = Array.isArray(settings.linkColumns) ? settings.linkColumns : [];
   append(canonical, columns.length);
   for (const column of columns) {
     append(canonical, normalizeId(column?.id));
+    append(canonical, column?.span ?? 1);
+    appendAlignment(canonical, column?.alignment);
     const groups = Array.isArray(column?.groups) ? column.groups : [];
     append(canonical, groups.length);
     for (const group of groups) {
@@ -111,6 +123,7 @@ export function computeFooterDraftHash(settings = {}) {
   const hasAsideCta = settings.asideCta !== undefined && settings.asideCta !== null;
   append(canonical, hasAsideCta);
   if (hasAsideCta) appendLink(canonical, settings.asideCta);
+  append(canonical, settings.asideSpan ?? 1);
   appendRichText(canonical, settings.bottomContent);
   appendLinks(canonical, settings.bottomLinks);
   appendSocialLinks(canonical, settings.socialLinks);
@@ -125,6 +138,10 @@ export function computeFooterDraftHash(settings = {}) {
   }
 
   return createHash("sha256").update(canonical.join(""), "utf8").digest("hex");
+}
+
+function appendAlignment(canonical, profile, inlineOnly = false) {
+  for (const value of footerAlignmentProfileValues(profile, inlineOnly)) append(canonical, value);
 }
 
 function appendLinks(canonical, rawLinks) {
@@ -186,6 +203,7 @@ function appendScheme(canonical, rawScheme) {
   append(canonical, scheme.headingColor ?? "");
   append(canonical, scheme.linkColor ?? "");
   append(canonical, scheme.linkHoverColor ?? "");
+  append(canonical, normalizeId(scheme.logoId));
   append(canonical, normalizeId(scheme.backgroundImageId));
   append(canonical, doubleBits(scheme.backgroundImageOpacity ?? 1));
   append(canonical, presentationValue(scheme.backgroundPresentation));

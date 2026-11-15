@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "6.15.1", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "7.1.0", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -147,6 +147,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/credentials.js",
     "src/delivery-browser.js",
     "src/delivery-check.js",
+    "src/display-scale.js",
     "src/errors.js",
     "src/espalier-shared.js",
     "src/field-schema.json",
@@ -156,8 +157,14 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/fixture-contract.js",
     "src/fixture-init.js",
     "src/font-catalog.js",
+    "src/footer-alignment.js",
+    "src/footer-brand-inputs.js",
+    "src/footer-branding.js",
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
+    "src/footer-fit-widths.js",
+    "src/footer-fit.js",
+    "src/footer-font-metrics.js",
     "src/footer-workspace.js",
     // Where a page's form key and the site's form id translate (TR01216).
     "src/form-references.js",

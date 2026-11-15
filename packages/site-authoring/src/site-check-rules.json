@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "about": "The catalogue of site checks (TR01085, TR00947). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body plus cheap site lookups, 'site' rules read the site's own records, 'document' rules read only one document and its metadata, so the editor and the CLI evaluate them from shared/page-structure-checks.ts and the generator compiles deployment advice from the same pure evaluator. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline unless --site), deploy, health, edit (the editor, over the open document in the browser). appliesTo, when present, limits a rule to those page types. subject and detail say what a finding's two values hold. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
+  "about": "The catalogue of site checks (TR01085, TR00947). Severity: 'error' blocks a deploy, 'warning' informs. Scope: 'page' rules read one page body plus cheap site lookups, 'site' rules read the site's own records, 'document' rules read only one document and its metadata, so the editor and the CLI evaluate them from shared/page-structure-checks.ts and the generator compiles deployment advice from the same pure evaluator. runsAt names the run points that evaluate the rule: save, validate (the CLI, offline unless --site), deploy, health, edit (the page or Footer editor, over the open design in the browser). appliesTo, when present, limits a rule to those page types. subject and detail say what a finding's two values hold. The footer.word_breaks deploy check covers standard and profile sites; managed Docs sites are checked in the Footer editor and CLI. The typed registry in Taproot.Domain/SiteChecks/SiteCheckRules.cs must list the same rules; SiteCheckTests fails on a difference.",
   "runPoints": ["save", "validate", "deploy", "health", "edit"],
   "rules": [
     { "id": "link.page_missing", "severity": "warning", "scope": "page", "runsAt": ["save", "validate", "health"], "subject": "page_path", "detail": "none" },
@@ -33,6 +33,7 @@
     { "id": "seo.description_short", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
     { "id": "seo.description_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
     { "id": "seo.description_matches_title", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "none" },
-    { "id": "seo.social_image_fallback", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["edit"], "subject": "none", "detail": "social_image_source" }
+    { "id": "seo.social_image_fallback", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["edit"], "subject": "none", "detail": "social_image_source" },
+    { "id": "footer.word_breaks", "severity": "warning", "scope": "site", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "footer_word", "detail": "width_and_region" }
   ]
 }

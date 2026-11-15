@@ -3,6 +3,9 @@ import { VERB_FOOTER_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace, validateFooterDocument } from "../footer-contract.js";
 import { computeFooterDraftHash } from "../footer-draft-hash.js";
+import { readFooterBrandInputs } from "../footer-brand-inputs.js";
+import { buildFooterFitInput } from "../footer-fit.js";
+import { evaluateOfflineSiteChecks } from "../site-check-findings.js";
 import {
   advanceFooterManifest,
   FOOTER_SETTINGS_FILE,
@@ -78,6 +81,13 @@ export async function footerPush(invocation) {
   );
   onProgress("Validated the complete footer document, stable page targets, and site-owned image references locally.");
 
+  const footerChecks = evaluateOfflineSiteChecks({
+    pagePaths: [],
+    footerOnly: true,
+    footerInput: buildFooterFitInput(footerSettings, await readFooterBrandInputs(config.workspaceDir, footerSettings)),
+    onProgress,
+  });
+
   let response;
   try {
     response = await withRefusalGuidance(onProgress, "footer push", async () =>
@@ -140,6 +150,7 @@ export async function footerPush(invocation) {
   return successResult(VERB_FOOTER_PUSH, siteId, {
     footerFile: FOOTER_SETTINGS_FILE,
     footerDraftHash,
+    ...footerChecks,
     written: { items: ["footerSettings"], count: 1 },
   });
 }

@@ -1,0 +1,368 @@
+{
+  "version": "footer-draft-v7",
+  "vectors": [
+    {
+      "name": "default",
+      "settings": {
+        "enabled": false,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 1,
+        "asideSpan": 1,
+        "brandSize": "standard",
+        "logoScale": "1.0",
+        "logoBox": "fixed",
+        "linkColumns": [],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [],
+        "light": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "fecd14df11f2a7ae22f2b7dd5010bc534c8eadcd60b26b40ffe53ae2893e31dd"
+    },
+    {
+      "name": "social",
+      "settings": {
+        "enabled": false,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 1,
+        "asideSpan": 1,
+        "brandSize": "standard",
+        "logoScale": "1.0",
+        "logoBox": "fixed",
+        "linkColumns": [],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "platform": "instagram",
+            "url": "https://www.instagram.com/shywellness",
+            "label": ""
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "platform": "other",
+            "url": "https://shywellness.example/book",
+            "label": "Book online"
+          }
+        ],
+        "light": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "0f9230be7901dd2a938f50319249430353eac74e83e537fcc14b8e39b8cd218a"
+    },
+    {
+      "name": "spanLegacy",
+      "settings": {
+        "enabled": true,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 3,
+        "asideSpan": 2,
+        "brandSize": "large",
+        "logoScale": null,
+        "logoBox": "fixed",
+        "linkColumns": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "span": 2,
+            "groups": []
+          }
+        ],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [],
+        "light": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "08b2428db783acc1e2bc0a2799e9ba2e0ebd872e7f9f5658bb72420fb937908e"
+    },
+    {
+      "name": "customLogo",
+      "settings": {
+        "enabled": false,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 1,
+        "asideSpan": 1,
+        "brandSize": "large",
+        "logoScale": "2.4",
+        "logoBox": "fixed",
+        "linkColumns": [],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [],
+        "light": {
+          "logoId": "44444444-4444-4444-8444-444444444444",
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "logoId": "55555555-5555-4555-8555-555555555555",
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "c372dca47891d1496a7ff83e4a75d1c7171b788e66dce030a218bc2305606ec4"
+    },
+    {
+      "name": "allAxes",
+      "settings": {
+        "enabled": false,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 1,
+        "asideSpan": 1,
+        "brandSize": "standard",
+        "logoScale": "1.0",
+        "logoBox": "natural",
+        "alignment": {
+          "wide": {
+            "horizontal": "start",
+            "vertical": "center",
+            "textAlign": "justify"
+          },
+          "wrapped": {
+            "horizontal": "center",
+            "vertical": "end",
+            "textAlign": "auto"
+          },
+          "stacked": {
+            "horizontal": "end",
+            "vertical": "start",
+            "textAlign": "center"
+          }
+        },
+        "brandAlignment": {
+          "wide": {
+            "horizontal": "end",
+            "vertical": "start",
+            "textAlign": "auto"
+          },
+          "wrapped": {
+            "horizontal": "start",
+            "vertical": "center",
+            "textAlign": "end"
+          },
+          "stacked": {
+            "horizontal": "center",
+            "vertical": "end",
+            "textAlign": "justify"
+          }
+        },
+        "asideAlignment": {
+          "wide": {
+            "horizontal": "center",
+            "vertical": "end",
+            "textAlign": "start"
+          },
+          "wrapped": {
+            "horizontal": "end",
+            "vertical": "start",
+            "textAlign": "justify"
+          },
+          "stacked": {
+            "horizontal": "start",
+            "vertical": "center",
+            "textAlign": "auto"
+          }
+        },
+        "bottomAlignment": {
+          "wide": {
+            "horizontal": "end",
+            "textAlign": "center"
+          },
+          "wrapped": {
+            "horizontal": "center",
+            "textAlign": "auto"
+          },
+          "stacked": {
+            "horizontal": "start",
+            "textAlign": "justify"
+          }
+        },
+        "linkColumns": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "span": 2,
+            "alignment": {
+              "wide": {
+                "horizontal": "start",
+                "vertical": "end",
+                "textAlign": "end"
+              },
+              "wrapped": {
+                "horizontal": "end",
+                "vertical": "center",
+                "textAlign": "start"
+              },
+              "stacked": {
+                "horizontal": "center",
+                "vertical": "start",
+                "textAlign": "auto"
+              }
+            },
+            "groups": []
+          }
+        ],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [],
+        "light": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "444510a921cc917d6504ff6a1dcd3ea99e76a2768cf69b89c6cc45817cce8708"
+    },
+    {
+      "name": "stackedOnly",
+      "settings": {
+        "enabled": false,
+        "showBrand": true,
+        "showBrandText": true,
+        "brandSpan": 1,
+        "asideSpan": 1,
+        "brandSize": "standard",
+        "logoScale": "1.0",
+        "logoBox": "fixed",
+        "alignment": {
+          "stacked": {
+            "horizontal": "center",
+            "textAlign": "justify"
+          }
+        },
+        "brandAlignment": {
+          "stacked": {
+            "horizontal": "end",
+            "vertical": "start",
+            "textAlign": "auto"
+          }
+        },
+        "asideAlignment": {
+          "stacked": {
+            "horizontal": "start",
+            "textAlign": "end"
+          }
+        },
+        "bottomAlignment": {
+          "stacked": {
+            "horizontal": "center",
+            "textAlign": "auto"
+          }
+        },
+        "linkColumns": [
+          {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "span": 1,
+            "alignment": {
+              "stacked": {
+                "horizontal": "start",
+                "vertical": "center",
+                "textAlign": "auto"
+              }
+            },
+            "groups": []
+          }
+        ],
+        "asideHeadingContent": {
+          "paragraphs": []
+        },
+        "asideBodyContent": {
+          "paragraphs": []
+        },
+        "bottomContent": {
+          "paragraphs": []
+        },
+        "bottomLinks": [],
+        "socialLinks": [],
+        "light": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        },
+        "dark": {
+          "backgroundImageOpacity": 1,
+          "backgroundRepeatHeightPx": 160,
+          "additionalTopPaddingRem": 0
+        }
+      },
+      "expected": "470232505c54c87fbcef0f35332bfa9cc446b527c75b32f844dfd050d1d200cf"
+    }
+  ]
+}
