@@ -1315,7 +1315,7 @@ tracked-Markdown conflict, and a stale push is refused. There is no reverse
 Markdown exporter. See `taproot-site help page free-form` for the closed attrs
 reference and examples.
 
-### Testimonial Google reviews in 0.38.0
+### Testimonial Google reviews in 0.38.0 and 0.41.0
 
 A Testimonial block can show the site's selected Google reviews instead of
 hand-written quotes. In its component data set `"source": "google-reviews"` and
@@ -1327,12 +1327,39 @@ hand-written `items`. The `items` are kept in the data whichever source is set.
 `source` and `maxItems` are refused at their field path when the value is
 unknown or out of range.
 
+From 0.41.0 a block can show particular reviews: set `"reviewSelection":
+"chosen"` and list the reviews in `"reviewIds"`, at most 12 review ids. They are
+shown in the listed order and `maxItems` is ignored. A chosen review keeps showing
+after it passes the newest 200 (a site keeps up to 200 such older reviews across
+all its pages, and the oldest of them stop showing if pages chose more), and is
+left out of the page when it is hidden, below the minimum rating, without text or
+deleted at Google. Omit
+`reviewSelection`, or use `"newest"`, for the newest reviews; the ids are kept in
+the data and not used. No command lists reviews, so an id comes from a page that
+was pulled after someone chose reviews in the app: copy it exactly as pulled. An
+unknown `reviewSelection`, more than 12 ids and an id that is not 1 to 256 letters,
+digits, underscores or hyphens are refused at their field path.
+
+Also from 0.41.0 two switches, both `true` or `false` (anything else is refused at
+its field path, and omitted is `false`). `"showAll": true` lists every review that
+can be shown, up to the newest 200, in a grid on a page of its own, such as one
+titled Reviews, each with its star rating written out and the owner's reply; it
+ignores `maxItems` and `carousel` (the carousel setting is kept in the data and not
+used) and does nothing beside chosen reviews. `"showProfileSummary": true` shows
+Google's average rating and total number of reviews above the reviews, with a link
+to read all reviews on Google and, when Google provides one, a link to write a
+review, and works with either selection. Reviews hidden in Marketing, reviews
+without text and reviews below the minimum rating stay off the list. The figures
+are as of the last time Taproot checked Google, once a day, and a page that shows
+them is published again when Google's average rating or total number of reviews changes.
+
 Which reviews are selected, and the minimum star rating, are set by someone who
 can manage the site's settings in the app under **Marketing → Google reviews**;
 they are not in the pulled workspace. The site needs a connected Google profile.
 Until it has reviews to show, a Google Testimonial publishes as empty. A release
-takes the reviews as they are when it is published. Help reference version 59
-covers the fields in `taproot-site help component testimonial`.
+takes the reviews as they are when it is published. A quotation's own line breaks
+are kept as line breaks on the published page. Help reference version 62 covers
+the fields in `taproot-site help component testimonial`.
 
 ### What changed between releases
 

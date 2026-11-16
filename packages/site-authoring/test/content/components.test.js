@@ -631,6 +631,17 @@ test("refuses component values the renderer would silently discard", async (test
     ["too many testimonial reviews", "testimonial", { source: "google-reviews", maxItems: 13 }, "/attrs/componentData/maxItems"],
     ["a fractional review count", "testimonial", { source: "google-reviews", maxItems: 2.5 }, "/attrs/componentData/maxItems"],
     ["a review count written as text", "testimonial", { source: "google-reviews", maxItems: "6" }, "/attrs/componentData/maxItems"],
+    ["an unknown review selection", "testimonial", { source: "google-reviews", reviewSelection: "all" }, "/attrs/componentData/reviewSelection"],
+    ["a review selection in another case", "testimonial", { source: "google-reviews", reviewSelection: "Chosen" }, "/attrs/componentData/reviewSelection"],
+    ["more than twelve chosen reviews", "testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: Array.from({ length: 13 }, (_, index) => `r${index}`) }, "/attrs/componentData/reviewIds"],
+    ["chosen reviews that are not a list", "testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: "r1" }, "/attrs/componentData/reviewIds"],
+    ["a chosen review id with a slash", "testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: ["ok", "a/b"] }, "/attrs/componentData/reviewIds/1"],
+    ["an empty chosen review id", "testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: [""] }, "/attrs/componentData/reviewIds/0"],
+    ["a chosen review id that is not text", "testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: [7] }, "/attrs/componentData/reviewIds/0"],
+    ["showAll written as text", "testimonial", { source: "google-reviews", showAll: "true" }, "/attrs/componentData/showAll"],
+    ["showAll written as a number", "testimonial", { source: "google-reviews", showAll: 1 }, "/attrs/componentData/showAll"],
+    ["showProfileSummary written as text", "testimonial", { source: "google-reviews", showProfileSummary: "yes" }, "/attrs/componentData/showProfileSummary"],
+    ["showProfileSummary set to null", "testimonial", { source: "google-reviews", showProfileSummary: null }, "/attrs/componentData/showProfileSummary"],
     ["unsupported latest-post page type", "latest-posts", { pageTypes: ["blog"] }, "/attrs/componentData/pageTypes/0"],
     ["invalid texture identifier", "image-banner", { texture: "Fine Linen" }, "/attrs/componentData/texture"],
   ];
@@ -656,6 +667,18 @@ test("refuses component values the renderer would silently discard", async (test
     assert.deepEqual(validate("testimonial", { interval: 2000 }), []);
     assert.deepEqual(validate("testimonial", { source: "google-reviews", maxItems: 12 }), []);
     assert.deepEqual(validate("testimonial", { source: "manual", maxItems: 1, items: [{ quote: "Kept" }] }), []);
+    assert.deepEqual(validate("testimonial", {
+      source: "google-reviews",
+      reviewSelection: "chosen",
+      reviewIds: Array.from({ length: 12 }, (_, index) => `AbCd-${index}_x`),
+    }), []);
+    // Ids a newest component still holds are kept, and an empty list is a component that chooses nothing yet.
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", reviewSelection: "newest", reviewIds: ["a"] }), []);
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: [] }), []);
+    // The list and the summary switches are plain booleans; a stored showAll beside chosen reviews is kept and does nothing.
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", showAll: true, showProfileSummary: true }), []);
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", showAll: false, showProfileSummary: false }), []);
+    assert.deepEqual(validate("testimonial", { source: "google-reviews", reviewSelection: "chosen", reviewIds: ["a"], showAll: true }), []);
   });
 
   await testContext.test("URL failures name every enforced character restriction", () => {

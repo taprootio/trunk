@@ -22,7 +22,13 @@ import {
 } from "./vocabulary.js";
 import { normalizeCssLengthOverride } from "./media-presentation.js";
 import { isVideoEmbedId, parseVideoEmbedUrl, VIDEO_EMBED_REFUSAL } from "./video-embed-url.js";
-import { TESTIMONIAL_MAX_ITEMS, TESTIMONIAL_SOURCES } from "./testimonial-google-reviews.js";
+import {
+  REVIEW_ID_PATTERN,
+  TESTIMONIAL_MAX_CHOSEN_REVIEWS,
+  TESTIMONIAL_MAX_ITEMS,
+  TESTIMONIAL_REVIEW_SELECTIONS,
+  TESTIMONIAL_SOURCES,
+} from "./testimonial-google-reviews.js";
 
 /**
  * The eight canonical `componentBlock` data shapes. Seven remain mirrored
@@ -216,8 +222,29 @@ const TESTIMONIAL = Object.freeze({
     integer: true,
     minimum: TESTIMONIAL_MAX_ITEMS.minimum,
     maximum: TESTIMONIAL_MAX_ITEMS.maximum,
-    description: "How many Google reviews to show, newest first. Used only when source is google-reviews.",
+    description:
+      "How many Google reviews to show, newest first. Used only when source is google-reviews, reviewSelection is newest and showAll is not true.",
   }),
+  reviewSelection: described(
+    enumOf(...TESTIMONIAL_REVIEW_SELECTIONS),
+    "newest shows the newest selected reviews, as many as maxItems says (up to the newest 200 reviews that can be shown when showAll is true). chosen shows the reviews listed in reviewIds, in that order, and ignores maxItems. Used only when source is google-reviews. Omitted is newest.",
+  ),
+  reviewIds: described(
+    list(boundedStr(256, {
+      pattern: REVIEW_ID_PATTERN,
+      patternSource: REVIEW_ID_PATTERN.source,
+      patternDescription: "1 to 256 letters, digits, underscores or hyphens",
+    }), { maxItems: TESTIMONIAL_MAX_CHOSEN_REVIEWS }),
+    "The Google reviews a chosen component shows, by review id, at most 12. No command lists reviews: an id comes from a page that was pulled after someone chose reviews in the app, so copy it as it is. A chosen review that is hidden, below the minimum rating, without text or deleted at Google is left out of the page. Kept, and not used, while reviewSelection is newest.",
+  ),
+  showAll: described(
+    bool(),
+    "true lists every review that can be shown, up to the newest 200, in a grid, each with its star rating written out and the owner's reply, and ignores maxItems and carousel (a carousel setting is kept in the data and not used). Used only when source is google-reviews and reviewSelection is newest; beside chosen reviews it does nothing. Omitted is false.",
+  ),
+  showProfileSummary: described(
+    bool(),
+    "true shows Google's average rating and total number of reviews above the reviews, with a link to read all reviews on Google and, when Google provides one, a link to write a review. Used only when source is google-reviews, with either selection. Omitted is false.",
+  ),
   items: withOmission(
     list(shape({
       quote: str(),
@@ -666,6 +693,10 @@ const COMPONENT_DEFINITIONS = Object.freeze({
     {
       source: "manual",
       maxItems: TESTIMONIAL_MAX_ITEMS.default,
+      reviewSelection: "newest",
+      reviewIds: [],
+      showAll: false,
+      showProfileSummary: false,
       items: [{ quote: "", authorName: "", authorTitle: "", authorImage: null }],
       columns: 1,
       carousel: false,
@@ -679,6 +710,9 @@ const COMPONENT_DEFINITIONS = Object.freeze({
       "Set carousel:true for directional previous/next arrows, dot navigation and a play/pause control. Navigation or keyboard focus pauses rotation; reduced-motion users get manual navigation without sliding or automatic rotation.",
       "Use real attributed reviews, or clearly label fictional demo reviews. Never imply invented testimonials are genuine customer endorsements.",
       "Set source:\"google-reviews\" only for a site with a connected Google profile; the published page shows the selected reviews with their reviewer names and a link to read all reviews on Google, and shows nothing until the profile has reviews it can show.",
+      "A Google Testimonial shows the newest reviews unless reviewSelection is \"chosen\". Choose reviews in the app: it writes their ids into reviewIds, and a pulled page carries them. Keep an id exactly as pulled, because no command lists reviews and a made-up id shows nothing.",
+      "A quotation's own line breaks are kept on the published page.",
+      "Set showAll:true on a Google Testimonial with the newest selection to list up to the newest 200 reviews that can be shown on a page of its own, such as one titled Reviews; reviews hidden in Marketing, without text or below the minimum rating stay off it. Set showProfileSummary:true to show Google's average rating and total number of reviews above the reviews, with links to read and to write reviews.",
     ],
     {
       items: [{

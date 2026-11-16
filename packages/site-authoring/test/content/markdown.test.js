@@ -529,6 +529,38 @@ const GOLDENS = [
     },
   },
   {
+    name: "a Testimonial fence that chooses Google reviews keeps the ids in their order",
+    markdown: "```component:testimonial\n"
+      + "{\"source\":\"google-reviews\",\"reviewSelection\":\"chosen\",\"reviewIds\":[\"b2\",\"a1\"],\"columns\":2}\n"
+      + "```",
+    doc: {
+      type: "doc",
+      content: [{
+        type: "componentBlock",
+        attrs: {
+          componentType: "testimonial",
+          componentData: "{\"source\":\"google-reviews\",\"reviewSelection\":\"chosen\",\"reviewIds\":[\"b2\",\"a1\"],\"columns\":2}",
+        },
+      }],
+    },
+  },
+  {
+    name: "a Testimonial fence that lists every Google review and shows the summary keeps both switches",
+    markdown: "```component:testimonial\n"
+      + "{\"source\":\"google-reviews\",\"showAll\":true,\"showProfileSummary\":true,\"columns\":2}\n"
+      + "```",
+    doc: {
+      type: "doc",
+      content: [{
+        type: "componentBlock",
+        attrs: {
+          componentType: "testimonial",
+          componentData: "{\"source\":\"google-reviews\",\"showAll\":true,\"showProfileSummary\":true,\"columns\":2}",
+        },
+      }],
+    },
+  },
+  {
     name: "a component fence carrying an image",
     markdown: "```component:image-banner\n"
       + `{"overlayText":"Hi","image":"media/banner.webp"}\n`
