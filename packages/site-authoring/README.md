@@ -125,12 +125,12 @@ writes it (`help appearance` prints the same text beside each writable field,
 and the shipped help is the authority if this table drifts). The ones that are
 easy to confuse:
 
-| App control | Workspace field | Where it renders |
-| --- | --- | --- |
-| Brand & style > Page style > Background image | `lightTheme` / `darkTheme` `pageBackgroundImage` (with `pageBackgroundImageOpacity`) | One layer across the page box behind the content; the opaque header and footer cover it, so it shows behind the main content. |
-| Brand & style > Page canvas > Canvas image | `lightCanvasImageId` / `darkCanvasImageId` in `taproot-styles.json` (with the two `...CanvasImageOpacity` fields) | Only the empty side margins of a page. Not on a standard site today, whose margins are 0 px wide. |
-| Brand & style > Brand > Logo | `lightLogoId` / `darkLogoId` | The header brand and the enabled footer's inherited logo. Each footer scheme may override it with `logoId`. |
-| Brand & style > Brand > Favicon | `brand.json` `faviconId` | The icon set in every page's head and `/favicon.ico`. |
+| App control                                   | Workspace field                                                                                                   | Where it renders                                                                                                              |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Brand & style > Page style > Background image | `lightTheme` / `darkTheme` `pageBackgroundImage` (with `pageBackgroundImageOpacity`)                              | One layer across the page box behind the content; the opaque header and footer cover it, so it shows behind the main content. |
+| Brand & style > Page canvas > Canvas image    | `lightCanvasImageId` / `darkCanvasImageId` in `taproot-styles.json` (with the two `...CanvasImageOpacity` fields) | Only the empty side margins of a page. Not on a standard site today, whose margins are 0 px wide.                             |
+| Brand & style > Brand > Logo                  | `lightLogoId` / `darkLogoId`                                                                                      | The header brand and the enabled footer's inherited logo. Each footer scheme may override it with `logoId`.                   |
+| Brand & style > Brand > Favicon               | `brand.json` `faviconId`                                                                                          | The icon set in every page's head and `/favicon.ico`.                                                                         |
 
 Both background layers tile at the image's natural pixel size from the top-left;
 neither sets a size, repeat or position.
@@ -183,11 +183,11 @@ Desktop, Small desktop, Tablet, Phone and Small phone (320px). They show at most
 metrics, type scale and gaps are assumed; custom fonts or scale may differ.
 Supported whitespace, hyphen and zero-width breaks are estimated, with bounded
 contextual shaping; fragments containing Han, Kana or Thai are skipped.
-Unknown logo proportions
+Local upload dimensions follow the selected footer artwork. Unknown proportions
 use the 4:1 maximum, so a narrow logo can produce extra brand warnings.
 Warnings allow the push. Managed Docs workspaces get the same check; deployment
 checks cover standard and profile sites. Footer overrides count as logos even without
-a site logo. After upgrading to this v7 footer hash
+a site logo. After upgrading to the v8 footer hash
 contract, pull again before pushing.
 
 `validate` also runs the site checks that need nothing but the workspace, from
@@ -352,12 +352,12 @@ explicitly and bypasses discovery. `login`, `logout`, `sites`, `use`,
 }
 ```
 
-| Field              | Rule                                                                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `configVersion`    | Must be `1`.                                                                                                                                                                                            |
-| `siteId`           | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.                                                               |
-| `authoringSurface` | Optional. `standard`, `docs-presentation`, or `none`: the verbs the site accepts, as `use` recorded them. A present but unknown value is refused; Taproot re-resolves the surface on every write.        |
-| `workspaceDir`     | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory.                                                           |
+| Field              | Rule                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configVersion`    | Must be `1`.                                                                                                                                                                                      |
+| `siteId`           | Optional. The canonical lowercase UUID of the site the next command writes to. `use` writes it; a present but malformed value is refused.                                                         |
+| `authoringSurface` | Optional. `standard`, `docs-presentation`, or `none`: the verbs the site accepts, as `use` recorded them. A present but unknown value is refused; Taproot re-resolves the surface on every write. |
+| `workspaceDir`     | Required. A relative POSIX path beneath the configuration directory that `pull` writes into. Every existing segment must be a real directory.                                                     |
 
 The file is a small, closed JSON object. Unknown fields, duplicate keys, links
 in the path, and unsupported versions are refused before any credential is
@@ -418,7 +418,7 @@ each step names the reference it relies on.
    `theme push --dry-run` reads the site and lists the JSON paths at which
    each settings file differs from it, and whether the baseline `pull`
    recorded is still current; `theme push` saves both themes, the appearance
-   scalars and the ten footer scheme colours in one transaction fenced by
+   scalars, header/footer contexts and logo variants in one transaction fenced by
    that baseline. A concurrent change to any of those fields refuses the
    whole push (`theme.concurrent_modification`) and nothing is written: keep
    copies of the edited files, pull, re-apply, push again. A lost response is
@@ -426,8 +426,17 @@ each step names the reference it relies on.
    `theme push` again with the same files replays it under its original
    baseline, and the site answers `applied: false` when it already holds the
    change set. `pull` reads the four settings documents and the revision
-   from one snapshot, and `footer push` advances the recorded revision only
-   when its save replaced that same revision.
+   from one snapshot. `footer push` saves only content and retains local presentation
+   edits for the next `theme push`; it does not advance over unseen presentation edits.
+   Set `site-header.context` and `footerSettings.context` to a context declared
+   by both themes, or remove the key to follow the page colors. The five footer
+   color fields are retired; `help appearance` gives the color-to-context recipe.
+   Each surface's `logoVariant` is empty to match the color scheme, `light` for
+   light-background artwork, or `dark` for dark-background artwork. `validate`
+   reports an advisory brightness mismatch when another variant can fix it;
+   inspect the artwork in both schemes on staging. Offline workspaces have no
+   profile fallback metadata, and unknown image dimensions retain conservative
+   footer-fit estimates.
 6. **Review on staging in both schemes.** `staging review` (or
    `deploy --staging --handoff`) returns a single-use handoff in
    `stagingPreview.url`, on a managed Docs site too; open it once and use the
@@ -534,7 +543,7 @@ Markdown subset accepts levels 1 to 4.
 A `.pm.json` page's title, path, description and author live in the workspace
 manifest rather than the file. `pages meta set <path> --title <text>
 --description <text>` changes the title or description there (a Markdown page
-keeps them in its front matter; `--author` is described under *Page authors*); `pull` keeps that edit until `pages push`
+keeps them in its front matter; `--author` is described under _Page authors_); `pull` keeps that edit until `pages push`
 sends it, and a site edit to the same page conflicts only while that edit is unpushed
 (`pages.pull_conflict`; see the pull rule above). A
 description over 160 characters is a warning (`descriptionWarnings`), because
@@ -551,6 +560,7 @@ section. The regions stack in source order when the section is too narrow.
 :::section {}
 :::columns {"ratio":"40-60"}
 :::column {}
+
 ## Start a conversation
 
 Tell us about your project.
@@ -1280,7 +1290,10 @@ The same ProseMirror node is:
     "cite": "https://www.huxley.net/bnw/four.html"
   },
   "content": [
-    { "type": "paragraph", "content": [{ "type": "text", "text": "Words can be like X-rays." }] }
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "Words can be like X-rays." }]
+    }
   ]
 }
 ```

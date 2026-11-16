@@ -1,4 +1,4 @@
-import { APPEARANCE_FOOTER_COLOR_FIELDS, APPEARANCE_SCALAR_FIELDS } from "./appearance-contract.js";
+import { APPEARANCE_SCALAR_FIELDS } from "./appearance-contract.js";
 import {
   SETTINGS_GROUPS,
   SETTINGS_TYPE_BRAND,
@@ -160,6 +160,18 @@ const BRAND_ENTRIES = {
 };
 
 const HEADER_ENTRIES = {
+  logoVariant: entry(
+    `${HEADER} > Logo`,
+    "Which artwork the header uses: empty matches the color scheme, light chooses light-background artwork, and dark chooses dark-background artwork.",
+    "The header's regular and eligible compact logos; footer and legal PDF choices remain independent.",
+    "",
+  ),
+  context: entry(
+    `${HEADER} > Colors`,
+    "The header's theme context, declared by both schemes; empty uses the page colors.",
+    "Everything in the header, including navigation and its drawer.",
+    "",
+  ),
   headerLayout: entry(
     `${HEADER} > Layout`,
     "How the brand, menu and buttons are arranged: standard (one row), centered-brand, minimal (the menu stays in "
@@ -361,7 +373,7 @@ const PREFERENCES_ENTRIES = {
   ),
   footerSettings: entry(
     "Footer",
-    "The whole footer: link columns, aside and bottom text, brand, feature image and per-scheme colors and background.",
+    "The whole footer: link columns, aside and bottom text, brand, feature image, theme context and per-scheme background art.",
     "The footer of every published page, but only once footerSettings.enabled is true. help footer has the closed "
       + "schema.",
     { enabled: false },
@@ -385,13 +397,12 @@ export function describeSettingField(settingsType, name) {
 const WRITABLE_SCALARS = new Set(
   APPEARANCE_SCALAR_FIELDS.map((field) => `${field.settingsType}:${field.name}`),
 );
-const THEME_FOOTER_COLORS = APPEARANCE_FOOTER_COLOR_FIELDS.length;
 
 /** How the CLI changes a field: the verb that writes it, or that it is read-only here. */
 function writeVerb(group, field) {
   if (field.wireType === "theme" || WRITABLE_SCALARS.has(`${group.settingsType}:${field.name}`)) return "theme push";
   if (field.name === "footerSettings") {
-    return `footer push (content); theme push (the ${THEME_FOOTER_COLORS} scheme colors)`;
+    return "footer push (content); theme push (context and logoVariant)";
   }
   if (field.name.endsWith("Url")) return "read-only projection of the matching id; never authored";
   return "read-only: pull records it, change it in the app";

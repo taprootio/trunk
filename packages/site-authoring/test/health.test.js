@@ -443,7 +443,7 @@ const withTotals = (value) => ({
 });
 
 const MANIFEST = {
-  manifestVersion: 7, siteId: SITE_ID,
+  manifestVersion: 8, siteId: SITE_ID,
   pages: [
     { file: "pages/about.md", pageId: PAGE_A, path: "about", title: "About", workspaceMode: "editable" },
     { file: "pages/review.md", pageId: PAGE_B, path: "review", title: "Review", workspaceMode: "editable" },

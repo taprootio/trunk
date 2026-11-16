@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "maxEncodedThemeLength": 1048576,
+  "vectors": [
+    {
+      "name": "declared-in-object",
+      "json": "{\"contexts\":{\"inverted\":{},\"charcoal\":{\"canvas\":\"primary\"}}}",
+      "encoding": "ascii",
+      "declared": [
+        "charcoal",
+        "inverted"
+      ]
+    },
+    {
+      "name": "safe-lowercase-names",
+      "json": "{\"contexts\":{\"Brand\":{},\"my_band\":{},\"1x\":{},\"valid-name\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "valid-name"
+      ]
+    },
+    {
+      "name": "object-values-only",
+      "json": "{\"contexts\":{\"null-value\":null,\"false-value\":false,\"array-value\":[],\"string-value\":\"x\",\"number-value\":1,\"object-value\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "object-value"
+      ]
+    },
+    {
+      "name": "unsafe-keys",
+      "json": "{\"contexts\":{\"__proto__\":{},\"constructor\":{},\"prototype\":{},\"safe\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "safe"
+      ]
+    },
+    {
+      "name": "array-contexts",
+      "json": "{\"contexts\":[{}]}",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "scalar-contexts",
+      "json": "{\"contexts\":false}",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "null-contexts",
+      "json": "{\"contexts\":null}",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "missing-contexts",
+      "json": "{}",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "non-object-theme",
+      "json": "[{\"contexts\":{\"charcoal\":{}}}]",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "malformed-json",
+      "json": "{\"contexts\":",
+      "encoding": "ascii",
+      "declared": []
+    },
+    {
+      "name": "canonical-unicode-bom",
+      "json": "{\"label\":\"café\",\"contexts\":{\"charcoal\":{}}}",
+      "encoding": "utf8-bom",
+      "declared": [
+        "charcoal"
+      ]
+    },
+    {
+      "name": "ascii-bom-refused",
+      "json": "{\"contexts\":{\"charcoal\":{}}}",
+      "encoding": "ascii-bom",
+      "declared": []
+    },
+    {
+      "name": "unmarked-unicode-refused",
+      "json": "{\"label\":\"café\",\"contexts\":{\"charcoal\":{}}}",
+      "encoding": "utf8",
+      "declared": []
+    },
+    {
+      "name": "invalid-base64",
+      "json": "%%%not-base64%%%",
+      "encoding": "invalid-base64",
+      "declared": []
+    },
+    {
+      "name": "json-depth-64",
+      "json": "{\"contexts\":{\"charcoal\":{}},\"extra\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+      "encoding": "ascii",
+      "declared": [
+        "charcoal"
+      ],
+      "declaredObject": [
+        "charcoal"
+      ]
+    },
+    {
+      "name": "json-depth-65",
+      "json": "{\"contexts\":{\"charcoal\":{}},\"extra\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":{\"nested\":0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+      "encoding": "ascii",
+      "declared": [],
+      "declaredObject": [
+        "charcoal"
+      ]
+    },
+    {
+      "name": "duplicate-context-last-null",
+      "json": "{\"contexts\":{\"charcoal\":{},\"charcoal\":null,\"safe\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "safe"
+      ]
+    },
+    {
+      "name": "duplicate-context-last-object",
+      "json": "{\"contexts\":{\"charcoal\":null,\"charcoal\":{},\"safe\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "charcoal",
+        "safe"
+      ]
+    },
+    {
+      "name": "overwritten-json-depth-65",
+      "json": "{\"contexts\":{\"charcoal\":{}},\"extra\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":null}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}},\"extra\":null}",
+      "encoding": "ascii",
+      "declared": [],
+      "declaredObject": [
+        "charcoal"
+      ]
+    },
+    {
+      "name": "double-utf8-marker-refused",
+      "json": "\ufeff\ufeff{\"contexts\":{\"charcoal\":{}}}",
+      "encoding": "utf8",
+      "declared": []
+    },
+    {
+      "name": "malformed-escaped-context-name",
+      "json": "{\"contexts\":{\"\\uD800\":{},\"safe\":{},\"\\uDC00\":{}}}",
+      "encoding": "ascii",
+      "declared": [
+        "safe"
+      ]
+    }
+  ]
+}

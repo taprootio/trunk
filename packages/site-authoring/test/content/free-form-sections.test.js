@@ -11,6 +11,8 @@ import {
   validateFreeFormSectionContexts,
 } from "../../src/content/free-form-sections.js";
 import { CONTENT_LIMITS } from "../../src/content/vocabulary.js";
+import { declaredEncodedThemeContextNames, declaredThemeContextNames } from "../../src/theme-contexts.js";
+import contextVectors from "../fixtures/theme-context-vectors.json" with { type: "json" };
 
 const IMAGE_ID = "3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607";
 const processedImage = (overrides = {}) => {
@@ -438,4 +440,29 @@ test("all section image positions retain authored modes and valid readonly hydra
     const refused = normalize({ ...input, descriptionMode: "invalid" });
     assert.ok(refused.errors.some(error => error.path.endsWith("/descriptionMode") && error.code === "content.attr_invalid"));
   });
+});
+
+
+
+test("section and surface context names share the cross-runtime declaration vectors", async context => {
+  for (const vector of contextVectors.vectors) {
+    await context.test(vector.name, () => {
+      const marked = vector.encoding === "utf8-bom" || vector.encoding === "ascii-bom";
+      const encoded = vector.encoding === "invalid-base64" ? vector.json : Buffer.concat([
+        ...(marked ? [Buffer.from([0xef, 0xbb, 0xbf])] : []),
+        Buffer.from(vector.json, vector.encoding === "ascii" || vector.encoding === "ascii-bom" ? "ascii" : "utf8"),
+      ]).toString("base64");
+      assert.deepEqual(declaredEncodedThemeContextNames(encoded), vector.declared);
+      let theme;
+      try {
+        theme = JSON.parse(vector.json);
+      } catch {
+        return;
+      }
+      const expected = vector.declaredObject
+        ?? (vector.encoding === "ascii-bom" || vector.encoding === "utf8" ? ["charcoal"] : vector.declared);
+      assert.deepEqual(declaredThemeContextNames(theme), expected);
+      assert.deepEqual(sharedThemeContextNames(theme, theme), expected);
+    });
+  }
 });

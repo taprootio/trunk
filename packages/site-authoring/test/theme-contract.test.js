@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { encodeTheme, parseTheme } from "@taprootio/espalier/shared/theme";
 
-import { APPEARANCE_FOOTER_COLOR_FIELDS } from "../src/appearance-contract.js";
+
 import { projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
 import footerDraftVectors from "./fixtures/footer-draft-vectors.json" with { type: "json" };
@@ -287,9 +287,16 @@ test("Espalier warnings are terminal-safe and bounded before callers receive the
   }
 });
 
-test("footer v7 agrees with all six shared cross-port vectors", async context => {
-  assert.equal(footerDraftVectors.version, "footer-draft-v7");
-  assert.deepEqual(footerDraftVectors.vectors.map(vector => vector.name), ["default", "social", "spanLegacy", "customLogo", "allAxes", "stackedOnly"]);
+test("footer v8 agrees with all six shared cross-port vectors", async context => {
+  assert.equal(footerDraftVectors.version, "footer-draft-v8");
+  assert.deepEqual(footerDraftVectors.vectors.map(vector => vector.name), [
+    "default",
+    "social",
+    "spanLegacy",
+    "customLogo",
+    "allAxes",
+    "stackedOnly",
+  ]);
   for (const vector of footerDraftVectors.vectors) {
     await context.test(vector.name, () => {
       assert.match(vector.expected, /^[0-9a-f]{64}$/u);
@@ -299,49 +306,85 @@ test("footer v7 agrees with all six shared cross-port vectors", async context =>
   }
 });
 
-test("footer v7 normalizes omitted defaults and retains span intent", () => {
-  assert.equal(computeFooterDraftHash({}), computeFooterDraftHash({ brandSpan: 1, asideSpan: 1, brandSize: "standard" }));
+test("footer v8 normalizes omitted defaults and retains span intent", () => {
+  assert.equal(
+    computeFooterDraftHash({}),
+    computeFooterDraftHash({ brandSpan: 1, asideSpan: 1, brandSize: "standard" }),
+  );
   assert.equal(computeFooterDraftHash({ brandSize: "" }), computeFooterDraftHash({}));
   const column = { id: "33333333-3333-4333-8333-333333333333", groups: [] };
-  assert.equal(computeFooterDraftHash({ linkColumns: [column] }), computeFooterDraftHash({ linkColumns: [{ ...column, span: 1 }] }));
-  assert.notEqual(computeFooterDraftHash({ linkColumns: [column] }), computeFooterDraftHash({ linkColumns: [{ ...column, span: 2 }] }));
+  assert.equal(
+    computeFooterDraftHash({ linkColumns: [column] }),
+    computeFooterDraftHash({ linkColumns: [{ ...column, span: 1 }] }),
+  );
+  assert.notEqual(
+    computeFooterDraftHash({ linkColumns: [column] }),
+    computeFooterDraftHash({ linkColumns: [{ ...column, span: 2 }] }),
+  );
   assert.equal(computeFooterDraftHash({ logoBox: null, alignment: { wide: {} } }), computeFooterDraftHash({}));
   assert.notEqual(computeFooterDraftHash({ logoBox: "natural" }), computeFooterDraftHash({}));
   assert.notEqual(computeFooterDraftHash({ alignment: { wide: { horizontal: "start" } } }), computeFooterDraftHash({}));
-  assert.notEqual(computeFooterDraftHash({ bottomAlignment: { stacked: { textAlign: "auto" } } }), computeFooterDraftHash({}));
+  assert.notEqual(
+    computeFooterDraftHash({ bottomAlignment: { stacked: { textAlign: "auto" } } }),
+    computeFooterDraftHash({}),
+  );
 });
 
-test("footer v7 hashes migrated scale and independent per-scheme logo ids, excluding delivery URLs", () => {
+test("footer v8 hashes migrated scale and independent per-scheme logo ids, excluding delivery URLs", () => {
   assert.equal(computeFooterDraftHash({}), computeFooterDraftHash({ logoScale: "1.0" }));
-  assert.equal(computeFooterDraftHash({ brandSize: "large" }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }));
-  assert.equal(computeFooterDraftHash({ brandSize: "large", logoScale: null }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }));
-  assert.notEqual(computeFooterDraftHash({ brandSize: "large" }), computeFooterDraftHash({ brandSize: "large", logoScale: "1.0" }));
-  const custom = { brandSize: "large", logoScale: "2.4", light: { logoId: "44444444-4444-4444-8444-444444444444" }, dark: { logoId: "55555555-5555-4555-8555-555555555555" } };
+  assert.equal(
+    computeFooterDraftHash({ brandSize: "large" }),
+    computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }),
+  );
+  assert.equal(
+    computeFooterDraftHash({ brandSize: "large", logoScale: null }),
+    computeFooterDraftHash({ brandSize: "large", logoScale: "1.5" }),
+  );
+  assert.notEqual(
+    computeFooterDraftHash({ brandSize: "large" }),
+    computeFooterDraftHash({ brandSize: "large", logoScale: "1.0" }),
+  );
+  const custom = {
+    brandSize: "large",
+    logoScale: "2.4",
+    light: { logoId: "44444444-4444-4444-8444-444444444444" },
+    dark: { logoId: "55555555-5555-4555-8555-555555555555" },
+  };
   const hash = computeFooterDraftHash(custom);
   assert.notEqual(hash, computeFooterDraftHash({ ...custom, logoScale: "2.3" }));
   assert.notEqual(hash, computeFooterDraftHash({ ...custom, dark: {} }));
   assert.notEqual(hash, computeFooterDraftHash({ ...custom, light: custom.dark, dark: custom.light }));
-  assert.equal(hash, computeFooterDraftHash({ ...custom, light: { ...custom.light, logoUrl: "https://cdn.example/light.webp" }, dark: { ...custom.dark, logoUrl: "https://cdn.example/dark.webp" } }));
+  assert.equal(
+    hash,
+    computeFooterDraftHash({
+      ...custom,
+      light: { ...custom.light, logoUrl: "https://cdn.example/light.webp" },
+      dark: { ...custom.dark, logoUrl: "https://cdn.example/dark.webp" },
+    }),
+  );
 });
 
-test("the footer content baseline ignores exactly the ten theme-owned colors", () => {
+test("the footer content baseline ignores theme-owned presentation fields", () => {
   assert.equal(
     computeFooterContentHash({}),
-    "ac515b72a6b7e06fea28e0c2656713c7110c5790193c2dac9436e029658a337b",
+    "1461186d335aaaaf9f212a00a85874d3c0ad7d6b93820717c442d248c80a1b71",
   );
 
   const content = {
     enabled: true,
     bottomLinks: [{ id: "aaaa1111-bbbb-4111-8111-cccc11111111", label: "Privacy", externalUrl: "https://e.test/p" }],
-    light: { backgroundColor: "#111111", backgroundImageOpacity: 0.4 },
-    dark: { textColor: "#eeeeee", additionalTopPaddingRem: 2 },
+    light: { backgroundImageOpacity: 0.4 },
+    dark: { additionalTopPaddingRem: 2 },
   };
-  const recolored = structuredClone(content);
-  for (const field of APPEARANCE_FOOTER_COLOR_FIELDS) {
-    recolored[field.scheme] = { ...recolored[field.scheme], [field.name]: "#b83280" };
+  for (const context of ["", "charcoal", "another-context"]) {
+    assert.equal(computeFooterContentHash({ ...content, context }), computeFooterContentHash(content));
+    assert.equal(computeFooterDraftHash({ ...content, context }), computeFooterDraftHash(content));
   }
-  assert.equal(computeFooterContentHash(recolored), computeFooterContentHash(content));
-  assert.notEqual(computeFooterDraftHash(recolored), computeFooterDraftHash(content));
+  // Retired colors are no longer an overlay; raw edits remain visible to the dirty guard.
+  assert.notEqual(
+    computeFooterContentHash({ ...content, light: { ...content.light, backgroundColor: "#111111" } }),
+    computeFooterContentHash(content),
+  );
 
   const layoutEdit = structuredClone(content);
   layoutEdit.light.backgroundImageOpacity = 0.7;
@@ -351,24 +394,29 @@ test("the footer content baseline ignores exactly the ten theme-owned colors", (
   contentEdit.bottomLinks[0].label = "Imprint";
   assert.notEqual(computeFooterContentHash(contentEdit), computeFooterContentHash(content));
 
-  for (const edit of [
-    { ...content, logoScale: "1.0" },
-    { ...content, logoScale: 1 },
-    { ...content, logoBox: "natural" },
-    { ...content, alignment: { stacked: { horizontal: "start" } } },
-    { ...content, brandAlignment: { wide: { vertical: "start" } } },
-    { ...content, asideAlignment: { wrapped: { textAlign: "justify" } } },
-    { ...content, bottomAlignment: { stacked: { textAlign: "auto" } } },
-    { ...content, alignment: { stacked: { horizontal: 1 } } },
-    { ...content, light: { ...content.light, logoId: "11111111-1111-4111-8111-111111111111" } },
-    { ...content, dark: { ...content.dark, logoId: "22222222-2222-4222-8222-222222222222" } },
-  ]) assert.notEqual(computeFooterContentHash(edit), computeFooterContentHash(content));
+  for (
+    const edit of [
+      { ...content, logoScale: "1.0" },
+      { ...content, logoScale: 1 },
+      { ...content, logoBox: "natural" },
+      { ...content, alignment: { stacked: { horizontal: "start" } } },
+      { ...content, brandAlignment: { wide: { vertical: "start" } } },
+      { ...content, asideAlignment: { wrapped: { textAlign: "justify" } } },
+      { ...content, bottomAlignment: { stacked: { textAlign: "auto" } } },
+      { ...content, alignment: { stacked: { horizontal: 1 } } },
+      { ...content, light: { ...content.light, logoId: "11111111-1111-4111-8111-111111111111" } },
+      { ...content, dark: { ...content.dark, logoId: "22222222-2222-4222-8222-222222222222" } },
+    ]
+  ) assert.notEqual(computeFooterContentHash(edit), computeFooterContentHash(content));
 
   // The baseline hashes the raw workspace document, so hand-edited null link
   // entries must hash (as empty links), not throw.
   const nullLinks = {
     bottomLinks: [null],
-    linkColumns: [{ id: "aaaa1111-bbbb-4111-8111-cccc11111111", groups: [{ id: "aaaa1111-bbbb-4111-8111-cccc11111112", links: [null] }] }],
+    linkColumns: [{
+      id: "aaaa1111-bbbb-4111-8111-cccc11111111",
+      groups: [{ id: "aaaa1111-bbbb-4111-8111-cccc11111112", links: [null] }],
+    }],
     light: null,
   };
   assert.match(computeFooterContentHash(nullLinks), /^[0-9a-f]{64}$/u);
@@ -776,5 +824,15 @@ test("every canvas lint on the launch fixture either has a proposal or is cleare
     const surface = /contexts\.([a-z0-9-]+) /u.exec(warning)[1];
     const stillThere = afterRoot.some((entry) => entry.startsWith(`light: contexts.${surface} fit lint action-canvas-separation`));
     assert.ok(!stillThere || /Nearest passing value/u.test(warning), warning);
+  }
+});
+
+
+test("footer variants stay outside both v8 concurrency and v3 content ownership", () => {
+  for (const vector of footerDraftVectors.vectors) {
+    for (const logoVariant of ["", "light", "dark"]) {
+      assert.equal(computeFooterDraftHash({ ...vector.settings, logoVariant }), vector.expected);
+      assert.equal(computeFooterContentHash({ ...vector.settings, logoVariant }), computeFooterContentHash(vector.settings));
+    }
   }
 });

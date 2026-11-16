@@ -1,6 +1,24 @@
 {
   "entries": [
     {
+      "version": "0.40.0",
+      "note": "Choose a theme context and logo artwork independently for the header and footer, with an offline warning when the selected artwork may be hard to see.",
+      "behavior": [
+        "The bundled Espalier is 7.1.1. Header and footer contexts reach their controls and navigation, and panel menus keep a full-screen dismissing scrim. The default site theme is unchanged apart from its Espalier version.",
+        "Header context and footerSettings.context select a context declared in both theme schemes. Empty uses the root colors. Theme push saves both contexts with the theme atomically; footer push preserves them.",
+        "The five footer color overrides in each scheme are retired. Before this API release deploys, pull every site with custom footer colors using the previous CLI and preserve those values. After upgrading, pull again and recreate the colors as a context in both theme schemes. Old color keys are refused with their field paths.",
+        "Header logoVariant and footerSettings.logoVariant accept empty, light or dark. Empty follows the page scheme; light and dark select that artwork in both schemes. Header and footer select independently, including compact header artwork and per-scheme footer overrides. Theme push owns these choices; footer push preserves them, logo ids, scale, box and alignment.",
+        "Offline validation adds the warning brand.logo_on_surface when the selected artwork is likely hard to see on its resolved surface and another choice selects different artwork. It uses theme brightness and artwork identity, not image pixels or background images. Unavailable theme engines and surfaces with no meaningful alternative are skipped; warnings never block a save.",
+        "Workspace manifests now use version 8. Footer concurrency uses footer-draft-v8, footer content uses footer-content-v3, and atomic presentation revisions use site-presentation-v2. Upgrade and pull again before validating, planning or pushing an older workspace.",
+        "The help reference version is 61."
+      ],
+      "help": [
+        "theme",
+        "appearance",
+        "footer"
+      ]
+    },
+    {
       "version": "0.39.0",
       "note": "Set footer widths, responsive alignment and artwork space, choose independent logos and scale, and check whether words fit before saving.",
       "behavior": [

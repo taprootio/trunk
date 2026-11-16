@@ -156,7 +156,7 @@ export function internalPageObservedRevisionFile(pageId) {
 // classified pulled files but recorded no registry. The package is in-repo and
 // its manifests are workspace state, so an older one is re-pulled rather than
 // migrated.
-export const MANIFEST_VERSION = 7;
+export const MANIFEST_VERSION = 8;
 
 /**
  * The shape of a page body revision as the site reports it: a scheme name and

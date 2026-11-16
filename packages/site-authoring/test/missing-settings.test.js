@@ -142,12 +142,12 @@ test("a workspace pulled before blockSpacing existed reports it as missing", asy
   });
 });
 
-test("optional omitted footer colors and valid empty scalar values still validate", async (context) => {
+test("optional omitted surface contexts and valid empty scalar values still validate", async (context) => {
   const root = await workspace(context);
   const result = await validateThemeWorkspace(root, SITE_ID, new Set());
   assert.equal(result.scalarOperations.find((operation) => operation.setting === "faviconId").value, "");
-  assert.equal(result.footerColors.light.backgroundColor, "");
-  assert.equal(result.footerColors.dark.linkColor, "");
+  assert.equal(result.footerPresentation.context, "");
+  assert.equal(result.scalarOperations.find(operation => operation.setting === "context").value, "");
 });
 
 test("workspace minimum heights use the same canonical strings and preserve taller saved intent", async context => {

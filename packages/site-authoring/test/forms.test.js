@@ -262,7 +262,7 @@ test("the contact field is written only when several email fields need the choic
 const FORM_ID = "bbbb2222-cccc-4222-8222-dddd22222222";
 const KEY = "tr_live_site_key_for_forms_tests";
 const WAITLIST_ID = "cccc3333-dddd-4333-8333-eeee33333333";
-const MANIFEST = { manifestVersion: 7, siteId: SITE_ID, pages: [] };
+const MANIFEST = { manifestVersion: 8, siteId: SITE_ID, pages: [] };
 
 function jsonResponse(value, httpStatus = 200) {
   return new Response(JSON.stringify(value), { status: httpStatus, headers: { "content-type": "application/json" } });

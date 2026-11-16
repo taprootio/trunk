@@ -1,6 +1,7 @@
 import { PRESENTATION_REVISION, saveSiteFooterSettings, withRefusalGuidance } from "../api.js";
 import { VERB_FOOTER_PUSH } from "../constants.js";
 import { SiteAuthoringError } from "../errors.js";
+import { FOOTER_PRESENTATION_FIELDS, projectFooterContent } from "../footer-content.js";
 import { projectFooterSettingsForWorkspace, validateFooterDocument } from "../footer-contract.js";
 import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import { readFooterBrandInputs } from "../footer-brand-inputs.js";
@@ -94,7 +95,7 @@ export async function footerPush(invocation) {
       await saveSiteFooterSettings(
         client,
         siteId,
-        footerSettings,
+        projectFooterContent(footerSettings),
         context.footer.expectedDraftHash,
       ));
   } catch (error) {
@@ -113,6 +114,10 @@ export async function footerPush(invocation) {
   let footerDraftHash;
   try {
     saved = projectFooterSettingsForWorkspace(response.footerSettings);
+    for (const field of FOOTER_PRESENTATION_FIELDS) {
+      if (Object.hasOwn(footerSettings, field)) saved[field] = footerSettings[field];
+      else delete saved[field];
+    }
     footerDraftHash = computeFooterDraftHash(saved);
     const nextDocument = structuredClone(document_);
     nextDocument.settings.footerSettings = saved;
@@ -120,14 +125,9 @@ export async function footerPush(invocation) {
     // fails, a stale token prevents the next push from overwriting the saved
     // remote footer and the completed-write report tells the caller to pull.
     await writeWorkspaceJson(config.workspaceDir, FOOTER_SETTINGS_FILE, nextDocument);
-    // A footer save that moved a scheme colour moved the presentation revision
-    // (TR00807); the server reports the new one from its own transaction, and
-    // the one it replaced. The baseline advances only when the replaced
-    // revision is the one this workspace was pulled at: otherwise the site's
-    // appearance moved since the pull, the workspace's appearance files do not
-    // reflect it, and a baseline taken from this save would let the next
-    // theme push overwrite those edits unseen. A Taproot that predates the
-    // fields leaves the recorded baseline alone.
+    // Content saves report the stored presentation revision in both fields.
+    // An equal revision is a no-op; it cannot adopt newer appearance edits
+    // that this workspace has never read. Older servers may omit the fields.
     const baseline = readPresentationBaseline(context.manifest);
     const reported = PRESENTATION_REVISION.test(response.presentationRevision ?? "")
       && PRESENTATION_REVISION.test(response.previousPresentationRevision ?? "");

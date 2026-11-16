@@ -17,6 +17,7 @@ import { displayPagePath } from "./workspace.js";
  * words below are this surface's own.
  */
 export const SITE_CHECK_RULES = Object.freeze(rules.rules);
+export const SITE_FINDINGS_MAX_BYTES = 8 * 1024;
 
 /** Why `validate` did not run the image description rule, which needs the site's image records (TR01371). */
 export const IMAGE_CHECK_NOT_REQUESTED = "not_requested";
@@ -82,6 +83,11 @@ export const SITE_CHECK_WORDING = Object.freeze({
   "seo.description_long": (finding) => `has a description of ${finding.detail} characters; consider shortening it (guidance: ${DESCRIPTION_MINIMUM_LENGTH}–${DESCRIPTION_WARN_LENGTH})`,
   "seo.description_matches_title": () => "has a description that repeats its title; explain what readers will find",
   "footer.word_breaks": (finding) => footerFindingWords(finding),
+  "brand.logo_on_surface": finding => {
+    const [scheme, second, third] = String(finding.detail ?? "").split(":");
+    const artwork = third ?? second;
+    return `the ${finding.subject === "footer" ? "footer" : "header"} shows ${artwork === "dark" ? "dark" : "light"}-background ${second === "compact" ? "compact " : ""}artwork against the opposite surface brightness in the ${scheme === "dark" ? "dark" : "light"} scheme; choose its other Logo variant or adjust its Colors context`;
+  },
   "seo.social_image_fallback": (finding) =>
     finding.detail === "first_image"
       ? "has no cover image; link previews use the page's first image only when it is public and at least 1200 pixels wide"
@@ -95,6 +101,7 @@ export const SITE_CHECK_WORDING = Object.freeze({
 export const AFTER_PAGE_FIX =
   "then, for a page edit, run taproot-site pages push and taproot-site approve, and run taproot-site deploy --staging to refresh the report";
 export const SITE_CHECK_REMEDIES = Object.freeze({
+  "brand.logo_on_surface": "Choose a readable header or footer logoVariant in the settings files, run taproot-site theme push, and inspect both schemes on staging. This brightness heuristic does not inspect image pixels or footer background art.",
   "footer.word_breaks": "Widen the named footer region or shorten its text in settings/site-publishing-preferences.json, run taproot-site footer push, then taproot-site deploy --staging to refresh the report.",
   "link.page_missing": `Change the link to a page this site has, or create that page, ${AFTER_PAGE_FIX}.`,
   "image.missing": `Remove the image from the page or replace it with one from the site's library, ${AFTER_PAGE_FIX}.`,
@@ -240,7 +247,7 @@ export function evaluateOfflineSiteChecks({
     onProgress(`Warning: ${items.length - MAXIMUM_PROGRESS_LINES} more site check finding(s); see findings.`);
   }
   if (hiddenFooter > 0) onProgress(`Warning: and ${hiddenFooter} more footer fit finding(s); widen or shorten the footer text and run validate again.`);
-  const reported = boundedByBytes(items, 8 * 1024);
+  const reported = boundedByBytes(items, SITE_FINDINGS_MAX_BYTES);
   const total = items.length + hiddenFooter;
   const footerSkipped = footerInput !== undefined && footerInput.enabled !== true ? ["footer.word_breaks"] : [];
   const errors = items.filter((item) => item.severity === "error").length;
@@ -286,6 +293,29 @@ export function evaluateOfflineSiteChecks({
       ...(imageCheck.ran
         ? {}
         : { imageCheckReason: { code: imageCheck.code, ...(imageCheck.message === undefined ? {} : { message: imageCheck.message }) } }),
+    },
+  };
+}
+
+
+/** Add one offline step without losing the evaluator's findings or coverage metadata. */
+export function mergeOfflineSiteChecks(primary, secondary) {
+  const reported = boundedByBytes([...primary.findings.items, ...secondary.findings.items], SITE_FINDINGS_MAX_BYTES);
+  const union = name => [...new Set([...(primary.siteChecks[name] ?? []), ...(secondary.siteChecks[name] ?? [])])];
+  const skipped = union("skipped");
+  return {
+    ...primary,
+    findings: {
+      total: primary.findings.total + secondary.findings.total,
+      errors: primary.findings.errors + secondary.findings.errors,
+      warnings: primary.findings.warnings + secondary.findings.warnings,
+      items: reported.items,
+      ...(primary.findings.truncated || secondary.findings.truncated || reported.truncated ? { truncated: true } : {}),
+    },
+    siteChecks: {
+      ...primary.siteChecks,
+      ranOffline: union("ranOffline"),
+      ...(skipped.length === 0 ? {} : { skipped }),
     },
   };
 }

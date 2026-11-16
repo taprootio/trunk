@@ -877,11 +877,10 @@ export async function getSitePresentation(client, siteId) {
 
 /**
  * Applies a presentation change set atomically (TR00807). `expectedRevision`
- * is the revision the workspace was pulled at; `expectedFooterDraftHash` is
- * the footer document's draft token from the read immediately before, because
- * the server overlays the ten colours onto that document. Sent through the
- * replayable-POST path: a save whose response was lost is answered as already
- * current when it committed, and applied when it did not.
+ * is the revision the workspace was pulled at. Surface contexts are saved
+ * with the themes that declare them, independently of footer content. The
+ * replayable POST answers a lost response as already current when the save
+ * committed, and applies it when it did not.
  */
 export async function saveSitePresentation(client, siteId, body) {
   const response = requireObject(

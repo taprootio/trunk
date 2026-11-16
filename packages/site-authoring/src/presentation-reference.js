@@ -23,11 +23,12 @@ import {
 
 import {
   APPEARANCE_FILES,
-  APPEARANCE_FOOTER_COLOR_FIELDS,
+  APPEARANCE_FOOTER_FIELDS,
   APPEARANCE_READ_ONLY_FIELDS,
   APPEARANCE_SCALAR_FIELDS,
 } from "./appearance-contract.js";
 import { CLI_BINARY_NAME } from "./constants.js";
+import { LOGO_VARIANTS } from "./header-presentation.js";
 import { FOOTER_LOGO_BOX, FOOTER_LOGO_SCALE_LIMITS } from "./footer-branding.js";
 import { FOOTER_ALIGNMENT_LAYOUTS, FOOTER_POSITION_VALUES, FOOTER_TEXT_ALIGN_VALUES } from "./footer-alignment.js";
 import {
@@ -438,9 +439,6 @@ export function getThemeReference() {
   };
 }
 
-// "linkHoverColor" reads "link hover color", so a new footer color token needs no second table.
-const footerColorLabel = (name) => name.replace(/([A-Z])/gu, " $1").toLowerCase();
-
 function appearanceColorReference(definition) {
   return definition.type === "appearance-color"
     ? {
@@ -483,16 +481,17 @@ export function getAppearanceReference() {
         type: "complete-espalier-theme",
       },
       ...scalarFields,
-      ...APPEARANCE_FOOTER_COLOR_FIELDS.map((field) => ({
+      ...APPEARANCE_FOOTER_FIELDS.map(field => ({
         file: field.file,
         path: field.path,
-        appLabel: "Footer",
-        description: `The footer's ${
-          footerColorLabel(field.name)
-        } in the ${field.scheme} scheme. footer push owns the rest of the footer.`,
-        renders: "The footer, once footerSettings.enabled is true (default false).",
+        appLabel: field.name === "context" ? "Footer > Colors" : "Footer > Logo",
+        description: field.name === "context"
+          ? "The footer's theme context, declared in both schemes; empty follows the page. Theme push owns it."
+          : "The footer's artwork choice: empty matches the scheme; light or dark forces that effective footer artwork after per-scheme overrides. Theme push owns it.",
+        renders: "Everything in the enabled footer, including its background, text, links and controls.",
         type: field.type,
-        ...appearanceColorReference(field),
+        ...(field.values ? { values: field.values } : {}),
+        optional: field.optional,
         default: field.default,
       })),
     ],
@@ -518,7 +517,8 @@ export function getAppearanceReference() {
       + "Inspect at 16 and 32 pixels in light and dark browser tabs; a deliberate contrasting badge can help a favicon "
       + "remain recognizable independently of the header theme. Verify the published icon loads, not just the setting.",
     logoContrastContract:
-      "Evaluate lightLogoId against the rendered light-scheme header and darkLogoId against the rendered dark-scheme "
+      "logoVariant is empty (Match the color scheme), light (Light-background logo), or dark (Dark-background logo); auto is refused. Header and footer choose independently. Deleting the key clears a forced choice on theme push. Footer artwork is chosen after its per-scheme overrides and keeps its own scale. validate reports brand.logo_on_surface when a changeable artwork slot appears on the opposite layer2 brightness; it is a heuristic, not a pixel test, and ignores footer background art. Offline workspaces do not know profile fallback metadata; unknown fallback slots are unchecked. "
+      + "Evaluate lightLogoId against the rendered light-scheme header and darkLogoId against the rendered dark-scheme "
       + "header at desktop and compact/mobile widths. Transparent pixels provide no contrast: inspect the visible mark, "
       + "not its canvas bounds. When one asset does not remain distinct in both schemes, supply scheme-specific logo "
       + "assets rather than relying on a shadow, outline, or header color that has not been previewed.",
@@ -543,7 +543,7 @@ export function getAppearanceReference() {
       + "are per-scheme theme fields set in settings.lightTheme/darkTheme the same way fontBrand is, and an empty "
       + "fontMenu falls back to the body font, never to headings.",
     changeSet: [
-      "the ten footer scheme colors, overlaid onto the site's current footer document",
+      "the footer context and logo variant, saved alongside the theme and header presentation",
       "default scheme, assets, favicon, and header scalars",
       "the complete light theme and the complete dark theme",
     ],
@@ -555,7 +555,7 @@ export function getAppearanceReference() {
       + "one transaction or none of it does; a change to any of those fields since the pull refuses the push "
       + "(theme.concurrent_modification) and nothing is written. Footer prose, links and imagery, and the "
       + "publishing scalars are outside the revision, so an unrelated concurrent edit is preserved rather than "
-      + "refused. footer push advances the baseline only when its save replaced that same revision.",
+      + "refused. Footer content saves retain the stored context and cannot adopt an unrelated newer presentation baseline.",
     dryRun: CLI_BINARY_NAME + " theme push --dry-run reads the site, lists the JSON paths at which each settings file "
       + "differs from it, and says whether the recorded baseline is still current or a pending save of the same "
       + "change set would be replayed; it writes nothing.",
@@ -568,7 +568,11 @@ export function getAppearanceReference() {
       + " pull to refresh the baseline, re-apply the edits, and push again. A Taproot without the atomic save "
       + "refuses with theme.server_unsupported; theme push never falls back to sequential writes.",
     footerBoundary:
-      "theme push changes only five colors per footer scheme. Use footer push for prose, links, layout, and imagery.",
+      "theme push owns header and footer contexts and logo variants. Use footer push for prose, links, layout, logos, images, fade and padding.",
+    surfaceContexts:
+      "Set site-header.context and footerSettings.context to a name declared by both themes, or empty to follow the page. Deleting either key clears it on theme push. Invalid names fail settings.context_unknown; dropping a context a surface still uses fails theme.context_in_use. Repoint the surface and drop the old context in one atomic push.",
+    footerColorMigration:
+      "Before upgrading a site with custom footer colors, pull and record its five values per scheme. In each theme declare a context: the background is layer2, text is ink.color, headings are ink.heading, links are accent.text and hover is accent.hover. Add named color anchors for literal values and bind those roles to the anchors. For a semantic background such as --esp-color-layer-1, copy that token's source/lightness mapping into the context's semanticMappings.layer2. Set footerSettings.context to the shared name, remove backgroundColor/textColor/headingColor/linkColor/linkHoverColor from both footer schemes, then theme push. Retired keys fail appearance.retired_footer_color; images, fade and padding remain footer content.",
     footerContentGuard: "theme push refuses while settings.footerSettings carries unpushed content edits: "
       + "theme.unpushed_footer_content names " + CLI_BINARY_NAME + " footer push to save them "
       + "(" + CLI_BINARY_NAME + " pull discards them). A workspace pulled before this baseline "
@@ -578,30 +582,54 @@ export function getAppearanceReference() {
 }
 
 const FOOTER_FIELD_DETAILS = Object.freeze({
+  "FooterSettings.logoVariant": { type: "enum", values: LOGO_VARIANTS, default: "", description: "Theme-owned artwork choice: empty matches the scheme, light or dark forces that effective footer artwork. Footer push strips it and retains the local choice; auto is refused." },
+  "FooterSettings.context": {
+    type: "theme-context",
+    default: "",
+    description:
+      "Theme-owned Colors choice; declare the name in both schemes and save it with theme push. Footer push preserves local presentation edits and never sends this field.",
+  },
   "FooterSettings.enabled": { type: "boolean", default: false },
   "FooterSettings.showBrand": { type: "boolean", default: true },
   "FooterSettings.showBrandText": { type: "boolean", default: true },
   "FooterSettings.brandSpan": { type: "integer", default: 1, minimum: 1, maximum: FOOTER_LIMITS.brandSpanMax },
   "FooterSettings.asideSpan": { type: "integer", default: 1, minimum: 1, maximum: FOOTER_LIMITS.asideSpanMax },
-  "FooterSettings.brandSize": { type: "enum", default: "standard", values: ["standard", "large"], description: "Brand text size; logoScale independently sets the logo size." },
+  "FooterSettings.brandSize": {
+    type: "enum",
+    default: "standard",
+    values: ["standard", "large"],
+    description: "Brand text size; logoScale independently sets the logo size.",
+  },
   "FooterSettings.logoScale": {
     type: "decimal-string",
     default: "1.0",
     ...FOOTER_LOGO_SCALE_LIMITS,
-    description: "Logo size from 1.0 through 5.0 in 0.1 steps. Empty and 1 normalize to 1.0. An old absent or null value migrates to 1.5 for large brand text, otherwise 1.0; pull and footer push materialize it. Whitespace, exponents, numeric JSON values and extra decimal places are refused.",
+    description:
+      "Logo size from 1.0 through 5.0 in 0.1 steps. Empty and 1 normalize to 1.0. An old absent or null value migrates to 1.5 for large brand text, otherwise 1.0; pull and footer push materialize it. Whitespace, exponents, numeric JSON values and extra decimal places are refused.",
   },
   "FooterSettings.logoBox": {
-    type: "enum", default: "fixed", values: ["fixed", "natural"],
-    description: "Fixed keeps scaled logo height, including unused image-box space. Natural fits the constrained artwork dimensions without cropping alpha padding. Omitted, null or empty is fixed.",
+    type: "enum",
+    default: "fixed",
+    values: ["fixed", "natural"],
+    description:
+      "Fixed keeps scaled logo height, including unused image-box space. Natural fits the constrained artwork dimensions without cropping alpha padding. Omitted, null or empty is fixed.",
   },
   ...Object.fromEntries(["alignment", "brandAlignment", "asideAlignment"].map(name => [
-    `FooterSettings.${name}`, { type: "FooterResponsiveAlignment|null", inheritedWhenOmitted: true },
+    `FooterSettings.${name}`,
+    { type: "FooterResponsiveAlignment|null", inheritedWhenOmitted: true },
   ])),
   "FooterSettings.bottomAlignment": { type: "FooterResponsiveInlineAlignment|null", inheritedWhenOmitted: true },
-  ...Object.fromEntries(["FooterResponsiveAlignment", "FooterResponsiveInlineAlignment"].flatMap(type =>
-    FOOTER_ALIGNMENT_LAYOUTS.map(layout => [
-      `${type}.${layout}`, { type: type === "FooterResponsiveAlignment" ? "FooterAlignment|null" : "FooterInlineAlignment|null", inheritedWhenOmitted: true },
-    ]))),
+  ...Object.fromEntries(
+    ["FooterResponsiveAlignment", "FooterResponsiveInlineAlignment"].flatMap(type =>
+      FOOTER_ALIGNMENT_LAYOUTS.map(layout => [
+        `${type}.${layout}`,
+        {
+          type: type === "FooterResponsiveAlignment" ? "FooterAlignment|null" : "FooterInlineAlignment|null",
+          inheritedWhenOmitted: true,
+        },
+      ])
+    ),
+  ),
   ...Object.fromEntries(["FooterAlignment", "FooterInlineAlignment"].flatMap(type => [
     [`${type}.horizontal`, { type: "enum", values: ["", ...FOOTER_POSITION_VALUES], inheritedWhenOmitted: true }],
     [`${type}.textAlign`, { type: "enum", values: ["", ...FOOTER_TEXT_ALIGN_VALUES], inheritedWhenOmitted: true }],
@@ -676,35 +704,11 @@ const FOOTER_FIELD_DETAILS = Object.freeze({
     exclusiveWith: "pageResourceId",
     maximumLength: FOOTER_LIMITS.externalUrlLength,
   },
-  "FooterSchemeSettings.backgroundColor": {
-    type: "appearance-color",
-    ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "backgroundColor")),
-    default: "",
-  },
-  "FooterSchemeSettings.textColor": {
-    type: "appearance-color",
-    ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "textColor")),
-    default: "",
-  },
-  "FooterSchemeSettings.headingColor": {
-    type: "appearance-color",
-    ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "headingColor")),
-    default: "",
-  },
-  "FooterSchemeSettings.linkColor": {
-    type: "appearance-color",
-    ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "linkColor")),
-    default: "",
-  },
-  "FooterSchemeSettings.linkHoverColor": {
-    type: "appearance-color",
-    ...appearanceColorReference(APPEARANCE_FOOTER_COLOR_FIELDS.find((field) => field.name === "linkHoverColor")),
-    default: "",
-  },
   "FooterSchemeSettings.logoId": {
     type: "site-owned-png-or-webp-image-uuid",
     default: "",
-    description: "An optional footer logo override for this scheme. Empty inherits that scheme's site logo; clearing an override leaves the site logo and media unchanged.",
+    description:
+      "An optional footer logo override for this scheme. Empty inherits that scheme's site logo; clearing an override leaves the site logo and media unchanged.",
   },
   "FooterSchemeSettings.logoUrl": { type: "url", readOnly: true },
   "FooterSchemeSettings.backgroundImageId": { type: "site-owned-image-uuid", default: "" },
@@ -786,24 +790,24 @@ export function getFooterReference() {
     logoSpaceRule: "logoBox fixed preserves scaled image height; start moves spare height below the artwork. "
       + "Natural fits the width-constrained artwork, including its loading reservation, without changing scale or "
       + "cropping transparent padding. Absent, null or empty logoBox is fixed. Header geometry is unchanged.",
-    fitCheck: "validate reports footer.word_breaks at five widths: desktop, small desktop, tablet, phone and Small phone (320px); footer push "
+    fitCheck:
+      "validate reports footer.word_breaks at five widths: desktop, small desktop, tablet, phone and Small phone (320px); footer push "
       + "prints the same warnings before saving. At most 12 are shown, with the true count and any remainder. "
       + "Estimates use generated default-font advances, the default type scale and gaps; custom fonts or scale may differ. "
       + "Supported whitespace, hyphen and zero-width break opportunities are estimated; contextual shaping is bounded, "
-      + "and Han, Kana or Thai fragments are skipped. The CLI cannot measure logos and assumes their maximum "
-      + "4:1 ratio, so it can over-report brand words beside a narrow logo. Warnings never refuse a save. "
+      + "and Han, Kana or Thai fragments are skipped. When local upload dimensions are unavailable the CLI assumes a maximum "
+      + "4:1 logo ratio, so it can over-report brand words beside a narrow logo. Known dimensions follow the footer's own forced artwork. Warnings never refuse a save. "
       + "The deployment check covers standard and profile sites; managed Docs sites use validate and the Footer tab.",
     readOnlyProjections: FOOTER_READ_ONLY_FIELDS,
     concurrency:
-      "pull records the footer-draft-v7 expectedDraftHash, including effective logoScale, logoBox, all sparse profiles "
-      + "and both logo ids, but no response URLs or effective inherited choices. Old v6 baselines are refused; upgrade and pull again. A conflict returns "
+      "pull records the footer-draft-v8 expectedDraftHash, including effective logoScale, logoBox, all sparse profiles "
+      + "and both logo ids, but no context, logoVariant, retired colors, response URLs or effective inherited choices. Old v7 baselines are refused; upgrade and pull again. A conflict returns "
       + "footer.concurrent_modification; pull, reconcile, and retry.",
     themeInteraction:
-      "theme push overlays its ten scheme colors onto the site's current footer document inside its atomic save and "
-      + "rewrites this file from the saved result. It refuses while unpushed footer-content edits exist "
-      + "(theme.unpushed_footer_content); run " + CLI_BINARY_NAME + " footer push first, or " + CLI_BINARY_NAME
-      + " pull to discard the local edit. A footer push that changed a scheme color advances the presentation "
-      + "baseline theme push is fenced by.",
+      "theme push saves the footer context and logoVariant atomically with the themes and rewrites the file from the saved result. "
+      + "It refuses while unpushed footer-content edits exist (theme.unpushed_footer_content); run " + CLI_BINARY_NAME
+      + " footer push first, or pull to discard the edit. Footer push strips the context and logoVariant from its request and restores "
+      + "the local choice after projecting the response, so presentation edits not yet sent by theme push are preserved.",
     workflow: [
       CLI_BINARY_NAME + " pull",
       "edit settings/site-publishing-preferences.json at settings.footerSettings",
@@ -912,6 +916,8 @@ export function formatPresentationReference(reference) {
       + "\nHeader width: " + reference.headerWidthContract
       + "\nBlock spacing: " + reference.blockSpacingContract
       + "\nMobile menu and menu font: " + reference.menuContract
+      + "\nSurface contexts: " + reference.surfaceContexts
+      + "\nRetired footer color recipe: " + reference.footerColorMigration
       + "\nFooter: " + reference.footerBoundary
       + "\nFooter content guard: " + reference.footerContentGuard + "\n\nAtomic change set (one transaction):\n"
       + reference.changeSet.map((step, index) => "  " + (index + 1) + ". " + step).join("\n")
@@ -924,8 +930,10 @@ export function formatPresentationReference(reference) {
   if (reference.referenceKind === "footer") {
     const messages = reference.messages.map((message) =>
       message.name + " (unlisted fields rejected)\n"
-      + message.fields.map((field) => "  " + field.name.padEnd(30) + fieldConstraint(field)
-        + (field.description ? "; " + field.description : "")).join("\n")
+      + message.fields.map((field) =>
+        "  " + field.name.padEnd(30) + fieldConstraint(field)
+        + (field.description ? "; " + field.description : "")
+      ).join("\n")
     ).join("\n\n");
     return reference.title + "\nUsage: " + reference.usage + "\nWorkspace: "
       + reference.workspaceFile + " :: " + reference.workspacePath + "\n\nClosed schema:\n"

@@ -27,11 +27,6 @@
         }
       ],
       "light": {
-        "backgroundColor": "--esp-color-layer-1",
-        "textColor": "--esp-color-text",
-        "headingColor": "--esp-color-headings",
-        "linkColor": "--esp-color-link",
-        "linkHoverColor": "--esp-color-link-hover",
         "backgroundImageId": "",
         "backgroundImageOpacity": 0,
         "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",
@@ -41,11 +36,6 @@
         "logoId": "a0000000-0000-4000-8000-0000000000a0"
       },
       "dark": {
-        "backgroundColor": "--esp-color-layer-1",
-        "textColor": "--esp-color-text",
-        "headingColor": "--esp-color-headings",
-        "linkColor": "--esp-color-link",
-        "linkHoverColor": "--esp-color-link-hover",
         "backgroundImageId": "",
         "backgroundImageOpacity": 0,
         "backgroundPresentation": "FOOTER_BACKGROUND_PRESENTATION_COVER",

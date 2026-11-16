@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import logoCorpus from "./fixtures/header-presentation-corpus.json" with { type: "json" };
+import { LOGO_VARIANTS, resolveHeaderLogoPairs } from "../src/header-presentation.js";
+import { resolveFooterLogoPairs } from "../src/footer-branding.js";
 import { appearanceImageIds, buildAppearanceScalarOperations, APPEARANCE_SCALAR_FIELDS } from "../src/appearance-contract.js";
 import {
   projectSettingsGroup,
@@ -65,5 +68,30 @@ test("appearance push canonicalizes the minimum and preserves a taller authored 
 test("appearance push refuses malformed minimum values at the exact field", () => {
   for (const value of [1.9, null, true, "0.9", "1.95", " 1.9", "5.1", "1e0"]) {
     assert.throws(() => buildAppearanceScalarOperations(appearanceDocuments(value), new Set()), error => error?.code === "theme.setting_invalid" && error?.field === "site-header.headerMinHeightMultiplier");
+  }
+});
+
+
+for (const vector of logoCorpus.logoPairs) {
+  test(`CLI header artwork corpus: ${vector.name}`, () => assert.deepEqual(resolveHeaderLogoPairs(vector.input), vector.expected));
+}
+for (const vector of logoCorpus.footerLogoPairs) {
+  test(`CLI footer artwork corpus: ${vector.name}`, () => assert.deepEqual(resolveFooterLogoPairs(vector.input), vector.expected));
+}
+
+test("header logoVariant pull omission and strict authored enum keep the same default", () => {
+  for (const value of [undefined, "", "light", "dark", "unknown"]) {
+    const projected = projectSettingsGroup(group, { headerSettings: { logoVariant: value } });
+    assert.equal(projected.logoVariant, value === "light" || value === "dark" ? value : undefined);
+  }
+  for (const variant of LOGO_VARIANTS) {
+    const documents = appearanceDocuments("");
+    documents[SETTINGS_TYPE_SITE_HEADER].logoVariant = variant;
+    assert.equal(buildAppearanceScalarOperations(documents, new Set()).find(value => value.setting === "logoVariant").value, variant);
+  }
+  for (const variant of ["auto", "sepia", null, 1, "dark "]) {
+    const documents = appearanceDocuments("");
+    documents[SETTINGS_TYPE_SITE_HEADER].logoVariant = variant;
+    assert.throws(() => buildAppearanceScalarOperations(documents, new Set()), error => error?.code === "theme.setting_invalid" && error?.field === "site-header.logoVariant" && /light, dark/u.test(error.message));
   }
 });

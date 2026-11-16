@@ -56,9 +56,11 @@ test("help theme describes the page background image from the same source as hel
   assert.ok(description.includes(PAGE_BACKGROUND_IMAGE_RENDERING));
 });
 
-test("every writable footer color has a readable description", () => {
-  const colorFields = getAppearanceReference().fields.filter((field) => field.path.startsWith("settings.footerSettings."));
-  assert.equal(colorFields.length, 10);
+test("every writable footer presentation field has a readable description", () => {
+  const colorFields = getAppearanceReference().fields.filter((field) =>
+    field.path.startsWith("settings.footerSettings.")
+  );
+  assert.deepEqual(colorFields.map(field => field.path), ["settings.footerSettings.context", "settings.footerSettings.logoVariant"]);
   for (const field of colorFields) assert.doesNotMatch(field.description, /undefined/u, field.path);
 });
 

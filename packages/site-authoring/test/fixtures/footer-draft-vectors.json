@@ -1,5 +1,5 @@
 {
-  "version": "footer-draft-v7",
+  "version": "footer-draft-v8",
   "vectors": [
     {
       "name": "default",
@@ -35,7 +35,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "fecd14df11f2a7ae22f2b7dd5010bc534c8eadcd60b26b40ffe53ae2893e31dd"
+      "expected": "2d9d4c73e25c16dee0f1e7cce249e5acb57989dc0f36d7b8e54c1b10081acf83"
     },
     {
       "name": "social",
@@ -84,7 +84,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "0f9230be7901dd2a938f50319249430353eac74e83e537fcc14b8e39b8cd218a"
+      "expected": "31348f69a9da74706a26b4b40e9d9d0bfd7c0137890313ad9f975570c79144fe"
     },
     {
       "name": "spanLegacy",
@@ -126,7 +126,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "08b2428db783acc1e2bc0a2799e9ba2e0ebd872e7f9f5658bb72420fb937908e"
+      "expected": "2e83854b4e8cc5dd3d5505eba17b0d8d3a78a33204c6153821718d5c538d7b85"
     },
     {
       "name": "customLogo",
@@ -164,7 +164,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "c372dca47891d1496a7ff83e4a75d1c7171b788e66dce030a218bc2305606ec4"
+      "expected": "de438af1261c219992fa6b28ecb9cdcc69783304e74d837aa2a87cb532267347"
     },
     {
       "name": "allAxes",
@@ -288,7 +288,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "444510a921cc917d6504ff6a1dcd3ea99e76a2768cf69b89c6cc45817cce8708"
+      "expected": "8673720bdbc853e836b0958fe9add0e4659cbccbb3e386373adc37b74a7124e1"
     },
     {
       "name": "stackedOnly",
@@ -362,7 +362,7 @@
           "additionalTopPaddingRem": 0
         }
       },
-      "expected": "470232505c54c87fbcef0f35332bfa9cc446b527c75b32f844dfd050d1d200cf"
+      "expected": "365e33d6ee771c217f8c1ea5fb5d9662f52b6615c3d2eaf7764d32fa91733f2b"
     }
   ]
 }

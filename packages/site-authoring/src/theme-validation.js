@@ -11,6 +11,7 @@ import {
 
 import { hasControlCharacter, sanitizeDiagnostic, SiteAuthoringError } from "./errors.js";
 import { loadEspalierShared } from "./espalier-shared.js";
+import { sharedDeclaredThemeContextNames, sharedEncodedThemeContextNames } from "./theme-contexts.js";
 import { proposePassingValues, refuseUnavailableFontWeights } from "./theme-proposals.js";
 
 export const MAXIMUM_THEME_WARNINGS = 32;
@@ -99,19 +100,35 @@ export const HEADER_BRAND_COLOR_TOKENS = Object.freeze(
   ]),
 );
 
-export const FOOTER_COLOR_TOKENS = Object.freeze({
-  backgroundColor: new Set([
-    "--esp-color-background",
-    "--esp-color-layer-1",
-    "--esp-color-layer-2",
-    "--esp-color-layer-3",
-    "--esp-color-layer-4",
-  ]),
-  textColor: new Set(["--esp-color-text", "--esp-color-headings"]),
-  headingColor: new Set(["--esp-color-headings", "--esp-color-text"]),
-  linkColor: new Set(["--esp-color-link", "--esp-color-headings"]),
-  linkHoverColor: new Set(["--esp-color-link-hover", "--esp-color-link"]),
-});
+/** Validate the complete post-save state, including an atomic repoint and context removal. */
+export function requireSurfaceContexts({ lightTheme, darkTheme, headerContext = "", footerContext = "" }, current) {
+  const declared = new Set(sharedDeclaredThemeContextNames(lightTheme, darkTheme));
+  const previous = current === undefined ? new Set() : new Set(sharedEncodedThemeContextNames(
+    current.styleSettings?.lightTheme,
+    current.styleSettings?.darkTheme,
+  ));
+  for (
+    const [surface, field, context, stored] of [
+      ["header", "site-header.context", headerContext, current?.headerSettings?.context ?? ""],
+      [
+        "footer",
+        "footerSettings.context",
+        footerContext,
+        current?.sitePublishingPreferences?.footerSettings?.context ?? "",
+      ],
+    ]
+  ) {
+    if (context === "" || declared.has(context)) continue;
+    const removingUsedContext = context === stored && previous.has(context);
+    fail(
+      removingUsedContext ? "theme.context_in_use" : "settings.context_unknown",
+      removingUsedContext
+        ? `The ${surface} still uses context '${context}'. Keep it in both themes, or repoint the ${surface} in this same theme push.`
+        : `${field} must be empty or name a context declared by both lightTheme and darkTheme.`,
+      field,
+    );
+  }
+}
 
 export const APPEARANCE_COLOR_CONSTRAINT = Object.freeze({
   maximumLength: 128,

@@ -16,6 +16,8 @@ import {
   FIXTURE_ROOT_FIELDS,
 } from "../fixture-contract.js";
 import { initializeFixture } from "../fixture-init.js";
+import { evaluateLogoSurfaceChecks } from "../logo-surface-checks.js";
+import { loadThemeEngines } from "../theme-resolve.js";
 import { readFooterBrandInputs } from "../footer-brand-inputs.js";
 import { buildFooterFitInput } from "../footer-fit.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
@@ -26,6 +28,7 @@ import { isRedirectMapRevision, REDIRECT_KIND_GONE, REDIRECTS_FILE_NAME } from "
 import { boundedList, openSession, successResult } from "../session.js";
 import {
   evaluateOfflineSiteChecks,
+  mergeOfflineSiteChecks,
   IMAGE_CHECK_DIRECTORY_ARGUMENT,
   IMAGE_CHECK_DOCS_SITE,
   IMAGE_CHECK_NOT_REQUESTED,
@@ -684,11 +687,11 @@ function pageHints(checked, onProgress) {
  * The offline site checks (TR01085) over the planned pages: the rules the shared
  * catalogue lists for `validate`, with the rest named as checked by the site.
  */
-async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, workspaceDir) {
+async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, workspaceDir, loadLogoEngines) {
   const footerInput = checked.footer === undefined
     ? undefined
     : buildFooterFitInput(checked.footer.footerSettings, await readFooterBrandInputs(workspaceDir, checked.footer.footerSettings));
-  return evaluateOfflineSiteChecks({
+  const evaluated = evaluateOfflineSiteChecks({
     planned: checked.settingsOnly ? [] : checked.pages?.planned,
     footerInput,
     footerOnly: checked.settingsOnly,
@@ -698,6 +701,13 @@ async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, work
     imageCheck,
     onProgress,
   });
+  const logos = await evaluateLogoSurfaceChecks({
+    styles: checked.presentation?.style,
+    header: checked.presentation?.header,
+    footer: checked.footer?.footerSettings,
+    onProgress,
+  }, { loadEngines: loadLogoEngines });
+  return mergeOfflineSiteChecks(evaluated, logos);
 }
 
 /**
@@ -742,12 +752,12 @@ function emptyBlock(pages) {
   };
 }
 
-export async function validateFixture(invocation = {}) {
+export async function validateFixture(invocation = {}, { loadLogoEngines = loadThemeEngines } = {}) {
   // Refused before any file is read: a directory, or a fixture to export, has no site to read.
   if (invocation.fromSite === true && (invocation.init || invocation.fixturePath !== undefined)) {
     throw siteNeedsWorkspaceError(Boolean(invocation.init));
   }
-  if (invocation.init) return await initializeFixture(invocation, validateFixture);
+  if (invocation.init) return await initializeFixture(invocation, next => validateFixture(next, { loadLogoEngines }));
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
   const cwd = invocation.cwd ?? process.cwd();
   if (invocation.fixturePath === undefined) {
@@ -759,7 +769,7 @@ export async function validateFixture(invocation = {}) {
         "siteId",
       );
     }
-    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress, { config });
+    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress, { config, loadLogoEngines });
   }
   const fixtureRoot = await resolveFixtureRoot(cwd, invocation.fixturePath);
   if (
@@ -770,7 +780,7 @@ export async function validateFixture(invocation = {}) {
     if (!isCanonicalUuid(siteId)) {
       fail("workspace.manifest_invalid", `${MANIFEST_FILE_NAME} does not record a canonical site id.`, "siteId");
     }
-    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress, { directoryArgument: true });
+    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress, { directoryArgument: true, loadLogoEngines });
   }
 
   onProgress(`Reading ${FIXTURE_MANIFEST_FILE_NAME}.`);
@@ -834,7 +844,7 @@ export async function validateFixture(invocation = {}) {
     ...autolinkWarnings(checked.pages?.planned, onProgress),
     ...descriptionWarnings(checked.pages?.planned, onProgress),
     ...authorWarnings(checked.pages?.planned, onProgress),
-    ...await offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT), fixtureRoot),
+    ...await offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT), fixtureRoot, loadLogoEngines),
   };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -876,7 +886,7 @@ export async function validateFixture(invocation = {}) {
  * runs before it sends anything, for every page and setting at once, against
  * what the manifests recorded at the pull — no credential and no request.
  */
-async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress, { config, directoryArgument = false }) {
+async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress, { config, directoryArgument = false, loadLogoEngines }) {
   onProgress(`Reading ${MANIFEST_FILE_NAME}.`);
   const manifest = await readManifest(workspaceDir, siteId);
   const mediaManifest = await readMediaManifest(workspaceDir, siteId);
@@ -905,9 +915,9 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       ...descriptionWarnings(checked.pages.planned, onProgress),
       ...authorWarnings(checked.pages.planned, onProgress),
     }),
-    ...await offlineSiteChecks(checked, manifest, onProgress, site.imageCheck, workspaceDir),
+    ...await offlineSiteChecks(checked, manifest, onProgress, site.imageCheck, workspaceDir, loadLogoEngines),
   };
-  // Docs runs only the footer rule; its skipped image check belongs outside that footer-only report.
+  // The Docs settings checks do not own the skipped image reason reported by --site.
   const docsReason = checked.settingsOnly && invocation.fromSite === true
     ? {
       imageCheckReason: {

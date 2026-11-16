@@ -21,7 +21,7 @@ import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } 
 import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
 import { saveCredential } from "../src/credentials.js";
-import { applyFooterColors } from "../src/appearance-contract.js";
+
 import { FOOTER_EXAMPLE, projectFooterSettingsForWorkspace } from "../src/footer-contract.js";
 import { computeFooterContentHash, computeFooterDraftHash } from "../src/footer-draft-hash.js";
 import { appearanceManifestEntry, footerManifestEntry, presentationManifestEntry } from "../src/footer-workspace.js";
@@ -53,10 +53,11 @@ import { status } from "../src/verbs/status.js";
 import { themePush, validateThemeWorkspace } from "../src/verbs/theme-push.js";
 import {
   internalPageObservedRevisionFile,
+  MANIFEST_VERSION,
   pageContentKey,
   readWorkspaceFile,
-  workspaceContentHash,
   WORKSPACE_LIMITS,
+  workspaceContentHash,
   writeWorkspaceFile,
 } from "../src/workspace.js";
 import { INSIDE_MONOREPO, MONOREPO_ONLY } from "./monorepo.js";
@@ -768,7 +769,7 @@ function capabilityGatedFetch(verbName, fetchImpl) {
 
 function manifestFixture(pages, extra = {}) {
   return {
-    manifestVersion: 7,
+    manifestVersion: 8,
     siteId: SITE_ID,
     pulledAt: "2026-08-20T00:00:00.000Z",
     navigation: { file: "nav.json", items: 1, revision: NAVIGATION_REVISION },
@@ -812,20 +813,9 @@ function settingsDocument(settingsType, settings) {
 
 function themeWorkspace(overrides = {}) {
   const footerSettings = {
-    light: {
-      backgroundColor: "--esp-color-layer-1",
-      textColor: "#222222",
-      headingColor: "oklch(0.3 0.1 330)",
-      linkColor: "--esp-color-link",
-      linkHoverColor: "--esp-color-link-hover",
-    },
-    dark: {
-      backgroundColor: "--esp-color-background",
-      textColor: "--esp-color-text",
-      headingColor: "#ffffff",
-      linkColor: "--esp-color-headings",
-      linkHoverColor: "--esp-color-link",
-    },
+    context: "feature",
+    light: {},
+    dark: {},
     ...overrides.footerSettings,
   };
   return {
@@ -1010,7 +1000,7 @@ test("pull snapshots pages, navigation, and settings with a manifest that maps i
   assert.deepEqual((await readWorkspaceJson(workspace, "nav.json")).navItems.length, 1);
 
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 7);
+  assert.equal(manifest.manifestVersion, 8);
   assert.equal(manifest.siteId, SITE_ID);
   assertTimeCloseTo(Date.parse(manifest.pulledAt), 1_700_000_000_000);
   assert.deepEqual(
@@ -1255,7 +1245,7 @@ test("pull projects a pre-menu-font stored theme to the complete effective pair 
     theme.explicitMappingTokens = ["headings"];
     return theme;
   };
-  const pulledThemeWorkspace = themeWorkspace();
+  const pulledThemeWorkspace = themeWorkspace({ footerSettings: { context: "" } });
   const styleSettings = {
     ...pulledThemeWorkspace["settings/taproot-styles.json"].settings,
     lightTheme: encodeTheme(stored("light")),
@@ -1497,24 +1487,30 @@ function presentationReply({
 }
 
 /**
- * What the server does with a save: overlays the ten colours from the request
+ * What the server does with a save: overlays the context from the request
  * onto the footer document it holds and answers with the new revision. The
  * footer is a function of the request so a test can assert the overlay
  * reached the document the site holds rather than the workspace's copy.
  */
-function presentationSaveReply(call, { footerSettings = {}, revision = NEXT_PRESENTATION_REVISION, applied = true } = {}) {
+function presentationSaveReply(
+  call,
+  { footerSettings = {}, revision = NEXT_PRESENTATION_REVISION, applied = true } = {},
+) {
   return {
     applied,
     presentation: presentationReply({
       revision,
-      footerSettings: applyFooterColors(footerSettings, call.body.footerColors),
+      footerSettings: { ...structuredClone(footerSettings), context: call.body.footerContext, logoVariant: call.body.footerLogoVariant },
     }),
   };
 }
 
 test("theme push saves the complete change set in one request fenced by the pull baseline", async (site) => {
   const workspace = await fixture(site, {
-    ...themeWorkspace({ style: { lightLogoId: IMAGE_ID, lightCompactLogoId: IMAGE_ID }, header: { headerPosition: "fixed", headerHeightMultiplier: "2", headerMinHeightMultiplier: "1.5" } }),
+    ...themeWorkspace({
+      style: { lightLogoId: IMAGE_ID, lightCompactLogoId: IMAGE_ID },
+      header: { headerPosition: "fixed", headerHeightMultiplier: "2", headerMinHeightMultiplier: "1.5" },
+    }),
     ".taproot-site-media.json": {
       mediaManifestVersion: 2,
       siteId: SITE_ID,
@@ -1524,6 +1520,10 @@ test("theme push saves the complete change set in one request fenced by the pull
   const currentFooter = {
     enabled: true,
     showBrand: false,
+    showBrandText: false,
+    brandSize: "large",
+    brandSpan: 3,
+    asideSpan: 2,
     logoScale: "3.1",
     logoBox: "natural",
     alignment: { stacked: { horizontal: "center" } },
@@ -1532,8 +1532,18 @@ test("theme push saves the complete change set in one request fenced by the pull
     bottomAlignment: { stacked: { horizontal: "end", textAlign: "auto" } },
     linkColumns: [{ id: navId(8), span: 2, groups: [], alignment: { stacked: { horizontal: "start" } } }],
     bottomLinks: [{ id: navId(9), label: "Privacy", externalUrl: "https://example.test/privacy" }],
-    light: { logoId: IMAGE_ID, logoUrl: "https://cdn.example/footer-light.webp", backgroundImageOpacity: 0.4, backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_COVER" },
-    dark: { logoId: NEW_PAGE_ID, logoUrl: "https://cdn.example/footer-dark.webp", backgroundFade: "FOOTER_FADE_MODE_BOTTOM", additionalTopPaddingRem: 2 },
+    light: {
+      logoId: IMAGE_ID,
+      logoUrl: "https://cdn.example/footer-light.webp",
+      backgroundImageOpacity: 0.4,
+      backgroundPresentation: "FOOTER_BACKGROUND_PRESENTATION_COVER",
+    },
+    dark: {
+      logoId: NEW_PAGE_ID,
+      logoUrl: "https://cdn.example/footer-dark.webp",
+      backgroundFade: "FOOTER_FADE_MODE_BOTTOM",
+      additionalTopPaddingRem: 2,
+    },
   };
   const wire = api([
     { method: "GET", pattern: PRESENTATION, reply: presentationReply({ footerSettings: currentFooter }) },
@@ -1557,18 +1567,17 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.equal(save.pathname, `/api/v1/sites/${SITE_ID}/presentation`);
   assert.equal(save.body.siteId, SITE_ID);
   assert.equal(save.body.expectedRevision, PRESENTATION_REVISION);
-  assert.equal(save.body.expectedFooterDraftHash, computeFooterDraftHash(currentFooter));
-  // The ten colours travel as a typed overlay, never the footer document.
+  assert.equal("expectedFooterDraftHash" in save.body, false);
   assert.equal("footerSettings" in save.body, false);
-  assert.equal(save.body.footerColors.light.backgroundColor, "--esp-color-layer-1");
-  assert.equal(save.body.footerColors.dark.headingColor, "#ffffff");
-  for (const scheme of ["light", "dark"]) assert.deepEqual(Object.keys(save.body.footerColors[scheme]).sort(), ["backgroundColor", "headingColor", "linkColor", "linkHoverColor", "textColor"]);
+  assert.equal("footerColors" in save.body, false);
+  assert.equal(save.body.footerContext, "feature");
   assert.deepEqual(
     save.body.settings.map(write => write.setting),
     [...APPEARANCE_SCALAR_FIELDS.map(field => field.name), "lightTheme", "darkTheme"],
   );
   assert.deepEqual(result.written.items, [
-    "footerSettings.light/dark colors",
+    "footerSettings.context",
+    "footerSettings.logoVariant",
     ...save.body.settings.map(write => `${write.settingsType}.${write.setting}`),
   ]);
   assert.equal(
@@ -1594,12 +1603,15 @@ test("theme push saves the complete change set in one request fenced by the pull
     assert.deepEqual(decoded.semanticMappings, {});
   }
   // The footer document is rewritten from the saved result — the site's
-  // prose and links, the workspace's colours — and both baselines advance.
+  // prose and links, the workspace's context — and both baselines advance.
   const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   assert.deepEqual(publishing.settings.footerSettings.bottomLinks, currentFooter.bottomLinks);
-  assert.equal(publishing.settings.footerSettings.light.backgroundColor, "--esp-color-layer-1");
+  assert.equal(publishing.settings.footerSettings.context, "feature");
   assert.equal(publishing.settings.footerSettings.light.backgroundImageOpacity, 0.4);
   assert.equal(publishing.settings.footerSettings.logoScale, "3.1");
+  for (const key of ["showBrand", "showBrandText", "brandSize", "brandSpan", "asideSpan"]) {
+    assert.equal(publishing.settings.footerSettings[key], currentFooter[key], key);
+  }
   for (const key of ["logoBox", "alignment", "brandAlignment", "asideAlignment", "bottomAlignment", "linkColumns"]) {
     assert.deepEqual(publishing.settings.footerSettings[key], currentFooter[key], key);
   }
@@ -1642,7 +1654,7 @@ test("theme push --dry-run reads the site, names the paths that differ per file,
       pattern: PRESENTATION,
       reply: presentationReply({
         headerSettings: { brandText: "Remote brand", showThemeToggle: true, showBrandText: true },
-        footerSettings: { light: { backgroundColor: "#000000" } },
+        footerSettings: { context: "remote-context" },
       }),
     },
   ]);
@@ -1663,17 +1675,8 @@ test("theme push --dry-run reads the site, names the paths that differ per file,
   assert.ok(header.paths.includes("$.brandText"));
   // A field the workspace and the site agree on is not reported.
   assert.equal(header.paths.includes("$.showThemeToggle"), false);
-  // The site holds one light colour and no dark ones; the workspace sets all
-  // ten, so every colour path is named — sorted, so two runs report alike.
   const footer = result.differences.find((entry) => entry.file === "settings/site-publishing-preferences.json");
-  assert.deepEqual(
-    footer.paths,
-    ["dark", "light"].flatMap((scheme) =>
-      ["backgroundColor", "headingColor", "linkColor", "linkHoverColor", "textColor"].map((color) =>
-        `$.footerSettings.${scheme}.${color}`
-      )
-    ),
-  );
+  assert.deepEqual(footer.paths, ["$.footerSettings.context"]);
   // Only the fields the save owns are compared: the site's `allowSearch` or
   // footer prose never appears here.
   assert.ok(result.differences.every((entry) => entry.paths.every((path) => !path.includes("allowSearch"))));
@@ -1783,24 +1786,38 @@ test("theme push maps the site's stale-baseline refusal to pull-and-reconcile gu
   assert.equal(await readWorkspaceText(workspace, ".taproot-site-manifest.json"), beforeManifest);
 });
 
-test("theme push maps a footer document race to a retry, not a pull", async (site) => {
-  const workspace = await fixture(site, themeWorkspace());
-  const wire = api([
-    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
-    {
-      method: "POST",
-      pattern: PRESENTATION,
-      reply: () => jsonResponse(violation("ExpectedFooterDraftHash", "changed"), 400),
-    },
-  ]);
-
-  await assert.rejects(
-    themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
-    (error) =>
-      error?.code === "theme.footer_concurrent_modification"
-      && error?.field === "expectedFooterDraftHash"
-      && error?.message.includes("again"),
-  );
+test("theme push --dry-run refuses removing a context still used by either surface", async context => {
+  for (const surface of ["header", "footer"]) {
+    await context.test(surface, async site => {
+      const files = themeWorkspace({
+        header: { context: surface === "header" ? "feature" : "" },
+        footerSettings: { context: surface === "footer" ? "feature" : "" },
+      });
+      for (const scheme of ["light", "dark"]) {
+        files["settings/taproot-styles.json"].settings[`${scheme}Theme`].contexts = {};
+      }
+      const workspace = await fixture(site, files);
+      const wire = api([{
+        method: "GET",
+        pattern: PRESENTATION,
+        reply: presentationReply({
+          headerSettings: { context: surface === "header" ? "feature" : "" },
+          footerSettings: { context: surface === "footer" ? "feature" : "" },
+          styleSettings: {
+            lightTheme: encodeTheme(agentTheme(DEFAULT_SITE_THEME.light.theme)),
+            darkTheme: encodeTheme(agentTheme(DEFAULT_SITE_THEME.dark.theme)),
+          },
+        }),
+      }]);
+      await assert.rejects(
+        themePush(invoke(workspace, wire, { verb: "theme push", dryRun: true }).invocation),
+        error =>
+          error?.code === "theme.context_in_use"
+          && error?.field === (surface === "header" ? "site-header.context" : "footerSettings.context"),
+      );
+      assert.deepEqual(writes(wire), []);
+    });
+  }
 });
 
 test("theme push accepts an already-current answer as success and refreshes the baseline", async (site) => {
@@ -1982,13 +1999,13 @@ test("theme push drops the pending record after an authoritative refusal", async
     {
       method: "POST",
       pattern: PRESENTATION,
-      reply: () => jsonResponse(violation("ExpectedFooterDraftHash", "changed"), 400),
+      reply: () => jsonResponse(violation("ExpectedRevision", "changed"), 400),
     },
   ]);
 
   await assert.rejects(
     themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
-    (error) => error?.code === "theme.footer_concurrent_modification",
+    (error) => error?.code === "theme.concurrent_modification",
   );
 
   assert.deepEqual(
@@ -2120,7 +2137,7 @@ test("theme push refuses an image id not proven by pull or media upload before a
   assert.equal(wire.calls.length, 0);
 });
 
-test("theme push refuses footer values outside their semantic allowlists before mutation", async (site) => {
+test("theme push refuses retired footer colors before mutation", async (site) => {
   const workspace = await fixture(
     site,
     themeWorkspace({
@@ -2140,13 +2157,13 @@ test("theme push refuses footer values outside their semantic allowlists before 
   await assert.rejects(
     themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
     (error) =>
-      error?.code === "theme.color_invalid"
+      error?.code === "appearance.retired_footer_color"
       && error?.field === "footerSettings.light.backgroundColor",
   );
   assert.equal(wire.calls.length, 0);
 });
 
-test("theme push rejects explicit null footer colors before mutation", async (site) => {
+test("theme push refuses retired footer colors even when null", async (site) => {
   const workspace = await fixture(
     site,
     themeWorkspace({
@@ -2166,7 +2183,7 @@ test("theme push rejects explicit null footer colors before mutation", async (si
   await assert.rejects(
     themePush(invoke(workspace, wire, { verb: "theme push" }).invocation),
     (error) =>
-      error?.code === "theme.color_invalid"
+      error?.code === "appearance.retired_footer_color"
       && error?.field === "footerSettings.light.backgroundColor",
   );
   assert.equal(wire.calls.length, 0);
@@ -2195,7 +2212,7 @@ test("theme push reports a remote refusal with no completed writes, because noth
   assert.equal("completedWrites" in failureResult(rejected).error, false);
 });
 
-test("theme push can project stricter stored footer values after its color overlay", async (site) => {
+test("theme push can project stricter stored footer values after its context save", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const currentFooter = projectFooterSettingsForWorkspace({
     bottomLinks: [{ id: navId(22), label: "Legacy", externalUrl: "https://good.example/a\\b" }],
@@ -2214,7 +2231,7 @@ test("theme push can project stricter stored footer values after its color overl
 
   assert.equal(result.ok, true);
   const save = wire.matching("POST", PRESENTATION)[0];
-  assert.equal(save.body.expectedFooterDraftHash, computeFooterDraftHash(currentFooter));
+  assert.equal("expectedFooterDraftHash" in save.body, false);
   const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   assert.equal(publishing.settings.footerSettings.bottomLinks[0].externalUrl, "https://good.example/a\\b");
   assert.equal(
@@ -2315,11 +2332,10 @@ test("theme push refuses unsaved logo and alignment content, including raw shape
   }
 });
 
-test("theme push proceeds when only the ten overlay colors differ from the pull baseline", async (site) => {
+test("theme push proceeds when only the footer context differs from the pull baseline", async (site) => {
   const workspace = await fixture(site, themeWorkspace());
   const document_ = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
-  document_.settings.footerSettings.light.backgroundColor = "#f6efe8";
-  document_.settings.footerSettings.dark.headingColor = "oklch(0.9 0.05 330)";
+  document_.settings.footerSettings.context = "";
   await writeFile(
     workspacePath(workspace, "settings/site-publishing-preferences.json"),
     `${JSON.stringify(document_, undefined, 2)}\n`,
@@ -2340,11 +2356,10 @@ test("theme push proceeds when only the ten overlay colors differ from the pull 
 
   assert.equal(result.ok, true);
   const save = wire.matching("POST", PRESENTATION)[0];
-  assert.equal(save.body.footerColors.light.backgroundColor, "#f6efe8");
-  assert.equal(save.body.footerColors.dark.headingColor, "oklch(0.9 0.05 330)");
+  assert.equal(save.body.footerContext, "");
   const written = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
   assert.deepEqual(written.settings.footerSettings.bottomLinks, currentFooter.bottomLinks);
-  assert.equal(written.settings.footerSettings.light.backgroundColor, "#f6efe8");
+  assert.equal("context" in written.settings.footerSettings, false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
   assert.equal(
     manifest.footer.expectedContentHash,
@@ -2492,10 +2507,22 @@ test("footer push warns before sending with either optional brand file missing o
 
 test("footer push advances the presentation baseline only when the save replaced the revision it was pulled at", async (site) => {
   const cases = [
+    { previous: PRESENTATION_REVISION, next: PRESENTATION_REVISION, expected: PRESENTATION_REVISION, warned: false },
+    {
+      previous: NEXT_PRESENTATION_REVISION,
+      next: NEXT_PRESENTATION_REVISION,
+      expected: PRESENTATION_REVISION,
+      warned: true,
+    },
     // The save replaced the recorded baseline: the workspace's appearance
     // files are still the site's, and the new revision covers them plus this
     // footer save.
-    { previous: PRESENTATION_REVISION, next: NEXT_PRESENTATION_REVISION, expected: NEXT_PRESENTATION_REVISION, warned: false },
+    {
+      previous: PRESENTATION_REVISION,
+      next: NEXT_PRESENTATION_REVISION,
+      expected: NEXT_PRESENTATION_REVISION,
+      warned: false,
+    },
     // The save replaced a revision the workspace never pulled: the site's
     // appearance moved unseen, so the baseline stays and theme push refuses
     // toward a pull instead of overwriting that edit.
@@ -2765,12 +2792,11 @@ test("footer push validates the whole local document and references before the f
   assert.equal(wire.calls.length, 0);
 });
 
-test("theme push followed by footer push preserves both the merged remote footer and desired colors", async (site) => {
+test("theme push followed by footer push preserves both the merged remote footer and desired context", async (site) => {
   const remoteStart = authorableFooter();
   remoteStart.bottomContent.paragraphs[0].runs[0].text = "Remote content before theme push";
   const desired = authorableFooter();
-  desired.light.backgroundColor = "#f6efe8";
-  desired.dark.backgroundColor = "#231d28";
+  desired.context = "feature";
   const files = {
     ...themeWorkspace({ footerSettings: desired }),
     ...footerWorkspace(desired),
@@ -2790,8 +2816,8 @@ test("theme push followed by footer push preserves both the merged remote footer
       pattern: PRESENTATION,
       reply: (call) => {
         assert.equal(call.body.expectedRevision, revision);
-        assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
-        remote = projectFooterSettingsForWorkspace(applyFooterColors(remote, call.body.footerColors));
+        assert.equal("expectedFooterDraftHash" in call.body, false);
+        remote = projectFooterSettingsForWorkspace({ ...remote, context: call.body.footerContext });
         revision = NEXT_PRESENTATION_REVISION;
         return { applied: true, presentation: presentationReply({ revision, footerSettings: remote }) };
       },
@@ -2801,7 +2827,7 @@ test("theme push followed by footer push preserves both the merged remote footer
       pattern: FOOTER_SETTINGS,
       reply: (call) => {
         assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
-        remote = projectFooterSettingsForWorkspace(call.body.footerSettings);
+        remote = projectFooterSettingsForWorkspace({ ...call.body.footerSettings, context: remote.context });
         return { footerSettings: remote, presentationRevision: revision };
       },
     },
@@ -2821,11 +2847,10 @@ test("theme push followed by footer push preserves both the merged remote footer
   await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
 
   assert.equal(remote.bottomContent.paragraphs[0].runs[0].text, "Footer content after theme push");
-  assert.equal(remote.light.backgroundColor, desired.light.backgroundColor);
-  assert.equal(remote.dark.backgroundColor, desired.dark.backgroundColor);
+  assert.equal(remote.context, desired.context);
 });
 
-test("footer push followed by theme push preserves the footer edit while applying later color decisions", async (site) => {
+test("footer push followed by theme push preserves the footer edit while applying later context decisions", async (site) => {
   const initial = authorableFooter();
   const files = {
     ...themeWorkspace({ footerSettings: initial }),
@@ -2834,9 +2859,7 @@ test("footer push followed by theme push preserves the footer edit while applyin
   files[".taproot-site-manifest.json"].presentation = presentationManifestEntry(PRESENTATION_REVISION);
   const workspace = await fixture(site, files);
   let remote = initial;
-  // The footer save moves the presentation revision (its colours are in the
-  // change set), reports the new one, and the workspace records it — so the
-  // theme push that follows carries a baseline the site still holds.
+  // A content save retains the presentation revision while refreshing its own token.
   let revision = PRESENTATION_REVISION;
   const wire = api([
     {
@@ -2849,7 +2872,7 @@ test("footer push followed by theme push preserves the footer edit while applyin
       pattern: PRESENTATION,
       reply: (call) => {
         assert.equal(call.body.expectedRevision, revision);
-        remote = projectFooterSettingsForWorkspace(applyFooterColors(remote, call.body.footerColors));
+        remote = projectFooterSettingsForWorkspace({ ...remote, context: call.body.footerContext });
         revision = "e".repeat(64);
         return { applied: true, presentation: presentationReply({ revision, footerSettings: remote }) };
       },
@@ -2859,9 +2882,8 @@ test("footer push followed by theme push preserves the footer edit while applyin
       pattern: FOOTER_SETTINGS,
       reply: (call) => {
         assert.equal(call.body.expectedFooterDraftHash, footerManifestEntry(remote).expectedDraftHash);
-        remote = projectFooterSettingsForWorkspace(call.body.footerSettings);
+        remote = projectFooterSettingsForWorkspace({ ...call.body.footerSettings, context: remote.context });
         const previousPresentationRevision = revision;
-        revision = NEXT_PRESENTATION_REVISION;
         return { footerSettings: remote, presentationRevision: revision, previousPresentationRevision };
       },
     },
@@ -2876,12 +2898,11 @@ test("footer push followed by theme push preserves the footer edit while applyin
   await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
   assert.equal(
     (await readWorkspaceJson(workspace, ".taproot-site-manifest.json")).presentation.revision,
-    NEXT_PRESENTATION_REVISION,
+    PRESENTATION_REVISION,
   );
 
   const afterFooter = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
-  afterFooter.settings.footerSettings.light.backgroundColor = "#f4eee8";
-  afterFooter.settings.footerSettings.dark.backgroundColor = "#211b27";
+  afterFooter.settings.footerSettings.context = "feature";
   await writeFile(
     workspacePath(workspace, "settings/site-publishing-preferences.json"),
     `${JSON.stringify(afterFooter, undefined, 2)}\n`,
@@ -2889,8 +2910,7 @@ test("footer push followed by theme push preserves the footer edit while applyin
   await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
 
   assert.equal(remote.bottomContent.paragraphs[0].runs[0].text, "Footer content first");
-  assert.equal(remote.light.backgroundColor, "#f4eee8");
-  assert.equal(remote.dark.backgroundColor, "#211b27");
+  assert.equal(remote.context, "feature");
 });
 
 test("pull never writes outside the workspace, whatever path the server reports", async (site) => {
@@ -3207,7 +3227,7 @@ test("pull repairs a version-4 workspace that already tracks a Markdown source",
   assert.equal(result.pages.tracked, 1);
   assert.equal(await workspaceHas(workspace, "pages/about.pm.json"), false);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 7);
+  assert.equal(manifest.manifestVersion, 8);
   assert.equal(manifest.pages[0].file, "pages/about.md");
   assert.equal(manifest.pages[0].sourceFormat, "markdown");
 });
@@ -5227,7 +5247,7 @@ test("a version-5 manifest's superseded body hash does not refuse the pull that 
   assert.equal(migrated.pages.tracked, 1);
   assert.equal(await readWorkspaceText(workspace, "pages/about.md"), ABOUT_MARKDOWN);
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 7);
+  assert.equal(manifest.manifestVersion, 8);
   // The migration pull establishes the revision baseline, which is what every
   // later pull compares instead of falling back to a hash again.
   assert.equal(manifest.pages[0].baseline.revision, siteRevision(state));
@@ -6105,7 +6125,7 @@ test("pull re-pulls a version-6 read-only 404 projection as an ordinary editable
   await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
 
   const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
-  assert.equal(manifest.manifestVersion, 7);
+  assert.equal(manifest.manifestVersion, 8);
   const entry = manifest.pages.find((candidate) => candidate.pageId === NOT_FOUND_PAGE_ID);
   assert.equal(entry.file, "pages/404.pm.json");
   assert.equal(entry.workspaceMode, "editable");
@@ -13771,7 +13791,7 @@ test("site health precheck: a managed Docs workspace gets the docs_site reason a
     const { exitCode, result } = await runSite(workspace, ["validate", "--site"], undefined);
     assert.equal(exitCode, 0);
     assert.equal(result.imageCheckReason.code, "docs_site");
-    assert.deepEqual(result.siteChecks, { ranOffline: ["footer.word_breaks"], skipped: ["footer.word_breaks"] });
+    assert.deepEqual(result.siteChecks, { ranOffline: ["footer.word_breaks", "brand.logo_on_surface"], skipped: ["footer.word_breaks", "brand.logo_on_surface"] });
     assert.equal(result.findings.total, 0);
     assert.equal(result.offline, true);
   });
@@ -16548,7 +16568,7 @@ function siteRoutes({
   ];
 }
 
-function cliRun(site, arguments_, wire, content = REAL_CONTENT) {
+function cliRun(site, arguments_, wire, content = REAL_CONTENT, validateDependencies) {
   let stdout = "";
   let stderr = "";
   return runCli({
@@ -16559,7 +16579,7 @@ function cliRun(site, arguments_, wire, content = REAL_CONTENT) {
     stderr: { write: (chunk) => (stderr += chunk) },
     handlers: Object.fromEntries(Object.entries(VERB_HANDLERS).map(([name, handler]) => [
       name,
-      (invocation) => handler({ ...invocation, content }),
+      (invocation) => handler({ ...invocation, content }, name === "validate" ? validateDependencies : undefined),
     ])),
     fetch: wire === undefined
       ? async () => assert.fail("an offline verb made a request")
@@ -16634,7 +16654,7 @@ test("validate checks a settings-only workspace footer without claiming page rul
   assert.equal(checked.result.findings.total, words.length);
   assert.equal(checked.result.findings.warnings, words.length);
   assert.equal(checked.result.findings.items.length, 12);
-  assert.deepEqual(checked.result.siteChecks, { ranOffline: ["footer.word_breaks"] });
+  assert.deepEqual(checked.result.siteChecks, { ranOffline: ["footer.word_breaks", "brand.logo_on_surface"], skipped: ["brand.logo_on_surface"] });
   assert.match(checked.stderr, /and 3 more footer fit/u);
   assert.equal(Object.hasOwn(checked.result.validated, "pages"), false);
 });
@@ -16908,7 +16928,7 @@ test("validate names the form key check as skipped when no form file could be re
   const none = await fixture(site, wholeWorkspace({ uploaded: true, files: { "pages/about.md": aboutPlacingForm("contakt") } }));
   const skipped = await cliRun(none, ["validate"]);
   assert.equal(skipped.exitCode, 0, skipped.stderr);
-  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown", "footer.word_breaks"]);
+  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown", "footer.word_breaks", "brand.logo_on_surface"]);
 
   const broken = await fixture(site, wholeWorkspace({
     uploaded: true,
@@ -17403,10 +17423,11 @@ async function committedLostSave(workspace) {
       ? write.value === "true"
       : write.value;
   }
-  held.sitePublishingPreferences.footerSettings = applyFooterColors(
-    themeWorkspace()["settings/site-publishing-preferences.json"].settings.footerSettings,
-    committed.footerColors,
-  );
+  held.sitePublishingPreferences.footerSettings = {
+    ...themeWorkspace()["settings/site-publishing-preferences.json"].settings.footerSettings,
+    context: committed.footerContext,
+    logoVariant: committed.footerLogoVariant,
+  };
   return held;
 }
 
@@ -17914,45 +17935,63 @@ test("apply refuses footer, theme, navigation, and media edited while an earlier
   const cases = [
     {
       label: "footer",
-      before: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
-        document_.settings.footerSettings.enabled = true;
-      }),
-      during: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
-        document_.settings.footerSettings.showBrand = false;
-      }),
+      before: (workspace) =>
+        editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+          document_.settings.footerSettings.enabled = true;
+        }),
+      during: (workspace) =>
+        editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+          document_.settings.footerSettings.showBrand = false;
+        }),
       field: "settings/site-publishing-preferences.json",
       unsent: (wire) => wire.matching("POST", FOOTER_SETTINGS).length,
     },
     {
-      label: "footer color",
-      before: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
-        document_.settings.footerSettings.enabled = true;
-      }),
-      during: (workspace) => editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
-        document_.settings.footerSettings.light.textColor = "#123456";
-      }),
+      label: "footer context",
+      before: (workspace) =>
+        editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+          document_.settings.footerSettings.enabled = true;
+        }),
+      during: (workspace) =>
+        editJson(workspace, "settings/site-publishing-preferences.json", (document_) => {
+          document_.settings.footerSettings.context = "";
+        }),
       field: "settings/site-publishing-preferences.json",
       unsent: (wire) => wire.matching("POST", FOOTER_SETTINGS).length,
     },
     {
       label: "page manifest title",
-      during: (workspace) => editJson(workspace, ".taproot-site-manifest.json", (document_) => {
-        document_.pages[0].title = "Retitled mid-apply";
-      }),
+      during: (workspace) =>
+        editJson(workspace, ".taproot-site-manifest.json", (document_) => {
+          document_.pages[0].title = "Retitled mid-apply";
+        }),
       field: ".taproot-site-manifest.json",
       unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
     },
     {
       label: "page media record",
       files: { "media/other.png": png(320, 200) },
-      before: (workspace) => writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify({
-        mediaManifestVersion: 2,
-        siteId: SITE_ID,
-        media: { "media/other.png": { imageId: IMAGE_ID, contentHash: contentHashOf(png(320, 200)), width: 320, height: 200, alt: "" } },
-      })),
-      during: (workspace) => editJson(workspace, ".taproot-site-media.json", (document_) => {
-        document_.media["media/other.png"].alt = "Changed mid-apply";
-      }),
+      before: (workspace) =>
+        writeFile(
+          workspacePath(workspace, ".taproot-site-media.json"),
+          JSON.stringify({
+            mediaManifestVersion: 2,
+            siteId: SITE_ID,
+            media: {
+              "media/other.png": {
+                imageId: IMAGE_ID,
+                contentHash: contentHashOf(png(320, 200)),
+                width: 320,
+                height: 200,
+                alt: "",
+              },
+            },
+          }),
+        ),
+      during: (workspace) =>
+        editJson(workspace, ".taproot-site-media.json", (document_) => {
+          document_.media["media/other.png"].alt = "Changed mid-apply";
+        }),
       // While apply re-plans, after it read the media records: the plan's own
       // read is the first navigation read, apply's the second.
       trigger: { method: "GET", pattern: NAVIGATION, occurrence: 2 },
@@ -17962,41 +18001,56 @@ test("apply refuses footer, theme, navigation, and media edited while an earlier
     {
       label: "pending media alt text",
       files: { "media/other.png": png(320, 200) },
-      before: (workspace) => writeFile(workspacePath(workspace, ".taproot-site-media.json"), JSON.stringify({
-        mediaManifestVersion: 2,
-        siteId: SITE_ID,
-        // Recorded, but its bytes changed since, so this apply uploads it again.
-        media: { "media/other.png": { imageId: IMAGE_ID, contentHash: "0".repeat(64), width: 320, height: 200, alt: "" } },
-      })),
-      during: (workspace) => editJson(workspace, ".taproot-site-media.json", (document_) => {
-        document_.media["media/other.png"].alt = "Changed mid-apply";
-      }),
+      before: (workspace) =>
+        writeFile(
+          workspacePath(workspace, ".taproot-site-media.json"),
+          JSON.stringify({
+            mediaManifestVersion: 2,
+            siteId: SITE_ID,
+            // Recorded, but its bytes changed since, so this apply uploads it again.
+            media: {
+              "media/other.png": { imageId: IMAGE_ID, contentHash: "0".repeat(64), width: 320, height: 200, alt: "" },
+            },
+          }),
+        ),
+      during: (workspace) =>
+        editJson(workspace, ".taproot-site-media.json", (document_) => {
+          document_.media["media/other.png"].alt = "Changed mid-apply";
+        }),
       trigger: { method: "GET", pattern: NAVIGATION, occurrence: 2 },
       field: ".taproot-site-media.json",
       unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
     },
     {
       label: "page revision",
-      live: () => [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home", bodyRevision: "sha256:aaaaaaaaaaaaaaaa" })],
+      live:
+        () => [pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home", bodyRevision: "sha256:aaaaaaaaaaaaaaaa" })],
       during: (workspace, live) => {
-        live[0] = pageSummary({ pageId: HOME_PAGE_ID, path: "", title: "Home", bodyRevision: "sha256:bbbbbbbbbbbbbbbb" });
+        live[0] = pageSummary({
+          pageId: HOME_PAGE_ID,
+          path: "",
+          title: "Home",
+          bodyRevision: "sha256:bbbbbbbbbbbbbbbb",
+        });
       },
       field: "pages/index.pm.json",
       unsent: (wire) => wire.matching("POST", PAGES_COLLECTION).length + wire.matching("PATCH", PAGE_BY_ID).length,
     },
     {
       label: "theme",
-      during: (workspace) => editJson(workspace, "settings/site-header.json", (document_) => {
-        document_.settings.brandText = "Edited mid-apply";
-      }),
+      during: (workspace) =>
+        editJson(workspace, "settings/site-header.json", (document_) => {
+          document_.settings.brandText = "Edited mid-apply";
+        }),
       field: "settings/site-header.json",
       unsent: (wire) => wire.matching("POST", PRESENTATION).length,
     },
     {
       label: "navigation",
-      during: (workspace) => editJson(workspace, "nav.json", (document_) => {
-        document_.navItems[0].title = "Edited mid-apply";
-      }),
+      during: (workspace) =>
+        editJson(workspace, "nav.json", (document_) => {
+          document_.navItems[0].title = "Edited mid-apply";
+        }),
       field: "nav.json",
       unsent: (wire) => wire.matching("PUT", NAVIGATION).length,
     },
@@ -18010,16 +18064,33 @@ test("apply refuses footer, theme, navigation, and media edited while an earlier
   ];
   for (const scenario of cases) {
     await testContext.test(scenario.label, async (site) => {
-      const workspace = await fixture(site, wholeWorkspace({
-        navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
-        files: scenario.files ?? {},
-      }));
+      const workspace = await fixture(
+        site,
+        wholeWorkspace({
+          navItems: [{
+            id: navId(1),
+            kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+            title: "Blog",
+            externalUrl: "https://example.com/blog",
+          }],
+          files: scenario.files ?? {},
+        }),
+      );
       await scenario.before?.(workspace);
       let edited = false;
       const live = scenario.live?.();
       const routes = [
-        ...(live === undefined ? [] : [{ method: "GET", pattern: PAGES_LIST, reply: () => ({ pages: live, nextPageToken: "" }) }]),
-        { method: "GET", pattern: SITE_IMAGES, reply: { images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }], nextPageToken: "" } },
+        ...(live === undefined
+          ? []
+          : [{ method: "GET", pattern: PAGES_LIST, reply: () => ({ pages: live, nextPageToken: "" }) }]),
+        {
+          method: "GET",
+          pattern: SITE_IMAGES,
+          reply: {
+            images: [{ image: { imageId: IMAGE_ID }, processingState: "IMAGE_PROCESSING_STATE_COMPLETE" }],
+            nextPageToken: "",
+          },
+        },
         ...siteRoutes(),
       ];
       const trigger = scenario.trigger ?? { method: "POST", pattern: REQUEST_UPLOAD, occurrence: 1 };
@@ -19387,4 +19458,308 @@ test("plan and apply block a legal draft without a grant before any step writes"
   assert.ok([applied.result.error.code, ...(applied.result.error.problems ?? []).map((problem) => problem.code)]
     .includes("pages.legal_grant_required"));
   assert.deepEqual(writes(wire), []);
+});
+
+
+
+test("footer push strips presentation context and restores unpushed local choices after the server reply", async context => {
+  for (const local of [undefined, "", "new-local-context"]) {
+    await context.test(String(local), async site => {
+      const footer = authorableFooter();
+      if (local !== undefined) footer.context = local;
+      const workspace = await fixture(site, footerWorkspace(footer));
+      const wire = api([{
+        method: "POST",
+        pattern: FOOTER_SETTINGS,
+        reply: call => {
+          assert.equal("context" in call.body.footerSettings, false);
+          return { footerSettings: { ...call.body.footerSettings, context: "stored-context" } };
+        },
+      }]);
+      await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
+      const saved =
+        (await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json")).settings.footerSettings;
+      assert.equal(saved.context, local || undefined);
+      const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+      assert.equal(manifest.footer.expectedDraftHash, computeFooterDraftHash(saved));
+      assert.equal(manifest.footer.expectedContentHash, computeFooterContentHash(saved));
+    });
+  }
+});
+
+test("theme push adopts a declared context and atomically repoints before dropping the old one", async site => {
+  const files = themeWorkspace({ header: { context: "feature" }, footerSettings: { context: "feature" } });
+  const currentStyle = structuredClone(files["settings/taproot-styles.json"].settings);
+  for (const scheme of ["light", "dark"]) {
+    const theme = files["settings/taproot-styles.json"].settings[`${scheme}Theme`];
+    theme.contexts["new-context"] = theme.contexts.feature;
+    delete theme.contexts.feature;
+  }
+  files["settings/site-header.json"].settings.context = "new-context";
+  files["settings/site-publishing-preferences.json"].settings.footerSettings.context = "new-context";
+  const workspace = await fixture(site, files);
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: presentationReply({
+        styleSettings: {
+          lightTheme: encodeTheme(currentStyle.lightTheme),
+          darkTheme: encodeTheme(currentStyle.darkTheme),
+        },
+        headerSettings: { context: "feature" },
+        footerSettings: { context: "feature" },
+      }),
+    },
+    { method: "POST", pattern: PRESENTATION, reply: call => presentationSaveReply(call) },
+  ]);
+  const result = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+  assert.equal(result.ok, true);
+  const save = wire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.body.footerContext, "new-context");
+  assert.equal(save.body.settings.find(write => write.setting === "context").value, "new-context");
+});
+
+test("deleting both context keys sends explicit clears and permits removing their declaration", async site => {
+  const files = themeWorkspace();
+  delete files["settings/site-header.json"].settings.context;
+  delete files["settings/site-publishing-preferences.json"].settings.footerSettings.context;
+  for (const scheme of ["light", "dark"]) {
+    files["settings/taproot-styles.json"].settings[`${scheme}Theme`].contexts = {};
+  }
+  const workspace = await fixture(site, files);
+  const wire = api([
+    {
+      method: "GET",
+      pattern: PRESENTATION,
+      reply: presentationReply({
+        headerSettings: { context: "feature" },
+        footerSettings: { context: "feature" },
+        styleSettings: {
+          lightTheme: encodeTheme(agentTheme(DEFAULT_SITE_THEME.light.theme)),
+          darkTheme: encodeTheme(agentTheme(DEFAULT_SITE_THEME.dark.theme)),
+        },
+      }),
+    },
+    { method: "POST", pattern: PRESENTATION, reply: call => presentationSaveReply(call) },
+  ]);
+  await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+  const save = wire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.body.footerContext, "");
+  assert.equal(save.body.settings.find(write => write.setting === "context").value, "");
+});
+
+test("validate names unknown header and footer contexts at their workspace fields", async context => {
+  for (const surface of ["header", "footer"]) {
+    await context.test(surface, async site => {
+      const files = wholeWorkspace({ uploaded: true });
+      if (surface === "header") files["settings/site-header.json"].settings.context = "missing";
+      else files["settings/site-publishing-preferences.json"].settings.footerSettings.context = "missing";
+      const workspace = await fixture(site, files);
+      const result = await cliRun(workspace, ["validate"]);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.result.error.code, "settings.context_unknown");
+      assert.equal(result.result.error.field, surface === "header" ? "site-header.context" : "footerSettings.context");
+    });
+  }
+});
+
+test("footer-context-only changes appear in dry-run and plan without a footer-content step", async site => {
+  const files = wholeWorkspace({ uploaded: true });
+  const workspace = await fixture(site, files);
+  const held = await committedLostSave(workspace);
+  held.sitePublishingPreferences.footerSettings.context = "";
+  const wire = api(routesHolding(held));
+  const dry = await themePush(invoke(workspace, wire, { verb: "theme push", dryRun: true }).invocation);
+  assert.deepEqual(dry.differences.find(entry => entry.file === "settings/site-publishing-preferences.json").paths, [
+    "$.footerSettings.context",
+  ]);
+  const planned = await cliRun(workspace, ["plan"], wire);
+  assert.equal(planned.result.steps.find(entry => entry.step === "theme push").status, "ready");
+  assert.equal(planned.result.steps.find(entry => entry.step === "footer push").status, "nothing to do");
+});
+
+test(
+  "pre-context manifests refuse before footer hashes and planning",
+  async context => {
+    assert.equal(MANIFEST_VERSION, 8);
+    for (const verb of ["validate", "plan", "theme push", "footer push"]) {
+      await context.test(verb, async site => {
+        const files = wholeWorkspace({ uploaded: true });
+        files[".taproot-site-manifest.json"].manifestVersion = 7;
+        files[".taproot-site-manifest.json"].footer.expectedContentHash = "a".repeat(64);
+        const workspace = await fixture(site, files);
+        const wire = api([]);
+        const result = await cliRun(workspace, verb.split(" "), wire);
+        assert.equal(result.result.error.code, "workspace.manifest_version");
+        assert.equal(result.result.error.field, "manifestVersion");
+        assert.equal(wire.calls.length, 0);
+      });
+    }
+  },
+);
+
+test("pull followed by an unchanged theme push retains the stored header context", async site => {
+  const local = themeWorkspace({ header: { context: "feature" } });
+  const styles = local["settings/taproot-styles.json"].settings;
+  const presentation = presentationReply({
+    styleSettings: { ...styles, lightTheme: encodeTheme(styles.lightTheme), darkTheme: encodeTheme(styles.darkTheme) },
+    brandSettings: local["settings/brand.json"].settings,
+    headerSettings: local["settings/site-header.json"].settings,
+    footerSettings: local["settings/site-publishing-preferences.json"].settings.footerSettings,
+  });
+  const workspace = await fixture(site);
+  const wire = api([
+    { method: "GET", pattern: PAGES_LIST, reply: { pages: [], nextPageToken: "" } },
+    { method: "GET", pattern: NAVIGATION, reply: { navItems: [] } },
+    { method: "GET", pattern: PRESENTATION, reply: presentation },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: call => presentationSaveReply(call, { applied: false, revision: PRESENTATION_REVISION }),
+    },
+  ]);
+  await pull(invoke(workspace, wire, { verb: "pull" }).invocation);
+  assert.equal((await readWorkspaceJson(workspace, "settings/site-header.json")).settings.context, "feature");
+  await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+  assert.equal(
+    wire.matching("POST", PRESENTATION)[0].body.settings.find(write => write.setting === "context").value,
+    "feature",
+  );
+});
+
+
+test("theme push sends each logo variant and clears deleted keys without changing footer content", async site => {
+  const workspace = await fixture(site, themeWorkspace({ header: { logoVariant: "dark" }, footerSettings: { logoVariant: "light" } }));
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: call => presentationSaveReply(call) },
+  ]);
+  await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation);
+  let save = wire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.body.footerLogoVariant, "light");
+  assert.equal(save.body.settings.find(write => write.setting === "logoVariant").value, "dark");
+  const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+  assert.equal(publishing.settings.footerSettings.logoVariant, "light");
+  const header = await readWorkspaceJson(workspace, "settings/site-header.json");
+  delete header.settings.logoVariant;
+  delete publishing.settings.footerSettings.logoVariant;
+  await writeFile(workspacePath(workspace, "settings/site-header.json"), JSON.stringify(header));
+  await writeFile(workspacePath(workspace, "settings/site-publishing-preferences.json"), JSON.stringify(publishing));
+  const clearWire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision: NEXT_PRESENTATION_REVISION }) },
+    { method: "POST", pattern: PRESENTATION, reply: call => presentationSaveReply(call) },
+  ]);
+  await themePush(invoke(workspace, clearWire, { verb: "theme push" }).invocation);
+  save = clearWire.matching("POST", PRESENTATION)[0];
+  assert.equal(save.body.footerLogoVariant, "");
+  assert.equal(save.body.settings.find(write => write.setting === "logoVariant").value, "");
+});
+
+test("footer push strips the logo variant and keeps unpushed local presentation edits", async context => {
+  for (const variant of [undefined, "", "light", "dark"]) {
+    await context.test(String(variant), async site => {
+      const footer = authorableFooter({ context: "unpublished-context", ...(variant === undefined ? {} : { logoVariant: variant }) });
+      const workspace = await fixture(site, footerWorkspace(footer));
+      const wire = api([{ method: "POST", pattern: FOOTER_SETTINGS, reply: call => {
+        assert.equal("context" in call.body.footerSettings, false);
+        assert.equal("logoVariant" in call.body.footerSettings, false);
+        return { footerSettings: { ...call.body.footerSettings, context: "stored", logoVariant: "dark" } };
+      } }]);
+      await footerPush(invoke(workspace, wire, { verb: "footer push" }).invocation);
+      const saved = (await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json")).settings.footerSettings;
+      assert.equal(saved.context, "unpublished-context");
+      assert.equal(saved.logoVariant, variant || undefined);
+      assert.equal(saved.logoScale, footer.logoScale);
+      assert.deepEqual(saved.brandAlignment, footer.brandAlignment);
+      assert.deepEqual(saved.bottomAlignment, footer.bottomAlignment);
+    });
+  }
+});
+
+test("a footer variant-only edit is a theme step in dry-run and plan", async site => {
+  const workspace = await fixture(site, wholeWorkspace({ uploaded: true }));
+  const held = await committedLostSave(workspace);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  manifest.presentation = presentationManifestEntry(held.revision);
+  await writeFile(workspacePath(workspace, ".taproot-site-manifest.json"), JSON.stringify(manifest));
+  const document = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+  document.settings.footerSettings.logoVariant = "dark";
+  await writeFile(workspacePath(workspace, "settings/site-publishing-preferences.json"), JSON.stringify(document));
+  const wire = api(routesHolding(held));
+  const dry = await themePush(invoke(workspace, wire, { verb: "theme push", dryRun: true }).invocation);
+  assert.deepEqual(dry.differences.find(value => value.file === "settings/site-publishing-preferences.json").paths, ["$.footerSettings.logoVariant"]);
+  const plan = await cliRun(workspace, ["plan"], wire);
+  assert.equal(plan.result.steps.find(value => value.step === "theme push").status, "ready");
+  assert.equal(plan.result.steps.find(value => value.step === "footer push").status, "nothing to do");
+});
+
+test("real page validation preserves evaluator coverage when the logo engine loader is unavailable", async site => {
+  const files = wholeWorkspace({ uploaded: true });
+  files["settings/taproot-styles.json"].settings.lightLogoId = IMAGE_ID;
+  files["settings/taproot-styles.json"].settings.darkLogoId = NEW_PAGE_ID;
+  files[".taproot-site-manifest.json"].appearance.imageIds = [IMAGE_ID, NEW_PAGE_ID];
+  files[".taproot-site-manifest.json"].pagesTruncated = true;
+  const workspace = await fixture(site, files);
+  const ordinary = await cliRun(workspace, ["validate"]);
+  assert.equal(ordinary.exitCode, 0, ordinary.stderr);
+  let loads = 0;
+  const unavailable = await cliRun(workspace, ["validate"], undefined, REAL_CONTENT, { loadLogoEngines: async () => { loads += 1; throw new Error("module unavailable"); } });
+  assert.equal(unavailable.exitCode, 0, unavailable.stderr);
+  assert.equal(loads, 1);
+  assert.equal(unavailable.result.validated.themes, 2);
+  assert.equal(unavailable.result.validated.pages.total, 2);
+  assert.deepEqual(unavailable.result.findings.items.filter(value => value.rule !== "brand.logo_on_surface"), ordinary.result.findings.items.filter(value => value.rule !== "brand.logo_on_surface"));
+  for (const name of ["deferredToDeployment", "checkedBySite", "checkedAtDeploy", "checkedInEditor", "imageCheckReason"]) assert.deepEqual(unavailable.result.siteChecks[name], ordinary.result.siteChecks[name], name);
+  assert.deepEqual(unavailable.result.siteChecks.skipped, [...new Set([...ordinary.result.siteChecks.skipped, "brand.logo_on_surface"])]);
+  for (const rule of ["link.page_missing", "a11y.image_default_missing", "form.key_unknown", "footer.word_breaks", "brand.logo_on_surface"]) assert.ok(unavailable.result.siteChecks.skipped.includes(rule));
+  assert.equal(unavailable.result.siteChecks.ranOffline.filter(value => value === "brand.logo_on_surface").length, 1);
+
+  const styles = await readWorkspaceJson(workspace, "settings/taproot-styles.json");
+  delete styles.settings.lightTheme;
+  await writeFile(workspacePath(workspace, "settings/taproot-styles.json"), JSON.stringify(styles));
+  loads = 0;
+  const refused = await cliRun(workspace, ["validate"], undefined, REAL_CONTENT, { loadLogoEngines: async () => { loads += 1; throw new Error("must not load"); } });
+  assert.equal(refused.result.error.code, "theme.settings_missing");
+  assert.equal(loads, 0);
+});
+
+test("settings-only validation merges real logo warnings with footer word findings", async site => {
+  const words = Array.from({ length: 15 }, (_, index) => `Word${index}${"x".repeat(48)}`);
+  const files = themeWorkspace({ style: { lightLogoId: IMAGE_ID, darkLogoId: NEW_PAGE_ID }, header: { logoVariant: "dark", context: "feature" }, footerSettings: { enabled: true, logoVariant: "light", asideBodyContent: { paragraphs: [{ runs: [{ text: words.join(" ") }] }] } } });
+  for (const scheme of ["light", "dark"]) files["settings/taproot-styles.json"].settings[`${scheme}Theme`].contexts.feature.lightness = { surface: 0.1, raised1: 0.15, raised2: 0.2, raised3: 0.25, raised4: 0.3, text: 0.95, ink: 0.98 };
+  files[".taproot-site-manifest.json"].appearance.imageIds = [IMAGE_ID, NEW_PAGE_ID];
+  files[".taproot-site-manifest.json"].authoringSurface = "docs-presentation";
+  const workspace = await fixture(site, files, { config: { authoringSurface: "docs-presentation" } });
+  const checked = await cliRun(workspace, ["validate"]);
+  assert.equal(checked.exitCode, 0, checked.stderr);
+  assert.ok(checked.result.findings.items.some(value => value.rule === "footer.word_breaks"));
+  const logos = checked.result.findings.items.filter(value => value.rule === "brand.logo_on_surface");
+  assert.deepEqual(logos.map(value => [value.subject, value.detail]), [["footer", "light:light"], ["footer", "dark:light"]]);
+  assert.equal(checked.result.findings.total, words.length + logos.length);
+  assert.deepEqual(checked.result.siteChecks.ranOffline, ["footer.word_breaks", "brand.logo_on_surface"]);
+  assert.equal(checked.result.siteChecks.checkedBySite, undefined);
+});
+
+
+test("a full page-workspace findings budget keeps totals when logo warnings do not fit", async site => {
+  const pages = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`pages/budget-${index}.md`, `---\ntitle: Tiny\npath: budget-${index}\ndescription:\n---\n\n# Main\n\nWords.\n`]));
+  const files = wholeWorkspace({ uploaded: true, files: pages });
+  const styles = files["settings/taproot-styles.json"].settings;
+  styles.lightLogoId = IMAGE_ID;
+  styles.darkLogoId = NEW_PAGE_ID;
+  for (const scheme of ["light", "dark"]) styles[`${scheme}Theme`].contexts.feature.lightness = { surface: 0.1, raised1: 0.15, raised2: 0.2, raised3: 0.25, raised4: 0.3, text: 0.95, ink: 0.98 };
+  Object.assign(files["settings/site-header.json"].settings, { context: "feature", logoVariant: "light" });
+  files[".taproot-site-manifest.json"].appearance.imageIds = [IMAGE_ID, NEW_PAGE_ID];
+  const workspace = await fixture(site, files);
+  const primary = await cliRun(workspace, ["validate"], undefined, REAL_CONTENT, { loadLogoEngines: async () => { throw new Error("skip logo step"); } });
+  const combined = await cliRun(workspace, ["validate"]);
+  assert.equal(primary.exitCode, 0, primary.stderr);
+  assert.equal(combined.exitCode, 0, combined.stderr);
+  assert.equal(primary.result.findings.truncated, true);
+  assert.equal(combined.result.findings.truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(combined.result.findings.items)) <= 8192);
+  assert.equal(combined.result.findings.total, primary.result.findings.total + 2);
+  assert.equal(combined.result.findings.warnings, primary.result.findings.warnings + 2);
+  assert.deepEqual(combined.result.findings.items.slice(0, primary.result.findings.items.length), primary.result.findings.items);
 });

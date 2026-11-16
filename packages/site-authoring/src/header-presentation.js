@@ -1,6 +1,11 @@
 // Generated from shared/header-presentation.ts by scripts/sync-field-validation.mjs. Do not edit.
 import { DISPLAY_SCALE_LIMITS, parseDisplayScale } from "./display-scale.js";
 export const HEADER_HEIGHT_MULTIPLIER_LIMITS = DISPLAY_SCALE_LIMITS;
+export const LOGO_VARIANTS = Object.freeze(["", "light", "dark"]);
+/** Unknown stored values keep the existing scheme choice; writers validate the literal vocabulary. */
+export function resolveLogoVariant(value) {
+    return value === "light" || value === "dark" ? value : "";
+}
 const STANDARD_HEIGHT = Object.freeze({ tenths: 10, scale: 1, canonical: "" });
 /** Parse the authored string without floating-point remainder or whitespace normalization. */
 export function parseHeaderHeightMultiplier(value) {
@@ -34,6 +39,14 @@ export function resolveHeaderLogoPairs(input) {
     const first = (...pairs) => pairs.find(candidate => candidate.url !== "") ?? pairs[0];
     const resolvedLight = first(light, profile, dark);
     const resolvedDark = first(dark, light, profile);
+    const variant = resolveLogoVariant(input.logoVariant);
+    if (variant) {
+        const regular = variant === "light" ? resolvedLight : resolvedDark;
+        const compact = variant === "light"
+            ? first(compactLight, light, compactDark, regular)
+            : first(compactDark, dark, compactLight, regular);
+        return { light: regular, dark: regular, lightCompact: compact, darkCompact: compact };
+    }
     return {
         light: resolvedLight,
         dark: resolvedDark,

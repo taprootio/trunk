@@ -34,6 +34,7 @@
     { "id": "seo.description_long", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "character_count" },
     { "id": "seo.description_matches_title", "severity": "warning", "scope": "document", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "none", "detail": "none" },
     { "id": "seo.social_image_fallback", "severity": "warning", "scope": "document", "appliesTo": ["free_form"], "runsAt": ["edit"], "subject": "none", "detail": "social_image_source" },
-    { "id": "footer.word_breaks", "severity": "warning", "scope": "site", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "footer_word", "detail": "width_and_region" }
+    { "id": "footer.word_breaks", "severity": "warning", "scope": "site", "runsAt": ["validate", "edit", "deploy", "health"], "subject": "footer_word", "detail": "width_and_region" },
+    { "id": "brand.logo_on_surface", "severity": "warning", "scope": "site", "runsAt": ["validate"], "subject": "surface", "detail": "scheme_and_variant" }
   ]
 }

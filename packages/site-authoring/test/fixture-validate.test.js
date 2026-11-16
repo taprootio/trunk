@@ -992,3 +992,41 @@ test("the shipped example is already in the form pull writes for navigation and 
     JSON.stringify(footer.bottomContent),
   );
 });
+
+
+
+test("fixture validation names an unknown footer context and its retired-color migration", async context => {
+  for (
+    const [name, edit, code, field] of [
+      [
+        "unknown-context",
+        footer => {
+          footer.context = "missing";
+        },
+        "settings.context_unknown",
+        "footerSettings.context",
+      ],
+      [
+        "retired-color",
+        footer => {
+          footer.light.backgroundColor = "";
+        },
+        "appearance.retired_footer_color",
+        "footerSettings.light.backgroundColor",
+      ],
+    ]
+  ) {
+    await context.test(name, async caseContext => {
+      const { fixture } = await copiedFixture(caseContext, name);
+      const file = path.join(fixture, "settings/site-publishing-preferences.json");
+      const document = JSON.parse(await readFile(file, "utf8"));
+      edit(document.settings.footerSettings);
+      await writeFile(file, JSON.stringify(document));
+      const result = await runValidation(fixture);
+      assert.equal(result.exitCode, 1);
+      const error = JSON.parse(result.stdout).error;
+      assert.equal(error.code, code);
+      assert.equal(error.field, field);
+    });
+  }
+});

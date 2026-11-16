@@ -1,0 +1,1728 @@
+{
+  "version": 1,
+  "height": {
+    "accepted": [
+      {
+        "input": "",
+        "tenths": 10,
+        "canonical": ""
+      },
+      {
+        "input": "1.0",
+        "tenths": 10,
+        "canonical": ""
+      },
+      {
+        "input": "1.1",
+        "tenths": 11,
+        "canonical": "1.1"
+      },
+      {
+        "input": "1.2",
+        "tenths": 12,
+        "canonical": "1.2"
+      },
+      {
+        "input": "1.3",
+        "tenths": 13,
+        "canonical": "1.3"
+      },
+      {
+        "input": "1.4",
+        "tenths": 14,
+        "canonical": "1.4"
+      },
+      {
+        "input": "1.5",
+        "tenths": 15,
+        "canonical": "1.5"
+      },
+      {
+        "input": "1.6",
+        "tenths": 16,
+        "canonical": "1.6"
+      },
+      {
+        "input": "1.7",
+        "tenths": 17,
+        "canonical": "1.7"
+      },
+      {
+        "input": "1.8",
+        "tenths": 18,
+        "canonical": "1.8"
+      },
+      {
+        "input": "1.9",
+        "tenths": 19,
+        "canonical": "1.9"
+      },
+      {
+        "input": "2.0",
+        "tenths": 20,
+        "canonical": "2.0"
+      },
+      {
+        "input": "2.1",
+        "tenths": 21,
+        "canonical": "2.1"
+      },
+      {
+        "input": "2.2",
+        "tenths": 22,
+        "canonical": "2.2"
+      },
+      {
+        "input": "2.3",
+        "tenths": 23,
+        "canonical": "2.3"
+      },
+      {
+        "input": "2.4",
+        "tenths": 24,
+        "canonical": "2.4"
+      },
+      {
+        "input": "2.5",
+        "tenths": 25,
+        "canonical": "2.5"
+      },
+      {
+        "input": "2.6",
+        "tenths": 26,
+        "canonical": "2.6"
+      },
+      {
+        "input": "2.7",
+        "tenths": 27,
+        "canonical": "2.7"
+      },
+      {
+        "input": "2.8",
+        "tenths": 28,
+        "canonical": "2.8"
+      },
+      {
+        "input": "2.9",
+        "tenths": 29,
+        "canonical": "2.9"
+      },
+      {
+        "input": "3.0",
+        "tenths": 30,
+        "canonical": "3.0"
+      },
+      {
+        "input": "3.1",
+        "tenths": 31,
+        "canonical": "3.1"
+      },
+      {
+        "input": "3.2",
+        "tenths": 32,
+        "canonical": "3.2"
+      },
+      {
+        "input": "3.3",
+        "tenths": 33,
+        "canonical": "3.3"
+      },
+      {
+        "input": "3.4",
+        "tenths": 34,
+        "canonical": "3.4"
+      },
+      {
+        "input": "3.5",
+        "tenths": 35,
+        "canonical": "3.5"
+      },
+      {
+        "input": "3.6",
+        "tenths": 36,
+        "canonical": "3.6"
+      },
+      {
+        "input": "3.7",
+        "tenths": 37,
+        "canonical": "3.7"
+      },
+      {
+        "input": "3.8",
+        "tenths": 38,
+        "canonical": "3.8"
+      },
+      {
+        "input": "3.9",
+        "tenths": 39,
+        "canonical": "3.9"
+      },
+      {
+        "input": "4.0",
+        "tenths": 40,
+        "canonical": "4.0"
+      },
+      {
+        "input": "4.1",
+        "tenths": 41,
+        "canonical": "4.1"
+      },
+      {
+        "input": "4.2",
+        "tenths": 42,
+        "canonical": "4.2"
+      },
+      {
+        "input": "4.3",
+        "tenths": 43,
+        "canonical": "4.3"
+      },
+      {
+        "input": "4.4",
+        "tenths": 44,
+        "canonical": "4.4"
+      },
+      {
+        "input": "4.5",
+        "tenths": 45,
+        "canonical": "4.5"
+      },
+      {
+        "input": "4.6",
+        "tenths": 46,
+        "canonical": "4.6"
+      },
+      {
+        "input": "4.7",
+        "tenths": 47,
+        "canonical": "4.7"
+      },
+      {
+        "input": "4.8",
+        "tenths": 48,
+        "canonical": "4.8"
+      },
+      {
+        "input": "4.9",
+        "tenths": 49,
+        "canonical": "4.9"
+      },
+      {
+        "input": "5.0",
+        "tenths": 50,
+        "canonical": "5.0"
+      },
+      {
+        "input": "1",
+        "tenths": 10,
+        "canonical": ""
+      },
+      {
+        "input": "2",
+        "tenths": 20,
+        "canonical": "2.0"
+      },
+      {
+        "input": "3",
+        "tenths": 30,
+        "canonical": "3.0"
+      },
+      {
+        "input": "4",
+        "tenths": 40,
+        "canonical": "4.0"
+      },
+      {
+        "input": "5",
+        "tenths": 50,
+        "canonical": "5.0"
+      }
+    ],
+    "rejected": [
+      "0",
+      "0.9",
+      "5.1",
+      "6",
+      "1.15",
+      "1.80",
+      "01.8",
+      "+1.8",
+      "-1.8",
+      "1e0",
+      "1E0",
+      "NaN",
+      "Infinity",
+      "-Infinity",
+      ".5",
+      "1.",
+      "1.0 ",
+      " 1.0",
+      "\t1.0",
+      "1\n",
+      "1\r\n",
+      "1\u2028",
+      "1\u2029",
+      "\uff11.\uff18",
+      "1,8",
+      null,
+      1,
+      1.8,
+      true,
+      false,
+      [],
+      {}
+    ]
+  },
+  "compactEligibility": [
+    {
+      "name": "fixed-expanded",
+      "position": "fixed",
+      "multiplier": "1.8",
+      "hasRegularLogo": true,
+      "eligible": true
+    },
+    {
+      "name": "normal",
+      "position": "normal",
+      "multiplier": "1.8",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "sticky",
+      "position": "sticky",
+      "multiplier": "1.8",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "fixed-default",
+      "position": "fixed",
+      "multiplier": "",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "fixed-explicit-one",
+      "position": "fixed",
+      "multiplier": "1.0",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "fixed-alias-one",
+      "position": "fixed",
+      "multiplier": "1",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "compact-only",
+      "position": "fixed",
+      "multiplier": "1.8",
+      "hasRegularLogo": false,
+      "eligible": false
+    },
+    {
+      "name": "fixed-max",
+      "position": "fixed",
+      "multiplier": "5.0",
+      "hasRegularLogo": true,
+      "eligible": true
+    },
+    {
+      "name": "unsupported-position",
+      "position": "other",
+      "multiplier": "1.8",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "off-grid",
+      "position": "fixed",
+      "multiplier": "1.15",
+      "hasRegularLogo": true,
+      "eligible": false
+    },
+    {
+      "name": "minimum 1.9",
+      "position": "fixed",
+      "multiplier": "3.8",
+      "hasRegularLogo": true,
+      "minimum": "1.9",
+      "eligible": true
+    },
+    {
+      "name": "minimum 3.8",
+      "position": "fixed",
+      "multiplier": "3.8",
+      "hasRegularLogo": true,
+      "minimum": "3.8",
+      "eligible": false
+    },
+    {
+      "name": "minimum 5.0",
+      "position": "fixed",
+      "multiplier": "3.8",
+      "hasRegularLogo": true,
+      "minimum": "5.0",
+      "eligible": false
+    },
+    {
+      "name": "minimum 1.95",
+      "position": "fixed",
+      "multiplier": "3.8",
+      "hasRegularLogo": true,
+      "minimum": "1.95",
+      "eligible": true
+    }
+  ],
+  "minimumHeight": [
+    {
+      "expanded": "3.8",
+      "minimum": "1.9",
+      "effective": 1.9
+    },
+    {
+      "expanded": "3.8",
+      "minimum": "",
+      "effective": 1
+    },
+    {
+      "expanded": "3.8",
+      "minimum": null,
+      "effective": 1
+    },
+    {
+      "expanded": "3.8",
+      "minimum": "3.8",
+      "effective": 3.8
+    },
+    {
+      "expanded": "3.8",
+      "minimum": "5.0",
+      "effective": 3.8
+    },
+    {
+      "expanded": "3.8",
+      "minimum": "1.95",
+      "effective": 1
+    },
+    {
+      "expanded": "1.0",
+      "minimum": "1.9",
+      "effective": 1
+    },
+    {
+      "expanded": "bad",
+      "minimum": "1.9",
+      "effective": 1
+    }
+  ],
+  "logoPairs": [
+    {
+      "name": "full-artwork-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "no-dark-regular-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "no-compact-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-light-with-compact-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "one-dark-with-compact-match",
+      "input": {
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-no-upload-match",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-dark-only-match",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "full-artwork-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "no-dark-regular-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "no-compact-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "darkCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-light-with-compact-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "one-dark-with-compact-light",
+      "input": {
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-no-upload-light",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-dark-only-light",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "full-artwork-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "no-dark-regular-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "no-compact-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-light-with-compact-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "one-dark-with-compact-dark",
+      "input": {
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        },
+        "darkCompact": {
+          "url": "compact-dark.svg",
+          "aspectRatio": "2 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-no-upload-dark",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-dark-only-dark",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "forced-dark-prefers-own-regular-to-light-compact",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "forced-light-prefers-own-regular-to-dark-compact",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "darkCompactLogoUrl": "compact-dark.svg",
+        "darkCompactLogoAspectRatio": "2 / 1",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "darkCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-forced-dark-falls-back-to-uploaded-light-before-mark",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "lightCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "darkCompact": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        }
+      }
+    },
+    {
+      "name": "selected-unknown-ratio-does-not-borrow",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": ""
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": ""
+        },
+        "lightCompact": {
+          "url": "dark.svg",
+          "aspectRatio": ""
+        },
+        "darkCompact": {
+          "url": "dark.svg",
+          "aspectRatio": ""
+        }
+      }
+    },
+    {
+      "name": "unknown-stored-variant-auto",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": "auto"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "unknown-stored-variant-unknown",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": "unknown"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "unknown-stored-variant-None",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": null
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "unknown-stored-variant-17",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightCompactLogoUrl": "compact-light.svg",
+        "lightCompactLogoAspectRatio": "1 / 2",
+        "logoVariant": 17
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "lightCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        },
+        "darkCompact": {
+          "url": "compact-light.svg",
+          "aspectRatio": "1 / 2"
+        }
+      }
+    },
+    {
+      "name": "no-artwork",
+      "input": {
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "dark": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "lightCompact": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "darkCompact": {
+          "url": "",
+          "aspectRatio": ""
+        }
+      }
+    }
+  ],
+  "footerLogoPairs": [
+    {
+      "name": "separate-footer-overrides-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        }
+      }
+    },
+    {
+      "name": "light-footer-override-only-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-site-logo-with-dark-footer-match",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-inheritance-beside-override-match",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": ""
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "separate-footer-overrides-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        }
+      }
+    },
+    {
+      "name": "light-footer-override-only-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        }
+      }
+    },
+    {
+      "name": "one-site-logo-with-dark-footer-light",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-inheritance-beside-override-light",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        }
+      }
+    },
+    {
+      "name": "separate-footer-overrides-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        },
+        "dark": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        }
+      }
+    },
+    {
+      "name": "light-footer-override-only-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-site-logo-with-dark-footer-dark",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1",
+        "darkFooterLogoId": "footerDark",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        },
+        "dark": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        }
+      }
+    },
+    {
+      "name": "profile-inheritance-beside-override-dark",
+      "input": {
+        "profileLogoFallbackUrl": "profile.svg",
+        "profileLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        },
+        "dark": {
+          "url": "profile.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "cleared-footer-override-ignores-stale-url",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": ""
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "broken-footer-override-keeps-unknown-geometry",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "light"
+      },
+      "expected": {
+        "light": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "dark": {
+          "url": "",
+          "aspectRatio": ""
+        }
+      }
+    },
+    {
+      "name": "custom-only-footer-does-not-supply-other-scheme",
+      "input": {
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "",
+          "aspectRatio": ""
+        }
+      }
+    },
+    {
+      "name": "forced-dark-custom-only-footer-selects-empty-effective-scheme",
+      "input": {
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "dark"
+      },
+      "expected": {
+        "light": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "dark": {
+          "url": "",
+          "aspectRatio": ""
+        }
+      }
+    },
+    {
+      "name": "unknown-footer-variant-keeps-independent-schemes",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3",
+        "lightFooterLogoId": "footerLight",
+        "logoVariant": "auto"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "dark-override-leaves-light-site-inheritance",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "darkFooterLogoId": "footerDark",
+        "darkFooterLogoUrl": "footer-dark.svg",
+        "darkFooterLogoAspectRatio": "3 / 1"
+      },
+      "expected": {
+        "light": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        },
+        "dark": {
+          "url": "footer-dark.svg",
+          "aspectRatio": "3 / 1"
+        }
+      }
+    },
+    {
+      "name": "broken-override-keeps-other-scheme-independent",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "darkLogoUrl": "dark.svg",
+        "darkLogoAspectRatio": "1 / 1",
+        "lightFooterLogoId": "footerLight",
+        "lightFooterLogoUrl": "",
+        "lightFooterLogoAspectRatio": "1 / 3"
+      },
+      "expected": {
+        "light": {
+          "url": "",
+          "aspectRatio": ""
+        },
+        "dark": {
+          "url": "dark.svg",
+          "aspectRatio": "1 / 1"
+        }
+      }
+    },
+    {
+      "name": "one-site-scheme-is-still-the-inherited-dark-fallback",
+      "input": {
+        "lightLogoUrl": "light.svg",
+        "lightLogoAspectRatio": "4 / 1",
+        "lightFooterLogoId": "footerLight",
+        "lightFooterLogoUrl": "footer-light.svg",
+        "lightFooterLogoAspectRatio": "1 / 3"
+      },
+      "expected": {
+        "light": {
+          "url": "footer-light.svg",
+          "aspectRatio": "1 / 3"
+        },
+        "dark": {
+          "url": "light.svg",
+          "aspectRatio": "4 / 1"
+        }
+      }
+    }
+  ]
+}

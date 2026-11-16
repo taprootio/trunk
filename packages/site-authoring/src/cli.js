@@ -519,7 +519,7 @@ const VERBS = Object.freeze([
     tokens: ["plan"],
     summary: "Check the whole workspace against the live site and order what is left to send. Writes nothing.",
     note: "Runs every check the pushes run — each page against the site's pages, revisions, videos and forms; media that "
-      + "pages reference and media upload has not sent; the theme, appearance and footer colors against the site's "
+      + "pages reference and media upload has not sent; the theme, appearance, surface contexts and logo variants against the site's "
       + "presentation revision; the footer against its draft; navigation against the live page list and the revision pull recorded (an unchanged tree under a stale revision is listed ready with settlesLostPush, so apply settles a push whose answer was lost) — and lists "
       + "every problem with its area, file, code and field. It then orders the steps that remain: media upload, "
       + "pages push, footer push (theme push refuses unsaved footer content), theme push, nav push, each marked "
@@ -689,7 +689,7 @@ const VERBS = Object.freeze([
     summary: "Validate and push the workspace's complete theme and appearance settings in one atomic save.",
     note: "Run pull first. Theme JSON stays decoded in the workspace; this command validates the complete light/dark"
       + " pair and encodes it only at the API boundary. Image settings reference site-owned image IDs from media upload. "
-      + "The complete change set — both themes, the appearance scalars, and the ten footer scheme colors — is saved in "
+      + "The complete change set — both themes, the appearance scalars, and the header/footer contexts and logo variants — is saved in "
       + "one transaction fenced by the presentation revision pull recorded: a concurrent change to any of those "
       + "fields refuses the whole push (theme.concurrent_modification) and nothing is written. A save whose response "
       + "was lost is replayed safely; the site answers applied=false when it already holds the change set. "

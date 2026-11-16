@@ -77,7 +77,7 @@ test("init exports a self-contained version-7 fixture, remaps identities and ori
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.result.validated.pages.total, 6);
   const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
-  assert.equal(fixture.manifestVersion, 7);
+  assert.equal(fixture.manifestVersion, 8);
   assert.ok(fixture.appearance && fixture.footer);
   assert.notEqual(fixture.siteId, manifest.siteId);
   assert.ok(fixture.fixture.deliveryOrigins.every((origin) => new URL(origin).hostname.endsWith(".example.test")));

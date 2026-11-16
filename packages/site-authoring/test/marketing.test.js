@@ -17,7 +17,7 @@ import {
 const SITE_ID = "aaaa1111-bbbb-4111-8111-cccc11111111";
 const API_BASE_URL = "https://app.taproot.test/api";
 const KEY = "tr_live_site_key_for_marketing_tests";
-const MANIFEST = { manifestVersion: 7, siteId: SITE_ID, pages: [] };
+const MANIFEST = { manifestVersion: 8, siteId: SITE_ID, pages: [] };
 const CAMPAIGN_ID = "bbbb2222-cccc-4222-8222-dddd22222222";
 const OLD_CAMPAIGN_ID = "cccc3333-dddd-4333-8333-eeee33333333";
 const PLACEMENT_ID = "dddd4444-eeee-4444-8444-ffff44444444";

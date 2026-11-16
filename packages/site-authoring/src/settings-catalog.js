@@ -2,7 +2,7 @@ import { parseTheme } from "@taprootio/espalier/shared/theme";
 
 import { SiteAuthoringError } from "./errors.js";
 import { projectFooterSettingsForWorkspace } from "./footer-contract.js";
-import { parseHeaderHeightMultiplier } from "./header-presentation.js";
+import { parseHeaderHeightMultiplier, resolveLogoVariant } from "./header-presentation.js";
 import { projectPulledTheme } from "./theme-projection.js";
 
 /**
@@ -25,8 +25,8 @@ import { projectPulledTheme } from "./theme-projection.js";
  *   projected to the complete effective theme (`theme-projection.js`). Theme
  *   push validates and re-encodes them only at the wire boundary.
  * - `footerSettings` is snapshotted as its structured document. Theme push
- *   overlays only its scheme colors onto a fresh server read before using the
- *   optimistic-concurrency footer endpoint.
+ *   owns its context through the atomic presentation save; footer push owns
+ *   its content through the optimistic-concurrency footer endpoint.
  * - `membershipsEnabled` is excluded. It appears in the publishing-preferences
  *   message but not in the group's settable field set: it is a plan-derived
  *   flag the server computes, not site configuration a workspace owns.
@@ -104,6 +104,8 @@ export const SETTINGS_GROUPS = Object.freeze([
         "headerMinHeightMultiplier",
         "lightBrandColor",
         "darkBrandColor",
+        "context",
+        "logoVariant",
       ),
       { name: "showThemeToggle", wireType: "boolean" },
       { name: "showBrandText", wireType: "boolean" },
@@ -210,6 +212,11 @@ export function projectSettingsGroup(group, response) {
   const source = message !== null && typeof message === "object" && !Array.isArray(message) ? message : {};
   const projected = {};
   for (const field of group.fields) {
+    if (field.name === "logoVariant") {
+      const variant = resolveLogoVariant(source[field.name]);
+      if (variant !== "") projected[field.name] = variant;
+      continue;
+    }
     if (field.name === "headerHeightMultiplier" || field.name === "headerMinHeightMultiplier") {
       const height = parseHeaderHeightMultiplier(source[field.name]);
       if (!height) {

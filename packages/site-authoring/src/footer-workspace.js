@@ -98,10 +98,8 @@ export async function advanceFooterManifest(
     expectedContentHash: computeFooterContentHash(footerSettings),
     imageIds: [...new Set([...prior.imageIds, ...footerImageIds(footerSettings)])].sort(),
   };
-  // The ten scheme colours are part of the presentation change set, so a
-  // footer save that moved one moved the revision too; the server reports the
-  // new one from the same transaction and it becomes the baseline the next
-  // theme push must carry (TR00807). One manifest write for both baselines.
+  // Update both baselines in one manifest write. The caller only supplies a
+  // presentation revision when it is already safe for this workspace to own.
   if (presentationRevision !== undefined) {
     manifest.presentation = presentationManifestEntry(presentationRevision);
   }
@@ -203,8 +201,8 @@ export function footerManifestEntry(footerSettings) {
  * `theme push` begins with a fresh server read that replaces the workspace
  * footer document, so an unpushed footer-content edit would be silently lost.
  * Refuse while the workspace footer's content hash differs from the recorded
- * pull baseline. The ten scheme colors `theme push` overlays are excluded
- * from the comparison, so a colour-only edit passes. A manifest that predates
+ * pull baseline. The presentation fields `theme push` owns are excluded
+ * from the comparison, so a context- or logo-variant-only edit passes. A manifest that predates
  * the baseline cannot prove the workspace is clean and refuses toward pull:
  * assuming "unchanged" is exactly the data loss this guard exists to stop.
  */

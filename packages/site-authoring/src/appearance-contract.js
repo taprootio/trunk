@@ -1,13 +1,15 @@
 import { BLOCK_SPACINGS, DEFAULT_BLOCK_SPACING } from "./block-flow.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
-import { HEADER_HEIGHT_MULTIPLIER_LIMITS, parseHeaderHeightMultiplier } from "./header-presentation.js";
+import { FOOTER_PRESENTATION_FIELDS } from "./footer-content.js";
+import { refuseRetiredFooterColors } from "./footer-contract.js";
+import { HEADER_HEIGHT_MULTIPLIER_LIMITS, LOGO_VARIANTS, parseHeaderHeightMultiplier } from "./header-presentation.js";
 import {
   SETTINGS_TYPE_BRAND,
   SETTINGS_TYPE_SITE_HEADER,
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "./settings-catalog.js";
-import { FOOTER_COLOR_TOKENS, HEADER_BRAND_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
+import { HEADER_BRAND_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
 
 export const APPEARANCE_FILES = Object.freeze({
   [SETTINGS_TYPE_TAPROOT_STYLES]: "settings/taproot-styles.json",
@@ -65,6 +67,23 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     name: "faviconId",
     path: "brand.faviconId",
     type: "site-owned-image-id",
+    default: "",
+  }),
+  Object.freeze({
+    settingsType: SETTINGS_TYPE_SITE_HEADER,
+    name: "logoVariant",
+    path: "site-header.logoVariant",
+    type: "enum",
+    values: LOGO_VARIANTS,
+    optional: true,
+    default: "",
+  }),
+  Object.freeze({
+    settingsType: SETTINGS_TYPE_SITE_HEADER,
+    name: "context",
+    path: "site-header.context",
+    type: "theme-context",
+    optional: true,
     default: "",
   }),
   Object.freeze({
@@ -131,15 +150,17 @@ export const APPEARANCE_SCALAR_FIELDS = Object.freeze([
     values: Object.freeze(["normal", "sticky", "fixed"]),
     default: "normal",
   }),
-  ...["headerHeightMultiplier", "headerMinHeightMultiplier"].map(name => Object.freeze({
-    settingsType: SETTINGS_TYPE_SITE_HEADER,
-    name,
-    path: `site-header.${name}`,
-    type: "header-height-multiplier",
-    ...HEADER_HEIGHT_MULTIPLIER_LIMITS,
-    optional: true,
-    default: "",
-  })),
+  ...["headerHeightMultiplier", "headerMinHeightMultiplier"].map(name =>
+    Object.freeze({
+      settingsType: SETTINGS_TYPE_SITE_HEADER,
+      name,
+      path: `site-header.${name}`,
+      type: "header-height-multiplier",
+      ...HEADER_HEIGHT_MULTIPLIER_LIMITS,
+      optional: true,
+      default: "",
+    })
+  ),
   Object.freeze({
     settingsType: SETTINGS_TYPE_SITE_HEADER,
     name: "showThemeToggle",
@@ -218,21 +239,16 @@ export const APPEARANCE_READ_ONLY_FIELDS = Object.freeze([
   Object.freeze({ file: APPEARANCE_FILES[SETTINGS_TYPE_BRAND], path: "settings.faviconUrl" }),
 ]);
 
-export const APPEARANCE_FOOTER_COLOR_FIELDS = Object.freeze(
-  ["light", "dark"].flatMap((scheme) =>
-    Object.keys(FOOTER_COLOR_TOKENS).map((name) =>
-      Object.freeze({
-        file: APPEARANCE_FILES[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES],
-        path: `settings.footerSettings.${scheme}.${name}`,
-        scheme,
-        name,
-        type: "appearance-color",
-        default: "",
-        allowedTokens: FOOTER_COLOR_TOKENS[name],
-      })
-    )
-  ),
-);
+export const APPEARANCE_FOOTER_FIELDS = Object.freeze(FOOTER_PRESENTATION_FIELDS.map(name =>
+  Object.freeze({
+    file: APPEARANCE_FILES[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES],
+    path: `settings.footerSettings.${name}`,
+    name,
+    ...(name === "context" ? { type: "theme-context" } : { type: "enum", values: LOGO_VARIANTS }),
+    optional: true,
+    default: "",
+  })
+));
 
 export const APPEARANCE_IMAGE_FIELDS = Object.freeze(
   APPEARANCE_SCALAR_FIELDS.filter((field) => field.type === "site-owned-image-id"),
@@ -283,6 +299,15 @@ function validateScalar(definition, value, knownImageIds) {
       return value;
     case "string":
       return requireString(value, definition.path);
+    case "theme-context":
+      if (typeof value !== "string") {
+        fail(
+          "settings.context_unknown",
+          `${definition.path} must name a shared theme context or be empty.`,
+          definition.path,
+        );
+      }
+      return value;
     case "plain-text": {
       const text = requireString(value, definition.path, definition.maximumLength);
       if ([...text].some((character) => character === "<" || character === ">" || character === "\"")) {
@@ -355,7 +380,7 @@ export function buildAppearanceScalarOperations(documents, knownImageIds) {
   }));
 }
 
-export function footerColorOverlay(workspaceFooter) {
+export function footerPresentationOverlay(workspaceFooter) {
   if (workspaceFooter === null || typeof workspaceFooter !== "object" || Array.isArray(workspaceFooter)) {
     fail(
       "theme.footer_missing",
@@ -363,38 +388,22 @@ export function footerColorOverlay(workspaceFooter) {
       "site-publishing-preferences.footerSettings",
     );
   }
-  const colors = { light: {}, dark: {} };
-  for (const definition of APPEARANCE_FOOTER_COLOR_FIELDS) {
-    const scheme = workspaceFooter[definition.scheme];
+  refuseRetiredFooterColors(workspaceFooter);
+  for (const name of ["light", "dark"]) {
+    const scheme = workspaceFooter[name];
     if (scheme === null || typeof scheme !== "object" || Array.isArray(scheme)) {
       fail(
         "theme.footer_invalid",
-        `footerSettings.${definition.scheme} must be an object.`,
-        `footerSettings.${definition.scheme}`,
+        `footerSettings.${name} must be an object.`,
+        `footerSettings.${name}`,
       );
     }
-    colors[definition.scheme][definition.name] = requireAppearanceColor(
-      scheme[definition.name] === undefined ? "" : scheme[definition.name],
-      definition.allowedTokens,
-      `footerSettings.${definition.scheme}.${definition.name}`,
-    );
   }
-  return colors;
-}
-
-export function applyFooterColors(currentFooter, colors) {
-  const next = structuredClone(
-    currentFooter !== null && typeof currentFooter === "object" && !Array.isArray(currentFooter)
-      ? currentFooter
-      : {},
-  );
-  for (const scheme of ["light", "dark"]) {
-    next[scheme] = {
-      ...(next[scheme] !== null && typeof next[scheme] === "object" && !Array.isArray(next[scheme])
-        ? next[scheme]
-        : {}),
-      ...colors[scheme],
-    };
-  }
-  return next;
+  return Object.fromEntries(APPEARANCE_FOOTER_FIELDS.map(definition => [
+    definition.name,
+    validateScalar(
+      { ...definition, path: `footerSettings.${definition.name}` },
+      workspaceFooter[definition.name] === undefined ? definition.default : workspaceFooter[definition.name],
+    ),
+  ]));
 }

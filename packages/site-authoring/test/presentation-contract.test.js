@@ -4,7 +4,7 @@ import test from "node:test";
 
 import {
   APPEARANCE_FILES,
-  APPEARANCE_FOOTER_COLOR_FIELDS,
+  APPEARANCE_FOOTER_FIELDS,
   APPEARANCE_READ_ONLY_FIELDS,
   APPEARANCE_SCALAR_FIELDS,
 } from "../src/appearance-contract.js";
@@ -93,7 +93,7 @@ function csharpIntegerConstant(source, name) {
 
 test("the presentation references expose examples accepted by their executable validators", async () => {
   await assert.doesNotReject(() => assertPresentationExamples());
-  assert.equal(getThemeReference().espalierVersion, "7.1.0");
+  assert.equal(getThemeReference().espalierVersion, "7.1.1");
   const normalizedFooter = validateFooterDocument(FOOTER_EXAMPLE);
   assert.equal(normalizedFooter.featureImage.alt, FOOTER_EXAMPLE.featureImage.alt);
   assert.equal(normalizedFooter.light.backgroundPresentation, "FOOTER_BACKGROUND_PRESENTATION_COVER");
@@ -152,13 +152,12 @@ test("appearance help is derived from the same ordered registries theme push exe
         : {}),
       default: field.default,
     })),
-    ...APPEARANCE_FOOTER_COLOR_FIELDS.map((field) => ({
+    ...APPEARANCE_FOOTER_FIELDS.map(field => ({
       file: field.file,
       path: field.path,
       type: field.type,
-      allowedTokens: [...field.allowedTokens],
-      customForms: APPEARANCE_COLOR_CONSTRAINT.customForms,
-      maximumLength: APPEARANCE_COLOR_CONSTRAINT.maximumLength,
+      ...(field.values ? { values: field.values } : {}),
+      optional: field.optional,
       default: field.default,
     })),
   ];
@@ -408,7 +407,11 @@ test("footer logo scale materializes legacy values and stays independent of bran
 test("footer logo ids are owned content and logo URLs are response-only metadata", async context => {
   const lightId = "11111111-1111-4111-8111-111111111111";
   const darkId = "22222222-2222-4222-8222-222222222222";
-  const response = { logoScale: "2", light: { logoId: lightId, logoUrl: "https://cdn.example/light.webp" }, dark: { logoId: darkId, logoUrl: "https://cdn.example/dark.webp" } };
+  const response = {
+    logoScale: "2",
+    light: { logoId: lightId, logoUrl: "https://cdn.example/light.webp" },
+    dark: { logoId: darkId, logoUrl: "https://cdn.example/dark.webp" },
+  };
   const projected = projectFooterSettingsForWorkspace(response);
   assert.equal(projected.logoScale, "2.0");
   assert.equal(projected.light.logoId, lightId);
@@ -422,15 +425,32 @@ test("footer logo ids are owned content and logo URLs are response-only metadata
   assert.deepEqual(validateFooterDocument(projected, { knownImageIds: new Set([lightId, darkId]) }), projected);
   for (const scheme of ["light", "dark"]) {
     await context.test(scheme, () => {
-      assert.throws(() => validateFooterDocument({ [scheme]: response[scheme] }), error => error?.code === "footer.field_read_only" && error?.field === `footerSettings.${scheme}.logoUrl`);
-      assert.throws(() => validateFooterDocument({ [scheme]: { logoId: lightId } }, { knownImageIds: new Set() }), error => error?.code === "footer.image_reference_unknown" && error?.field === `footerSettings.${scheme}.logoId`);
-      assert.throws(() => validateFooterDocument({ [scheme]: { logoId: "unknown" } }), error => error?.code === "footer.id_invalid" && error?.field === `footerSettings.${scheme}.logoId`);
+      assert.throws(
+        () => validateFooterDocument({ [scheme]: response[scheme] }),
+        error => error?.code === "footer.field_read_only" && error?.field === `footerSettings.${scheme}.logoUrl`,
+      );
+      assert.throws(
+        () => validateFooterDocument({ [scheme]: { logoId: lightId } }, { knownImageIds: new Set() }),
+        error => error?.code === "footer.image_reference_unknown" && error?.field === `footerSettings.${scheme}.logoId`,
+      );
+      assert.throws(
+        () => validateFooterDocument({ [scheme]: { logoId: "unknown" } }),
+        error => error?.code === "footer.id_invalid" && error?.field === `footerSettings.${scheme}.logoId`,
+      );
     });
   }
   const reference = getFooterReference();
-  assert.match(formatPresentationReference(reference), /Old v6 baselines are refused/u);
-  const logoScale = reference.messages.find(message => message.name === "FooterSettings").fields.find(field => field.name === "logoScale");
-  assert.deepEqual([logoScale.type, logoScale.minimum, logoScale.maximum, logoScale.step, logoScale.default], ["decimal-string", 1, 5, 0.1, "1.0"]);
+  assert.match(formatPresentationReference(reference), /Old v7 baselines are refused/u);
+  const logoScale = reference.messages.find(message => message.name === "FooterSettings").fields.find(field =>
+    field.name === "logoScale"
+  );
+  assert.deepEqual([logoScale.type, logoScale.minimum, logoScale.maximum, logoScale.step, logoScale.default], [
+    "decimal-string",
+    1,
+    5,
+    0.1,
+    "1.0",
+  ]);
 });
 
 test("footer profiles normalize empty layouts sparsely and retain explicit start and auto", () => {
@@ -871,4 +891,50 @@ test("theme help states the role model the resolver applies and its examples con
   assert.match(rendered, /Role slots:/u);
   assert.match(rendered, /accent\s+color, text, hover/u);
   assert.match(rendered, /Precedence:/u);
+});
+
+
+
+test("footer context round-trips without admitting the retired five-color contract", async context => {
+  assert.equal(projectFooterSettingsForWorkspace({ context: "charcoal" }).context, "charcoal");
+  assert.equal(validateFooterDocument({ context: "charcoal" }).context, "charcoal");
+  assert.equal("context" in projectFooterSettingsForWorkspace({ context: "" }), false);
+  for (const scheme of ["light", "dark"]) {
+    for (const name of ["backgroundColor", "textColor", "headingColor", "linkColor", "linkHoverColor"]) {
+      await context.test(`${scheme}.${name}`, () => {
+        assert.throws(
+          () => validateFooterDocument({ unknown: true, [scheme]: { [name]: "" } }),
+          error =>
+            error?.code === "appearance.retired_footer_color" && error?.field === `footerSettings.${scheme}.${name}`
+            && /help appearance/u.test(error.message),
+        );
+      });
+    }
+  }
+  const appearance = getAppearanceReference();
+  assert.match(appearance.footerColorMigration, /semanticMappings.layer2/u);
+  assert.match(appearance.footerColorMigration, /ink.color/u);
+  assert.match(appearance.footerColorMigration, /accent.hover/u);
+  assert.match(formatPresentationReference(appearance), /appearance.retired_footer_color/u);
+  const footer = getFooterReference();
+  assert.ok(
+    footer.messages.find(message => message.name === "FooterSettings").fields.some(field => field.name === "context"),
+  );
+});
+
+
+test("footer logoVariant is strict for authoring and tolerant only for stored reads", async context => {
+  for (const variant of ["", "light", "dark"]) {
+    assert.equal(validateFooterDocument({ logoVariant: variant }).logoVariant, variant || undefined);
+    assert.equal(projectFooterSettingsForWorkspace({ logoVariant: variant }).logoVariant, variant || undefined);
+  }
+  for (const variant of ["auto", "sepia", " light", "Dark", null, 1, false]) {
+    await context.test(JSON.stringify(variant), () => {
+      assert.throws(() => validateFooterDocument({ logoVariant: variant }), error => error?.code === "footer.field_invalid" && error?.field === "footerSettings.logoVariant");
+      assert.equal("logoVariant" in projectFooterSettingsForWorkspace({ logoVariant: variant }), false);
+    });
+  }
+  const reference = getFooterReference();
+  assert.ok(reference.messages.find(message => message.name === "FooterSettings").fields.some(field => field.name === "logoVariant"));
+  assert.match(formatPresentationReference(getAppearanceReference()), /Light-background logo/u);
 });

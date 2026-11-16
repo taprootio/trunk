@@ -31,7 +31,7 @@ const THEME_SCHEMES = Object.freeze(["light", "dark"]);
 let engines;
 
 /** The fit report and color engine are Espalier modules beside the exported theme module (see espalier-shared.js). */
-function loadEngines() {
+export function loadThemeEngines() {
   engines ??= Promise.all([
     loadEspalierShared("theme-fit-report.js"),
     loadEspalierShared("color-engine.js"),
@@ -156,7 +156,7 @@ function describeSurface(color, report, scheme, rootSurface) {
  */
 export async function resolveThemePair(lightTheme, darkTheme, { scheme, context } = {}) {
   const { light, dark } = validateAndEncodeThemePair(lightTheme, darkTheme);
-  const { fit, color } = await loadEngines();
+  const { fit, color } = await loadThemeEngines();
   // The stored pair is encoded and parsed back, as theme push's fit lints do, so this is what the page resolves.
   const suite = fit.themeFitReportSuite(parseTheme(light) ?? {}, parseTheme(dark) ?? {});
   const contexts = suite.surfaces.filter((surface) => surface !== fit.ROOT_SURFACE);

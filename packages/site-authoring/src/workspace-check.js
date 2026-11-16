@@ -68,7 +68,7 @@ export async function checkWorkspace({
     ?? await collectProblems(problems, { area: CHECK_AREA.presentation }, async () =>
       (await readAppearanceWorkspaceContext(workspaceDir, siteId)).knownImageIds);
 
-  onProgress("Validating the complete light/dark theme, appearance, header, brand, and footer colors.");
+  onProgress("Validating the complete light/dark theme, appearance, header, brand, and surface contexts.");
   const presentation = knownImageIds === undefined
     ? undefined
     : await collectProblems(problems, { area: CHECK_AREA.presentation }, async () =>

@@ -95,7 +95,7 @@ import {
 
 export { getAppearanceReference, getFooterReference, getSettingsReference, getThemeReference };
 
-export const REFERENCE_VERSION = 60;
+export const REFERENCE_VERSION = 61;
 
 // The date-limit examples `help forms` prints; tests run them through the form validator.
 export const FORM_DATE_WINDOW_FIELD = Object.freeze({
@@ -640,7 +640,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "(and brand.faviconId) from the image ids .taproot-site-media.json records for those files, so each scheme carries the artwork that reads on its header. "
       + "Optional lightCompactLogoId and darkCompactLogoId in the same styles file provide alternate artwork when a Fixed header above 1.0 starts shrinking. "
       + "Its visible height follows scroll distance down to the minimum height (1.0 by default) and expands again when scrolling back to the top; "
-      + "the compact logo switches at the first actual shrink. "
+      + "the compact logo switches at the first actual shrink. Choose logoVariant independently in site-header.json and footerSettings: empty matches the scheme, light or dark forces that surface's effective artwork. Theme push owns those choices; footer push preserves them. validate can warn about a logo on the opposite surface brightness. "
       + "Set headerHeightMultiplier and optional headerMinHeightMultiplier as strings in site-header.json; for example, 3.8 expanded and 1.9 minimum. See help appearance for the range and fallback rules.",
       `See the compiled colors: ${CLI_BINARY_NAME} theme resolve prints, offline, every semantic color Espalier compiles `
       + "from the pair for each scheme and context, whether each is compiled from the roles or pinned, and the contrast "
@@ -658,7 +658,7 @@ const WORKFLOW_REFERENCES = Object.freeze({
       + "nothing to do.",
       `Push: ${CLI_BINARY_NAME} theme push --dry-run first: it reads the site and lists the JSON paths at which each `
       + "settings file differs from it, and says whether the baseline pull recorded is still current. Then "
-      + `${CLI_BINARY_NAME} theme push saves both themes, the appearance scalars and the ten footer scheme colours in `
+      + `${CLI_BINARY_NAME} theme push saves both themes, the appearance scalars, header/footer contexts and logo variants in `
       + "one transaction fenced by that baseline: a concurrent change to any of those fields refuses the whole push "
       + "(theme.concurrent_modification) and nothing is written; keep copies of the edited files, pull, re-apply, "
       + "and push again. A lost response is safe to retry — the site answers applied=false when it already holds "

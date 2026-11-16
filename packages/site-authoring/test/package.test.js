@@ -40,7 +40,7 @@ test("package metadata pins the repo Node baseline, the shared theme contract, a
   assert.deepEqual(packageJson.scripts, { test: "node --test", prepack: "npm test" });
   // Exact, not a range: the CLI validates against one Espalier theme contract,
   // and the release manifest's identity gate refuses anything else.
-  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "7.1.0", mediabunny: "1.61.1" });
+  assert.deepEqual(packageJson.dependencies, { "@taprootio/espalier": "7.1.1", mediabunny: "1.61.1" });
   assert.equal(packageJson.devDependencies, undefined);
   // The public release identity (TR00635). The Trunk stager refuses a package
   // without public access, provenance, and the public repository pointer, and
@@ -160,6 +160,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/footer-alignment.js",
     "src/footer-brand-inputs.js",
     "src/footer-branding.js",
+    "src/footer-content.js",
     "src/footer-contract.js",
     "src/footer-draft-hash.js",
     "src/footer-fit-widths.js",
@@ -179,6 +180,8 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/index.js",
     "src/json-guard.js",
     "src/json-path-diff.js",
+    "src/logo-inputs.js",
+    "src/logo-surface-checks.js",
     "src/marketing-api.js",
     "src/marketing-contract.js",
     "src/marketing-workspace.js",
@@ -212,6 +215,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/staging-check.js",
     "src/staging-served.js",
     "src/surface.js",
+    "src/theme-contexts.js",
     "src/theme-projection.js",
     "src/theme-proposals.js",
     "src/theme-resolve.js",

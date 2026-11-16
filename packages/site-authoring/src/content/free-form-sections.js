@@ -1,3 +1,4 @@
+import { sharedDeclaredThemeContextNames } from "../theme-contexts.js";
 import registry from "./free-form-section-registry.json" with { type: "json" };
 import { imageDescriptionIssues, pickImageDescriptionFields } from "./image-description-validation.js";
 
@@ -538,9 +539,7 @@ export function normalizeFreeFormSectionDecoration(
 
 /** The exact, sorted context names present in both staged site themes. */
 export function sharedThemeContextNames(lightTheme, darkTheme) {
-  const light = isPlainObject(lightTheme?.contexts) ? lightTheme.contexts : {};
-  const dark = isPlainObject(darkTheme?.contexts) ? darkTheme.contexts : {};
-  return Object.freeze(Object.keys(light).filter((name) => Object.hasOwn(dark, name)).sort());
+  return Object.freeze(sharedDeclaredThemeContextNames(lightTheme, darkTheme));
 }
 
 /**

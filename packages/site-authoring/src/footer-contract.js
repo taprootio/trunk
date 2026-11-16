@@ -4,6 +4,7 @@ import {
   isContactOrWebUrl,
 } from "./contact-url.js";
 import { hasControlCharacter, isCanonicalUuid, SiteAuthoringError } from "./errors.js";
+import { LOGO_VARIANTS, resolveLogoVariant } from "./header-presentation.js";
 import { parseFooterLogoScale, resolveFooterLogoScale } from "./footer-branding.js";
 import {
   FOOTER_ALIGNMENT_LAYOUTS,
@@ -15,7 +16,6 @@ import {
 } from "./footer-alignment.js";
 import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "./social-link-url.js";
 import socialPlatforms from "./social-platforms.json" with { type: "json" };
-import { FOOTER_COLOR_TOKENS, requireAppearanceColor } from "./theme-validation.js";
 
 export const FOOTER_LIMITS = Object.freeze({
   linkColumns: 6,
@@ -81,6 +81,8 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
     "asideAlignment",
     "bottomAlignment",
     "logoBox",
+    "context",
+    "logoVariant",
   ]),
   FooterLinkColumn: Object.freeze(["id", "groups", "span", "alignment"]),
   FooterAlignment: Object.freeze(["horizontal", "vertical", "textAlign"]),
@@ -95,11 +97,6 @@ export const FOOTER_FIELD_INVENTORY = Object.freeze({
   FooterRichTextRun: Object.freeze(["text", "bold", "italic", "underline", "link"]),
   FooterInlineLink: Object.freeze(["pageResourceId", "externalUrl"]),
   FooterSchemeSettings: Object.freeze([
-    "backgroundColor",
-    "textColor",
-    "headingColor",
-    "linkColor",
-    "linkHoverColor",
     "backgroundImageId",
     "backgroundImageUrl",
     "backgroundImageOpacity",
@@ -136,6 +133,23 @@ function isPlainObject(value) {
 
 function fail(code, message, field) {
   throw new SiteAuthoringError(code, message, { field });
+}
+
+/** Refuse the retired model before closed-object errors obscure the migration recipe. */
+export function refuseRetiredFooterColors(footer) {
+  for (const schemeName of ["light", "dark"]) {
+    const scheme = footer?.[schemeName];
+    if (!isPlainObject(scheme)) continue;
+    for (const name of ["backgroundColor", "textColor", "headingColor", "linkColor", "linkHoverColor"]) {
+      if (!Object.hasOwn(scheme, name)) continue;
+      const field = `footerSettings.${schemeName}.${name}`;
+      fail(
+        "appearance.retired_footer_color",
+        `${field} is retired. Declare a context in both themes and set footerSettings.context; 'taproot-site help appearance' gives the color-to-context recipe.`,
+        field,
+      );
+    }
+  }
 }
 
 function object(value, path, { nullable = false } = {}) {
@@ -471,23 +485,6 @@ function scheme(value, path, knownImageIds) {
     );
   }
   return {
-    backgroundColor: requireAppearanceColor(
-      value.backgroundColor ?? "",
-      FOOTER_COLOR_TOKENS.backgroundColor,
-      `${path}.backgroundColor`,
-    ),
-    textColor: requireAppearanceColor(value.textColor ?? "", FOOTER_COLOR_TOKENS.textColor, `${path}.textColor`),
-    headingColor: requireAppearanceColor(
-      value.headingColor ?? "",
-      FOOTER_COLOR_TOKENS.headingColor,
-      `${path}.headingColor`,
-    ),
-    linkColor: requireAppearanceColor(value.linkColor ?? "", FOOTER_COLOR_TOKENS.linkColor, `${path}.linkColor`),
-    linkHoverColor: requireAppearanceColor(
-      value.linkHoverColor ?? "",
-      FOOTER_COLOR_TOKENS.linkHoverColor,
-      `${path}.linkHoverColor`,
-    ),
     logoId: imageId(value.logoId, `${path}.logoId`, knownImageIds),
     backgroundImageId: imageId(value.backgroundImageId, `${path}.backgroundImageId`, knownImageIds),
     backgroundImageOpacity: number(value.backgroundImageOpacity, 1, `${path}.backgroundImageOpacity`, 0, 1),
@@ -547,11 +544,6 @@ function featureImage(value, knownImageIds, tolerateStoredValues) {
 
 export function footerDefaults() {
   const defaults = () => ({
-    backgroundColor: "",
-    textColor: "",
-    headingColor: "",
-    linkColor: "",
-    linkHoverColor: "",
     logoId: "",
     backgroundImageId: "",
     backgroundImageOpacity: 1,
@@ -587,6 +579,7 @@ function normalizeFooterDocument(
   { knownPageResourceIds, knownImageIds, tolerateStoredValues = false } = {},
 ) {
   value = object(value ?? {}, "footerSettings");
+  refuseRetiredFooterColors(value);
   closed(value, "FooterSettings", "footerSettings");
   const seenColumnIds = new Set();
   const seenGroupIds = new Set();
@@ -638,14 +631,36 @@ function normalizeFooterDocument(
   }
 
   const normalizedFeatureImage = featureImage(value.featureImage, knownImageIds, tolerateStoredValues);
-  const brandSize = choice(value.brandSize === "" ? undefined : value.brandSize, "standard", ["standard", "large"], "footerSettings.brandSize");
+  const brandSize = choice(
+    value.brandSize === "" ? undefined : value.brandSize,
+    "standard",
+    ["standard", "large"],
+    "footerSettings.brandSize",
+  );
   const logoScale = tolerateStoredValues
     ? resolveFooterLogoScale(value.logoScale, brandSize)
     : parseFooterLogoScale(value.logoScale, brandSize);
   if (logoScale === null) {
-    fail("footer.field_invalid", "footerSettings.logoScale must be a string from 1.0 through 5.0 in 0.1 steps.", "footerSettings.logoScale");
+    fail(
+      "footer.field_invalid",
+      "footerSettings.logoScale must be a string from 1.0 through 5.0 in 0.1 steps.",
+      "footerSettings.logoScale",
+    );
   }
+  const context = value.context === undefined ? "" : value.context;
+  if (typeof context !== "string") {
+    fail(
+      "settings.context_unknown",
+      "footerSettings.context must name a shared theme context or be empty.",
+      "footerSettings.context",
+    );
+  }
+  const logoVariant = tolerateStoredValues
+    ? resolveLogoVariant(value.logoVariant)
+    : choice(value.logoVariant, "", LOGO_VARIANTS, "footerSettings.logoVariant");
   return {
+    ...(context === "" ? {} : { context }),
+    ...(logoVariant === "" ? {} : { logoVariant }),
     enabled: boolean(value.enabled, false, "footerSettings.enabled"),
     showBrand: boolean(value.showBrand, true, "footerSettings.showBrand"),
     brandSpan: span(value.brandSpan, FOOTER_LIMITS.brandSpanMax, "footerSettings.brandSpan"),
@@ -653,7 +668,10 @@ function normalizeFooterDocument(
     logoScale: logoScale.canonical,
     logoBox: tolerateStoredValues
       ? normalizeFooterLogoBox(value.logoBox)
-      : choice(value.logoBox === "" || value.logoBox === null ? undefined : value.logoBox, "fixed", ["fixed", "natural"], "footerSettings.logoBox"),
+      : choice(value.logoBox === "" || value.logoBox === null ? undefined : value.logoBox, "fixed", [
+        "fixed",
+        "natural",
+      ], "footerSettings.logoBox"),
     ...authoredAlignment(value, "alignment", "footerSettings", tolerateStoredValues),
     ...authoredAlignment(value, "brandAlignment", "footerSettings", tolerateStoredValues),
     ...authoredAlignment(value, "asideAlignment", "footerSettings", tolerateStoredValues),
@@ -708,7 +726,9 @@ function normalizeFooterDocument(
     ...(normalizedFeatureImage === undefined ? {} : { featureImage: normalizedFeatureImage }),
     showBrandText: boolean(value.showBrandText, true, "footerSettings.showBrandText"),
     socialLinks: array(value.socialLinks, "footerSettings.socialLinks", FOOTER_LIMITS.socialLinks)
-      .map((link, index) => socialLink(link, `footerSettings.socialLinks[${index}]`, seenLinkIds, tolerateStoredValues)),
+      .map((link, index) =>
+        socialLink(link, `footerSettings.socialLinks[${index}]`, seenLinkIds, tolerateStoredValues)
+      ),
   };
 }
 
@@ -788,11 +808,6 @@ export const FOOTER_EXAMPLE = Object.freeze({
     }),
   ]),
   light: Object.freeze({
-    backgroundColor: "--esp-color-layer-1",
-    textColor: "--esp-color-text",
-    headingColor: "--esp-color-headings",
-    linkColor: "--esp-color-link",
-    linkHoverColor: "--esp-color-link-hover",
     logoId: "",
     backgroundImageId: "d461035a-74b6-4528-a4f5-e5a96fb50037",
     backgroundImageOpacity: 0.18,
@@ -802,11 +817,6 @@ export const FOOTER_EXAMPLE = Object.freeze({
     additionalTopPaddingRem: 0,
   }),
   dark: Object.freeze({
-    backgroundColor: "--esp-color-background",
-    textColor: "--esp-color-text",
-    headingColor: "--esp-color-headings",
-    linkColor: "--esp-color-link",
-    linkHoverColor: "--esp-color-link-hover",
     logoId: "",
     backgroundImageId: "",
     backgroundImageOpacity: 1,

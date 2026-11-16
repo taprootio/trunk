@@ -15,6 +15,8 @@ import {
 import {
   describeSiteFinding,
   evaluateOfflineSiteChecks,
+  mergeOfflineSiteChecks,
+  SITE_FINDINGS_MAX_BYTES,
   SITE_CHECK_RULES,
 } from "../src/site-check-findings.js";
 import rules from "../src/site-check-rules.json" with { type: "json" };
@@ -246,4 +248,24 @@ test("footer finding copy names known widths and remedies and tolerates unknown 
     assert.ok(!sentence.includes("small_desktop") && !sentence.includes("small_phone"));
     if (width === "small_phone") assert.match(sentence, /small phone \(320px\)/u);
   }
+});
+
+
+test("merging an offline logo step preserves coverage and bounds evaluator findings first", () => {
+  const primary = evaluateOfflineSiteChecks({ planned: [], pagePaths: [], pagesComplete: false, formKeysChecked: false });
+  primary.findings = { total: 120, errors: 2, warnings: 118, items: Array.from({ length: 120 }, (_, i) => ({ rule: "seo.title_short", severity: "warning", file: `pages/${i}.md`, subject: "x".repeat(200) })), truncated: true };
+  const secondary = { findings: { total: 2, errors: 0, warnings: 2, items: [{ rule: "brand.logo_on_surface", severity: "warning", file: "settings/site-header.json", subject: "header", detail: "light:light" }] }, siteChecks: { ranOffline: ["brand.logo_on_surface", "brand.logo_on_surface"], skipped: ["brand.logo_on_surface", "link.page_missing"] } };
+  const merged = mergeOfflineSiteChecks(primary, secondary);
+  assert.equal(SITE_FINDINGS_MAX_BYTES, 8192);
+  assert.ok(Buffer.byteLength(JSON.stringify(merged.findings.items)) <= SITE_FINDINGS_MAX_BYTES);
+  assert.equal(merged.findings.total, 122);
+  assert.equal(merged.findings.errors, 2);
+  assert.equal(merged.findings.warnings, 120);
+  assert.equal(merged.findings.truncated, true);
+  assert.deepEqual(merged.findings.items, primary.findings.items.slice(0, merged.findings.items.length));
+  for (const name of ["deferredToDeployment", "checkedBySite", "checkedAtDeploy", "checkedInEditor", "imageCheckReason"]) assert.deepEqual(merged.siteChecks[name], primary.siteChecks[name], name);
+  assert.deepEqual(merged.siteChecks.skipped, [...primary.siteChecks.skipped, "brand.logo_on_surface"]);
+  assert.equal(merged.siteChecks.ranOffline.filter(value => value === "brand.logo_on_surface").length, 1);
+  const small = mergeOfflineSiteChecks({ findings: { total: 0, errors: 0, warnings: 0, items: [] }, siteChecks: { ranOffline: [] } }, { ...secondary, findings: { ...secondary.findings, truncated: true } });
+  assert.equal(small.findings.truncated, true);
 });

@@ -3,12 +3,7 @@ import { createHash } from "node:crypto";
 import { SiteAuthoringError } from "./errors.js";
 import { resolveFooterLogoScale } from "./footer-branding.js";
 import { footerAlignmentProfileValues, normalizeFooterLogoBox } from "./footer-alignment.js";
-import { FOOTER_COLOR_TOKENS } from "./theme-validation.js";
-
-// The ten scheme colors theme push owns — light/dark times the color-token
-// registry — so a new footer color changes one executable registry, not a
-// hand-copied list. Every other footer field is footer-push content.
-const THEME_OWNED_SCHEME_COLORS = Object.freeze(Object.keys(FOOTER_COLOR_TOKENS));
+import { projectFooterContent } from "./footer-content.js";
 
 // Matches the package's document-depth convention (CONTENT_LIMITS.documentDepth):
 // the baseline hashes raw hand-editable JSON, and unbounded nesting would
@@ -17,8 +12,8 @@ const MAXIMUM_CONTENT_DEPTH = 64;
 
 /**
  * The pull baseline over everything `footer push` owns: a stable, type- and
- * shape-preserving JSON hash of the raw footer document with exactly the ten
- * scheme colors `theme push` overlays removed. The draft hash's canonical
+ * shape-preserving JSON hash of the raw footer document with presentation
+ * fields removed. The draft hash's canonical
  * form deliberately normalizes types and shapes the way the server does, so
  * it cannot see a hand-edit such as `enabled: "true"` or `bottomLinks: {}`;
  * this baseline must, because `theme push` would otherwise silently discard
@@ -28,16 +23,8 @@ const MAXIMUM_CONTENT_DEPTH = 64;
  */
 export function computeFooterContentHash(settings = {}) {
   requireBoundedDepth(settings);
-  let content = settings;
-  if (isContentObject(settings)) {
-    content = structuredClone(settings);
-    for (const scheme of ["light", "dark"]) {
-      if (isContentObject(content[scheme])) {
-        for (const color of THEME_OWNED_SCHEME_COLORS) delete content[scheme][color];
-      }
-    }
-  }
-  return createHash("sha256").update(`footer-content-v2${stableJson(content)}`, "utf8").digest("hex");
+  const content = isContentObject(settings) ? projectFooterContent(settings) : settings;
+  return createHash("sha256").update(`footer-content-v3${stableJson(content)}`, "utf8").digest("hex");
 }
 
 function isContentObject(value) {
@@ -85,12 +72,11 @@ export function stableJson(value) {
 }
 
 // Byte-for-byte port of FooterDraftConcurrency.ComputeHash. The token protects
-// the whole footer document while theme push overlays only its ten scheme color
-// fields onto a fresh read. Response-only image URLs deliberately do not enter
-// the canonical form.
+// footer content independently of theme-owned presentation fields.
+// Response-only image URLs stay outside the canonical form.
 export function computeFooterDraftHash(settings = {}) {
   const canonical = [];
-  append(canonical, "footer-draft-v7");
+  append(canonical, "footer-draft-v8");
   append(canonical, settings.enabled === true);
   append(canonical, settings.showBrand ?? true);
   append(canonical, settings.showBrandText ?? true);
@@ -198,11 +184,6 @@ function appendRichText(canonical, richText) {
 
 function appendScheme(canonical, rawScheme) {
   const scheme = rawScheme ?? {};
-  append(canonical, scheme.backgroundColor ?? "");
-  append(canonical, scheme.textColor ?? "");
-  append(canonical, scheme.headingColor ?? "");
-  append(canonical, scheme.linkColor ?? "");
-  append(canonical, scheme.linkHoverColor ?? "");
   append(canonical, normalizeId(scheme.logoId));
   append(canonical, normalizeId(scheme.backgroundImageId));
   append(canonical, doubleBits(scheme.backgroundImageOpacity ?? 1));

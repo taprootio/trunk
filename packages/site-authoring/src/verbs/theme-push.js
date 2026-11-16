@@ -1,15 +1,14 @@
 import { getSitePresentation, saveSitePresentation, withRefusalGuidance } from "../api.js";
 import {
-  APPEARANCE_FOOTER_COLOR_FIELDS,
+  APPEARANCE_FOOTER_FIELDS,
   APPEARANCE_SCALAR_FIELDS,
   appearanceScalarInput,
   buildAppearanceScalarOperations,
-  footerColorOverlay,
+  footerPresentationOverlay,
 } from "../appearance-contract.js";
 import { REFUSAL_UNCLASSIFIED, VERB_THEME_PUSH } from "../constants.js";
 import { MISSING_SETTING_MESSAGE, SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace } from "../footer-contract.js";
-import { computeFooterDraftHash } from "../footer-draft-hash.js";
 import {
   advanceFooterManifest,
   clearPendingPresentationSave,
@@ -30,7 +29,7 @@ import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
-import { missingThemeFields, validateAndLintThemePair } from "../theme-validation.js";
+import { missingThemeFields, requireSurfaceContexts, validateAndLintThemePair } from "../theme-validation.js";
 import { ApiError } from "../transport.js";
 import {
   readWorkspaceJson,
@@ -112,8 +111,14 @@ export function requireNoMissingSettings(missing) {
   );
 }
 
-/** The complete local validation phase shared by live push and offline fixtures. */
-export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds, expectedEntityIds) {
+/** Offline callers validate context names here; push waits for the current state to classify removals. */
+export async function validateThemeWorkspace(
+  workspaceDir,
+  siteId,
+  knownImageIds,
+  expectedEntityIds,
+  { deferContextValidation = false } = {},
+) {
   const [style, brand, header, publishing] = await Promise.all([
     readSettingsDocument(
       workspaceDir,
@@ -146,8 +151,8 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
     [SETTINGS_TYPE_SITE_HEADER]: header,
   };
   // Preflight the complete required-key inventory before any value validator
-  // can stop at a malformed value in an earlier group. Optional footer color
-  // leaves retain their existing empty-color fallback.
+  // can stop at a malformed value in an earlier group. Optional presentation
+  // fields retain their empty default.
   const missing = missingThemeSettings(style);
   for (const definition of APPEARANCE_SCALAR_FIELDS) {
     if (!definition.optional && !Object.hasOwn(documents[definition.settingsType], definition.name)) {
@@ -162,18 +167,26 @@ export async function validateThemeWorkspace(workspaceDir, siteId, knownImageIds
     }
   }
   requireNoMissingSettings(missing);
+  const footerPresentation = footerPresentationOverlay(publishing.footerSettings);
+  if (!deferContextValidation) {
+    requireSurfaceContexts({
+      lightTheme: style.lightTheme,
+      darkTheme: style.darkTheme,
+      headerContext: header.context,
+      footerContext: footerPresentation.context,
+    });
+  }
   const themes = await validateAndLintThemePair(style.lightTheme, style.darkTheme);
   const scalarOperations = buildAppearanceScalarOperations(
     documents,
     knownImageIds,
   );
-  const footerColors = footerColorOverlay(publishing.footerSettings);
-  return { style, brand, header, publishing, themes, scalarOperations, footerColors };
+  return { style, brand, header, publishing, themes, scalarOperations, footerPresentation };
 }
 
 /**
  * The change set the atomic save receives: every appearance scalar in
- * registry order, then the two encoded themes, plus the ten footer colours.
+ * registry order, then the two encoded themes, plus the footer presentation fields.
  */
 function buildChangeSet(validated) {
   return {
@@ -189,7 +202,8 @@ function buildChangeSet(validated) {
         value: setting === "lightTheme" ? validated.themes.light : validated.themes.dark,
       })),
     ],
-    footerColors: validated.footerColors,
+    footerContext: validated.footerPresentation.context,
+    footerLogoVariant: validated.footerPresentation.logoVariant,
   };
 }
 
@@ -226,14 +240,6 @@ function translateSaveRefusal(error) {
       { field: "revision", status: error.status },
     );
   }
-  if (error instanceof ApiError && error.hasField("ExpectedFooterDraftHash")) {
-    return new SiteAuthoringError(
-      "theme.footer_concurrent_modification",
-      "The footer document changed between this push's read and its save, so the push was refused and nothing was "
-        + "written. Run 'taproot-site theme push' again; it re-reads the footer before saving.",
-      { field: "expectedFooterDraftHash", status: error.status },
-    );
-  }
   return translateServerSupport(error, "save");
 }
 
@@ -261,15 +267,11 @@ function ownedDocuments(validated, presentation) {
   });
   const scalarNames = (settingsType) =>
     APPEARANCE_SCALAR_FIELDS.filter((field) => field.settingsType === settingsType).map((field) => field.name);
-  const footerColors = (footer) => {
-    const colors = {};
-    for (const definition of APPEARANCE_FOOTER_COLOR_FIELDS) {
-      const scheme = isPlainObject(footer?.[definition.scheme]) ? footer[definition.scheme] : {};
-      colors[definition.scheme] ??= {};
-      colors[definition.scheme][definition.name] = scheme[definition.name] ?? "";
-    }
-    return { footerSettings: colors };
-  };
+  const footerPresentation = footer => ({
+    footerSettings: Object.fromEntries(
+      APPEARANCE_FOOTER_FIELDS.map(field => [field.name, footer?.[field.name] ?? field.default]),
+    ),
+  });
   return [
     owned(
       SETTINGS_TYPE_TAPROOT_STYLES,
@@ -286,8 +288,8 @@ function ownedDocuments(validated, presentation) {
     ),
     {
       file: `${SETTINGS_DIRECTORY}/${SETTINGS_FILES[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES]}`,
-      local: footerColors(validated.publishing.footerSettings),
-      remote: footerColors(projected[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES].footerSettings),
+      local: footerPresentation(validated.publishing.footerSettings),
+      remote: footerPresentation(projected[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES].footerSettings),
     },
   ];
 }
@@ -343,6 +345,12 @@ export async function comparePresentation(client, siteId, validated, manifest) {
   } catch (error) {
     throw translateServerSupport(error, "read");
   }
+  requireSurfaceContexts({
+    lightTheme: validated.style.lightTheme,
+    darkTheme: validated.style.darkTheme,
+    headerContext: validated.header.context,
+    footerContext: validated.footerPresentation.context,
+  }, current);
   const stale = baseline !== undefined && baseline.revision !== current.revision;
   // A save this workspace sent and never heard back from (TR00807). When the
   // change set about to go is the same one, a moved revision is not evidence
@@ -383,11 +391,13 @@ export async function themePush(invocation) {
     config.workspaceDir,
     siteId,
     appearanceContext.knownImageIds,
+    undefined,
+    { deferContextValidation: true },
   );
   const { publishing, themes, scalarOperations } = validated;
   // The save's response replaces the workspace footer document, so refuse
   // while it still carries footer-content edits that footer push has not
-  // saved. Colour-only differences are theme push's own to write.
+  // saved. Context-only differences are theme push's own to write.
   requireFooterContentPushed(appearanceContext.footer, publishing.footerSettings);
   const baseline = readPresentationBaseline(appearanceContext.manifest);
   if (!dryRun && baseline === undefined) {
@@ -408,7 +418,7 @@ export async function themePush(invocation) {
   };
 
   // The fresh read serves both modes: the dry run compares against it, and
-  // the push takes the footer document's draft token from it. Nothing before
+  // the push checks the complete post-save context state. Nothing before
   // this point, and nothing in a dry run after it, writes to the site.
   const comparison = await withRefusalGuidance(
     onProgress,
@@ -490,16 +500,11 @@ export async function themePush(invocation) {
     });
   }
 
-  // The footer token comes from the read just made: the server overlays the
-  // colours onto the document it holds now. On a replay of a committed save
-  // the site is already current and the token is not consulted.
-  const currentFooter = current.sitePublishingPreferences?.footerSettings ?? {};
   let saved;
   try {
     saved = await withRefusalGuidance(onProgress, "theme push", async () =>
       await saveSitePresentation(client, siteId, {
         expectedRevision,
-        expectedFooterDraftHash: computeFooterDraftHash(currentFooter),
         ...changeSet,
       }));
   } catch (error) {
@@ -519,7 +524,7 @@ export async function themePush(invocation) {
     // record is what lets the next run of the same change set be answered as
     // already current instead of refused as someone else's edit.
     if (
-      error instanceof ApiError && (error.hasField("ExpectedRevision") || error.hasField("ExpectedFooterDraftHash"))
+      error instanceof ApiError && error.hasField("ExpectedRevision")
     ) {
       await clearPendingPresentationSave(config.workspaceDir, siteId);
     } else {
@@ -560,13 +565,13 @@ export async function themePush(invocation) {
   });
   onProgress(
     applied
-      ? "Saved the complete presentation in one transaction: footer scheme colors, appearance settings, and both "
+      ? "Saved the complete presentation in one transaction: surface contexts and logo choices, appearance settings, and both "
         + "themes; Brand & Style now treats the color model as externally managed."
       : "The site already held this presentation; nothing was written and the baseline was refreshed.",
   );
 
   const written = [
-    "footerSettings.light/dark colors",
+    ...APPEARANCE_FOOTER_FIELDS.map(field => `footerSettings.${field.name}`),
     ...scalarOperations.map((operation) => `${operation.settingsType}.${operation.setting}`),
     ...THEME_SETTINGS.map((setting) => `${SETTINGS_TYPE_TAPROOT_STYLES}.${setting}`),
   ];

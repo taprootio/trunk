@@ -100,7 +100,7 @@ const STEP_REASONS = Object.freeze({
   [PLAN_STEP.media]: "Pages resolve their media references against the uploads this step records.",
   [PLAN_STEP.pages]: "Navigation and the footer can point only at pages the site already holds.",
   [PLAN_STEP.footer]: "theme push refuses while the footer document carries unsaved content.",
-  [PLAN_STEP.theme]: "The theme saves the footer's scheme colors with the rest of the presentation.",
+  [PLAN_STEP.theme]: "The theme saves the footer context with the rest of the presentation.",
   [PLAN_STEP.navigation]: "Navigation replaces the whole tree, so it goes last, once its targets exist.",
 });
 const READY = "ready";
@@ -468,7 +468,7 @@ function planReport(planned) {
     checked: [
       "every page source, against the live site's pages, revisions, video library, and the forms it places",
       "media under media/ that pages reference and media upload has not sent",
-      "the theme, appearance, and footer colors, against the site's presentation revision",
+      "the theme, appearance, and surface contexts, against the site's presentation revision",
       "the footer document, against the site's footer draft and the pages it still holds",
       "every image the theme and footer name, and every recorded upload, against the site's images",
       "navigation shape and page targets, against the live page list and navigation",
