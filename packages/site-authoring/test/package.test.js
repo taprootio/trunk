@@ -106,6 +106,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     // The block spacing choices and flow stylesheet, generated from shared/ (TR01328).
     "src/block-flow.js",
     "src/bounded-file.js",
+    "src/brand-color.js",
     "src/capabilities.js",
     "src/changelog.js",
     "src/changelog.json",
@@ -137,6 +138,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/content/media-presentation.js",
     "src/content/testimonial-google-reviews.js",
     "src/content/tiptap-prosemirror.ts",
+    "src/content/url-safety.js",
     "src/content/validate-document.js",
     // The video embed card's link rules, generated from shared/ (TR01109).
     "src/content/video-embed-url.js",
@@ -223,6 +225,7 @@ test("the packaged surface is exactly the reviewed runtime", (testContext) => {
     "src/transport.js",
     "src/typed-page-reference.js",
     "src/typed-pages.js",
+    "src/url-safety.js",
     "src/utm-link.js",
     "src/verbs/approve.js",
     "src/verbs/authors.js",

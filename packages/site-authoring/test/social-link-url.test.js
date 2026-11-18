@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import corpus from "./fixtures/social-link-url-corpus.json" with { type: "json" };
-import { isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "../src/social-link-url.js";
+import { findSocialPlatform, isRenderableSocialLink, isSocialLinkUrl, SOCIAL_LINK_URL_MAX_LENGTH, trimSocialLinkInput } from "../src/social-link-url.js";
 
 // The same corpus runs through the generator's copy, the editor's import of
 // shared/social-link-url.ts and the API's own port (TR01324).
@@ -23,4 +23,11 @@ test("refuses values that are not text and holds the length bound", () => {
     assert.equal(isSocialLinkUrl(value), false);
   }
   assert.equal(SOCIAL_LINK_URL_MAX_LENGTH, 2048);
+});
+
+test("renders known platforms and rejects unknown platforms through the compiled vocabulary", () => {
+  const url = corpus.entries.find(entry => entry.valid).value;
+  assert.ok(findSocialPlatform("other"));
+  assert.equal(isRenderableSocialLink({ platform: "other", url }), true);
+  assert.equal(isRenderableSocialLink({ platform: "unknown", url }), false);
 });

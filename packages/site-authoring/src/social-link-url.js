@@ -10,11 +10,25 @@
  * CLI, the generator, the editor and the API's own port in agreement, which
  * `shared/social-link-url-corpus.json` proves in each of them.
  *
- * It is pure and dependency-free. The generator and the site-authoring CLI
+ * It uses the shared platform vocabulary. The generator and site-authoring CLI
  * cannot import this file, so `node scripts/sync-field-validation.mjs` writes
  * their copies; edit only this file and re-run it. The editor imports it by
  * relative path.
  */
+import socialPlatforms from "./social-platforms.json" with { type: "json" };
+/** The vocabulary in its recorded order; `other` is last. */
+export const SOCIAL_PLATFORMS = socialPlatforms.platforms;
+/** The platform key a Website link stores. */
+export const OTHER_SOCIAL_PLATFORM = "other";
+export function findSocialPlatform(key) {
+    return typeof key === "string" ? SOCIAL_PLATFORMS.find((platform) => platform.key === key) : undefined;
+}
+/** Whether a stored link can be rendered: a known platform and an accepted address. */
+export function isRenderableSocialLink(item) {
+    return item !== null && item !== undefined
+        && findSocialPlatform(item.platform) !== undefined
+        && isSocialLinkUrl(item.url);
+}
 /** The longest address stored anywhere a social link lives. */
 export const SOCIAL_LINK_URL_MAX_LENGTH = 2048;
 /**

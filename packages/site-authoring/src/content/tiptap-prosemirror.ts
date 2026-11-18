@@ -11,6 +11,7 @@ import { blockquoteCaptionParts, readBlockquoteMetadata } from "./blockquote-met
 import { columnsAttributes, isColumnEligibleBlock } from "./free-form-columns.js";
 import freeFormSectionRegistry from "./free-form-section-registry.json" with { type: "json" };
 import { imageDescriptionIssues } from "./image-description-validation.js";
+import { isSafeUrl } from "./url-safety.js";
 import { isExternalLink, NEW_TAB_CUE_HTML, relWithNewTabTokens } from "./external-link.js";
 import {
   explicitImageMaxHeight,
@@ -1551,22 +1552,6 @@ function renderLink(
   const linkAttributes = linkRelAttributes(attrs, href, options.siteHosts);
   const cue = options.siteHosts !== undefined && linkAttributes.target === "_blank" ? NEW_TAB_CUE_HTML : "";
   return renderElement("a", { href, ...linkAttributes }, `${html}${cue}`);
-}
-
-function isSafeUrl(url: string): boolean {
-  if (/[\x00-\x1f\x7f\\]/u.test(url)) return false;
-  const cleaned = url.trim();
-  if (!cleaned) return false;
-  if (cleaned.startsWith("//")) return false;
-  if (cleaned.startsWith("/") || cleaned.startsWith("./")) return true;
-  if (cleaned.startsWith("#") || cleaned.startsWith("?")) return true;
-
-  try {
-    const parsed = new URL(cleaned);
-    return ["http:", "https:", "mailto:", "tel:"].includes(parsed.protocol);
-  } catch {
-    return true;
-  }
 }
 
 function jsonAttr(value: unknown): string | null {

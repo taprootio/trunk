@@ -1,6 +1,15 @@
 {
   "entries": [
     {
+      "version": "0.41.1",
+      "note": "Share renderer URL, social platform and brand-color rules with the authoring CLI while preserving published output.",
+      "behavior": [
+        "Renderer URL safety, social platform helpers and brand-color rules now have shared owners used by their generated copies; rendering and content validation behavior are unchanged.",
+        "The help reference version is 62."
+      ],
+      "help": []
+    },
+    {
       "version": "0.41.0",
       "note": "A Google Testimonial can show particular reviews (reviewSelection and reviewIds), list every review with showAll, and show Google's rating and links with showProfileSummary. A quotation's own line breaks are kept on the published page.",
       "behavior": [
