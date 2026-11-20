@@ -1,4 +1,5 @@
 import { normalizeNavigationReadiness } from "./navigation-readiness.js";
+import { isNavigationRevision } from "./navigation-workspace.js";
 import { normalizeLatestCliVersion } from "./cli-release.js";
 import { imageDescriptionRevision, isImageId, safeImagePreviewUrl } from "./image-description-contract.js";
 import {
@@ -700,11 +701,11 @@ export async function publishDrafts(client, pageIds) {
  * site-authoring key actually holds; production resolves against a published
  * deployment instead.
  */
-export async function getNavigation(client, siteId) {
+export async function getNavigation(client, siteId, { requireEvidence = false } = {}) {
   const search = query([["environment", SITE_ENVIRONMENT_DRAFT]]);
   return requireNavigation(await client.request(sitePath(siteId, `navigation${search}`), {
     maximumResponseBytes: LIMITS.navigationResponseBytes,
-  }));
+  }), requireEvidence);
 }
 
 /**
@@ -722,8 +723,13 @@ export async function saveNavigation(client, siteId, navItems, expectedRevision)
 }
 
 /** A navigation answer: the tree and the revision a later save must present. */
-function requireNavigation(value) {
+function requireNavigation(value, requireEvidence = false) {
   const response = requireObject(value, "api.navigation_contract", "site navigation");
+  // ProtoJSON may omit an empty repeated field. A revision proves this is the tree response.
+  if (requireEvidence && (!isNavigationRevision(response.revision)
+    || (Object.hasOwn(response, "navItems") && !Array.isArray(response.navItems)))) {
+    throw new SiteAuthoringError("api.navigation_contract", "Taproot returned incomplete navigation evidence.");
+  }
   return {
     navItems: Array.isArray(response.navItems) ? response.navItems : [],
     revision: typeof response.revision === "string" ? response.revision : "",

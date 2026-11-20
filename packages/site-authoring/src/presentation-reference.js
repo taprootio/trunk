@@ -27,6 +27,11 @@ import {
   APPEARANCE_READ_ONLY_FIELDS,
   APPEARANCE_SCALAR_FIELDS,
 } from "./appearance-contract.js";
+import {
+  CHROME_NAVIGATION_UNAVAILABLE_MESSAGE,
+  CHROME_OFFLINE_PAGE_LIMITATION,
+  CHROME_REPORT_NAME_RULE,
+} from "./chrome-input.js";
 import { CLI_BINARY_NAME } from "./constants.js";
 import { LOGO_VARIANTS } from "./header-presentation.js";
 import { FOOTER_LOGO_BOX, FOOTER_LOGO_SCALE_LIMITS } from "./footer-branding.js";
@@ -522,6 +527,15 @@ export function getAppearanceReference() {
       + "header at desktop and compact/mobile widths. Transparent pixels provide no contrast: inspect the visible mark, "
       + "not its canvas bounds. When one asset does not remain distinct in both schemes, supply scheme-specific logo "
       + "assets rather than relying on a shadow, outline, or header color that has not been previewed.",
+    chromeContrastContract:
+      "Theme resolve, validate and theme push check registered header and footer text, icons and focus indicators against the "
+      + "base colors they use in both schemes. Text needs 4.5:1. Icons and focus indicators need 3:1. Inspect "
+      + "background artwork and states outside the audited interactions on staging. "
+      + `Offline reports leave ${CHROME_OFFLINE_PAGE_LIMITATION} unchecked. `
+      + "A staged edit to a live page or a truncated inventory can leave its production path unknown. "
+      + "Settings-only Docs validation lacks the navigation and page inventory for navigation and footer page links. "
+      + CHROME_NAVIGATION_UNAVAILABLE_MESSAGE + " When report-name display eligibility is unknown, only validate "
+      + `lists ${CHROME_REPORT_NAME_RULE} in siteChecks.skipped.`,
     headerWidthContract: "headerWidth 'contained' keeps the brand and the header buttons at the page content edges; "
       + "'wide' moves them to the viewport edges. Pages with root-band components (image-banner) span the viewport, "
       + "so full-bleed designs usually pair headerWidth 'wide' with headerLayout 'centered-menu', which keeps the "
@@ -912,6 +926,7 @@ export function formatPresentationReference(reference) {
       + "\n\nField map: " + reference.fieldMap
       + "\n\nImages: " + reference.imageReferences + "\nLogos: " + reference.logoContract
       + "\nLogo contrast: " + reference.logoContrastContract
+      + "\nHeader and footer contrast\n  " + reference.chromeContrastContract
       + "\nFavicon: " + reference.faviconContract
       + "\nHeader width: " + reference.headerWidthContract
       + "\nBlock spacing: " + reference.blockSpacingContract

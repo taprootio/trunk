@@ -17,6 +17,8 @@ import {
   CAPABILITY_DESIGN,
   SITE_AUTHORING_CAPABILITIES,
 } from "../src/capabilities.js";
+import { CHROME_REPORT_NAME_RULE } from "../src/chrome-input.js";
+import { CHROME_UNAVAILABLE_MESSAGE } from "../src/chrome-report.js";
 import { runCli, VERB_CAPABILITIES, VERB_SURFACES, verbCapabilitiesForSurface } from "../src/cli.js";
 import { CLI_VERSION, CAPABILITY_REFUSAL_REASON, EXTERNAL_WRITES_SETTING_KEY, LIMITS, STAGING_REVIEW_SESSION_NOTE } from "../src/constants.js";
 import { markdownToProseMirror, validateDocument } from "../src/content/index.js";
@@ -40,7 +42,7 @@ import { navPush, validateNavigationWorkspaceDocument } from "../src/verbs/nav-p
 import { pagesPush } from "../src/verbs/pages-push.js";
 import { previewPage } from "../src/verbs/preview-page.js";
 import { projectPulledTheme } from "../src/theme-projection.js";
-import { missingThemeFields } from "../src/theme-validation.js";
+import { loadFitReport, MAXIMUM_THEME_WARNINGS, missingThemeFields, validateAndLintThemePair } from "../src/theme-validation.js";
 import { previewRevoke } from "../src/verbs/preview-revoke.js";
 import { linkBuild } from "../src/verbs/link-build.js";
 import { marketingPull } from "../src/verbs/marketing-pull.js";
@@ -1632,6 +1634,209 @@ test("theme push saves the complete change set in one request fenced by the pull
   assert.ok(progress.some((line) => line.includes("one transaction")));
   assert.ok(progress.some((line) => line.includes("externally managed")));
   wire.assertQueryContracts();
+});
+
+test("theme push compares and saves chrome using the same server-owned publishing and delivery data", async (site) => {
+  const files = themeWorkspace({
+    style: { lightLogoId: IMAGE_ID },
+    header: { context: "feature", showBrandText: false },
+    footerSettings: { logoVariant: "dark" },
+  });
+  files[".taproot-site-manifest.json"].appearance.imageIds = [IMAGE_ID];
+  files["nav.json"] = "{";
+  const workspace = await fixture(site, files);
+  const currentFooter = {
+    enabled: true,
+    showBrandText: false,
+    light: { logoId: IMAGE_ID, logoUrl: "https://cdn.example.test/footer-light.webp" },
+    dark: { logoId: NEW_PAGE_ID },
+    asideBodyContent: { paragraphs: [{ runs: [{ text: "Current site footer" }] }] },
+  };
+  const styleSettings = { lightLogoId: IMAGE_ID };
+  const current = presentationReply({ footerSettings: currentFooter, styleSettings });
+  current.sitePublishingPreferences.allowSearch = true;
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: current },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: (call) => {
+        const saved = presentationSaveReply(call, { footerSettings: currentFooter });
+        saved.presentation.styleSettings = styleSettings;
+        saved.presentation.sitePublishingPreferences.allowSearch = true;
+        return saved;
+      },
+    },
+  ]);
+  const observed = [];
+  const fit = await loadFitReport();
+  const loadFit = async () => ({
+    themeFitReportSuite: (light, dark, options) => {
+      observed.push(options.paintSurfaces);
+      return fit.themeFitReportSuite(light, dark, options);
+    },
+  });
+  const dryRun = await themePush(invoke(workspace, wire, { verb: "theme push", dryRun: true }).invocation, { loadFit });
+  const applied = await themePush(invoke(workspace, wire, { verb: "theme push" }).invocation, { loadFit });
+
+  assert.equal(dryRun.revision.stale, false);
+  assert.equal(applied.applied, true);
+  assert.deepEqual(wire.matching("POST", PRESENTATION).map(({ body }) => ({
+    expectedRevision: body.expectedRevision, context: body.footerContext, logoVariant: body.footerLogoVariant,
+  })), [{ expectedRevision: PRESENTATION_REVISION, context: "feature", logoVariant: "dark" }]);
+  assert.equal(observed.length, 2);
+  assert.deepEqual(observed[0], observed[1]);
+  const [header, footer] = observed[0];
+  assert.deepEqual([header.context, footer.context], ["feature", "feature"]);
+  for (const scheme of ["light", "dark"]) {
+    assert.ok(header.features[scheme].flags.includes("searchButton"));
+    assert.ok(!header.features[scheme].flags.includes("brandLink"));
+    assert.ok(footer.features[scheme].flags.includes("footerBody"));
+    assert.ok(!footer.features[scheme].flags.includes("brandLink"));
+  }
+  assert.deepEqual(dryRun.warnings, applied.warnings);
+  assert.ok(!dryRun.warnings.items.includes(CHROME_UNAVAILABLE_MESSAGE));
+});
+
+test("validate and theme push keep the exact named-context warning ahead of the inert warning cap", async (site) => {
+  const files = wholeWorkspace({ uploaded: true });
+  const { settings: header } = files["settings/site-header.json"];
+  Object.assign(header, { context: "feature", brandColor: "", lightBrandColor: "", darkBrandColor: "" });
+  const { settings: styles } = files["settings/taproot-styles.json"];
+  for (const scheme of ["light", "dark"]) {
+    const theme = styles[scheme + "Theme"];
+    theme.explicitMappingTokens = [];
+    theme.semanticMappings = Object.fromEntries(Object.keys(DEFAULT_SITE_THEME[scheme].theme.semanticMappings)
+      .map((token) => [token, { source: "danger", lightness: "ink" }]));
+  }
+  const legacy = await validateAndLintThemePair(styles.lightTheme, styles.darkTheme);
+  assert.ok(legacy.warningCount > MAXIMUM_THEME_WARNINGS);
+  const firstInert = legacy.warnings.findIndex((warning) => warning.includes("is not named in explicitMappingTokens"));
+  assert.ok(firstInert >= 0);
+
+  const workspace = await fixture(site, files);
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    { method: "POST", pattern: PRESENTATION, reply: (call) => presentationSaveReply(call) },
+  ]);
+  const loadFit = async () => ({
+    themeFitReportSuite: (_light, _dark, { paintSurfaces }) => {
+      const header = paintSurfaces.find(({ role }) => role === "header");
+      assert.equal(header.context, "feature");
+      assert.ok(header.features.light.flags.includes("brandText"));
+      return { paint: { dark: [], light: [{
+        role: header.role,
+        context: header.context,
+        pairs: [{ element: "brand-text", foreground: "headings", background: "layer2", state: "rest", kind: "text", ratio: 1, required: 4.5 }],
+      }] } };
+    },
+  });
+  const validated = await cliRun(workspace, ["validate"], undefined, REAL_CONTENT, { loadChromeFit: loadFit });
+  assert.equal(validated.exitCode, 0, validated.stderr);
+  const dryRun = invoke(workspace, wire, { verb: "theme push", dryRun: true });
+  const applied = invoke(workspace, wire, { verb: "theme push" });
+  const compared = await themePush(dryRun.invocation, { loadFit });
+  const saved = await themePush(applied.invocation, { loadFit });
+
+  const warning = "chrome: theme.contrast_text_below_aa; site-header.context; light header brand-text/rest; 1.00:1 < 4.50:1.";
+  const expected = {
+    items: legacy.warnings.toSpliced(firstInert, 0, warning).slice(0, MAXIMUM_THEME_WARNINGS),
+    count: legacy.warningCount + 1,
+    truncated: true,
+  };
+  for (const result of [validated.result, compared, saved]) {
+    assert.deepEqual(result.warnings, expected);
+  }
+  for (const progress of [validated.stderr.split("\n"), dryRun.progress, applied.progress]) {
+    assert.equal(progress.filter((line) => line.includes("Espalier warning: " + warning)).length, 1);
+  }
+});
+
+test("theme push preserves response evidence when chrome measurement fails after save", async (site) => {
+  const files = themeWorkspace();
+  files["nav.json"] = {
+    siteId: SITE_ID,
+    navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Work", externalUrl: "https://example.test/work" }],
+  };
+  const workspace = await fixture(site, files);
+  const savedFooter = projectFooterSettingsForWorkspace({ enabled: true, showBrandText: false });
+  const wire = api([
+    { method: "GET", pattern: PRESENTATION, reply: presentationReply() },
+    {
+      method: "POST",
+      pattern: PRESENTATION,
+      reply: async (call) => {
+        await writeFile(workspacePath(workspace, "nav.json"), "{");
+        await writeFile(workspacePath(workspace, "settings/site-header.json"), "{");
+        return presentationSaveReply(call, { applied: false, footerSettings: savedFooter });
+      },
+    },
+  ]);
+  const { invocation, progress } = invoke(workspace, wire, { verb: "theme push" });
+  const observations = [];
+  const result = await themePush(invocation, { loadFit: async () => ({
+    themeFitReportSuite: (_light, _dark, options) => {
+      observations.push(options.paintSurfaces);
+      throw new Error("chrome report could not complete");
+    },
+  }) });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.revision, NEXT_PRESENTATION_REVISION);
+  assert.equal(wire.matching("POST", PRESENTATION).length, 1);
+  assert.equal(observations.length, 1);
+  const header = observations[0].find(({ role }) => role === "header");
+  assert.equal(header.features.light.navigation.length, 1);
+  assert.ok(header.features.light.flags.includes("brandText"));
+  assert.equal(observations[0].find(({ role }) => role === "footer").context, "feature");
+  assert.equal(result.warnings.items.filter((item) => item === CHROME_UNAVAILABLE_MESSAGE).length, 1);
+  assert.equal(progress.filter((line) => line === `Espalier warning: ${CHROME_UNAVAILABLE_MESSAGE}`).length, 1);
+  const manifest = await readWorkspaceJson(workspace, ".taproot-site-manifest.json");
+  assert.deepEqual(manifest.presentation, { revision: NEXT_PRESENTATION_REVISION });
+  const publishing = await readWorkspaceJson(workspace, "settings/site-publishing-preferences.json");
+  assert.equal(publishing.settings.footerSettings.enabled, true);
+  assert.equal(publishing.settings.footerSettings.showBrandText, false);
+});
+
+test("theme push reports only the same legacy warnings once on comparison, fence, or ambiguous save errors", async (context) => {
+  const files = themeWorkspace({ header: { lightBrandColor: "#0000" } });
+  const { lightTheme, darkTheme } = files["settings/taproot-styles.json"].settings;
+  lightTheme.semanticMappings.typeLabel = { source: "danger", lightness: "ink" };
+  const legacy = await validateAndLintThemePair(lightTheme, darkTheme);
+  assert.ok(legacy.warnings.length > 0);
+  const cases = [
+    { name: "comparison", revision: NEXT_PRESENTATION_REVISION, code: "theme.concurrent_modification" },
+    {
+      name: "fence",
+      save: () => jsonResponse(violation("ExpectedRevision", "changed"), 400),
+      code: "theme.concurrent_modification",
+    },
+    {
+      name: "ambiguous",
+      save: () => { throw new Error("socket hang up"); },
+      code: "transport.mutation_ambiguous",
+    },
+  ];
+  for (const { name, revision, save, code } of cases) {
+    await context.test(name, async (site) => {
+      const workspace = await fixture(site, files);
+      const wire = api([
+        { method: "GET", pattern: PRESENTATION, reply: presentationReply({ revision }) },
+        ...(save === undefined ? [] : [{ method: "POST", pattern: PRESENTATION, reply: save }]),
+      ]);
+      const { invocation, progress } = invoke(workspace, wire, { verb: "theme push" });
+      let reportCalls = 0;
+      await assert.rejects(
+        themePush(invocation, { loadFit: async () => { reportCalls += 1; throw new Error("unexpected report"); } }),
+        (error) => error?.code === code,
+      );
+      assert.equal(reportCalls, 0);
+      assert.deepEqual(progress.filter((line) => line.startsWith("Espalier warning: ")), legacy.warnings.map(
+        (warning) => `Espalier warning: ${warning}`,
+      ));
+    });
+  }
 });
 
 test("theme push --dry-run reads the site, names the paths that differ per file, and writes nothing", async (site) => {
@@ -13791,7 +13996,10 @@ test("site health precheck: a managed Docs workspace gets the docs_site reason a
     const { exitCode, result } = await runSite(workspace, ["validate", "--site"], undefined);
     assert.equal(exitCode, 0);
     assert.equal(result.imageCheckReason.code, "docs_site");
-    assert.deepEqual(result.siteChecks, { ranOffline: ["footer.word_breaks", "brand.logo_on_surface"], skipped: ["footer.word_breaks", "brand.logo_on_surface"] });
+    assert.deepEqual(result.siteChecks, {
+      ranOffline: ["footer.word_breaks", "brand.logo_on_surface", CHROME_REPORT_NAME_RULE],
+      skipped: ["footer.word_breaks", "brand.logo_on_surface", CHROME_REPORT_NAME_RULE],
+    });
     assert.equal(result.findings.total, 0);
     assert.equal(result.offline, true);
   });
@@ -16602,6 +16810,9 @@ test("validate checks a pulled workspace with no credential or request and repor
   assert.equal(passed.exitCode, 0, passed.stderr);
   assert.equal(passed.result.offline, true);
   assert.deepEqual(passed.result.workspace, { manifest: ".taproot-site-manifest.json", settingsOnly: false });
+  assert.ok(passed.result.doesNotProve.includes(
+    "navigation or footer page-link contrast for destinations without a published path in the workspace inventory",
+  ));
   assert.equal(passed.result.validated.pages.total, 2);
 
   const broken = await fixture(site, wholeWorkspace({
@@ -16620,6 +16831,38 @@ test("validate checks a pulled workspace with no credential or request and repor
   assert.equal(failed.result.error.problemCount, 3);
   assert.equal(failed.result.error.code, "nav.resource_unknown");
   for (const [, file] of found) assert.ok(failed.stderr.includes(file), `stderr names ${file}`);
+});
+
+test("validate publishes chrome warnings once and records unknown eligibility even without a fit report", async (site) => {
+  const files = wholeWorkspace({ uploaded: true });
+  const header = files["settings/site-header.json"];
+  header.settings.lightBrandColor = "#0000";
+  header.settings.showBrandText = true;
+  header.settings.brandText = "Taproot";
+  const workspace = await fixture(site, files);
+  const compare = await cliRun(workspace, ["validate"]);
+  const warning = "chrome: theme.contrast_text_below_aa; site-header.lightBrandColor; light header brand-text/rest; 1.00:1 < 4.50:1.";
+  assert.equal(compare.exitCode, 0, compare.stderr);
+  assert.equal(compare.result.warnings.items.filter((item) => item === warning).length, 1);
+  assert.equal(compare.stderr.split("\n").filter((line) => line.includes(`Espalier warning: ${warning}`)).length, 1);
+
+  const unavailable = await cliRun(workspace, ["validate"], undefined, REAL_CONTENT, {
+    loadChromeFit: async () => ({ themeFitReportSuite() { throw new Error("could not measure"); } }),
+  });
+  assert.equal(unavailable.exitCode, 0, unavailable.stderr);
+  assert.equal(unavailable.result.warnings.items.filter((item) => item === CHROME_UNAVAILABLE_MESSAGE).length, 1);
+  for (const { result } of [compare, unavailable]) {
+    assert.equal(result.siteChecks.ranOffline.filter((id) => id === CHROME_REPORT_NAME_RULE).length, 1);
+    assert.equal(result.siteChecks.skipped.filter((id) => id === CHROME_REPORT_NAME_RULE).length, 1);
+  }
+
+  const publishing = files["settings/site-publishing-preferences.json"];
+  publishing.settings.footerSettings.showBrand = "invalid";
+  await writeFile(workspacePath(workspace, "settings/site-publishing-preferences.json"), JSON.stringify(publishing));
+  const refused = await cliRun(workspace, ["validate"]);
+  assert.equal(refused.exitCode, 1);
+  assert.deepEqual(refused.result.error, { code: "footer.field_invalid", field: "footerSettings.showBrand" });
+  assert.ok(!refused.stderr.includes("Espalier warning: chrome:"));
 });
 
 test("validate reports footer fit for a full workspace with a logo and long brand text", async site => {
@@ -16654,7 +16897,10 @@ test("validate checks a settings-only workspace footer without claiming page rul
   assert.equal(checked.result.findings.total, words.length);
   assert.equal(checked.result.findings.warnings, words.length);
   assert.equal(checked.result.findings.items.length, 12);
-  assert.deepEqual(checked.result.siteChecks, { ranOffline: ["footer.word_breaks", "brand.logo_on_surface"], skipped: ["brand.logo_on_surface"] });
+  assert.deepEqual(checked.result.siteChecks, {
+    ranOffline: ["footer.word_breaks", "brand.logo_on_surface", CHROME_REPORT_NAME_RULE],
+    skipped: ["brand.logo_on_surface", CHROME_REPORT_NAME_RULE],
+  });
   assert.match(checked.stderr, /and 3 more footer fit/u);
   assert.equal(Object.hasOwn(checked.result.validated, "pages"), false);
 });
@@ -16928,7 +17174,7 @@ test("validate names the form key check as skipped when no form file could be re
   const none = await fixture(site, wholeWorkspace({ uploaded: true, files: { "pages/about.md": aboutPlacingForm("contakt") } }));
   const skipped = await cliRun(none, ["validate"]);
   assert.equal(skipped.exitCode, 0, skipped.stderr);
-  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown", "footer.word_breaks", "brand.logo_on_surface"]);
+  assert.deepEqual(skipped.result.siteChecks.skipped, ["a11y.image_default_missing", "form.key_unknown", "footer.word_breaks", "brand.logo_on_surface", CHROME_REPORT_NAME_RULE]);
 
   const broken = await fixture(site, wholeWorkspace({
     uploaded: true,
@@ -17027,13 +17273,20 @@ test("a refusal's problem list stays inside the result bound however many pages 
 });
 
 test("plan orders the remaining steps, binds them to a hash, and writes nothing", async (site) => {
-  const workspace = await fixture(site, wholeWorkspace({
+  const files = wholeWorkspace({
     navItems: [{ id: navId(1), kind: "NAV_ITEM_KIND_EXTERNAL_URL", title: "Blog", externalUrl: "https://example.com/blog" }],
-  }));
+  });
+  const { settings: header } = files["settings/site-header.json"];
+  header.brandText = "Taproot";
+  header.showBrandText = true;
+  header.lightBrandColor = "#0000";
+  const workspace = await fixture(site, files);
   const wire = api(siteRoutes());
   const planned = await cliRun(workspace, ["plan"], wire);
 
   assert.equal(planned.exitCode, 0, planned.stderr);
+  assert.ok(!planned.stderr.includes("theme.contrast_text_below_aa"));
+  assert.equal(Object.hasOwn(planned.result, "siteChecks"), false);
   assert.match(planned.result.planHash, /^sha256:[0-9a-f]{64}$/u);
   assert.deepEqual(planned.result.problems, []);
   assert.equal(planned.result.ready, true);
@@ -19711,7 +19964,11 @@ test("real page validation preserves evaluator coverage when the logo engine loa
   assert.equal(unavailable.result.validated.pages.total, 2);
   assert.deepEqual(unavailable.result.findings.items.filter(value => value.rule !== "brand.logo_on_surface"), ordinary.result.findings.items.filter(value => value.rule !== "brand.logo_on_surface"));
   for (const name of ["deferredToDeployment", "checkedBySite", "checkedAtDeploy", "checkedInEditor", "imageCheckReason"]) assert.deepEqual(unavailable.result.siteChecks[name], ordinary.result.siteChecks[name], name);
-  assert.deepEqual(unavailable.result.siteChecks.skipped, [...new Set([...ordinary.result.siteChecks.skipped, "brand.logo_on_surface"])]);
+  assert.deepEqual(unavailable.result.siteChecks.skipped, [
+    ...ordinary.result.siteChecks.skipped.filter((rule) => rule !== CHROME_REPORT_NAME_RULE),
+    "brand.logo_on_surface",
+    CHROME_REPORT_NAME_RULE,
+  ]);
   for (const rule of ["link.page_missing", "a11y.image_default_missing", "form.key_unknown", "footer.word_breaks", "brand.logo_on_surface"]) assert.ok(unavailable.result.siteChecks.skipped.includes(rule));
   assert.equal(unavailable.result.siteChecks.ranOffline.filter(value => value === "brand.logo_on_surface").length, 1);
 
@@ -19737,7 +19994,7 @@ test("settings-only validation merges real logo warnings with footer word findin
   const logos = checked.result.findings.items.filter(value => value.rule === "brand.logo_on_surface");
   assert.deepEqual(logos.map(value => [value.subject, value.detail]), [["footer", "light:light"], ["footer", "dark:light"]]);
   assert.equal(checked.result.findings.total, words.length + logos.length);
-  assert.deepEqual(checked.result.siteChecks.ranOffline, ["footer.word_breaks", "brand.logo_on_surface"]);
+  assert.deepEqual(checked.result.siteChecks.ranOffline, ["footer.word_breaks", "brand.logo_on_surface", CHROME_REPORT_NAME_RULE]);
   assert.equal(checked.result.siteChecks.checkedBySite, undefined);
 });
 

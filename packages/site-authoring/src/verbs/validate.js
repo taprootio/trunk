@@ -2,6 +2,8 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { NAVIGATION_MAXIMUM_DEPTH, withRefusalGuidance } from "../api.js";
+import { CHROME_OFFLINE_PAGE_LIMITATION, CHROME_REPORT_NAME_RULE, selectNameReportEligibility } from "../chrome-input.js";
+import { completeChromeReport } from "../chrome-report.js";
 import { loadSiteConfig } from "../config.js";
 import { SURFACE_DOCS_PRESENTATION, VERB_VALIDATE } from "../constants.js";
 import { freeFormRootPresentation } from "../content/free-form-sections.js";
@@ -18,7 +20,7 @@ import {
 import { initializeFixture } from "../fixture-init.js";
 import { evaluateLogoSurfaceChecks } from "../logo-surface-checks.js";
 import { loadThemeEngines } from "../theme-resolve.js";
-import { readFooterBrandInputs } from "../footer-brand-inputs.js";
+import { footerBrandInputsFromSettings } from "../footer-brand-inputs.js";
 import { buildFooterFitInput } from "../footer-fit.js";
 import { appearanceManifestEntry, footerManifestEntry } from "../footer-workspace.js";
 import { FORMS_DIRECTORY } from "../forms-contract.js";
@@ -41,6 +43,7 @@ import {
   readImageRecords,
 } from "../site-health-precheck.js";
 import { SETTINGS_GROUPS } from "../settings-catalog.js";
+import { withChromeWarnings } from "../theme-validation.js";
 import { checkWorkspace } from "../workspace-check.js";
 import {
   displayPagePath,
@@ -73,6 +76,7 @@ const SITE_CHECKS_NOT_PROVEN =
   + "applies, or siteChecks.checkedInEditor, which only the page editor evaluates (a cover, a description field, or a "
   + "description's length); images an integration places, or a video poster a push copies, which the stored report "
   + "after staging covers";
+const DOCS_CHROME_NOT_PROVEN = "navigation or footer-page-link contrast, because the settings-only workspace has no local navigation or page inventory";
 const FIXTURE_ROOT_KEYS = new Set(FIXTURE_ROOT_FIELDS);
 const FIXTURE_METADATA_KEYS = new Set(FIXTURE_METADATA_FIELDS);
 
@@ -687,10 +691,17 @@ function pageHints(checked, onProgress) {
  * The offline site checks (TR01085) over the planned pages: the rules the shared
  * catalogue lists for `validate`, with the rest named as checked by the site.
  */
-async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, workspaceDir, loadLogoEngines) {
-  const footerInput = checked.footer === undefined
+async function offlineSiteChecks(checked, manifest, mediaManifest, onProgress, imageCheck, options) {
+  const { reportChrome, nameReportEnabled, loadLogoEngines } = options;
+  const footer = checked.footer?.footerSettings;
+  const footerInput = footer === undefined
     ? undefined
-    : buildFooterFitInput(checked.footer.footerSettings, await readFooterBrandInputs(workspaceDir, checked.footer.footerSettings));
+    : buildFooterFitInput(footer, footerBrandInputsFromSettings(
+      checked.presentation?.header,
+      checked.presentation?.style,
+      mediaManifest.media,
+      footer,
+    ));
   const evaluated = evaluateOfflineSiteChecks({
     planned: checked.settingsOnly ? [] : checked.pages?.planned,
     footerInput,
@@ -704,10 +715,42 @@ async function offlineSiteChecks(checked, manifest, onProgress, imageCheck, work
   const logos = await evaluateLogoSurfaceChecks({
     styles: checked.presentation?.style,
     header: checked.presentation?.header,
-    footer: checked.footer?.footerSettings,
+    footer,
     onProgress,
   }, { loadEngines: loadLogoEngines });
-  return mergeOfflineSiteChecks(evaluated, logos);
+  const merged = mergeOfflineSiteChecks(evaluated, logos);
+  if (!reportChrome) {
+    merged.siteChecks.ranOffline = merged.siteChecks.ranOffline.filter((id) => id !== CHROME_REPORT_NAME_RULE);
+    return merged;
+  }
+
+  return mergeOfflineSiteChecks(merged, {
+    findings: { total: 0, errors: 0, warnings: 0, items: [] },
+    siteChecks: {
+      ...(checked.settingsOnly ? { ranOffline: [CHROME_REPORT_NAME_RULE] } : {}),
+      ...(nameReportEnabled === undefined ? { skipped: [CHROME_REPORT_NAME_RULE] } : {}),
+    },
+  });
+}
+
+async function completeValidationWarnings(checked, resources, options, onProgress) {
+  if (options.reportChrome && resources.valid) {
+    const appearance = checked.presentation;
+    const { warnings } = await completeChromeReport({
+      themes: appearance.themes,
+      appearance,
+      resources: {
+        manifest: resources.manifest,
+        mediaManifest: resources.mediaManifest,
+        footerSettings: checked.footer?.footerSettings,
+        navigation: checked.navigation,
+        settingsOnly: checked.settingsOnly,
+      },
+      nameReportEnabled: options.nameReportEnabled,
+    }, { loadFit: options.loadChromeFit });
+    appearance.themes = withChromeWarnings(appearance.themes, warnings);
+  }
+  reportThemeWarnings(checked.presentation, onProgress);
 }
 
 /**
@@ -752,12 +795,19 @@ function emptyBlock(pages) {
   };
 }
 
-export async function validateFixture(invocation = {}, { loadLogoEngines = loadThemeEngines } = {}) {
+export async function validateFixture(invocation = {}, {
+  loadLogoEngines = loadThemeEngines,
+  loadChromeFit,
+  reportChrome = true,
+} = {}) {
   // Refused before any file is read: a directory, or a fixture to export, has no site to read.
   if (invocation.fromSite === true && (invocation.init || invocation.fixturePath !== undefined)) {
     throw siteNeedsWorkspaceError(Boolean(invocation.init));
   }
-  if (invocation.init) return await initializeFixture(invocation, next => validateFixture(next, { loadLogoEngines }));
+  if (invocation.init) {
+    return await initializeFixture(invocation, next => validateFixture(next, { loadLogoEngines, reportChrome: false }));
+  }
+  const reporting = { loadLogoEngines, loadChromeFit, reportChrome };
   const onProgress = typeof invocation.onProgress === "function" ? invocation.onProgress : () => {};
   const cwd = invocation.cwd ?? process.cwd();
   if (invocation.fixturePath === undefined) {
@@ -769,7 +819,7 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
         "siteId",
       );
     }
-    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress, { config, loadLogoEngines });
+    return await validatePulledWorkspace(config.workspaceDir, config.siteId, invocation, onProgress, { config, ...reporting });
   }
   const fixtureRoot = await resolveFixtureRoot(cwd, invocation.fixturePath);
   if (
@@ -780,7 +830,7 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
     if (!isCanonicalUuid(siteId)) {
       fail("workspace.manifest_invalid", `${MANIFEST_FILE_NAME} does not record a canonical site id.`, "siteId");
     }
-    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress, { directoryArgument: true, loadLogoEngines });
+    return await validatePulledWorkspace(fixtureRoot, siteId, invocation, onProgress, { directoryArgument: true, ...reporting });
   }
 
   onProgress(`Reading ${FIXTURE_MANIFEST_FILE_NAME}.`);
@@ -819,7 +869,6 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
     onProgress,
   });
   problems.push(...checked.problems);
-  reportThemeWarnings(checked.presentation, onProgress);
 
   const manifestByFile = new Map(manifest.pages.map((entry) => [entry.file, entry]));
   const validatedPages = [];
@@ -837,6 +886,8 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
     // A forms folder that failed to read is already its own problem.
     if (checked.forms !== undefined) requireFixtureFormsBound(manifest.forms, checked.forms);
   });
+  const options = { ...reporting, nameReportEnabled: selectNameReportEligibility({ manifest }) };
+  await completeValidationWarnings(checked, { manifest, mediaManifest, valid: problems.length === 0 }, options, onProgress);
   refuseProblems(problems, "validate found problems in the fixture");
 
   const hints = pageHints(checked, onProgress);
@@ -844,7 +895,7 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
     ...autolinkWarnings(checked.pages?.planned, onProgress),
     ...descriptionWarnings(checked.pages?.planned, onProgress),
     ...authorWarnings(checked.pages?.planned, onProgress),
-    ...await offlineSiteChecks(checked, manifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT), fixtureRoot, loadLogoEngines),
+    ...await offlineSiteChecks(checked, manifest, mediaManifest, onProgress, imageCheckSkipped(IMAGE_CHECK_DIRECTORY_ARGUMENT), options),
   };
   onProgress(
     `Validated ${validatedPages.length} page(s), ${checked.navigation.items} navigation item(s), two themes, appearance, and footer without credentials or mutation.`,
@@ -886,7 +937,7 @@ export async function validateFixture(invocation = {}, { loadLogoEngines = loadT
  * runs before it sends anything, for every page and setting at once, against
  * what the manifests recorded at the pull — no credential and no request.
  */
-async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress, { config, directoryArgument = false, loadLogoEngines }) {
+async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgress, { config, directoryArgument = false, ...reporting }) {
   onProgress(`Reading ${MANIFEST_FILE_NAME}.`);
   const manifest = await readManifest(workspaceDir, siteId);
   const mediaManifest = await readMediaManifest(workspaceDir, siteId);
@@ -898,7 +949,8 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
     content: invocation.content,
     onProgress,
   });
-  reportThemeWarnings(checked.presentation, onProgress);
+  const options = { ...reporting, nameReportEnabled: selectNameReportEligibility({ manifest }) };
+  await completeValidationWarnings(checked, { manifest, mediaManifest, valid: checked.problems.length === 0 }, options, onProgress);
   refuseProblems(checked.problems, "validate found problems in the workspace");
 
   // Only --site reads the site; without it the image rule is skipped with the reason (TR01371).
@@ -915,7 +967,7 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
       ...descriptionWarnings(checked.pages.planned, onProgress),
       ...authorWarnings(checked.pages.planned, onProgress),
     }),
-    ...await offlineSiteChecks(checked, manifest, onProgress, site.imageCheck, workspaceDir, loadLogoEngines),
+    ...await offlineSiteChecks(checked, manifest, mediaManifest, onProgress, site.imageCheck, options),
   };
   // The Docs settings checks do not own the skipped image reason reported by --site.
   const docsReason = checked.settingsOnly && invocation.fromSite === true
@@ -961,6 +1013,7 @@ async function validatePulledWorkspace(workspaceDir, siteId, invocation, onProgr
     doesNotProve: [
       "credential authorization or live site ownership",
       "pages, revisions, or videos that changed on the site since the pull",
+      checked.settingsOnly ? DOCS_CHROME_NOT_PROVEN : CHROME_OFFLINE_PAGE_LIMITATION,
       "server normalization and pull round trips",
       SITE_CHECKS_NOT_PROVEN,
       "preview or published rendering",

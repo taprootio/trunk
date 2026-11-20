@@ -6,6 +6,8 @@ import {
   buildAppearanceScalarOperations,
   footerPresentationOverlay,
 } from "../appearance-contract.js";
+import { captureChromeResources, selectNameReportEligibility } from "../chrome-input.js";
+import { completeChromeReport } from "../chrome-report.js";
 import { REFUSAL_UNCLASSIFIED, VERB_THEME_PUSH } from "../constants.js";
 import { MISSING_SETTING_MESSAGE, SiteAuthoringError } from "../errors.js";
 import { projectFooterSettingsForWorkspace } from "../footer-contract.js";
@@ -29,7 +31,7 @@ import {
   SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
   SETTINGS_TYPE_TAPROOT_STYLES,
 } from "../settings-catalog.js";
-import { missingThemeFields, requireSurfaceContexts, validateAndLintThemePair } from "../theme-validation.js";
+import { missingThemeFields, requireSurfaceContexts, validateAndLintThemePair, withChromeWarnings } from "../theme-validation.js";
 import { ApiError } from "../transport.js";
 import {
   readWorkspaceJson,
@@ -62,7 +64,7 @@ function fail(code, message, field) {
   throw new SiteAuthoringError(code, message, { field });
 }
 
-export async function readSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId = siteId) {
+async function readBoundSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId = siteId) {
   const file = `${SETTINGS_DIRECTORY}/${SETTINGS_FILES[settingsType]}`;
   if (!await workspaceFileExists(workspaceDir, file)) {
     fail("theme.settings_missing", `Workspace file '${file}' is missing. Run 'taproot-site pull' first.`, file);
@@ -80,7 +82,11 @@ export async function readSettingsDocument(workspaceDir, siteId, settingsType, e
       file,
     );
   }
-  return document.settings;
+  return document;
+}
+
+export async function readSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId) {
+  return (await readBoundSettingsDocument(workspaceDir, siteId, settingsType, expectedEntityId)).settings;
 }
 
 /** The theme paths the styles document lacks, both schemes, in the order theme push reports them. */
@@ -119,7 +125,7 @@ export async function validateThemeWorkspace(
   expectedEntityIds,
   { deferContextValidation = false } = {},
 ) {
-  const [style, brand, header, publishing] = await Promise.all([
+  const [style, brand, header, publishingDocument] = await Promise.all([
     readSettingsDocument(
       workspaceDir,
       siteId,
@@ -138,13 +144,14 @@ export async function validateThemeWorkspace(
       SETTINGS_TYPE_SITE_HEADER,
       expectedEntityIds?.get(SETTINGS_TYPE_SITE_HEADER),
     ),
-    readSettingsDocument(
+    readBoundSettingsDocument(
       workspaceDir,
       siteId,
       SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES,
       expectedEntityIds?.get(SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES),
     ),
   ]);
+  const { settings: publishing } = publishingDocument;
   const documents = {
     [SETTINGS_TYPE_TAPROOT_STYLES]: style,
     [SETTINGS_TYPE_BRAND]: brand,
@@ -181,7 +188,7 @@ export async function validateThemeWorkspace(
     documents,
     knownImageIds,
   );
-  return { style, brand, header, publishing, themes, scalarOperations, footerPresentation };
+  return { style, brand, header, publishing, publishingDocument, themes, scalarOperations, footerPresentation };
 }
 
 /**
@@ -248,11 +255,7 @@ function translateSaveRefusal(error) {
  * file, and the site's copy projected the way `pull` writes it — so the paths
  * reported are paths in the files an author edits.
  */
-function ownedDocuments(validated, presentation) {
-  const projected = {};
-  for (const group of SETTINGS_GROUPS) {
-    projected[group.settingsType] = projectSettingsGroup(group, presentation);
-  }
+function ownedDocuments(validated, projected) {
   const fieldDefinitions = new Map(
     APPEARANCE_SCALAR_FIELDS.map(field => [`${field.settingsType}:${field.name}`, field]),
   );
@@ -295,8 +298,8 @@ function ownedDocuments(validated, presentation) {
 }
 
 /** The JSON paths at which each settings file differs from the site, remote first. */
-function describeDifferences(validated, presentation) {
-  return ownedDocuments(validated, presentation).map((document_) => {
+function describeDifferences(validated, projected) {
+  return ownedDocuments(validated, projected).map((document_) => {
     const differences = describeJsonDifferences(document_.remote, document_.local);
     return {
       file: document_.file,
@@ -363,10 +366,14 @@ export async function comparePresentation(client, siteId, validated, manifest) {
   const changeSetHash = computePresentationChangeSetHash(changeSet);
   const pending = readPendingPresentationSave(manifest);
   const replayable = pending !== undefined && pending.changeSetHash === changeSetHash;
-  const differences = describeDifferences(validated, current);
+  const projected = Object.fromEntries(SETTINGS_GROUPS.map((group) => [
+    group.settingsType, projectSettingsGroup(group, current),
+  ]));
+  const differences = describeDifferences(validated, projected);
   return {
     baseline,
     current,
+    currentFooter: projected[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES].footerSettings,
     stale,
     changeSet,
     changeSetHash,
@@ -378,32 +385,7 @@ export async function comparePresentation(client, siteId, validated, manifest) {
   };
 }
 
-export async function themePush(invocation) {
-  const session = await openSession(invocation);
-  const { client, config, siteId, onProgress } = session;
-  const dryRun = invocation.dryRun === true;
-  // One advisory line before this verb does any work, and only when the
-  // exchange said the platform is paused. It changes nothing else: the write
-  // still runs and its refusal still classifies as platform_paused (TR00692).
-  if (!dryRun) warnIfExternalWritesPaused(session, VERB_THEME_PUSH);
-  const appearanceContext = await readAppearanceWorkspaceContext(config.workspaceDir, siteId);
-  const validated = await validateThemeWorkspace(
-    config.workspaceDir,
-    siteId,
-    appearanceContext.knownImageIds,
-    undefined,
-    { deferContextValidation: true },
-  );
-  const { publishing, themes, scalarOperations } = validated;
-  // The save's response replaces the workspace footer document, so refuse
-  // while it still carries footer-content edits that footer push has not
-  // saved. Context-only differences are theme push's own to write.
-  requireFooterContentPushed(appearanceContext.footer, publishing.footerSettings);
-  const baseline = readPresentationBaseline(appearanceContext.manifest);
-  if (!dryRun && baseline === undefined) {
-    throw presentationPullRequired();
-  }
-  onProgress(`Validated the complete light/dark theme pair and ${scalarOperations.length} appearance settings.`);
+function reportPushWarnings(themes, onProgress) {
   for (const warning of themes.warnings) onProgress(`Espalier warning: ${warning}`);
   if (themes.warningsTruncated) {
     const hidden = themes.warningCount - themes.warnings.length;
@@ -411,77 +393,27 @@ export async function themePush(invocation) {
       `${hidden} more Espalier warning(s) not shown; resolve the ones above and run theme push --dry-run to see them.`,
     );
   }
-  const warnings = {
+  return {
     items: themes.warnings,
     count: themes.warningCount,
     ...(themes.warningsTruncated ? { truncated: true } : {}),
   };
+}
 
-  // The fresh read serves both modes: the dry run compares against it, and
-  // the push checks the complete post-save context state. Nothing before
-  // this point, and nothing in a dry run after it, writes to the site.
-  const comparison = await withRefusalGuidance(
-    onProgress,
-    "theme push",
-    async () => await comparePresentation(client, siteId, validated, appearanceContext.manifest),
-  );
-  const { current, stale, changeSet, changeSetHash, pending, replayable, replaying, differences, changed } = comparison;
+async function completePushWarnings(appearance, resources, evidence, onProgress, chromeDependencies) {
+  const { themes } = appearance;
+  const { warnings } = await completeChromeReport({
+    themes,
+    appearance,
+    resources,
+    nameReportEnabled: selectNameReportEligibility(evidence),
+  }, chromeDependencies);
+  return reportPushWarnings(withChromeWarnings(themes, warnings), onProgress);
+}
 
-  if (dryRun) {
-    for (const entry of differences) {
-      if (entry.paths.length === 0 && entry.truncated !== true) continue;
-      onProgress(`${entry.file} differs at: ${entry.paths.join(", ")}${entry.truncated ? ", and more" : ""}.`);
-    }
-    if (!changed) onProgress("The workspace's presentation matches the site; a push would change nothing.");
-    if (baseline === undefined) {
-      onProgress(
-        "The pull manifest records no presentation baseline; a push would refuse until the workspace is re-pulled.",
-      );
-    } else if (replaying) {
-      onProgress(
-        `The site's presentation revision moved since this workspace was pulled (${baseline.revision} → `
-          + `${current.revision}), and the manifest records a save of this same change set whose response was `
-          + "lost; a push would replay it under its original baseline rather than refuse.",
-      );
-    } else if (stale) {
-      onProgress(
-        `The site's presentation revision moved since this workspace was pulled (${baseline.revision} → `
-          + `${current.revision}); a push would be refused. Keep copies of the edited files, pull, and re-apply.`,
-      );
-    }
-    onProgress("Dry run: nothing was written.");
-    return successResult(VERB_THEME_PUSH, siteId, {
-      dryRun: true,
-      revision: {
-        ...(baseline === undefined ? {} : { baseline: baseline.revision }),
-        current: current.revision,
-        stale: baseline === undefined ? undefined : stale,
-      },
-      ...(pending === undefined ? {} : {
-        pendingSave: {
-          ...(pending.startedAt === undefined ? {} : { startedAt: pending.startedAt }),
-          sameChangeSet: replayable,
-        },
-      }),
-      changed,
-      differences,
-      warnings,
-    });
-  }
-
-  if (stale && !replaying) {
-    // Refused here, before any request that could write, with the same
-    // guidance the server's fence would give — and with the paths that
-    // differ, which the server cannot know.
-    if (pending !== undefined) {
-      onProgress(
-        "The manifest records an earlier save of a different change set whose response was lost; the site may hold "
-          + "it. The pull that refreshes the baseline shows what the site holds now.",
-      );
-    }
-    throw presentationMovedRefusal(comparison);
-  }
-
+async function saveComparedPresentation(session, comparison) {
+  const { client, config, siteId, onProgress } = session;
+  const { baseline, changeSet, changeSetHash, pending, replaying } = comparison;
   const expectedRevision = replaying ? pending.expectedRevision : baseline.revision;
   if (replaying) {
     onProgress(
@@ -535,8 +467,10 @@ export async function themePush(invocation) {
     }
     throw translateSaveRefusal(error);
   }
+  return saved;
+}
 
-  const { presentation, applied } = saved;
+async function adoptSavedFooter(workspaceDir, siteId, presentation, publishing) {
   const savedFooter = presentation.sitePublishingPreferences?.footerSettings;
   if (!isPlainObject(savedFooter)) {
     throw new SiteAuthoringError(
@@ -552,7 +486,7 @@ export async function themePush(invocation) {
   // than one that overwrites the save.
   const projectedFooter = projectFooterSettingsForWorkspace(savedFooter);
   await writeWorkspaceJson(
-    config.workspaceDir,
+    workspaceDir,
     `${SETTINGS_DIRECTORY}/${SETTINGS_FILES[SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES]}`,
     {
       entityId: siteId,
@@ -560,9 +494,136 @@ export async function themePush(invocation) {
       settings: { ...publishing, footerSettings: projectedFooter },
     },
   );
-  await advanceFooterManifest(config.workspaceDir, siteId, projectedFooter, undefined, {
+  await advanceFooterManifest(workspaceDir, siteId, projectedFooter, undefined, {
     presentationRevision: presentation.revision,
   });
+  return projectedFooter;
+}
+
+export async function themePush(invocation, chromeDependencies) {
+  const session = await openSession(invocation);
+  const { client, config, siteId, onProgress } = session;
+  const dryRun = invocation.dryRun === true;
+  // One advisory line before this verb does any work, and only when the
+  // exchange said the platform is paused. It changes nothing else: the write
+  // still runs and its refusal still classifies as platform_paused (TR00692).
+  if (!dryRun) warnIfExternalWritesPaused(session, VERB_THEME_PUSH);
+  const appearanceContext = await readAppearanceWorkspaceContext(config.workspaceDir, siteId);
+  const validated = await validateThemeWorkspace(
+    config.workspaceDir,
+    siteId,
+    appearanceContext.knownImageIds,
+    undefined,
+    { deferContextValidation: true },
+  );
+  const { publishing, scalarOperations } = validated;
+  // The save's response replaces the workspace footer document, so refuse
+  // while it still carries footer-content edits that footer push has not
+  // saved. Context-only differences are theme push's own to write.
+  requireFooterContentPushed(appearanceContext.footer, publishing.footerSettings);
+  const baseline = readPresentationBaseline(appearanceContext.manifest);
+  if (!dryRun && baseline === undefined) {
+    throw presentationPullRequired();
+  }
+  onProgress(`Validated the complete light/dark theme pair and ${scalarOperations.length} appearance settings.`);
+  let comparison;
+  let resources;
+  let saved;
+  try {
+    // Both modes check the complete proposed context state against the site.
+    comparison = await withRefusalGuidance(
+      onProgress,
+      "theme push",
+      async () => await comparePresentation(client, siteId, validated, appearanceContext.manifest),
+    );
+    if (!dryRun && comparison.stale && !comparison.replaying) {
+      // Report the paths that differ before sending a request that could write.
+      if (comparison.pending !== undefined) {
+        onProgress(
+          "The manifest records an earlier save of a different change set whose response was lost; the site may hold "
+            + "it. The pull that refreshes the baseline shows what the site holds now.",
+        );
+      }
+      throw presentationMovedRefusal(comparison);
+    }
+
+    // Keep the optional snapshot on this side of the save. Report completion
+    // never reads settings or manifests after the response has arrived.
+    resources = await captureChromeResources({ ...appearanceContext, siteId, workspaceDir: config.workspaceDir });
+    if (!dryRun) saved = await saveComparedPresentation(session, comparison);
+  } catch (error) {
+    reportPushWarnings(validated.themes, onProgress);
+    throw error;
+  }
+  const { current, stale, pending, replayable, replaying, differences, changed } = comparison;
+  const { manifest } = appearanceContext;
+
+  if (dryRun) {
+    // The save overlays the proposed context and variant on the site's
+    // footer, and leaves publishing preferences and asset delivery in place.
+    const warnings = await completePushWarnings(
+      validated,
+      { ...resources, footerSettings: comparison.currentFooter, presentation: current },
+      { current, manifest },
+      onProgress,
+      chromeDependencies,
+    );
+    for (const entry of differences) {
+      if (entry.paths.length === 0 && entry.truncated !== true) continue;
+      onProgress(`${entry.file} differs at: ${entry.paths.join(", ")}${entry.truncated ? ", and more" : ""}.`);
+    }
+    if (!changed) onProgress("The workspace's presentation matches the site; a push would change nothing.");
+    if (baseline === undefined) {
+      onProgress(
+        "The pull manifest records no presentation baseline; a push would refuse until the workspace is re-pulled.",
+      );
+    } else if (replaying) {
+      onProgress(
+        `The site's presentation revision moved since this workspace was pulled (${baseline.revision} → `
+          + `${current.revision}), and the manifest records a save of this same change set whose response was `
+          + "lost; a push would replay it under its original baseline rather than refuse.",
+      );
+    } else if (stale) {
+      onProgress(
+        `The site's presentation revision moved since this workspace was pulled (${baseline.revision} → `
+          + `${current.revision}); a push would be refused. Keep copies of the edited files, pull, and re-apply.`,
+      );
+    }
+    onProgress("Dry run: nothing was written.");
+    return successResult(VERB_THEME_PUSH, siteId, {
+      dryRun: true,
+      revision: {
+        ...(baseline === undefined ? {} : { baseline: baseline.revision }),
+        current: current.revision,
+        stale: baseline === undefined ? undefined : stale,
+      },
+      ...(pending === undefined ? {} : {
+        pendingSave: {
+          ...(pending.startedAt === undefined ? {} : { startedAt: pending.startedAt }),
+          sameChangeSet: replayable,
+        },
+      }),
+      changed,
+      differences,
+      warnings,
+    });
+  }
+
+  const { presentation, applied } = saved;
+  const projectedFooter = await adoptSavedFooter(config.workspaceDir, siteId, presentation, publishing).catch((error) => {
+    reportPushWarnings(validated.themes, onProgress);
+    throw error;
+  });
+  const warnings = await completePushWarnings(
+    {
+      ...validated,
+      footerPresentation: { context: projectedFooter.context, logoVariant: projectedFooter.logoVariant },
+    },
+    { ...resources, footerSettings: projectedFooter, presentation },
+    { saved, current, manifest },
+    onProgress,
+    chromeDependencies,
+  );
   onProgress(
     applied
       ? "Saved the complete presentation in one transaction: surface contexts and logo choices, appearance settings, and both "

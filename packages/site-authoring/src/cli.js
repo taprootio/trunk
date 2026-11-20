@@ -1195,7 +1195,9 @@ function verbHelp(verb) {
   const boundary = verb.name === VERB_THEME_RESOLVE
     ? "By default this verb reads the pulled workspace and uses no credential, makes no network request, and writes "
       + `nothing to the workspace or the site (GITHUB_OUTPUT, when set, receives the JSON result). With --site it reads the site's presentation with the site-scoped credential from ${PUBLISH_KEY_ENVIRONMENT_VARIABLE} `
-      + `or the sign-in '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores.${upgradeGate}`
+      + `or the sign-in '${CLI_BINARY_NAME} ${VERB_LOGIN}' stores. Header and footer JSON rows are `
+      + "[identityIndex, ratio, required]. Resolve identityIndex through chromeCatalog.pairs and its elements, colors, "
+      + `states and kinds dictionaries.${upgradeGate}`
     : verb.name === VERB_VALIDATE
     ? "Validation uses no credential, network or write unless --site is given; it reads the configuration only to find "
       + "the workspace when no directory is given. With --init it reads the pulled workspace or selected configuration "

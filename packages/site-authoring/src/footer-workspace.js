@@ -54,15 +54,22 @@ export async function readFooterWorkspaceContext(workspaceDir, siteId) {
   const manifest = await readManifest(workspaceDir, siteId);
   const footer = requireFooterMetadata(manifest);
   const mediaManifest = await readMediaManifest(workspaceDir, siteId);
-  const knownPageResourceIds = new Set(
-    manifest.pages.map((page) => page?.resourceId).filter((id) => isCanonicalUuid(id)),
-  );
-  const appearance = requireAppearanceMetadata(manifest, { required: false, code: "footer.pull_required" });
-  const knownImageIds = new Set([...footer.imageIds, ...(appearance?.imageIds ?? [])]);
-  for (const value of Object.values(mediaManifest.media)) {
-    if (isCanonicalUuid(value?.imageId)) knownImageIds.add(value.imageId);
-  }
-  return { manifest, footer, knownPageResourceIds, knownImageIds };
+  requireAppearanceMetadata(manifest, { required: false, code: "footer.pull_required" });
+  return { manifest, mediaManifest, footer, ...appearanceResourceIds(manifest, mediaManifest) };
+}
+
+/** Collect the identities present in the available, site-bound inventory. */
+export function appearanceResourceIds(manifest, mediaManifest) {
+  const knownPageResourceIds = manifest === undefined
+    ? undefined
+    : new Set(manifest.pages.map((page) => page?.resourceId).filter(isCanonicalUuid));
+  const imageIds = [manifest?.footer?.imageIds, manifest?.appearance?.imageIds]
+    .flatMap((ids) => Array.isArray(ids) ? ids : []);
+  const knownImageIds = new Set([
+    ...imageIds,
+    ...Object.values(mediaManifest?.media ?? {}).map((item) => item?.imageId),
+  ].filter(isCanonicalUuid));
+  return { knownPageResourceIds, knownImageIds };
 }
 
 export async function readAppearanceWorkspaceContext(workspaceDir, siteId) {

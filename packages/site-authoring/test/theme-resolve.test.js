@@ -5,10 +5,17 @@ import path from "node:path";
 import test from "node:test";
 import { encodeTheme, SEMANTIC_COLOR_NAMES, TOKEN_PAIRINGS } from "@taprootio/espalier/shared/theme";
 
+import { CAPABILITY_CONTENT, CAPABILITY_DESIGN } from "../src/capabilities.js";
+import { decodeChromePair } from "../src/chrome-output.js";
 import { runCli, VERB_CAPABILITIES, VERB_SURFACES } from "../src/cli.js";
-import { LIMITS } from "../src/constants.js";
+import { LIMITS, SURFACE_DOCS_PRESENTATION, SURFACE_STANDARD } from "../src/constants.js";
+import { footerImageIds } from "../src/footer-contract.js";
+import { withinByteBudget } from "../src/problems.js";
+import { formatThemeResolve, loadThemeEngines, resolveThemePair } from "../src/theme-resolve.js";
+import { themeResolve } from "../src/verbs/theme-resolve.js";
 
-const EXAMPLE_STYLES = new URL("../examples/riverbend-wellness/settings/taproot-styles.json", import.meta.url);
+const EXAMPLE = new URL("../examples/riverbend-wellness/", import.meta.url);
+const EXAMPLE_STYLES = new URL("settings/taproot-styles.json", EXAMPLE);
 const TOKEN = "tr_live_site_key_that_must_never_be_logged";
 const HEX = /^#[0-9a-f]{6}$/u;
 
@@ -33,7 +40,7 @@ async function workspace(testContext, edit = () => {}) {
 }
 
 /** Runs the real CLI with no credential and a network that fails the test if it is touched. */
-async function run(site, arguments_, { environment = {}, fetch } = {}) {
+async function run(site, arguments_, { environment = {}, fetch, handlers } = {}) {
   const stdout = sink();
   const stderr = sink();
   const calls = [];
@@ -43,6 +50,7 @@ async function run(site, arguments_, { environment = {}, fetch } = {}) {
     environment: { HOME: site.root, XDG_CONFIG_HOME: path.join(site.root, "config"), ...environment },
     stdout,
     stderr,
+    ...(handlers === undefined ? {} : { handlers }),
     fetch: async (url, init) => {
       calls.push(String(url));
       if (fetch === undefined) throw new Error(`unexpected network request to ${url}`);
@@ -55,6 +63,43 @@ async function run(site, arguments_, { environment = {}, fetch } = {}) {
 async function resolveJson(site, extra = [], options) {
   const result = await run(site, ["theme", "resolve", "--json", ...extra], options);
   return { ...result, json: JSON.parse(result.stdout) };
+}
+
+async function chromeWorkspace(site, { header = {}, publishing = {}, footer = {} } = {}) {
+  const [headerDocument, publishingDocument, manifest, media, navigation] = await Promise.all([
+    "settings/site-header.json",
+    "settings/site-publishing-preferences.json",
+    "manifest.fixture.json",
+    ".taproot-site-media.json",
+    "nav.json",
+  ].map(async (file) => JSON.parse(await readFile(new URL(file, EXAMPLE), "utf8"))));
+  headerDocument.entityId = site.siteId;
+  publishingDocument.entityId = site.siteId;
+  for (const artifact of [manifest, media, navigation]) artifact.siteId = site.siteId;
+  Object.assign(headerDocument.settings, header);
+  Object.assign(publishingDocument.settings, publishing);
+  Object.assign(publishingDocument.settings.footerSettings, footer);
+  manifest.footer = { imageIds: [...footerImageIds(publishingDocument.settings.footerSettings)] };
+  manifest.pages = manifest.pages.map((page) => ({ ...page, status: "PAGE_STATUS_PUBLISHED" }));
+  for (const [file, document] of [
+    ["settings/site-header.json", headerDocument],
+    ["settings/site-publishing-preferences.json", publishingDocument],
+    [".taproot-site-manifest.json", manifest],
+    [".taproot-site-media.json", media],
+    ["nav.json", navigation],
+  ]) {
+    await writeFile(path.join(site.root, "site", file), JSON.stringify(document));
+  }
+  return {
+    headerSettings: headerDocument.settings,
+    sitePublishingPreferences: publishingDocument.settings,
+    navItems: navigation.navItems,
+  };
+}
+
+function chromePairs(result, scheme, role) {
+  return result.chrome[scheme]?.find((surface) => surface.role === role)?.pairs.map((row) =>
+    decodeChromePair(result.chromeCatalog, row)) ?? [];
 }
 
 function surfaceFor(json, scheme, context = null) {
@@ -157,6 +202,33 @@ test("flags pairs under WCAG AA with stable codes and the field to edit, and sti
   const table = await run(site, ["theme", "resolve", "--scheme", "light", "--context", "raised"]);
   assert.match(table.stdout, /text\s+background\s+4\.48:1\s+4\.5:1\s+Lc [\d.]+\/75\s+BELOW AA/u);
   assert.match(table.stdout, /pairs are below WCAG AA \(flags: theme\.contrast_text_below_aa\)/u);
+});
+
+test("legacy WCAG ratios preserve clamping, display precision, and AA decisions for gamut-edge colors", async (context) => {
+  const site = await workspace(context, ({ lightTheme }) => {
+    lightTheme.anchors.saturated = "oklch(0.5 0.25 35)";
+    lightTheme.tones.edge = 0.5;
+    lightTheme.semanticMappings.background = { source: "anchor:saturated", lightness: "tone:edge" };
+    lightTheme.explicitMappingTokens = [...lightTheme.explicitMappingTokens, "background"];
+  });
+  const { exitCode, json } = await resolveJson(site, ["--scheme", "light"]);
+  assert.equal(exitCode, 0);
+  const { color } = await loadThemeEngines();
+  const surface = surfaceFor(json, "light");
+  let gamutEdge = false;
+  const luminance = new Map(surface.tokens.map(({ token, value }) => {
+    const { r, g, b } = color.oklchToSRGB(color.gamutMapToSRGB(color.parseCssColor(value)));
+    gamutEdge ||= [r, g, b].some((channel) => channel < 0 || channel > 1);
+    const linear = (channel) => color.gammaToLinear(Math.max(0, Math.min(1, channel)));
+    return [token, 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)];
+  }));
+  assert.equal(gamutEdge, true, "the fixture must exercise the legacy clamp");
+  for (const { token, background, required, ratio, aa } of surface.pairs) {
+    const [lighter, darker] = [luminance.get(token), luminance.get(background)].sort((a, b) => b - a);
+    const raw = (lighter + 0.05) / (darker + 0.05);
+    assert.equal(ratio, Math.floor(raw * 100 + 1e-9) / 100, token);
+    assert.equal(aa, raw >= required, token);
+  }
 });
 
 test("narrowing never skips validation of the whole pair", async (context) => {
@@ -292,6 +364,281 @@ test("--site reads the site's presentation with a credential and compiles the sa
   assert.equal(unsigned.json.ok, false);
   assert.deepEqual(unsigned.calls, []);
 });
+
+test("indexed chrome shares identities across schemes, preserves provenance and decodes the text report", async (context) => {
+  const site = await workspace(context, ({ lightTheme, darkTheme }) => {
+    for (const theme of [lightTheme, darkTheme]) {
+      theme.contexts.charcoal = {};
+      theme.contexts.header = {};
+    }
+  });
+  await chromeWorkspace(site, {
+    header: { context: "charcoal", lightBrandColor: "#0000" },
+    footer: { context: "charcoal" },
+    publishing: { allowSearch: true },
+  });
+  const { json, exitCode, calls } = await resolveJson(site);
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, []);
+  assert.equal(json.chromeNavigationUnavailable, undefined);
+  assert.ok(json.contexts.items.includes("header"));
+  assert.deepEqual(json.chrome.light.map(({ role, context }) => [role, context]), [
+    ["header", "charcoal"], ["footer", "charcoal"],
+  ]);
+  assert.ok(json.schemes.every((scheme) => !Object.hasOwn(scheme, "chrome")));
+  const brand = chromePairs(json, "light", "header").find(({ element, state }) => element === "brand-text" && state === "rest");
+  assert.equal(brand.foreground, "brand-color");
+  assert.equal(brand.ratio, 1);
+  assert.equal(brand.required, 4.5);
+  assert.ok(chromePairs(json, "light", "header").some(({ element }) => element === "search-button"));
+  const brandRow = json.chrome.light[0].pairs.find((row) => decodeChromePair(json.chromeCatalog, row).element === "brand-text");
+  assert.ok(json.chrome.dark[0].pairs.some(([identity]) => identity === brandRow[0]));
+  assert.ok(json.flags.items.some((flag) =>
+    flag.field === "site-header.lightBrandColor" && flag.element === "brand-text" && flag.ratio === 1));
+
+  const selected = await resolveJson(site, ["--scheme", "light", "--context", "charcoal"]);
+  assert.deepEqual(Object.keys(selected.json.chrome), ["light"]);
+  assert.equal(selected.json.contrast.pairs, Object.keys(TOKEN_PAIRINGS).length
+    + selected.json.chrome.light.reduce((count, card) => count + card.pairs.length, 0));
+  assert.equal(selected.json.flags.count, selected.json.contrast.belowAa);
+  assert.ok(selected.json.flags.items.every(({ context, scheme }) => scheme === "light" && context === "charcoal"));
+  const noChrome = await resolveJson(site, ["--context", "header"]);
+  assert.deepEqual(noChrome.json.chrome, { light: [], dark: [] });
+  assert.equal(noChrome.json.contrast.pairs, 2 * Object.keys(TOKEN_PAIRINGS).length);
+  assert.deepEqual(noChrome.json.chromeCatalog.pairs, []);
+
+  const human = await run(site, ["theme", "resolve", "--scheme", "light", "--context", "charcoal"]);
+  assert.match(human.stdout, /light · header · context charcoal/u);
+  assert.match(human.stdout, /brand-text\/rest\s+brand-color\s+layer2\s+1\.00:1\s+4\.50:1\s+BELOW AA/u);
+  assert.match(formatThemeResolve({ ...selected.json, schemes: [] }), /brand-text\/rest.+BELOW AA/u);
+});
+
+test("huge selected names keep every indexed pair and the 24 KiB allowance inside the Actions bound", async (context) => {
+  const longName = "z".repeat(20_000);
+  const site = await workspace(context, ({ lightTheme, darkTheme }) => {
+    lightTheme.tones = { ...lightTheme.tones, "mid-band": 0.55 };
+    lightTheme.semanticMappings.background = { source: "primary", lightness: "tone:mid-band" };
+    lightTheme.explicitMappingTokens = [...lightTheme.explicitMappingTokens, "background"];
+    for (const theme of [lightTheme, darkTheme]) {
+      theme.contexts = { [longName]: {} };
+      for (let index = 0; index < 127; index += 1) {
+        theme.contexts[`z${String(index).padStart(3, "0")}-${"x".repeat(95)}`] = { canvas: "primary" };
+      }
+    }
+  });
+  await chromeWorkspace(site, {
+    header: { context: longName, lightBrandColor: "#0000", headerPosition: "fixed", headerHeightMultiplier: "3.0" },
+    footer: { context: longName },
+    publishing: { allowSearch: true },
+  });
+  const output = path.join(site.root, "outputs");
+  await writeFile(output, "");
+  const { exitCode, stdout, json } = await resolveJson(site, [], { environment: { GITHUB_OUTPUT: output } });
+  assert.equal(exitCode, 0);
+  assert.ok(Buffer.byteLength(stdout.trim(), "utf8") <= LIMITS.githubOutputBytes);
+  assert.ok((await readFile(output, "utf8")).includes(stdout.trim()));
+  assert.deepEqual(Object.keys(json.chrome), ["light", "dark"]);
+  for (const entries of Object.values(json.chrome)) {
+    assert.deepEqual(entries.map(({ role }) => role), ["header", "footer"]);
+    for (const entry of entries) {
+      assert.deepEqual(
+        [entry.context, entry.contextTruncated, entry.contextLength],
+        [longName.slice(0, 128), true, longName.length],
+      );
+      assert.ok(entry.pairs.length > 0);
+      assert.ok(entry.pairs.every((row) => decodeChromePair(json.chromeCatalog, row).element.length > 0));
+    }
+  }
+  const legacy = await resolveThemePair(site.settings.lightTheme, site.settings.darkTheme);
+  const allSurfaces = legacy.schemes.flatMap(({ scheme, surfaces }) => surfaces.map((surface) => ({ scheme, surface })));
+  const legacyFloor = withinByteBudget(allSurfaces, 24 * 1024);
+  const shown = json.schemes.flatMap(({ scheme, surfaces }) => surfaces.map((surface) => ({ scheme, surface })));
+  assert.ok(legacyFloor.length > 1);
+  assert.deepEqual(shown.slice(0, legacyFloor.length), legacyFloor);
+  const chromeCount = Object.values(json.chrome).flat().reduce((total, entry) => total + entry.pairs.length, 0);
+  const retainedFlags = Object.entries(json.chrome).flatMap(([scheme, surfaces]) => surfaces.flatMap(({ role }) =>
+    chromePairs(json, scheme, role))).filter(({ ratio, required }) => ratio < required);
+  assert.equal(json.contrast.pairs, legacy.contrast.pairs + chromeCount);
+  assert.equal(json.contrast.belowAa, legacy.contrast.belowAa + retainedFlags.length);
+  assert.equal(json.contexts.truncated, true);
+  assert.equal(json.flags.truncated, true);
+  assert.equal(json.omittedSurfaces.truncated, true);
+});
+
+test("resolves the released disclosure, hover bar, and context-specific button shadow", async (context) => {
+  const site = await workspace(context, ({ lightTheme, darkTheme }) => {
+    lightTheme.contexts["shadow-test"] = {};
+    darkTheme.contexts["shadow-test"] = { lightness: { raised2: 0.28, shadow: 0.76 } };
+  });
+  const { navItems } = await chromeWorkspace(site, {
+    header: { context: "shadow-test", showThemeToggle: false },
+    publishing: { allowSearch: false },
+  });
+  const draft = navItems[0];
+  const button = navItems.find(({ appearance }) => appearance === "NAV_ITEM_APPEARANCE_BUTTON");
+  const manifestPath = path.join(site.root, "site", ".taproot-site-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.pages.find(({ resourceId }) => resourceId === draft.resourceId).status = "PAGE_STATUS_DRAFT";
+  const group = {
+    id: "a0000000-0000-4000-8000-0000000000e0", kind: "NAV_ITEM_KIND_GROUP_HEADER", title: "More",
+    children: [{
+      id: "a0000000-0000-4000-8000-0000000000e1", kind: "NAV_ITEM_KIND_EXTERNAL_URL",
+      title: "Guide", externalUrl: "https://example.test/guide",
+    }],
+  };
+  await Promise.all([
+    writeFile(manifestPath, JSON.stringify(manifest)),
+    writeFile(path.join(site.root, "site", "nav.json"), JSON.stringify({ siteId: site.siteId, navItems: [draft, button, group] })),
+  ]);
+
+  const themed = await resolveJson(site, ["--scheme", "dark", "--context", "shadow-test"]);
+  assert.equal(themed.exitCode, 0, themed.stderr);
+  const painted = chromePairs(themed.json, "dark", "header");
+  const restDisclosure = painted.find(({ element, state }) => element === "nav-group-disclosure" && state === "rest");
+  assert.deepEqual([restDisclosure.foreground, restDisclosure.background, restDisclosure.required], ["text", "layer2", 3]);
+  assert.ok(restDisclosure.ratio > 3);
+  const hoverBar = painted.find(({ element }) => element === "nav-hover-indicator");
+  assert.deepEqual(hoverBar, {
+    element: "nav-hover-indicator", foreground: "headingsHover", background: "layer2", state: "hover", kind: "graphic",
+    ratio: 12.45, required: 3,
+  });
+  assert.ok(painted.some(({ element }) => element.startsWith("burger")));
+  assert.ok(painted.every(({ element }) => !element.startsWith("search") && !element.startsWith("theme-toggle")));
+  const shadow = (pairs) => pairs.find(({ element, kind, state }) => element === "nav-button" && kind === "ring" && state === "focus");
+  assert.deepEqual(shadow(painted), {
+    element: "nav-button", foreground: "button-focus-shadow", background: "layer2", state: "focus", kind: "ring",
+    ratio: 2.44, required: 3,
+  });
+  const headerPath = path.join(site.root, "site", "settings", "site-header.json");
+  const header = JSON.parse(await readFile(headerPath, "utf8"));
+  header.settings.context = "";
+  await writeFile(headerPath, JSON.stringify(header));
+
+  const root = await resolveJson(site, ["--scheme", "dark"]);
+  assert.equal(root.exitCode, 0, root.stderr);
+  assert.equal(shadow(chromePairs(root.json, "dark", "header")).ratio, 3.39);
+});
+
+test("measures root chrome and applies the text threshold to visible footer group headings", async (context) => {
+  const site = await workspace(context, ({ lightTheme }) => {
+    lightTheme.tones["group-heading"] = 0.552;
+    lightTheme.semanticMappings.headings = { source: "anchor:root", lightness: "tone:group-heading" };
+    lightTheme.explicitMappingTokens.push("headings");
+  });
+  await chromeWorkspace(site, { footer: { asideHeadingContent: { paragraphs: [] } } });
+  const enabled = await resolveJson(site);
+  assert.equal(enabled.exitCode, 0, enabled.stderr);
+  for (const cards of Object.values(enabled.json.chrome)) {
+    assert.deepEqual(cards.map(({ role, context: name }) => [role, name]), [["header", null], ["footer", null]]);
+  }
+  const heading = chromePairs(enabled.json, "light", "footer").find(({ element }) => element === "footer-heading");
+  assert.deepEqual(heading, {
+    element: "footer-heading", foreground: "headings", background: "layer2", state: "rest", kind: "text", ratio: 3.5,
+    required: 4.5,
+  });
+  assert.ok(enabled.json.flags.items.some(({ element, role, scheme, required }) =>
+    element === heading.element && role === "footer" && scheme === "light" && required === 4.5));
+
+  await chromeWorkspace(site, { header: { showBrandText: false }, footer: { enabled: false, context: "raised" } });
+  const disabled = await resolveJson(site);
+  assert.equal(disabled.exitCode, 0, disabled.stderr);
+  for (const scheme of ["light", "dark"]) {
+    assert.deepEqual(disabled.json.chrome[scheme].map(({ role }) => role), ["header"]);
+    assert.ok(chromePairs(disabled.json, scheme, "header").every(({ element }) => element !== "brand-text"));
+  }
+});
+
+test("resolve keeps the base report when optional appearance or the chrome fit is unavailable", async (context) => {
+  const site = await workspace(context);
+  await chromeWorkspace(site, { header: { showBrandText: "invalid" }, publishing: { allowSearch: true } });
+  const optional = await resolveJson(site);
+  assert.equal(optional.exitCode, 0);
+  assert.deepEqual(optional.json.chrome.light.map(({ role }) => role), ["footer"]);
+  const handlers = {
+    "theme resolve": (invocation) => themeResolve(invocation, { loadFit: async () => { throw new Error("unavailable"); } }),
+  };
+  const unavailable = await resolveJson(site, ["--scheme", "dark"], { handlers });
+  assert.equal(unavailable.exitCode, 0);
+  assert.equal(unavailable.json.chromeUnavailable, true);
+  assert.deepEqual(unavailable.json.chrome, { dark: [] });
+  assert.match(formatThemeResolve(unavailable.json), /theme report was unavailable/u);
+  assert.match(formatThemeResolve(unavailable.json), /measured pairs/u);
+});
+
+const LIVE_NAVIGATION_REVISION = "e".repeat(64);
+const liveCases = [
+  { name: "current content capability", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_CONTENT], get: true, nav: true },
+  { name: "design-only capability", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_DESIGN] },
+  { name: "Docs surface", surface: SURFACE_DOCS_PRESENTATION, capabilities: [CAPABILITY_CONTENT] },
+  { name: "unknown direct-key grant", surface: SURFACE_STANDARD },
+  { name: "failed optional read", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_CONTENT], get: true, failure: true },
+  { name: "malformed list", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_CONTENT], get: true, answer: { navItems: {} } },
+  { name: "missing revision", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_CONTENT], get: true, answer: { revision: "" } },
+  { name: "empty ProtoJSON tree", surface: SURFACE_STANDARD, capabilities: [CAPABILITY_CONTENT], get: true, empty: true },
+];
+for (const scenario of liveCases) {
+  test(`site chrome navigation uses ${scenario.name} without widening the grant`, async (context) => {
+    const site = await workspace(context, ({ lightTheme }) => {
+      lightTheme.tones["ember-deep"] = 0.6;
+    });
+    const { headerSettings, sitePublishingPreferences, navItems } = await chromeWorkspace(site);
+    await rm(path.join(site.root, "site"), { recursive: true });
+    await rm(path.join(site.root, "taproot-site.json"));
+    const presentation = {
+      siteId: site.siteId,
+      revision: "c".repeat(64),
+      styleSettings: {
+        ...site.settings,
+        lightTheme: encodeTheme(site.settings.lightTheme),
+        darkTheme: encodeTheme(site.settings.darkTheme),
+      },
+      headerSettings,
+      sitePublishingPreferences,
+    };
+    const reads = [];
+    const resolvedSession = {
+      siteId: site.siteId,
+      surface: scenario.surface,
+      ...(scenario.capabilities === undefined ? {} : { exchanged: { capabilities: scenario.capabilities } }),
+      onProgress: () => {},
+      client: {
+        async request(resource) {
+          reads.push(resource);
+          if (resource.endsWith("/presentation")) return presentation;
+          if (scenario.failure) throw new Error("optional read failed");
+          return {
+            revision: LIVE_NAVIGATION_REVISION,
+            ...(scenario.empty ? {} : { navItems }),
+            ...scenario.answer,
+          };
+        },
+      },
+    };
+    const handlers = { "theme resolve": (invocation) => {
+      assert.deepEqual(invocation.capabilities, [CAPABILITY_DESIGN]);
+      return themeResolve({ ...invocation, resolvedSession });
+    } };
+    const result = await resolveJson(site, ["--site"], { handlers });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.json.source, "site");
+    assert.deepEqual(reads, [
+      `v1/sites/${site.siteId}/presentation`,
+      ...(scenario.get ? [`v1/sites/${site.siteId}/navigation?environment=SITE_ENVIRONMENT_DRAFT`] : []),
+    ]);
+    assert.equal(result.json.chromeNavigationUnavailable, scenario.nav || scenario.empty ? undefined : true);
+    const button = chromePairs(result.json, "light", "header").filter(({ element }) => element === "nav-button");
+    assert.equal(button.length > 0, scenario.nav === true);
+    if (scenario.nav) {
+      const rest = button.find(({ state }) => state === "rest");
+      const hover = button.find(({ state }) => state === "hover");
+      assert.ok(rest.ratio >= rest.required);
+      assert.ok(hover.ratio < hover.required);
+      assert.ok(result.json.flags.items.some(({ element, state, scheme }) =>
+        element === "nav-button" && state === "hover" && scheme === "light"));
+    }
+    if (!scenario.nav && !scenario.empty) assert.match(formatThemeResolve(result.json), /Navigation contrast was not checked/u);
+  });
+}
 
 test("the verb asks for what theme push reads and nothing else, and is listed in the help", async () => {
   assert.deepEqual(VERB_CAPABILITIES["theme resolve"], VERB_CAPABILITIES["theme push"]);

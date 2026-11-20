@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { CHROME_REPORT_NAME_RULE } from "../src/chrome-input.js";
 import { runCli } from "../src/cli.js";
 import { shippedFixtureDirectory } from "../src/fixture-contract.js";
 import { validateFixture } from "../src/verbs/validate.js";
@@ -69,6 +70,10 @@ async function invoke(cwd, args) {
 
 test("init exports a self-contained version-7 fixture, remaps identities and origins, and preserves its source", async (t) => {
   const { source, manifest } = await sourceWorkspace(t);
+  const headerFile = path.join(source, "settings", "site-header.json");
+  const header = JSON.parse(await readFile(headerFile, "utf8"));
+  Object.assign(header.settings, { lightBrandColor: "#0000", brandText: "Taproot", showBrandText: true });
+  await writeFile(headerFile, JSON.stringify(header));
   const before = await readFile(path.join(source, ".taproot-site-manifest.json"), "utf8");
   const initialized = await invoke(source, ["validate", "--init", "../output"]);
   assert.equal(initialized.exit, 0, initialized.stderr);
@@ -76,6 +81,12 @@ test("init exports a self-contained version-7 fixture, remaps identities and ori
   const result = await invoke(source, ["validate", output]);
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.result.validated.pages.total, 6);
+  assert.ok(!initialized.result.siteChecks.ranOffline.includes(CHROME_REPORT_NAME_RULE));
+  assert.ok(!initialized.result.siteChecks.skipped?.includes(CHROME_REPORT_NAME_RULE));
+  assert.ok(initialized.result.warnings.items.every((warning) => !warning.startsWith("chrome:")));
+  assert.ok(result.result.warnings.items.some((warning) => warning.startsWith("chrome:")));
+  assert.equal(result.result.siteChecks.ranOffline.filter((id) => id === CHROME_REPORT_NAME_RULE).length, 1);
+  assert.equal(result.result.siteChecks.skipped.filter((id) => id === CHROME_REPORT_NAME_RULE).length, 1);
   const fixture = JSON.parse(await readFile(path.join(output, "manifest.fixture.json"), "utf8"));
   assert.equal(fixture.manifestVersion, 8);
   assert.ok(fixture.appearance && fixture.footer);

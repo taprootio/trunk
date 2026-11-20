@@ -422,7 +422,7 @@ let fitReport;
  * actually checked. The exact Espalier pin and this package's tests catch a
  * release that moves it.
  */
-function loadFitReport() {
+export function loadFitReport() {
   fitReport ??= loadEspalierShared("theme-fit-report.js");
   return fitReport;
 }
@@ -515,7 +515,16 @@ export async function validateAndLintThemePair(lightTheme, darkTheme) {
     fit,
   });
   const unbuilt = items.filter((item) => item.lint === undefined).map((item) => item.text);
-  return { light, dark, ...boundedThemeWarnings([...proposed.warnings, ...unbuilt, ...proposed.lints, ...inert]) };
+  const warningGroups = { validation: proposed.warnings, unbuilt, lints: proposed.lints, inert };
+  const themes = Object.defineProperty({ light, dark }, "warningGroups", { value: warningGroups });
+  return withChromeWarnings(themes, []);
+}
+
+/** Finish warning publication from the complete groups, before the shared cap. */
+export function withChromeWarnings(themes, chromeWarnings) {
+  const { validation, unbuilt, lints, inert } = themes.warningGroups;
+  const bounded = boundedThemeWarnings([...validation, ...unbuilt, ...lints, ...chromeWarnings, ...inert]);
+  return Object.defineProperty({ ...themes, ...bounded }, "warningGroups", { value: themes.warningGroups });
 }
 
 function checkThemePair(lightTheme, darkTheme) {

@@ -1,0 +1,52 @@
+{
+  "footer": [
+    {
+      "element": "social-link",
+      "foreground": "link",
+      "background": "layer2",
+      "state": "rest",
+      "kind": "graphic",
+      "flags": ["socialLinks"]
+    },
+    {
+      "element": "social-link",
+      "foreground": "linkHover",
+      "background": "linkHoverBg",
+      "state": "hover",
+      "kind": "graphic",
+      "flags": ["socialLinks"]
+    },
+    {
+      "element": "social-link",
+      "foreground": "link",
+      "background": "layer2",
+      "state": "focus",
+      "kind": "graphic",
+      "flags": ["socialLinks"]
+    },
+    {
+      "element": "social-link",
+      "foreground": "link",
+      "background": "layer2",
+      "state": "focus",
+      "kind": "ring",
+      "flags": ["socialLinks"]
+    },
+    {
+      "element": "social-link",
+      "foreground": "linkHover",
+      "background": "linkHoverBg",
+      "state": "hover-focus",
+      "kind": "graphic",
+      "flags": ["socialLinks"]
+    },
+    {
+      "element": "social-link",
+      "foreground": "linkHover",
+      "background": "layer2",
+      "state": "hover-focus",
+      "kind": "ring",
+      "flags": ["socialLinks"]
+    }
+  ]
+}

@@ -364,6 +364,19 @@ export function appearanceScalarInput(definition, value) {
   return input;
 }
 
+function checkedScalar(definition, settings, knownImageIds) {
+  return validateScalar(definition, appearanceScalarInput(definition, settings?.[definition.name]), knownImageIds);
+}
+
+/** Optional report evidence can be checked independently of other settings groups. */
+export function validateAppearanceScalarGroup(settingsType, settings, knownImageIds) {
+  if (settingsType === SETTINGS_TYPE_TAPROOT_STYLES) refuseRetiredScalarFonts(settings);
+  for (const definition of APPEARANCE_SCALAR_FIELDS) {
+    if (definition.settingsType === settingsType) checkedScalar(definition, settings, knownImageIds);
+  }
+  return settings;
+}
+
 export function buildAppearanceScalarOperations(documents, knownImageIds) {
   if (!(knownImageIds instanceof Set)) {
     throw new TypeError("Appearance validation requires the known site-owned image identities.");
@@ -372,11 +385,7 @@ export function buildAppearanceScalarOperations(documents, knownImageIds) {
   return APPEARANCE_SCALAR_FIELDS.map((definition) => ({
     settingsType: definition.settingsType,
     setting: definition.name,
-    value: validateScalar(
-      definition,
-      appearanceScalarInput(definition, documents[definition.settingsType]?.[definition.name]),
-      knownImageIds,
-    ),
+    value: checkedScalar(definition, documents[definition.settingsType], knownImageIds),
   }));
 }
 

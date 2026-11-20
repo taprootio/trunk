@@ -969,6 +969,21 @@ test("appearance reference requires scheme-specific header-logo contrast checks"
   assert.match(result.reference.faviconContract, /16 and 32 pixels/u);
 });
 
+test("appearance help explains measured contrast, missing evidence and report-name accounting", async () => {
+  const json = sink();
+  assert.equal(await runCli({ arguments_: ["help", "appearance", "--json"], environment: {}, stdout: json, stderr: sink() }), 0);
+  const contract = JSON.parse(json.read()).reference.chromeContrastContract;
+  assert.match(contract, /Text needs 4\.5:1\. Icons and focus indicators need 3:1/u);
+  assert.match(contract, /background artwork and states outside the audited interactions/u);
+  assert.match(contract, /a staged edit to a live page or a truncated inventory can leave its production path unknown/iu);
+  assert.match(contract, /Settings-only Docs validation lacks the navigation and page inventory/u);
+  assert.match(contract, /Navigation contrast was not checked because navigation information was unavailable/u);
+  assert.match(contract, /only validate lists theme\.chrome_report_name in siteChecks\.skipped/u);
+  const human = sink();
+  assert.equal(await runCli({ arguments_: ["help", "appearance"], environment: {}, stdout: human, stderr: sink() }), 0);
+  assert.ok(human.read().includes(contract));
+});
+
 test("reference help reports stable usage errors with valid alternatives", async (context) => {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "taproot-site-reference-output-"));
   context.after(() => rm(temporaryDirectory, { recursive: true, force: true }));

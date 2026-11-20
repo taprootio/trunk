@@ -21,10 +21,23 @@ export function resolveHeaderBrandColor(value) {
     return HEADER_BRAND_SEMANTIC_COLOR_TOKENS.has(color) ? `var(${color})` : color;
 }
 export function resolveBrandColors(input, resolve = resolveHeaderBrandColor) {
-    const configured = resolve(input?.brandColor);
-    const light = resolve(input?.lightBrandColor) || configured;
-    const dark = resolve(input?.darkBrandColor) || configured || light;
-    return { light, dark, generic: configured || light || dark };
+    const { light, dark, generic } = selectBrandColors(input, resolve);
+    return { light: light?.color ?? "", dark: dark?.color ?? "", generic: generic?.color ?? "" };
+}
+/** The source of each scheme's final ink, including the component's generic fallback. */
+export function resolveBrandColorSourceFields(input) {
+    const { light, dark, generic } = selectBrandColors(input, resolveBrandColorToken);
+    return { light: (light ?? generic)?.field, dark: (dark ?? generic)?.field };
+}
+function selectBrandColors(input, resolve) {
+    const select = (field) => {
+        const color = resolve(input?.[field]);
+        return color ? { field, color } : undefined;
+    };
+    const configured = select("brandColor");
+    const light = select("lightBrandColor") ?? configured;
+    const dark = select("darkBrandColor") ?? configured ?? light;
+    return { light, dark, generic: configured ?? light ?? dark };
 }
 /** The footer preserves the caller's colors without header validation. */
 export function resolveFooterBrandColors({ light, dark }) {

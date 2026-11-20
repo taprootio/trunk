@@ -21,6 +21,10 @@ export async function readFooterBrandInputs(workspaceDir, footerSettings) {
     optionalSettings(workspaceDir, SETTINGS_TYPE_TAPROOT_STYLES),
     readWorkspaceJson(workspaceDir, MEDIA_MANIFEST_FILE_NAME, WORKSPACE_LIMITS.manifestBytes).then(value => value?.media ?? {}).catch(() => ({})),
   ]);
+  return footerBrandInputsFromSettings(header, styles, media, footerSettings);
+}
+
+export function footerBrandInputsFromSettings(header, styles, media, footerSettings) {
   const pair = resolveFooterLogoPairs({ ...logoInputsFromSettings(styles, footerSettings, media), logoVariant: footerSettings?.logoVariant });
   const visible = [pair.light, pair.dark].filter(value => value.url !== "");
   const ratios = visible.map(value => Number(value.aspectRatio));

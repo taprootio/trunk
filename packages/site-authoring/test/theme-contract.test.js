@@ -11,6 +11,7 @@ import {
   isSupportedAppearanceColor,
   MAXIMUM_THEME_OPEN_MAP_ENTRIES,
   MAXIMUM_THEME_OPEN_MAP_KEY_SCALARS,
+  MAXIMUM_THEME_WARNINGS,
   MAXIMUM_THEME_WARNING_SCALARS,
   REQUIRED_THEME_PROPERTIES,
   REQUIRED_THEME_PATHS,
@@ -18,6 +19,7 @@ import {
   inertMappingWarnings,
   validateAndEncodeThemePair,
   validateAndLintThemePair,
+  withChromeWarnings,
 } from "../src/theme-validation.js";
 import { MONOREPO_ONLY, monorepoPath } from "./monorepo.js";
 
@@ -624,6 +626,30 @@ test("validate and theme push report Espalier's fit lints on every surface, in b
   // elements on import, which a process holding another Espalier copy cannot
   // survive (generator/src/site-authoring-content-isolation.test.ts).
   assert.equal(globalThis.customElements, undefined);
+});
+
+test("chrome warning completion preserves the private legacy groups and runs their single cap", async () => {
+  const defaults = JSON.parse(await readFile(DEFAULT_THEME_URL, "utf8"));
+  const inert = (theme) => ({
+    ...theme,
+    explicitMappingTokens: [],
+    semanticMappings: Object.fromEntries(
+      Object.keys(theme.semanticMappings).map((token) => [token, { source: "danger", lightness: "ink" }]),
+    ),
+  });
+  const legacy = await validateAndLintThemePair(inert(defaults.light.theme), inert(defaults.dark.theme));
+  assert.equal(legacy.warningCount > MAXIMUM_THEME_WARNINGS, true);
+  const legacyJson = JSON.stringify(legacy);
+  assert.equal(Object.hasOwn(JSON.parse(legacyJson), "warningGroups"), false);
+  assert.equal(JSON.stringify(withChromeWarnings(legacy, [])), legacyJson);
+  const chrome = "chrome: theme.contrast_text_below_aa; site-header.context; light header brand-text/rest; 1.00:1 < 4.50:1.";
+  const completed = withChromeWarnings(legacy, [chrome]);
+  const firstInert = legacy.warnings.findIndex((warning) => warning.includes("is not named in explicitMappingTokens"));
+  const expected = legacy.warnings.toSpliced(firstInert, 0, chrome).slice(0, MAXIMUM_THEME_WARNINGS);
+  assert.deepEqual(completed.warnings, expected);
+  assert.equal(completed.warningCount, legacy.warningCount + 1);
+  assert.equal(completed.warningsTruncated, true);
+  assert.equal(JSON.stringify(withChromeWarnings(completed, [])), legacyJson);
 });
 
 /** The value a warning proposes, applied the way the warning says to. */

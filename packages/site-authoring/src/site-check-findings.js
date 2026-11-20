@@ -88,6 +88,8 @@ export const SITE_CHECK_WORDING = Object.freeze({
     const artwork = third ?? second;
     return `the ${finding.subject === "footer" ? "footer" : "header"} shows ${artwork === "dark" ? "dark" : "light"}-background ${second === "compact" ? "compact " : ""}artwork against the opposite surface brightness in the ${scheme === "dark" ? "dark" : "light"} scheme; choose its other Logo variant or adjust its Colors context`;
   },
+  "theme.chrome_report_name": () =>
+    "could not check report-name action contrast because its display eligibility is unknown",
   "seo.social_image_fallback": (finding) =>
     finding.detail === "first_image"
       ? "has no cover image; link previews use the page's first image only when it is public and at least 1200 pixels wide"

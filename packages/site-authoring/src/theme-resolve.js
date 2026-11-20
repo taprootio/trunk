@@ -1,5 +1,14 @@
-import { parseTheme, SEMANTIC_COLOR_NAMES, TOKEN_PAIRINGS } from "@taprootio/espalier/shared/theme";
+import {
+  AA_LARGE_RATIO,
+  AA_TEXT_RATIO,
+  parseTheme,
+  SEMANTIC_COLOR_NAMES,
+  TOKEN_PAIRINGS,
+  wcagRatio,
+} from "@taprootio/espalier/shared/theme";
 
+import { CHROME_NAVIGATION_UNAVAILABLE_MESSAGE } from "./chrome-input.js";
+import { CHROME_UNAVAILABLE_MESSAGE, decodeChromePair, floorTo } from "./chrome-output.js";
 import { SiteAuthoringError } from "./errors.js";
 import { loadEspalierShared } from "./espalier-shared.js";
 import { validateAndEncodeThemePair } from "./theme-validation.js";
@@ -20,8 +29,6 @@ export const THEME_STYLES_FILE = "settings/taproot-styles.json";
 // WCAG 2.x AA. Espalier sizes its pairings by APCA target: Lc 90 and 75 are
 // body and 16px+ text, Lc 60 is the 24px+ and UI tier, which is what AA calls
 // large text and non-text contrast.
-export const AA_TEXT_RATIO = 4.5;
-export const AA_LARGE_RATIO = 3;
 const LARGE_TEXT_LC = 60;
 
 export const CONTRAST_TEXT_BELOW_AA = "theme.contrast_text_below_aa";
@@ -39,36 +46,17 @@ export function loadThemeEngines() {
   return engines;
 }
 
-function channelByte(color, value) {
-  return Math.round(color.clampChannel(value) * 255);
-}
-
 /** The sRGB the engine gamut-maps a compiled color to, as channels in 0..1 and as #rrggbb. */
 function toSrgb(color, value) {
   const parsed = color.parseCssColor(value);
   if (parsed === null) return undefined;
-  const srgb = color.oklchToSRGB(color.gamutMapToSRGB(parsed));
-  const hex = `#${[srgb.r, srgb.g, srgb.b].map((channel) => channelByte(color, channel).toString(16).padStart(2, "0")).join("")}`;
+  const mapped = color.oklchToSRGB(color.gamutMapToSRGB(parsed));
+  const srgb = { r: color.clampChannel(mapped.r), g: color.clampChannel(mapped.g), b: color.clampChannel(mapped.b) };
+  const hex = `#${[srgb.r, srgb.g, srgb.b].map((channel) => Math.round(channel * 255).toString(16).padStart(2, "0")).join("")}`;
   return { parsed, srgb, hex };
 }
 
-function relativeLuminance(color, srgb) {
-  const linear = (channel) => color.gammaToLinear(color.clampChannel(channel));
-  return 0.2126 * linear(srgb.r) + 0.7152 * linear(srgb.g) + 0.0722 * linear(srgb.b);
-}
-
-/** WCAG contrast ratio of two compiled colors, unrounded. */
-function wcagRatio(color, first, second) {
-  const [lighter, darker] = [relativeLuminance(color, first.srgb), relativeLuminance(color, second.srgb)]
-    .sort((left, right) => right - left);
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
-// Shown ratios round down, so a pair 0.004 short of AA never displays as 4.50.
-function floorTo(value, places) {
-  const scale = 10 ** places;
-  return Math.floor(value * scale + 1e-9) / scale;
-}
+export { floorTo } from "./chrome-output.js";
 
 function origin(token) {
   if (token.explicit === "declared") return "pinned";
@@ -126,7 +114,7 @@ function describeSurface(color, report, scheme, rootSurface) {
     const background = resolved.get(pairing.bg);
     if (foreground === undefined || background === undefined) continue;
     const required = pairing.targetLc <= LARGE_TEXT_LC ? AA_LARGE_RATIO : AA_TEXT_RATIO;
-    const ratio = wcagRatio(color, foreground, background);
+    const ratio = wcagRatio(foreground.srgb, background.srgb);
     const lc = Math.abs(color.apcaContrast(foreground.parsed, background.parsed));
     pairs.push({
       token: ink,
@@ -155,7 +143,8 @@ function describeSurface(color, report, scheme, rootSurface) {
  * a `theme.context_unknown` refusal for a context the theme does not declare.
  */
 export async function resolveThemePair(lightTheme, darkTheme, { scheme, context } = {}) {
-  const { light, dark } = validateAndEncodeThemePair(lightTheme, darkTheme);
+  const encoded = validateAndEncodeThemePair(lightTheme, darkTheme);
+  const { light, dark } = encoded;
   const { fit, color } = await loadThemeEngines();
   // The stored pair is encoded and parsed back, as theme push's fit lints do, so this is what the page resolves.
   const suite = fit.themeFitReportSuite(parseTheme(light) ?? {}, parseTheme(dark) ?? {});
@@ -184,7 +173,7 @@ export async function resolveThemePair(lightTheme, darkTheme, { scheme, context 
     schemes.push({ scheme: name, surfaces });
   }
   const pairs = schemes.flatMap((entry) => entry.surfaces).flatMap((surface) => surface.pairs);
-  return {
+  return Object.defineProperty({
     contexts,
     schemes,
     flags,
@@ -193,7 +182,7 @@ export async function resolveThemePair(lightTheme, darkTheme, { scheme, context 
       belowAa: pairs.filter((pair) => !pair.aa).length,
       belowApca: pairs.filter((pair) => !pair.apcaMet).length,
     },
-  };
+  }, "encoded", { value: encoded });
 }
 
 const TOKEN_ORDER = new Map(SEMANTIC_COLOR_NAMES.map((name, index) => [name, index]));
@@ -240,10 +229,33 @@ export function formatThemeResolve(result) {
       ]));
     }
   }
+  for (const [scheme, entries] of Object.entries(result.chrome ?? {})) {
+    for (const entry of entries) {
+      if (entry.pairs.length === 0) continue;
+      const location = entry.context === null ? "page (root)" : `context ${entry.context}${entry.contextTruncated ? "…" : ""}`;
+      lines.push("", `${scheme} · ${entry.role} · ${location}`);
+      lines.push(table([
+        ["element/state", "ink", "on", "ratio", "needs", ""],
+        ...entry.pairs.map((row) => {
+          const pair = decodeChromePair(result.chromeCatalog, row);
+          return [
+            `${pair.element}/${pair.state}`, pair.foreground, pair.background,
+            `${pair.ratio.toFixed(2)}:1`, `${pair.required.toFixed(2)}:1`,
+            pair.ratio < pair.required ? "BELOW AA" : "ok",
+          ];
+        }),
+      ]));
+    }
+  }
+  if (result.chromeUnavailable) lines.push("", CHROME_UNAVAILABLE_MESSAGE);
+  if (result.chromeNavigationUnavailable) lines.push("", CHROME_NAVIGATION_UNAVAILABLE_MESSAGE);
   const { belowAa, pairs } = result.contrast;
+  const measured = result.chromeUnavailable ? " measured" : "";
+  const codes = [...new Set(result.flags.items.map((flag) => flag.code))];
+  const flags = codes.length > 0 ? ` (flags: ${codes.join(", ")})` : "";
   lines.push("", belowAa === 0
-    ? `All ${pairs} pairs meet WCAG AA.`
-    : `${belowAa} of ${pairs} pairs are below WCAG AA (flags: ${[...new Set(result.flags.items.map((flag) => flag.code))].join(", ")}).`);
+    ? `All ${pairs}${measured} pairs meet WCAG AA.`
+    : `${belowAa} of ${pairs}${measured} pairs are below WCAG AA${flags}.`);
   if (result.omittedSurfaces !== undefined) {
     const names = result.omittedSurfaces.items.map((entry) => `${entry.scheme}/${entry.context ?? "root"}`);
     lines.push(`Not shown (result size): ${names.join(", ")}${result.omittedSurfaces.truncated ? ", and more" : ""}. Narrow with --scheme and --context.`);

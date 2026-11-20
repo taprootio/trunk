@@ -921,6 +921,25 @@ its pages-generated allowance, or the bandwidth pause on deploys,
 surfaced at deploy; the allowance shows its reset time, while the bandwidth pause shows the earliest
 time it can lift, since it lifts only after a month ends under the allowance or on upgrade), and `throttled` (back off).
 
+### Indexed contrast in `theme resolve`
+
+The authoring report measures header and footer text, graphics and focus
+indicators in the selected schemes and contexts. The default table names
+the element, state, ink, backdrop and WCAG AA result. The JSON adds a
+`chrome` map keyed by scheme and a response-local `chromeCatalog`.
+Each chrome card names its role and context and contains rows
+`[identityIndex, ratio, required]`.
+
+Look up `chromeCatalog.pairs[identityIndex]` to get
+`[elementIndex, foregroundIndex, backgroundIndex, stateIndex, kindIndex]`.
+Resolve these indexes through `elements`, `colors`, `colors`, `states`, and
+`kinds`, respectively. All indexes are zero-based and belong to the same
+response. Context display names longer than 128 characters carry
+`contextTruncated` and `contextLength`. Context filtering uses the full name.
+The authoring result fits 64 KiB, preserves all selected chrome measurements
+and reserves at least 24 KiB for legacy surfaces. The indexed report is
+produced by the authoring CLI.
+
 When `GITHUB_OUTPUT` names the runner's existing output file, every
 operational verb appends the same JSON under `taproot_site_result` through a
 random delimiter block, plus `taproot_site_verb` on success. Credentials,

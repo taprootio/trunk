@@ -42,6 +42,11 @@ const SHY_RESOURCE_ID = "00000000-0000-4000-8000-000000000792";
 const SHY_IMAGE_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
 // The image-row wordmark the composition fixture carries (TR01322).
 const SHY_WORDMARK_IMAGE_ID = "88888888-9999-4aaa-8bbb-cccccccccccc";
+const ROOT_CHROME_WARNING = /^chrome: theme\.contrast_text_below_aa; (?:lightTheme|darkTheme); ((?:light|dark) (?:header|footer) [a-z-]+\/[a-z-]+); \d+\.\d{2}:1 < \d+\.\d{2}:1\.$/u;
+
+function chromeWarningStates(warnings) {
+  return warnings.map((warning) => ROOT_CHROME_WARNING.exec(warning)?.[1]);
+}
 
 
 test("WordPress menu construction preserves parent destinations in valid navigation", { skip: MONOREPO_ONLY }, async (context) => {
@@ -203,9 +208,20 @@ test("the shipped example fixture validates without credentials, network, or wri
     { file: "pages/studio-tour.pm.json", path: "albums/studio-tour" },
     { file: "pages/visit.md", path: "visit" },
   ]);
-  // The README promises exit 0 with nothing to read afterwards, so the shipped
-  // fixture must be clean rather than merely valid.
-  assert.deepEqual(json.warnings, { items: [], count: 0 });
+  assert.equal(json.warnings.count, 8);
+  assert.deepEqual(chromeWarningStates(json.warnings.items), [
+    "light header nav-item/hover-focus",
+    "light header nav-button/focus",
+    "light header nav-button/hover-focus",
+    "light header nav-button/full-screen-focus",
+    "light header nav-button/full-screen-hover-focus",
+    "light footer footer-link/rest",
+    "light footer footer-link/focus",
+    "dark header nav-item/hover-focus",
+  ]);
+  assert.deepEqual(json.findings.items.map(({ rule, severity, detail }) => ({ rule, severity, detail })), [
+    { rule: "footer.word_breaks", severity: "warning", detail: "small_desktop:brand" },
+  ]);
   assert.deepEqual(json.hints, []);
   assert.match(result.stderr, /^Reading manifest\.fixture\.json\./u);
   assert.match(result.stderr, /Validated 6 page\(s\), 3 navigation item\(s\)/u);
@@ -238,16 +254,14 @@ test("validate reports a fit lint the theme's own validation cannot see", async 
   // A lint is a warning, not a refusal.
   assert.equal(result.exitCode, 0);
   const json = JSON.parse(result.stdout);
-  // The rest of the fixture checks clean, so every lint is the band's.
-  assert.ok(json.warnings.items.length > 0);
-  for (const warning of json.warnings.items) {
+  const fitLints = json.warnings.items.filter((warning) => warning.includes(" fit lint "));
+  assert.ok(fitLints.length > 0);
+  for (const warning of fitLints) {
     assert.match(warning, /^(?:light|dark): contexts\.fit-band fit lint [a-z-]+ — /u);
   }
+  assert.deepEqual(json.warnings.items.slice(0, fitLints.length), fitLints);
   assert.ok(
-    json.warnings.items.some((warning) =>
-      warning.startsWith("light: contexts.fit-band fit lint action-anchor-inversion — ")
-    ),
-    json.warnings.items.join("\n"),
+    fitLints.some((warning) => warning.startsWith("light: contexts.fit-band fit lint action-anchor-inversion — ")),
   );
   assert.equal(json.warnings.count, json.warnings.items.length);
   assert.match(result.stderr, /Espalier warning: light: contexts\.fit-band fit lint action-anchor-inversion — /u);
@@ -459,29 +473,25 @@ test("the public CLI validates the complete TR00621 Taproot-www fixture without 
     { label: "Privacy", externalUrl: "https://www.taproot.io/privacy-notice" },
     { label: "Terms", externalUrl: "https://www.taproot.io/terms-of-service" },
   ]);
-  // The www fixture declares roles beside the seeded default mappings, and
-  // its marker claims none of them — so the resolver recompiles those tokens
-  // and the cached values are never applied (TR00801, TR00852). The CLI says
-  // so once per discarded token and scheme, and leaves the fixture as its
-  // owner authored it. Its gold action also sits in the band no label can
-  // clear at the swatch's own lightness, so it renders the wrong way round;
-  // the fit report names that ahead of the inert mappings, which alone would
-  // fill the cap. Those two are the only kinds of warning it raises.
-  const kinds = json.warnings.items.map((warning) =>
-    /^(light|dark): (contexts\.[a-z][a-z0-9-]* )?fit lint [a-z-]+ — /u.test(warning)
-      ? "lint"
-      : /^(light|dark): semanticMappings\.[a-zA-Z0-9]+ is not named in explicitMappingTokens/u.test(warning)
-      ? "inert"
-      : warning
-  );
-  assert.ok(kinds.every((kind) => kind === "lint" || kind === "inert"), JSON.stringify(json.warnings));
-  assert.ok(kinds.includes("lint") && kinds.includes("inert"), JSON.stringify(json.warnings));
-  assert.ok(kinds.lastIndexOf("lint") < kinds.indexOf("inert"), kinds.join(","));
-  assert.ok(
-    json.warnings.items.some((warning) => /^light: fit lint action-anchor-inversion — /u.test(warning)),
-    JSON.stringify(json.warnings),
-  );
-  assert.ok(json.warnings.count >= json.warnings.items.length);
+  // The fit lint and inert mapping warnings predate the chrome audit. Inert
+  // mappings fill the cap, so the measured chrome warnings must precede them.
+  const items = json.warnings.items;
+  const fitLints = items.filter((warning) => /^(light|dark): (contexts\.[a-z][a-z0-9-]* )?fit lint [a-z-]+ — /u.test(warning));
+  const chrome = items.filter((warning) => warning.startsWith("chrome: "));
+  const inert = items.filter((warning) => /^(light|dark): semanticMappings\.[a-zA-Z0-9]+ is not named in explicitMappingTokens/u.test(warning));
+  assert.deepEqual(items, [...fitLints, ...chrome, ...inert]);
+  assert.equal(fitLints.length, 8);
+  assert.ok(fitLints.some((warning) => /^light: fit lint action-anchor-inversion — /u.test(warning)));
+  assert.deepEqual(chromeWarningStates(chrome), [
+    "light header nav-link/hover-focus",
+    "light header nav-item/hover-focus",
+    "dark header nav-link/hover-focus",
+    "dark header nav-item/hover-focus",
+  ]);
+  assert.ok(inert.length > 0);
+  assert.equal(json.warnings.truncated, true);
+  assert.ok(json.warnings.count > items.length);
+  assert.ok(json.findings.items.every(({ rule }) => rule !== "theme.contrast_text_below_aa"));
   assert.ok(json.doesNotProve.includes("credential authorization or live site ownership"));
   assert.ok(json.doesNotProve.includes("preview or published rendering"));
   // The www fixture keeps the contained header beside a full-bleed image

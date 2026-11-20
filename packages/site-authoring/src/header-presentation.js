@@ -28,6 +28,22 @@ export function canUseCompactHeaderLogo(position, multiplier, hasRegularLogo, mi
     return position === "fixed" && hasRegularLogo && height !== null
         && height.tenths > resolveHeaderMinHeightMultiplier(minimum, multiplier).tenths;
 }
+/** Read the same header settings when building the page and when auditing its paint. */
+export function resolveHeaderChromePresentation(settings) {
+    const layout = settings?.headerLayout;
+    return {
+        layout: layout === "centered-brand" || layout === "centered-menu" || layout === "minimal" ? layout : "standard",
+        heightMultiplier: resolveHeaderHeightMultiplier(settings?.headerHeightMultiplier).scale,
+        minHeightMultiplier: resolveHeaderMinHeightMultiplier(settings?.headerMinHeightMultiplier, settings?.headerHeightMultiplier).scale,
+        compactSizeStandard: settings?.headerPosition === "fixed",
+        compactOnScroll: canUseCompactHeaderLogo(settings?.headerPosition, settings?.headerHeightMultiplier, true, settings?.headerMinHeightMultiplier),
+        menuDisplay: settings?.navMenuDisplay === "drawer" ? "drawer" : "auto",
+        navDrawerStyle: settings?.navDrawerStyle === "panel" ? "panel" : "full-screen",
+        brandText: settings?.brandText ?? "",
+        showBrandText: settings?.showBrandText !== false,
+        showThemeToggle: settings?.showThemeToggle === true,
+    };
+}
 /** Keep each scheme's selected source and reserved ratio together through fallback. */
 export function resolveHeaderLogoPairs(input) {
     const pair = (url = "", aspectRatio = "") => ({ url, aspectRatio: url ? aspectRatio : "" });

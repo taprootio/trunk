@@ -79,7 +79,8 @@ export async function checkWorkspace({
     ? undefined
     : await collectProblems(problems, { area: CHECK_AREA.footer, file: FOOTER_SETTINGS_FILE }, async () =>
       validateFooterWorkspaceDocument(
-        await readWorkspaceJson(workspaceDir, FOOTER_SETTINGS_FILE, WORKSPACE_LIMITS.settingsBytes),
+        presentation?.publishingDocument
+          ?? await readWorkspaceJson(workspaceDir, FOOTER_SETTINGS_FILE, WORKSPACE_LIMITS.settingsBytes),
         siteId,
         {
           expectedEntityId: binding.settingsEntityIds?.get(SETTINGS_TYPE_SITE_PUBLISHING_PREFERENCES),

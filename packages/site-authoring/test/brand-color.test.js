@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   resolveBrandColorToken,
   resolveBrandColors,
+  resolveBrandColorSourceFields,
   resolveFooterBrandColors,
   resolveHeaderBrandColor,
 } from "../src/brand-color.js";
@@ -42,3 +43,25 @@ test("preserves the footer's raw dark-only value without copying it to light", (
     light: "", dark: "--esp-color-link", generic: "--esp-color-link",
   });
 });
+
+for (const [name, input, expected] of [
+  ["equal valid overrides", { brandColor: "#abc", lightBrandColor: "#abc", darkBrandColor: "#abc" },
+    { light: "lightBrandColor", dark: "darkBrandColor" }],
+  ["valid generic with invalid light override", { brandColor: "--esp-color-link", lightBrandColor: "invalid", darkBrandColor: "#abcd" },
+    { light: "brandColor", dark: "darkBrandColor" }],
+  ["dark-only override", { darkBrandColor: "#abcd" },
+    { light: "darkBrandColor", dark: "darkBrandColor" }],
+  ["light-only override", { lightBrandColor: " --esp-color-text " },
+    { light: "lightBrandColor", dark: "lightBrandColor" }],
+  ["invalid or absent colors", { brandColor: "rgb(1 2 3)" },
+    { light: undefined, dark: undefined }],
+]) {
+  test(`reports the actual brand-color source for ${name}`, () => {
+    const sources = resolveBrandColorSourceFields(input);
+    assert.deepEqual(sources, expected);
+    const resolved = resolveBrandColors(input, resolveBrandColorToken);
+    for (const scheme of ["light", "dark"]) {
+      assert.equal(resolved[scheme] || resolved.generic, resolveBrandColorToken(input[sources[scheme]]));
+    }
+  });
+}

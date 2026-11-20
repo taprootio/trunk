@@ -1,6 +1,17 @@
 {
   "entries": [
     {
+      "version": "0.42.0",
+      "note": "Check published header and footer contrast while authoring a theme.",
+      "behavior": [
+        "Theme resolve builds a contrast report for the selected schemes and contexts. JSON chrome rows use response-local indexes in chromeCatalog. The 64 KiB output retains every selected chrome measurement and at least 24 KiB for legacy surfaces.",
+        "Validate and theme push report below-AA header and footer paint in the warning list. Validate lists theme.chrome_report_name in siteChecks.skipped while display eligibility is unknown.",
+        "Espalier 7.2.0 provides the audited paint catalog and shared WCAG calculation. Contrast measurement runs in the authoring tools.",
+        "The help reference version is 63."
+      ],
+      "help": ["theme", "appearance"]
+    },
+    {
       "version": "0.41.1",
       "note": "Share renderer URL, social platform and brand-color rules with the authoring CLI while preserving published output.",
       "behavior": [
